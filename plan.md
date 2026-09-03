@@ -496,7 +496,7 @@ The milestone's real content is therefore D32: the shared behaviour became
 shared code rather than a checklist. See the status notes at the top of this
 file for the five bugs that surfaced along the way, four of them pre-existing.
 
-**Measured on completion.** 536 Rust tests and 178 frontend tests pass, clippy
+**Measured on completion.** 536 Rust tests and 200 frontend tests pass, clippy
 clean at `-D warnings`. The fidelity suite compares 30,647 samples across 120
 generated scenes — worst speed error 0.108 m/s against a 0.25 tolerance, worst
 direction 0.186° against 2° — with 73 samples (0.24%) exempted at a path tangent
@@ -505,7 +505,9 @@ tie. Tile cost is unchanged: 3.87 ms/tile exact on the CPU and 4.20 on the GPU.
 **Left open.** Nobody has clicked through the six tools in the running app; the
 app builds, starts and loads the frontend cleanly, and the tools are covered end
 to end by tests, but the interaction itself is unexercised by hand. That is the
-first thing M7 should do.
+first thing M7 should do. The gesture state machine — what a press, a move and a
+release do — is now a pure module with its own tests rather than something only
+a pointer could reach, which narrows the gap considerably but does not close it.
 
 **Deliverables**
 

@@ -35,6 +35,16 @@ import {
   type Settling,
   type FieldPreview,
 } from "./preview";
+import {
+  finished,
+  gestureLatitude,
+  hoverGesture,
+  type InProgress,
+  isComplete,
+  press,
+  release,
+  shapeNode,
+} from "./gesture";
 import ToolOptions, { type ToolPick } from "./ToolOptions";
 import {
   type ActiveTool,
@@ -94,90 +104,6 @@ const GLYPH_INK = "rgba(240, 247, 255, 0.9)";
  * preview the user cannot see is not a preview.
  */
 const PREVIEW_MIN_ALPHA = 0.28;
-
-/**
- * A gesture part-way through being drawn.
- *
- * The four gestures that take longer than an instant. A `point` is not among
- * them: a click commits it, so it is never in progress.
- */
-type InProgress =
-  | { kind: "stroke"; points: Array<[number, number]> }
-  | { kind: "extent"; centre: [number, number]; rim: [number, number] }
-  | { kind: "ring"; points: Array<[number, number]> }
-  | { kind: "path"; nodes: PathPoint[] };
-
-/** The finished gesture an in-progress one becomes. */
-function finished(drawing: InProgress): Gesture {
-  switch (drawing.kind) {
-    case "stroke":
-      return { kind: "stroke", points: drawing.points };
-    case "extent":
-      return { kind: "extent", centre: drawing.centre, rim: drawing.rim };
-    case "ring":
-      return { kind: "ring", points: drawing.points };
-    case "path":
-      return { kind: "path", nodes: drawing.nodes };
-  }
-}
-
-/** Whether a gesture has enough placed to be worth committing. */
-function isComplete(drawing: InProgress): boolean {
-  switch (drawing.kind) {
-    case "stroke":
-      return drawing.points.length > 0;
-    case "extent":
-      return drawing.centre[0] !== drawing.rim[0] || drawing.centre[1] !== drawing.rim[1];
-    // A polygon needs three vertices to have an inside, and a curve two nodes
-    // to have a length. Both are the backend's rule as well, so a gesture that
-    // fails here would have been refused there.
-    case "ring":
-      return drawing.points.length >= 3;
-    case "path":
-      return drawing.nodes.length >= 2;
-  }
-}
-
-/**
- * The latitude a gesture resolves its pixel sizes against.
- *
- * Where the gesture *began*, in every case — the point the object will be
- * anchored at. Taking it from wherever the pointer finished would mean a
- * footprint that changed size as a drag moved north, and a preview that
- * disagreed with what got painted.
- */
-function gestureLatitude(gesture: Gesture): number {
-  switch (gesture.kind) {
-    case "stroke":
-      return gesture.points[0]?.[1] ?? 0;
-    case "point":
-      return gesture.at[1];
-    case "extent":
-      return gesture.centre[1];
-    case "ring":
-      return gesture.points[0]?.[1] ?? 0;
-    case "path":
-      return gesture.nodes[0]?.at[1] ?? 0;
-  }
-}
-
-/**
- * The gesture a click at `at` would produce, for the hover indicator.
- *
- * Only the tools whose hover indicator exists reach this, so the gestures a
- * click cannot complete need no answer: a `point` is the whole gesture, and a
- * `stroke` is a one-point one, which is exactly what a click paints.
- */
-function hoverGesture(
-  schema: ToolSchema,
-  state: ToolState,
-  at: { lon: number; lat: number },
-): Gesture {
-  const kind = gestureKind(schema, state.values);
-  return kind === "point"
-    ? { kind: "point", at: [at.lon, at.lat] }
-    : { kind: "stroke", points: [[at.lon, at.lat]] };
-}
 
 /**
  * Most glyphs one stroke preview will draw.
@@ -1577,14 +1503,7 @@ export default function MapView({
     // corner possible without a second gesture.
     if (drawing?.kind === "path" && nodeDrag.current) {
       const geo = unproject(cameraRef.current, viewRef.current, point);
-      const node = drawing.nodes[drawing.nodes.length - 1];
-      if (node) {
-        node.out_handle = [geo.lon, geo.lat];
-        node.in_handle = [
-          normalizeLon(node.at[0] - normalizeLon(geo.lon - node.at[0])),
-          node.at[1] - (geo.lat - node.at[1]),
-        ];
-      }
+      shapeNode(drawing, [geo.lon, geo.lat]);
       drawOverlay();
       return;
     }
@@ -1692,7 +1611,12 @@ export default function MapView({
     if (!drawing || !schema || tool === HAND) return;
     // The commit picks the preview up synchronously, so the overlay redraw
     // never sees a moment with neither the gesture nor its field.
-    if (isComplete(drawing)) void commitGesture(finished(drawing), toolState, schema, tool);
+    // A press and release at one point describes a shape of no size, and one
+    // with a pixel of tremor describes an object the user cannot see and did
+    // not ask for. Both are no gesture at all.
+    if (isComplete(drawing, cameraRef.current.pxPerDeg)) {
+      void commitGesture(finished(drawing), toolState, schema, tool);
+    }
     drawOverlayRef.current();
   }, [commitGesture, schema, tool, toolState]);
 
@@ -1707,62 +1631,43 @@ export default function MapView({
    * the way another one does behaves the way it does — the eraser is brush-like
    * because both send a `stroke`, not because two branches were written alike.
    */
+  /**
+   * Begins, extends or completes a gesture at a pointer press.
+   *
+   * Which of the three depends only on the gesture's kind, so a tool that draws
+   * the way another one does behaves the way it does — the eraser is brush-like
+   * because both send a `stroke`, not because two branches were written alike.
+   */
   const startGesture = useCallback(
     (geo: { lon: number; lat: number }, event: React.PointerEvent<HTMLCanvasElement>) => {
       if (!schema || tool === HAND) return;
       const kind = gestureKind(schema, toolState.values);
       const at: [number, number] = [geo.lon, geo.lat];
+      const current = gestureRef.current;
 
-      switch (kind) {
-        // A stamp: click to place, no drag (spec.md 6.2). Committed on the
-        // press, which is what makes it feel like a stamp rather than a
-        // gesture that happens to be short.
-        case "point":
-          void commitGesture({ kind: "point", at }, toolState, schema, tool);
+      // Whether the press landed on the ring's own first vertex, which is the
+      // one thing the state machine cannot decide for itself: it is a distance
+      // on screen, and only the camera knows that.
+      const first = current?.kind === "ring" ? current.points[0] : undefined;
+      const onFirstVertex =
+        first !== undefined &&
+        near(
+          toDevice(event),
+          toScreen(cameraRef.current, viewRef.current, { lon: first[0], lat: first[1] }),
+        );
+
+      const outcome = press(kind, current, at, onFirstVertex);
+      switch (outcome.act) {
+        case "commit":
+          void commitGesture(outcome.gesture, toolState, schema, tool);
           return;
-
-        case "stroke":
-          gestureRef.current = { kind: "stroke", points: [at] };
+        case "close":
+          finishGesture();
+          return;
+        case "draw":
+          gestureRef.current = outcome.drawing;
+          nodeDrag.current = outcome.shapeHandles;
           break;
-
-        case "extent":
-          gestureRef.current = { kind: "extent", centre: at, rim: at };
-          break;
-
-        // Built up click by click. A click on the first vertex closes the ring,
-        // which is how a polygon tool is expected to end and avoids needing the
-        // keyboard for the common case.
-        case "ring": {
-          const current = gestureRef.current;
-          if (current?.kind === "ring") {
-            const first = current.points[0];
-            if (
-              first &&
-              current.points.length >= 3 &&
-              near(
-                toDevice(event),
-                toScreen(cameraRef.current, viewRef.current, { lon: first[0], lat: first[1] }),
-              )
-            ) {
-              finishGesture();
-              return;
-            }
-            current.points.push(at);
-          } else {
-            gestureRef.current = { kind: "ring", points: [at] };
-          }
-          break;
-        }
-
-        // The pen: each press places a node, and holding pulls its handles out.
-        case "path": {
-          const current = gestureRef.current;
-          const node: PathPoint = { at };
-          if (current?.kind === "path") current.nodes.push(node);
-          else gestureRef.current = { kind: "path", nodes: [node] };
-          nodeDrag.current = true;
-          break;
-        }
       }
       drawOverlay();
     },
@@ -1868,9 +1773,10 @@ export default function MapView({
 
     // A gesture that ends with the pointer is finished here; one built up click
     // by click keeps going until it is closed or cancelled.
-    const drawing = gestureRef.current;
     nodeDrag.current = false;
-    if (drawing?.kind === "stroke" || drawing?.kind === "extent") finishGesture();
+    // A gesture bounded by the pointer ends here; one built up click by click
+    // is held until it is closed or abandoned.
+    if (release(gestureRef.current) === "finish") finishGesture();
     drawOverlay();
   };
 

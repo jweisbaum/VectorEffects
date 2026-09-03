@@ -766,11 +766,22 @@ Hover: yes — the disc a click would place, in the speed colour with its glyph.
 Draw a polygon (click vertices, click the first one again to close), or place a
 preset (square, rectangle, circle) **by dragging out from its centre**.
 
+**All three presets are one press-drag-release gesture**, not three
+interactions. They differ only in how the drag is read into a footprint, which
+is what `shape_source` decides — so a preset cannot acquire an interaction of
+its own by accident.
+
 Centre-out rather than corner-to-corner so that all three presets have the same
 anchor as the shape they produce — which is the point their divergence and curl
 are measured from (§7.5) and the pivot their handles turn them about (§8.2). A
 square takes the larger of the drag's two reaches, so a drag that is mostly
 sideways produces the square it looks like it is producing.
+
+A press and release **at one point** commits nothing: it describes a shape of no
+size, and a press with a pixel of hand tremor describes an object the user
+cannot see and did not ask for. The drag must exceed the same few pixels of
+slack that tell a click from a pan (§8.1), measured on screen so that the same
+hand movement means the same thing at any zoom.
 
 A preset's size is **geometry, not a property**: it is part of what the user
 drew, like a polygon's vertices, and it is resized afterwards by the same scale
