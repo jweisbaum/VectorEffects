@@ -1048,3 +1048,149 @@ fn the_brush_like_tools_do_not_merge_into_each_other() {
     assert_eq!(objects[0].tool, ToolKind::Brush);
     assert_eq!(objects[1].tool, ToolKind::Eraser);
 }
+
+/// Spec 6.1 and 8.5: every object supports copy and paste, whatever tool made
+/// it. Walked over the catalogue rather than asserted on a brush stroke, since
+/// what could break it is a geometry the clipboard does not carry.
+#[test]
+fn every_tool_survives_a_copy_and_a_paste() {
+    for (tool, gesture, options) in catalogue() {
+        let (_root, state) = project("clipboard");
+        draw(&state, tool, gesture, options);
+
+        let original = document(&state).layers[0].objects[0].clone();
+        ve_app::document::clipboard_copy(&state, &[original.id.raw()], 0).expect("copy");
+        ve_app::document::clipboard_paste(&state, None, 0, false).expect("paste");
+
+        let objects = document(&state).layers[0].objects.clone();
+        assert_eq!(objects.len(), 2, "{tool:?} did not paste");
+        let pasted = &objects[1];
+
+        assert_ne!(
+            pasted.id, original.id,
+            "{tool:?}: a paste needs a new identity"
+        );
+        assert_eq!(pasted.tool, original.tool);
+        assert_eq!(
+            pasted.geometry, original.geometry,
+            "{tool:?}: the geometry did not survive the clipboard"
+        );
+
+        // Every property but the position, which a paste nudges so the copy
+        // does not hide underneath its original (spec.md 8.5).
+        for (id, anim) in original.props.iter() {
+            if *id == PropId::Position {
+                continue;
+            }
+            assert_eq!(
+                pasted.props.get(*id),
+                Some(anim),
+                "{tool:?}: {id:?} did not survive the clipboard"
+            );
+        }
+    }
+}
+
+// --- The antimeridian and the poles ------------------------------------------
+
+/// A gesture drawn across the antimeridian must be one shape, not two halves
+/// on opposite sides of the world. The failure is a longitude difference taken
+/// the long way round, which puts the geometry 358 degrees wide.
+#[test]
+fn every_tool_draws_across_the_antimeridian() {
+    // Gestures straddling 180°E, each in its tool's own shape.
+    let across: Vec<(Tool, Gesture, Vec<ToolOption>)> = vec![
+        (
+            Tool::Brush,
+            Gesture::Stroke {
+                points: vec![[178.0, 0.0], [179.5, 0.0], [-179.0, 0.0]],
+            },
+            vec![number(PropId::SizeKm, 400.0), number(PropId::Speed, 12.0)],
+        ),
+        (
+            Tool::ShapeFill,
+            Gesture::Ring {
+                points: vec![[178.0, -2.0], [-178.0, -2.0], [-178.0, 2.0], [178.0, 2.0]],
+            },
+            vec![number(PropId::Speed, 12.0)],
+        ),
+        (
+            Tool::Curve,
+            Gesture::Path {
+                nodes: vec![
+                    PathPoint {
+                        at: [178.0, 0.0],
+                        in_handle: None,
+                        out_handle: None,
+                    },
+                    PathPoint {
+                        at: [-178.0, 0.0],
+                        in_handle: None,
+                        out_handle: None,
+                    },
+                ],
+            },
+            vec![number(PropId::WidthKm, 300.0), number(PropId::Speed, 12.0)],
+        ),
+    ];
+
+    for (tool, gesture, options) in across {
+        let (_root, state) = project("antimeridian");
+        draw(&state, tool, gesture, options);
+
+        // The dateline itself is inside every one of these gestures...
+        assert!(
+            sample(&state, ll(180.0, 0.0)).0 > 1.0,
+            "{tool:?} left a hole at the dateline"
+        );
+        // ...and the far side of the world is not, which is what fails when a
+        // longitude difference is taken the long way round.
+        assert!(
+            sample(&state, ll(0.0, 0.0)).0 < 0.01,
+            "{tool:?} wrapped the wrong way and painted the far side of the world"
+        );
+    }
+}
+
+/// A polygon drawn around the pole is anchored near it, not at the mean of its
+/// longitudes — which for a ring of vertices spread round the pole is an
+/// arbitrary meridian, and would put the pivot and the divergence centre
+/// thousands of kilometres from the shape.
+#[test]
+fn a_polygon_around_the_pole_is_anchored_near_it() {
+    let (_root, state) = project("polar-polygon");
+    draw(
+        &state,
+        Tool::ShapeFill,
+        Gesture::Ring {
+            points: vec![[0.0, 80.0], [90.0, 80.0], [180.0, 80.0], [-90.0, 80.0]],
+        },
+        vec![number(PropId::Speed, 12.0), number(PropId::Feather, 0.0)],
+    );
+
+    let object = &document(&state).layers[0].objects[0];
+    let anchor = object
+        .props
+        .value_at(ToolKind::ShapeFill, PropId::Position, 0)
+        .and_then(ve_core::PropValue::as_lonlat)
+        .expect("a position");
+
+    // Within a few hundred kilometres of the pole: the four vertices sit on a
+    // circle of latitude, so their middle is the pole itself.
+    let from_pole = anchor.distance_m(ll(anchor.lon, 90.0));
+    assert!(
+        from_pole < 400_000.0,
+        "anchored {from_pole} m from the pole, at {anchor:?}"
+    );
+
+    // And the shape covers the pole, which is what it was drawn around.
+    let project = document(&state);
+    let scene = ve_render::scene::flatten(&project, 0);
+    assert!(
+        scene
+            .objects
+            .iter()
+            .any(|flat| ve_render::scene::covers(flat, ll(0.0, 89.0))),
+        "the polygon does not cover what it was drawn around"
+    );
+}

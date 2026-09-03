@@ -496,7 +496,7 @@ The milestone's real content is therefore D32: the shared behaviour became
 shared code rather than a checklist. See the status notes at the top of this
 file for the five bugs that surfaced along the way, four of them pre-existing.
 
-**Measured on completion.** 529 Rust tests and 169 frontend tests pass, clippy
+**Measured on completion.** 532 Rust tests and 173 frontend tests pass, clippy
 clean at `-D warnings`. The fidelity suite compares 30,647 samples across 120
 generated scenes — worst speed error 0.108 m/s against a 0.25 tolerance, worst
 direction 0.186° against 2° — with 73 samples (0.24%) exempted at a path tangent

@@ -297,3 +297,74 @@ describe("footprintHead", () => {
     ).toBeNull();
   });
 });
+
+describe("across the antimeridian and at the poles", () => {
+  /**
+   * A polygon straddling 180° is one shape, not two on opposite sides of the
+   * world. The failure is a longitude difference taken the long way round,
+   * which makes every containment test answer for a shape 358° wide.
+   */
+  it("fills a polygon that straddles the dateline", () => {
+    const points: Array<[number, number]> = [
+      [178, -4],
+      [-178, -4],
+      [-178, 4],
+      [178, 4],
+    ];
+    const found = latticeUnder({ kind: "polygon", points }, 1, 10_000);
+    expect(found.length).toBeGreaterThan(0);
+
+    // Every glyph is within the four degrees either side of the dateline...
+    for (const [lon] of found) {
+      expect(Math.abs(Math.abs(lon) - 180)).toBeLessThanOrEqual(4);
+    }
+    // ...and the dateline itself is covered, which is the point.
+    expect(found.some(([lon]) => Math.abs(lon) >= 179)).toBe(true);
+    // The far side of the world is not.
+    expect(found.some(([lon]) => Math.abs(lon) < 90)).toBe(false);
+  });
+
+  /** The same for a disc, whose reach wraps the lattice's columns. */
+  it("fills a disc that straddles the dateline", () => {
+    const found = latticeUnder(
+      { kind: "disc", centre: [179, 0], radiusKm: 400, space: "geodesic" },
+      1,
+      10_000,
+    );
+    expect(found.length).toBeGreaterThan(0);
+    expect(found.some(([lon]) => lon < -179)).toBe(true);
+    expect(found.some(([lon]) => lon > 178)).toBe(true);
+  });
+
+  /**
+   * Near a pole a geodesic shape's longitude reach grows without bound, so the
+   * scan must stay finite and must not wrap the lattice more than once. The
+   * cosine floor in `cosLat` is what bounds it.
+   */
+  it("stays finite for a geodesic shape at the pole", () => {
+    const found = latticeUnder(
+      { kind: "disc", centre: [0, 89], radiusKm: 300, space: "geodesic" },
+      1,
+      100_000,
+    );
+    const keys = new Set(found.map(([lon, lat]) => `${lon},${lat}`));
+    expect(keys.size).toBe(found.length);
+    // Nothing south of the shape's own reach; the disc is at 89°N.
+    for (const [, lat] of found) expect(lat).toBeGreaterThan(80);
+  });
+
+  /** A rectangle straddling the dateline draws as one box, not two. */
+  it("traces a dateline-straddling rectangle as a single box", () => {
+    const sink = trace({
+      kind: "rect",
+      centre: [180, 0],
+      halfWidthKm: 200,
+      halfHeightKm: 200,
+      space: "geodesic",
+    });
+    expect(sink.rects).toHaveLength(1);
+    const box = sink.rects[0]!;
+    // Its width is two degrees' worth of pixels, not the whole world's.
+    expect(box.w).toBeLessThan(view.width / 2);
+  });
+});
