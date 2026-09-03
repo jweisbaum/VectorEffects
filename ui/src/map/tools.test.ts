@@ -1,0 +1,519 @@
+/**
+ * The rules the option bar resolves.
+ *
+ * These are the frontend half of spec 6.1: which options a mode makes inert,
+ * which gesture a tool is drawn with, what a size in px means, and what gets
+ * frozen onto the object. The backend owns the *rules*; this owns applying them
+ * to values only the bar holds, and that application is what is checked here.
+ */
+import { describe, expect, it } from "vitest";
+
+import type { ToolOptionSpec } from "../generated/ToolOptionSpec";
+import type { ToolSchema } from "../generated/ToolSchema";
+import type { Camera } from "./camera";
+import { KM_PER_DEGREE } from "./footprint";
+import {
+  choiceOf,
+  convertSizes,
+  defaultState,
+  extentOf,
+  flattenPath,
+  footprintOf,
+  frozenOptions,
+  gestureKind,
+  isLive,
+  liveOptions,
+  shownAngle,
+  sizeKm,
+  spaceFor,
+  type ToolState,
+} from "./tools";
+
+const camera: Camera = { centerLon: 0, centerLat: 0, pxPerDeg: 4 };
+
+function option(over: Partial<ToolOptionSpec> & { property: string }): ToolOptionSpec {
+  return {
+    label: over.property,
+    unit: "none",
+    default: { kind: "number", value: 0 },
+    min: null,
+    max: null,
+    variants: [],
+    creation_only: false,
+    depends_on: [],
+    ...over,
+  };
+}
+
+/** A stand-in for the shape fill, whose two dependency axes cross. */
+const shapeFill: ToolSchema = {
+  tool: "shape_fill",
+  label: "Shape fill",
+  shortcut: "f",
+  hover: false,
+  gesture: {
+    kind: "by_choice",
+    on: "ShapeSource",
+    gestures: ["ring", "extent", "extent", "extent"],
+  },
+  options: [
+    option({
+      property: "ShapeSource",
+      default: { kind: "choice", index: 0 },
+      variants: ["polygon", "square", "rectangle", "circle"],
+      creation_only: true,
+    }),
+    option({
+      property: "VectorMode",
+      default: { kind: "choice", index: 0 },
+      variants: ["constant", "gradient"],
+    }),
+    option({
+      property: "DirectionMode",
+      default: { kind: "choice", index: 0 },
+      variants: ["constant", "toward_point", "away_from_point"],
+      depends_on: [{ on: "VectorMode", live_for: [0] }],
+    }),
+    option({
+      property: "Speed",
+      unit: "speed",
+      default: { kind: "number", value: 10 },
+      depends_on: [{ on: "VectorMode", live_for: [0] }],
+    }),
+    option({
+      property: "Direction",
+      unit: "direction",
+      default: { kind: "angle", degrees: 0 },
+      depends_on: [
+        { on: "VectorMode", live_for: [0] },
+        { on: "DirectionMode", live_for: [0] },
+      ],
+    }),
+    option({
+      property: "Target",
+      default: { kind: "position", lon: 0, lat: 0 },
+      depends_on: [
+        { on: "VectorMode", live_for: [0] },
+        { on: "DirectionMode", live_for: [1, 2] },
+      ],
+    }),
+    option({
+      property: "SpeedStart",
+      unit: "speed",
+      default: { kind: "number", value: 5 },
+      depends_on: [{ on: "VectorMode", live_for: [1] }],
+    }),
+  ],
+};
+
+/** A stand-in for the brush: one size, one space, one gesture. */
+const brush: ToolSchema = {
+  tool: "brush",
+  label: "Brush",
+  shortcut: "b",
+  hover: true,
+  gesture: { kind: "always", gesture: "stroke" },
+  options: [
+    option({
+      property: "BrushShape",
+      default: { kind: "choice", index: 0 },
+      variants: ["circle", "square"],
+      creation_only: true,
+    }),
+    option({
+      property: "SizeKm",
+      unit: "kilometres",
+      default: { kind: "number", value: 500 },
+    }),
+    option({ property: "Speed", unit: "speed", default: { kind: "number", value: 10 } }),
+  ],
+};
+
+describe("isLive", () => {
+  /**
+   * The shape fill crosses two axes: `direction` is read only when the object
+   * is *both* on a constant vector and on a fixed bearing. Rules on one option
+   * must therefore and together — a version that ored them would show the
+   * bearing on a gradient, where nothing reads it.
+   */
+  it("requires every rule on an option to hold", () => {
+    const direction = shapeFill.options.find((o) => o.property === "Direction")!;
+
+    const constant = { VectorMode: { kind: "choice" as const, index: 0 }, DirectionMode: { kind: "choice" as const, index: 0 } };
+    expect(isLive(direction, constant)).toBe(true);
+
+    // Constant vector, but aimed at a point: the bearing is not read.
+    expect(
+      isLive(direction, { ...constant, DirectionMode: { kind: "choice", index: 1 } }),
+    ).toBe(false);
+
+    // Gradient: neither the bearing nor the aim mode is read.
+    expect(
+      isLive(direction, { ...constant, VectorMode: { kind: "choice", index: 1 } }),
+    ).toBe(false);
+  });
+
+  it("treats an option with no rules as always live", () => {
+    expect(isLive(option({ property: "Feather" }), {})).toBe(true);
+  });
+
+  /** A missing value reads as variant 0, which is the schema default. */
+  it("falls back to the first variant when a mode is unset", () => {
+    const speed = shapeFill.options.find((o) => o.property === "Speed")!;
+    expect(isLive(speed, {})).toBe(true);
+  });
+});
+
+describe("liveOptions", () => {
+  /**
+   * Switching to the gradient must swap which half of the panel is shown, not
+   * add to it: an inert option left on screen invites editing a value and
+   * watching nothing happen.
+   */
+  it("swaps the constant options for the gradient ones", () => {
+    const state = defaultState(shapeFill);
+    const constant = liveOptions(shapeFill, state.values).map((o) => o.property);
+    expect(constant).toContain("Speed");
+    expect(constant).toContain("Direction");
+    expect(constant).not.toContain("SpeedStart");
+
+    const gradient = liveOptions(shapeFill, {
+      ...state.values,
+      VectorMode: { kind: "choice", index: 1 },
+    }).map((o) => o.property);
+    expect(gradient).toContain("SpeedStart");
+    expect(gradient).not.toContain("Speed");
+    expect(gradient).not.toContain("Direction");
+    expect(gradient).not.toContain("Target");
+  });
+
+  /** No mode may empty the bar; there is always something left to set. */
+  it("leaves something editable in every mode", () => {
+    for (const vector of [0, 1]) {
+      for (const aim of [0, 1, 2]) {
+        const live = liveOptions(shapeFill, {
+          VectorMode: { kind: "choice", index: vector },
+          DirectionMode: { kind: "choice", index: aim },
+        });
+        expect(live.length).toBeGreaterThan(0);
+      }
+    }
+  });
+});
+
+describe("gestureKind", () => {
+  it("takes the tool's single gesture when it has one", () => {
+    expect(gestureKind(brush, {})).toBe("stroke");
+  });
+
+  /**
+   * The shape fill's gesture is its `shape_source`: a polygon is placed vertex
+   * by vertex and a preset is dragged out. Sending the wrong one is refused by
+   * the backend, so this is the mapping that keeps that from happening.
+   */
+  it("follows the shape fill's own source", () => {
+    expect(gestureKind(shapeFill, { ShapeSource: { kind: "choice", index: 0 } })).toBe("ring");
+    for (const preset of [1, 2, 3]) {
+      expect(gestureKind(shapeFill, { ShapeSource: { kind: "choice", index: preset } })).toBe(
+        "extent",
+      );
+    }
+  });
+
+  it("falls back to the first gesture for a variant it does not know", () => {
+    expect(gestureKind(shapeFill, { ShapeSource: { kind: "choice", index: 9 } })).toBe("ring");
+  });
+});
+
+describe("sizes in px and km", () => {
+  /** px is a shape on the map, km one on the ground (spec.md 3.5). */
+  it("selects the stamp space from the unit", () => {
+    expect(spaceFor("px")).toBe("projected");
+    expect(spaceFor("km")).toBe("geodesic");
+  });
+
+  it("passes a km size through untouched at any latitude", () => {
+    const state: ToolState = { values: { SizeKm: { kind: "number", value: 400 } }, unit: "km" };
+    for (const lat of [0, 45, 70]) {
+      expect(sizeKm(state, "SizeKm", camera, lat)).toBe(400);
+    }
+  });
+
+  /**
+   * A projected stamp is the same number of pixels tall at any latitude, so the
+   * ground size a px number resolves to is the same everywhere — which is what
+   * makes it a shape on the map.
+   */
+  it("resolves a px size to the same ground height at every latitude", () => {
+    const state: ToolState = { values: { SizeKm: { kind: "number", value: 80 } }, unit: "px" };
+    const expected = (80 / camera.pxPerDeg) * KM_PER_DEGREE;
+    for (const lat of [0, 45, 70]) {
+      expect(sizeKm(state, "SizeKm", camera, lat)).toBeCloseTo(expected, 6);
+    }
+  });
+
+  /**
+   * Switching the unit must not resize the tool.
+   *
+   * The px field holds whole pixels, so a round trip can lose up to half of one
+   * in each direction — that is the whole of the permitted drift, and it is
+   * stated in pixels rather than as a percentage because that is what it is.
+   * Converting in the wrong space instead costs a factor of `cos(lat)`, which
+   * is a fifth of the size at 40° and nothing like a rounding error.
+   */
+  it("carries the size across a change of unit", () => {
+    const onePixelKm = KM_PER_DEGREE / camera.pxPerDeg;
+    const start: ToolState = { values: { SizeKm: { kind: "number", value: 600 } }, unit: "km" };
+    const asPixels = convertSizes(start, brush, "px", camera, 40);
+    const andBack = convertSizes(asPixels, brush, "km", camera, 40);
+
+    const original = sizeKm(start, "SizeKm", camera, 40);
+    const returned = sizeKm(andBack, "SizeKm", camera, 40);
+    expect(Math.abs(returned - original)).toBeLessThanOrEqual(onePixelKm);
+
+    // ...and the drift really is rounding, not a scale factor: a wrong space
+    // would be out by cos(40°), which is far more than a pixel here.
+    const wrong = original * Math.cos((40 * Math.PI) / 180);
+    expect(Math.abs(returned - wrong)).toBeGreaterThan(onePixelKm);
+  });
+
+  it("leaves the state alone when the unit does not change", () => {
+    const start = defaultState(brush);
+    expect(convertSizes(start, brush, "km", camera, 0)).toBe(start);
+  });
+});
+
+describe("frozenOptions", () => {
+  /**
+   * The unit chose the space, so the space must reach the object — otherwise a
+   * px stroke is stored as a ground shape and paints an ellipse.
+   */
+  it("sends the stamp space the unit selected", () => {
+    const state: ToolState = { values: { SizeKm: { kind: "number", value: 80 } }, unit: "px" };
+    const sent = frozenOptions(state, brush, camera, 60);
+    expect(sent).toContainEqual({
+      property: "StampSpace",
+      value: { kind: "choice", index: 1 },
+    });
+  });
+
+  it("sends sizes in kilometres, never in pixels", () => {
+    const state: ToolState = { values: { SizeKm: { kind: "number", value: 80 } }, unit: "px" };
+    const sent = frozenOptions(state, brush, camera, 0);
+    const size = sent.find((o) => o.property === "SizeKm")!;
+    expect(size.value).toEqual({
+      kind: "number",
+      value: (80 / camera.pxPerDeg) * KM_PER_DEGREE,
+    });
+  });
+
+  /**
+   * Hidden is not deleted (spec.md 6.1): an inert option keeps its value on the
+   * object, so switching the mode back brings it back as it was.
+   */
+  it("freezes the inert options too", () => {
+    const state = defaultState(shapeFill);
+    const sent = frozenOptions(
+      { ...state, values: { ...state.values, VectorMode: { kind: "choice", index: 1 } } },
+      shapeFill,
+      camera,
+      0,
+    ).map((o) => o.property);
+    expect(sent).toContain("Direction");
+    expect(sent).toContain("Target");
+  });
+
+  /** A tool with no size has no space to send. */
+  it("sends no stamp space for a tool that has no size", () => {
+    const sent = frozenOptions(defaultState(shapeFill), shapeFill, camera, 0);
+    expect(sent.some((o) => o.property === "StampSpace")).toBe(false);
+  });
+});
+
+describe("shownAngle", () => {
+  /**
+   * A flow direction is shown in the project's convention; a geometric bearing
+   * is not. Getting this wrong shows the reciprocal of what the user set.
+   */
+  it("converts a flow direction and leaves a bearing alone", () => {
+    expect(shownAngle("direction", "from", 270)).toBe(90);
+    expect(shownAngle("degrees", "from", 270)).toBe(270);
+    expect(shownAngle("direction", "toward", 270)).toBe(270);
+  });
+
+  it("is its own inverse", () => {
+    for (const degrees of [0, 45, 180, 359]) {
+      expect(shownAngle("direction", "from", shownAngle("direction", "from", degrees))).toBe(
+        degrees,
+      );
+    }
+  });
+});
+
+describe("footprintOf", () => {
+  const state = (values: Record<string, number>, unit: "km" | "px" = "km"): ToolState => ({
+    values: Object.fromEntries(
+      Object.entries(values).map(([k, v]) => [k, { kind: "number" as const, value: v }]),
+    ),
+    unit,
+  });
+
+  it("sweeps the brush's stamp along its stroke", () => {
+    const footprint = footprintOf(
+      "brush",
+      state({ SizeKm: 400 }),
+      { kind: "stroke", points: [[0, 0], [2, 0]] },
+      camera,
+    );
+    expect(footprint).toEqual({
+      kind: "swept",
+      points: [[0, 0], [2, 0]],
+      // The size is a diameter, so the footprint's radius is half of it.
+      radiusKm: 200,
+      shape: "circle",
+      space: "geodesic",
+    });
+  });
+
+  /** Fill mode 1 is the ring, and a ring is not a disc. */
+  it("previews a perimeter circle as a ring and the others as discs", () => {
+    const base = { DiameterKm: 1000, RingWidthKm: 200 };
+    const disc = footprintOf("circle", state(base), { kind: "point", at: [0, 0] }, camera);
+    expect(disc?.kind).toBe("disc");
+
+    const ring = footprintOf(
+      "circle",
+      {
+        values: {
+          DiameterKm: { kind: "number", value: 1000 },
+          RingWidthKm: { kind: "number", value: 200 },
+          FillMode: { kind: "choice", index: 1 },
+        },
+        unit: "km",
+      },
+      { kind: "point", at: [0, 0] },
+      camera,
+    );
+    expect(ring).toMatchObject({ kind: "ring", radiusKm: 500, halfWidthKm: 100 });
+  });
+
+  /** A square preset takes the larger reach, so a wide drag makes a square. */
+  it("reads one drag as each of the three presets", () => {
+    const drag = { kind: "extent" as const, centre: [0, 0] as [number, number], rim: [4, 1] as [number, number] };
+    const source = (index: number): ToolState => ({
+      values: { ShapeSource: { kind: "choice", index } },
+      unit: "km",
+    });
+
+    const square = footprintOf("shape_fill", source(1), drag, camera);
+    expect(square).toMatchObject({ kind: "rect" });
+    expect((square as { halfWidthKm: number }).halfWidthKm).toBeCloseTo(
+      (square as { halfHeightKm: number }).halfHeightKm,
+      6,
+    );
+
+    const rect = footprintOf("shape_fill", source(2), drag, camera);
+    expect((rect as { halfWidthKm: number }).halfWidthKm).toBeGreaterThan(
+      (rect as { halfHeightKm: number }).halfHeightKm,
+    );
+
+    expect(footprintOf("shape_fill", source(3), drag, camera)?.kind).toBe("disc");
+  });
+
+  it("has nothing to draw until a polygon has an inside", () => {
+    const ring = (points: Array<[number, number]>) =>
+      footprintOf("shape_fill", defaultState(shapeFill), { kind: "ring", points }, camera);
+    expect(ring([[0, 0]])).toBeNull();
+    expect(ring([[0, 0], [1, 0]])).toBeNull();
+    expect(ring([[0, 0], [1, 0], [1, 1]])?.kind).toBe("polygon");
+  });
+
+  it("has nothing to draw for a one-node path or a drag that has not moved", () => {
+    expect(
+      footprintOf(
+        "curve",
+        state({ WidthKm: 300 }),
+        { kind: "path", nodes: [{ at: [0, 0] }] },
+        camera,
+      ),
+    ).toBeNull();
+    expect(
+      footprintOf(
+        "shape_fill",
+        defaultState(shapeFill),
+        { kind: "extent", centre: [0, 0], rim: [0, 0] },
+        camera,
+      ),
+    ).toBeNull();
+  });
+
+  /** A curve is a corridor swept along its path, half the width either side. */
+  it("previews a curve as a corridor along its path", () => {
+    const footprint = footprintOf(
+      "curve",
+      state({ WidthKm: 300 }),
+      { kind: "path", nodes: [{ at: [0, 0] }, { at: [4, 0] }] },
+      camera,
+    );
+    expect(footprint).toMatchObject({ kind: "swept", radiusKm: 150 });
+  });
+});
+
+describe("extentOf", () => {
+  /**
+   * A geodesic drag's east-west reach is a ground distance, so the same drag
+   * in degrees covers less ground the further north it is; a projected drag is
+   * measured on the map and does not shrink.
+   */
+  it("measures a drag on the ground or on the map, as the space says", () => {
+    const drag = ([0, 60] as const);
+    const ground = extentOf(drag, [4, 60], "geodesic");
+    const map = extentOf(drag, [4, 60], "projected");
+
+    expect(map.halfWidthKm).toBeCloseTo(4 * KM_PER_DEGREE, 6);
+    expect(ground.halfWidthKm).toBeCloseTo(4 * KM_PER_DEGREE * Math.cos((60 * Math.PI) / 180), 1);
+  });
+
+  /** A drag across the dateline is a drag, not a lap of the world. */
+  it("takes the shorter way round", () => {
+    const across = extentOf([179, 0], [-179, 0], "projected");
+    expect(across.halfWidthKm).toBeCloseTo(2 * KM_PER_DEGREE, 6);
+  });
+});
+
+describe("flattenPath", () => {
+  it("leaves a handleless path as its own nodes", () => {
+    expect(
+      flattenPath([{ at: [0, 0] }, { at: [1, 1] }, { at: [2, 0] }]),
+    ).toEqual([[0, 0], [1, 1], [2, 0]]);
+  });
+
+  /**
+   * A Bézier must actually leave the chord. A flattening that ignored the
+   * handles would return the two endpoints and look exactly like a polyline.
+   */
+  it("bends a segment away from its chord", () => {
+    const points = flattenPath([
+      { at: [-4, 0], out_handle: [-2, 6] },
+      { at: [4, 0], in_handle: [2, 6] },
+    ]);
+    expect(points.length).toBeGreaterThan(10);
+    const highest = Math.max(...points.map(([, lat]) => lat));
+    expect(highest).toBeGreaterThan(2);
+    // The ends are still the nodes themselves.
+    expect(points[0]).toEqual([-4, 0]);
+    expect(points[points.length - 1]![0]).toBeCloseTo(4, 6);
+  });
+
+  it("returns nothing for an empty path", () => {
+    expect(flattenPath([])).toEqual([]);
+  });
+});
+
+describe("choiceOf", () => {
+  it("reads a choice and defaults to the first variant otherwise", () => {
+    expect(choiceOf({ Mode: { kind: "choice", index: 2 } }, "Mode")).toBe(2);
+    expect(choiceOf({}, "Mode")).toBe(0);
+    expect(choiceOf({ Mode: { kind: "number", value: 3 } }, "Mode")).toBe(0);
+  });
+});

@@ -512,6 +512,56 @@ fn a_gradient_circle_ramps_from_its_centre_outward() {
     );
 }
 
+/// M6 acceptance: a geodesic circle at 80°N is a true constant-radius cap.
+///
+/// The place this fails is where a "circle" is built in degree space: a disc of
+/// constant *angular* radius is six times narrower on the ground east-west at
+/// 80° than north-south, and the error grows without bound toward the pole.
+/// Measured by walking out along eight bearings, so a shape that is round in
+/// the wrong space cannot pass by being right on two axes.
+#[test]
+fn a_geodesic_circle_is_a_constant_radius_cap_at_eighty_north() {
+    let (_root, state) = project("polar-cap");
+    draw(
+        &state,
+        Tool::Circle,
+        Gesture::Point { at: [0.0, 80.0] },
+        vec![
+            number(PropId::DiameterKm, 1000.0),
+            number(PropId::Speed, 12.0),
+            number(PropId::Feather, 0.0),
+            // Space 0 is geodesic: a shape on the ground.
+            pick(PropId::StampSpace, 0),
+        ],
+    );
+
+    let project = document(&state);
+    let scene = ve_render::scene::flatten(&project, 0);
+    let centre = ll(0.0, 80.0);
+
+    for step in 0..8 {
+        let bearing = f64::from(step) * 45.0;
+        // 1 km inside the rim and 1 km outside it: the cap's edge is at 500 km
+        // along every bearing, or it is not a cap.
+        let inside = centre.destination(ve_core::angle::Angle::new(bearing), 499_000.0);
+        let outside = centre.destination(ve_core::angle::Angle::new(bearing), 501_000.0);
+        let covers = |p: LonLat| {
+            scene
+                .objects
+                .iter()
+                .any(|flat| ve_render::scene::covers(flat, p))
+        };
+        assert!(
+            covers(inside),
+            "not covered 499 km out on bearing {bearing}"
+        );
+        assert!(
+            !covers(outside),
+            "still covered 501 km out on bearing {bearing}"
+        );
+    }
+}
+
 /// Spec 6.2: the perimeter mode paints a ring, so the middle of the circle is
 /// untouched. The property that separates a ring from a disc is the hole.
 #[test]

@@ -96,7 +96,8 @@ pub enum PropertyValue {
 }
 
 impl PropertyValue {
-    fn of(value: PropValue) -> Self {
+    /// The wire form of a stored value.
+    pub fn of(value: PropValue) -> Self {
         match value {
             PropValue::F32(v) => Self::Number {
                 value: f64::from(v),

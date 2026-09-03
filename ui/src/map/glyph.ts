@@ -16,7 +16,7 @@ import type { BrushShape } from "../generated/BrushShape";
 import type { StampSpace } from "../generated/StampSpace";
 import { barbElements, CALM_KNOTS } from "./barbs";
 import { glyphStepDegrees, normalizeLon } from "./camera";
-import { cosLat, KM_PER_DEGREE } from "./footprint";
+import { cosLat, type Footprint, KM_PER_DEGREE } from "./footprint";
 
 /** A point in local screen coordinates, y down. */
 export type Point = readonly [number, number];
@@ -294,4 +294,160 @@ export function glyphLayout(
   const stepDeg = glyphStepDegrees(pxPerDeg, GLYPH_TARGET_PX[style] * pixelRatio);
   const spacing = stepDeg * pxPerDeg;
   return { stepDeg, spacing, lengthPx: spacing * GLYPH_SIZE_SCALE[style] };
+}
+
+/**
+ * Whether a compact footprint covers a lattice point.
+ *
+ * Measured in degrees about the footprint's centre, the same way
+ * {@link latticeUnderStroke} measures one stamp: a geodesic shape spans more
+ * longitude the further from the equator, a projected one is the same in both
+ * axes by construction (spec.md 3.5).
+ */
+function coversPoint(
+  footprint: Extract<Footprint, { kind: "disc" | "ring" | "rect" }>,
+  lon: number,
+  lat: number,
+): boolean {
+  const [centreLon, centreLat] = footprint.centre;
+  const dLat = lat - centreLat;
+  const dLon = normalizeLon(lon - centreLon);
+  const scale = footprint.space === "projected" ? 1 : 1 / cosLat(centreLat);
+
+  if (footprint.kind === "rect") {
+    const halfLat = footprint.halfHeightKm / KM_PER_DEGREE;
+    const halfLon = (footprint.halfWidthKm / KM_PER_DEGREE) * scale;
+    return Math.abs(dLat) <= halfLat && Math.abs(dLon) <= halfLon;
+  }
+
+  const radiusLat = footprint.radiusKm / KM_PER_DEGREE;
+  const radiusLon = radiusLat * scale;
+  if (radiusLat <= 0) return false;
+  // Normalised into the footprint's own axes, so the ellipse test is a circle
+  // test and the ring's two bounds are two radii of the same measure.
+  const r = Math.hypot(dLat / radiusLat, dLon / radiusLon);
+  if (footprint.kind === "disc") return r <= 1;
+  const halfWidth = footprint.halfWidthKm / footprint.radiusKm;
+  return Math.abs(r - 1) <= halfWidth;
+}
+
+/** Whether a polygon contains a point, by ray crossing. */
+function polygonContains(
+  points: ReadonlyArray<readonly [number, number]>,
+  lon: number,
+  lat: number,
+): boolean {
+  // Longitudes are taken relative to the first vertex so a polygon spanning the
+  // dateline is tested in one continuous strip rather than two.
+  const origin = points[0];
+  if (origin === undefined) return false;
+  const x = normalizeLon(lon - origin[0]);
+  let inside = false;
+  for (let i = 0; i < points.length; i++) {
+    const a = points[i]!;
+    const b = points[(i + 1) % points.length]!;
+    const ax = normalizeLon(a[0] - origin[0]);
+    const bx = normalizeLon(b[0] - origin[0]);
+    if (a[1] > lat !== b[1] > lat) {
+      const t = (lat - a[1]) / (b[1] - a[1]);
+      if (x < ax + t * (bx - ax)) inside = !inside;
+    }
+  }
+  return inside;
+}
+
+/**
+ * The lattice points a footprint covers, for its preview glyphs.
+ *
+ * Generic over the footprint kinds, so a new tool previews its direction by
+ * saying what it paints rather than by growing another branch here. The swept
+ * case delegates to {@link latticeUnderStroke}, which walks the stroke rather
+ * than its bounding box: a long thin stroke spans the viewport and covers
+ * almost none of it. The compact kinds have no such gap between their box and
+ * themselves, so a box scan is the cheaper answer for them.
+ */
+export function latticeUnder(
+  footprint: Footprint,
+  stepDeg: number,
+  limit: number,
+): Array<[number, number]> {
+  if (footprint.kind === "swept") {
+    return latticeUnderStroke(
+      footprint.points,
+      footprint.radiusKm,
+      stepDeg,
+      limit,
+      footprint.shape,
+      footprint.space,
+    );
+  }
+
+  const found: Array<[number, number]> = [];
+  if (limit <= 0) return found;
+  const columns = Math.round(360 / stepDeg);
+  const lastRow = Math.round(180 / stepDeg);
+
+  // The box to scan, in degrees, and the test that decides what is really in.
+  let south: number;
+  let north: number;
+  let west: number;
+  let east: number;
+  let inside: (lon: number, lat: number) => boolean;
+
+  if (footprint.kind === "polygon") {
+    const origin = footprint.points[0];
+    if (origin === undefined) return found;
+    let minX = 0;
+    let maxX = 0;
+    south = origin[1];
+    north = origin[1];
+    for (const point of footprint.points) {
+      const x = normalizeLon(point[0] - origin[0]);
+      minX = Math.min(minX, x);
+      maxX = Math.max(maxX, x);
+      south = Math.min(south, point[1]);
+      north = Math.max(north, point[1]);
+    }
+    west = origin[0] + minX;
+    east = origin[0] + maxX;
+    inside = (lon, lat) => polygonContains(footprint.points, lon, lat);
+  } else {
+    const [centreLon, centreLat] = footprint.centre;
+    const reachKm =
+      footprint.kind === "rect"
+        ? Math.max(footprint.halfWidthKm, footprint.halfHeightKm)
+        : footprint.radiusKm + (footprint.kind === "ring" ? footprint.halfWidthKm : 0);
+    const reachLat =
+      footprint.kind === "rect"
+        ? footprint.halfHeightKm / KM_PER_DEGREE
+        : reachKm / KM_PER_DEGREE;
+    const scale = footprint.space === "projected" ? 1 : 1 / cosLat(centreLat);
+    const reachLon = (reachKm / KM_PER_DEGREE) * scale;
+    south = centreLat - reachLat;
+    north = centreLat + reachLat;
+    west = centreLon - reachLon;
+    east = centreLon + reachLon;
+    inside = (lon, lat) => coversPoint(footprint, lon, lat);
+  }
+
+  const rowFrom = Math.max(0, Math.ceil((90 - north) / stepDeg));
+  const rowTo = Math.min(lastRow, Math.floor((90 - south) / stepDeg));
+  const colFrom = Math.ceil((west + 180) / stepDeg);
+  const colTo = Math.floor((east + 180) / stepDeg);
+
+  // A shape wider than the world would otherwise scan the same columns many
+  // times over; one pass round the lattice reaches every point there is.
+  const lastCol = Math.min(colTo, colFrom + columns - 1);
+
+  for (let row = rowFrom; row <= rowTo; row++) {
+    const lat = 90 - row * stepDeg;
+    for (let col = colFrom; col <= lastCol; col++) {
+      const wrapped = ((col % columns) + columns) % columns;
+      const lon = -180 + wrapped * stepDeg;
+      if (!inside(lon, lat)) continue;
+      found.push([lon, lat]);
+      if (found.length >= limit) return found;
+    }
+  }
+  return found;
 }

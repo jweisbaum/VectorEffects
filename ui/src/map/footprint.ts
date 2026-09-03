@@ -200,3 +200,171 @@ export function buildStrokePath(
   }
 }
 
+
+/**
+ * The region a gesture will paint, in geographic terms.
+ *
+ * The preview, the hover indicator and the drag outline all draw *this* rather
+ * than each knowing what any tool is: a new tool supplies its footprint and
+ * inherits the whole preview path, which is what spec 6.1 means by the gesture
+ * previewing the field. The variants are geometries, not tools — the brush, the
+ * eraser and the clone stamp all produce a `swept` one, and that is precisely
+ * why they cannot drift apart.
+ *
+ * Rotation is absent on purpose: a footprint is only ever previewed at the
+ * moment it is drawn, and an object's rotation starts at zero. A committed
+ * object's outline comes from the backend (`ObjectOutline`), which does carry
+ * the frame.
+ */
+export type Footprint =
+  | {
+      kind: "swept";
+      /** The polyline the stamp is swept along, as `[lon, lat]`. */
+      points: ReadonlyArray<readonly [number, number]>;
+      /** Half the stamp's size: a disc's radius or a square's half-side. */
+      radiusKm: number;
+      shape: BrushShape;
+      space: StampSpace;
+    }
+  | {
+      kind: "disc";
+      centre: readonly [number, number];
+      radiusKm: number;
+      space: StampSpace;
+    }
+  | {
+      kind: "ring";
+      centre: readonly [number, number];
+      /** Radius of the ring's centreline. */
+      radiusKm: number;
+      /** Half the ring's thickness. */
+      halfWidthKm: number;
+      space: StampSpace;
+    }
+  | {
+      kind: "rect";
+      centre: readonly [number, number];
+      halfWidthKm: number;
+      halfHeightKm: number;
+      space: StampSpace;
+    }
+  | {
+      kind: "polygon";
+      /** Vertices in order, as `[lon, lat]`. The closing edge is implied. */
+      points: ReadonlyArray<readonly [number, number]>;
+    };
+
+/** The part of `Path2D` a polygon needs beyond {@link PathSink}. */
+export interface PolygonSink extends PathSink {
+  lineTo(x: number, y: number): void;
+  closePath(): void;
+}
+
+/**
+ * Traces a footprint onto a path.
+ *
+ * Every closed piece opens its own subpath, so one `fill` merges them into a
+ * single silhouette. That is what makes a ring a ring: the outer and inner
+ * circles are wound the same way and the non-zero fill rule leaves the hole,
+ * which is the same trick the evaluator's annulus distance performs
+ * arithmetically.
+ */
+export function buildFootprintPath(
+  sink: PolygonSink,
+  camera: Camera,
+  view: Viewport,
+  footprint: Footprint,
+): void {
+  switch (footprint.kind) {
+    case "swept":
+      buildStrokePath(
+        sink,
+        camera,
+        view,
+        footprint.points,
+        footprint.radiusKm,
+        footprint.shape,
+        footprint.space,
+      );
+      return;
+
+    case "disc": {
+      const [lon, lat] = footprint.centre;
+      addFootprint(sink, camera, view, lon, lat, footprint.radiusKm, "circle", footprint.space);
+      return;
+    }
+
+    case "ring": {
+      const [lon, lat] = footprint.centre;
+      // Drawn as an annulus rather than a thick stroke: a stroked ellipse has a
+      // uniform *screen* thickness, and a geodesic ring's thickness is a ground
+      // distance that projects wider east-west like everything else.
+      const outer = footprint.radiusKm + footprint.halfWidthKm;
+      const inner = Math.max(0, footprint.radiusKm - footprint.halfWidthKm);
+      addFootprint(sink, camera, view, lon, lat, outer, "circle", footprint.space);
+      if (inner > 0) {
+        addFootprint(sink, camera, view, lon, lat, inner, "circle", footprint.space);
+      }
+      return;
+    }
+
+    case "rect": {
+      const [lon, lat] = footprint.centre;
+      const point = project(camera, view, { lon, lat });
+      const { rx } = footprintRadii(camera, lat, footprint.halfWidthKm, footprint.space);
+      const { ry } = footprintRadii(camera, lat, footprint.halfHeightKm, footprint.space);
+      sink.rect(point.x - rx, point.y - ry, rx * 2, ry * 2);
+      return;
+    }
+
+    case "polygon": {
+      const [first, ...rest] = footprint.points;
+      if (first === undefined) return;
+      const start = project(camera, view, { lon: first[0], lat: first[1] });
+      sink.moveTo(start.x, start.y);
+      for (const [lon, lat] of rest) {
+        const point = project(camera, view, { lon, lat });
+        sink.lineTo(point.x, point.y);
+      }
+      sink.closePath();
+      return;
+    }
+  }
+}
+
+/**
+ * A point inside the footprint, for the one glyph drawn when the lattice covers
+ * none (spec.md 6.1).
+ *
+ * The head of a stroke, or the centre of anything with one. A preview showing
+ * no direction at all is worse than one glyph off the lattice.
+ */
+export function footprintHead(footprint: Footprint): readonly [number, number] | null {
+  switch (footprint.kind) {
+    case "swept":
+      return footprint.points[footprint.points.length - 1] ?? null;
+    case "disc":
+    case "rect":
+      return footprint.centre;
+    // The centre of a ring is the hole, so a glyph there would sit outside the
+    // shape. The top of the centreline is on it.
+    case "ring":
+      return [
+        footprint.centre[0],
+        footprint.centre[1] + footprint.radiusKm / KM_PER_DEGREE,
+      ];
+    case "polygon": {
+      const n = footprint.points.length;
+      if (n === 0) return null;
+      // The mean of the vertices. Outside a sufficiently concave polygon, which
+      // is a worse glyph position than a vertex but never a missing one.
+      let lon = 0;
+      let lat = 0;
+      for (const point of footprint.points) {
+        lon += normalizeLon(point[0] - footprint.points[0]![0]) / n;
+        lat += point[1] / n;
+      }
+      return [normalizeLon(footprint.points[0]![0] + lon), lat];
+    }
+  }
+}

@@ -1,0 +1,318 @@
+//! What the tools palette and the option bar need to know about each tool.
+//!
+//! The inspector has been schema-driven since M5: it asks what properties an
+//! object has and renders them, so adding a property is one line in `ve-core`
+//! and nothing in the frontend. The *option bar* is the same question asked
+//! before the object exists, and it is answered the same way here — otherwise
+//! every tool would carry a hand-written bar, and spec 6.1's rules about which
+//! options are shown would have to be re-implemented six times in TypeScript
+//! and would be wrong in at least one of them.
+//!
+//! Nothing here decides anything. It reports what `ve_core::schema` already
+//! says, plus the two facts about a tool that are not properties: which gesture
+//! drives it, and whether it has a hover indicator (spec.md 6.2).
+
+use serde::Serialize;
+use ts_rs::TS;
+use ve_core::schema::{self, PropId, ToolKind, Unit};
+
+use crate::create::Tool;
+use crate::document::PropertyValue;
+use crate::error::Result;
+
+/// Why an option might not be read, and by what.
+///
+/// The frontend resolves these against the values the tool bar currently holds,
+/// which is the one thing it has that the backend does not. The *rule* stays
+/// here, so "which options does this mode make inert" has one answer for the
+/// inspector and the option bar both (spec.md 6.1).
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export, export_to = "OptionDependency.ts")]
+pub struct OptionDependency {
+    /// The choice property that decides.
+    pub on: String,
+    /// The variant indices of `on` for which the option is read.
+    pub live_for: Vec<u8>,
+}
+
+/// One option a tool offers, described well enough to render.
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export, export_to = "ToolOptionSpec.ts")]
+pub struct ToolOptionSpec {
+    /// The property id, spelled as `create_object` expects it.
+    pub property: String,
+    /// The label shown beside the control.
+    pub label: String,
+    /// Display unit: `"speed"`, `"kilometres"`, `"degrees"`, `"direction"`,
+    /// `"percent"` or `"none"`. A speed is stored in m/s and shown in knots; a
+    /// `direction` is a flow direction and shown in the project's convention,
+    /// where `degrees` is a geometric bearing and is not converted (spec.md 3.3).
+    pub unit: String,
+    /// The value the tool starts at.
+    pub default: PropertyValue,
+    /// Lower bound, for numeric options.
+    pub min: Option<f32>,
+    /// Upper bound, for numeric options.
+    pub max: Option<f32>,
+    /// Variant names, for choices.
+    pub variants: Vec<String>,
+    /// Whether the option is fixed once the object exists.
+    ///
+    /// Reported rather than hidden: a creation-only option is exactly the kind
+    /// the *tool* must offer, since it is the only chance to set it. It is the
+    /// inspector that leaves it out (spec.md 6.1).
+    pub creation_only: bool,
+    /// What makes this option inert, if anything.
+    pub depends_on: Vec<OptionDependency>,
+}
+
+/// Which gesture drives a tool.
+///
+/// Nearly always one, but the shape fill's depends on what it is drawing: a
+/// freehand polygon is a ring of placed vertices and a preset is a drag. The
+/// mapping lives here so the frontend cannot send a gesture `create_object`
+/// would refuse.
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[ts(export, export_to = "GestureSelector.ts")]
+pub enum GestureSelector {
+    /// The tool is always drawn the same way.
+    Always {
+        /// The gesture's tag, as `Gesture` spells it.
+        gesture: String,
+    },
+    /// A choice property decides.
+    ByChoice {
+        /// The property that decides.
+        on: String,
+        /// One gesture tag per variant of `on`, in variant order.
+        gestures: Vec<String>,
+    },
+}
+
+/// Everything the palette and the option bar need for one tool.
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export, export_to = "ToolSchema.ts")]
+pub struct ToolSchema {
+    /// Which tool.
+    pub tool: Tool,
+    /// Display name.
+    pub label: String,
+    /// Keyboard shortcut, a single lowercase letter.
+    pub shortcut: String,
+    /// How it is drawn.
+    pub gesture: GestureSelector,
+    /// Whether a click has a footprint worth previewing under the cursor.
+    ///
+    /// False for the shape fill and the curve, deliberately and not by omission
+    /// (spec.md 6.2): both are built up point by point, so a single click
+    /// produces nothing to show.
+    pub hover: bool,
+    /// Its options, in the order the bar should show them.
+    pub options: Vec<ToolOptionSpec>,
+}
+
+fn unit_name(unit: Unit) -> &'static str {
+    match unit {
+        Unit::None => "none",
+        Unit::Speed => "speed",
+        Unit::Kilometres => "kilometres",
+        Unit::Degrees => "degrees",
+        Unit::Direction => "direction",
+        Unit::Percent => "percent",
+    }
+}
+
+/// The gesture, or gestures, a tool is drawn with.
+fn gesture_for(tool: ToolKind) -> GestureSelector {
+    match tool {
+        ToolKind::Brush | ToolKind::Eraser | ToolKind::CloneStamp => GestureSelector::Always {
+            gesture: "stroke".to_owned(),
+        },
+        ToolKind::Circle => GestureSelector::Always {
+            gesture: "point".to_owned(),
+        },
+        ToolKind::Curve => GestureSelector::Always {
+            gesture: "path".to_owned(),
+        },
+        // Variant 0 is the freehand polygon, placed vertex by vertex; the three
+        // presets are dragged out from their centre.
+        ToolKind::ShapeFill => GestureSelector::ByChoice {
+            on: format!("{:?}", PropId::ShapeSource),
+            gestures: vec![
+                "ring".to_owned(),
+                "extent".to_owned(),
+                "extent".to_owned(),
+                "extent".to_owned(),
+            ],
+        },
+    }
+}
+
+/// Whether a click with this tool has a footprint to preview (spec.md 6.2).
+fn has_hover(tool: ToolKind) -> bool {
+    match tool {
+        ToolKind::Brush | ToolKind::Circle | ToolKind::Eraser | ToolKind::CloneStamp => true,
+        // Stated, not omitted: a polygon is built vertex by vertex and a curve
+        // node by node, so a single click produces no footprint to show.
+        ToolKind::ShapeFill | ToolKind::Curve => false,
+    }
+}
+
+/// The palette shortcut for a tool.
+fn shortcut_for(tool: ToolKind) -> &'static str {
+    match tool {
+        ToolKind::Brush => "b",
+        ToolKind::Circle => "c",
+        ToolKind::ShapeFill => "f",
+        ToolKind::Eraser => "e",
+        ToolKind::CloneStamp => "s",
+        ToolKind::Curve => "p",
+    }
+}
+
+/// Describes one tool.
+fn describe(tool: ToolKind) -> ToolSchema {
+    let options = schema::tool_specs(tool)
+        .iter()
+        .chain(
+            // The one common property a tool bar owns. The rest of `COMMON` is
+            // the object's placement and lifetime, which a gesture decides and
+            // the inspector edits; `edge_mode` is a choice about how the
+            // gesture paints, so it belongs beside the tool's own options.
+            schema::COMMON.iter().filter(|s| s.id == PropId::EdgeMode),
+        )
+        .map(|spec| ToolOptionSpec {
+            property: format!("{:?}", spec.id),
+            label: spec.label.to_owned(),
+            unit: unit_name(spec.unit).to_owned(),
+            default: PropertyValue::of(spec.default.value()),
+            min: spec.range.map(|(min, _)| min),
+            max: spec.range.map(|(_, max)| max),
+            variants: spec.variants.iter().map(|v| (*v).to_owned()).collect(),
+            creation_only: spec.creation_only,
+            depends_on: schema::dependencies(tool)
+                .iter()
+                .filter(|rule| rule.prop == spec.id)
+                .map(|rule| OptionDependency {
+                    on: format!("{:?}", rule.on),
+                    live_for: rule.live_for.to_vec(),
+                })
+                .collect(),
+        })
+        .collect();
+
+    ToolSchema {
+        tool: Tool::of(tool),
+        label: tool.label().to_owned(),
+        shortcut: shortcut_for(tool).to_owned(),
+        gesture: gesture_for(tool),
+        hover: has_hover(tool),
+        options,
+    }
+}
+
+/// Every tool, in palette order.
+#[tauri::command]
+pub fn tool_palette() -> Result<Vec<ToolSchema>> {
+    Ok(palette())
+}
+
+/// Implementation of [`tool_palette`], callable without a Tauri handle.
+pub fn palette() -> Vec<ToolSchema> {
+    ToolKind::ALL.iter().copied().map(describe).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The bar must offer every option a tool has, or an option that is
+    /// creation-only becomes unreachable — settable nowhere and editable
+    /// nowhere, which spec 6.1 says does not belong on the tool at all.
+    #[test]
+    fn every_tool_property_reaches_the_option_bar() {
+        for described in palette() {
+            let tool = described.tool.kind();
+            for spec in schema::tool_specs(tool) {
+                assert!(
+                    described
+                        .options
+                        .iter()
+                        .any(|o| o.property == format!("{:?}", spec.id)),
+                    "{tool:?} does not offer {:?}",
+                    spec.id
+                );
+            }
+        }
+    }
+
+    /// The gesture a tool declares has to be one `create_object` accepts, and
+    /// a per-variant mapping has to cover every variant — a short list would
+    /// leave a mode with no gesture at all.
+    #[test]
+    fn every_declared_gesture_is_one_the_write_path_knows() {
+        const KNOWN: [&str; 5] = ["stroke", "point", "extent", "ring", "path"];
+
+        for described in palette() {
+            let tool = described.tool.kind();
+            match &described.gesture {
+                GestureSelector::Always { gesture } => {
+                    assert!(KNOWN.contains(&gesture.as_str()), "{tool:?}: {gesture}");
+                }
+                GestureSelector::ByChoice { on, gestures } => {
+                    let spec = schema::tool_specs(tool)
+                        .iter()
+                        .find(|s| format!("{:?}", s.id) == *on)
+                        .unwrap_or_else(|| panic!("{tool:?} has no property {on}"));
+                    assert_eq!(
+                        gestures.len(),
+                        spec.variants.len(),
+                        "{tool:?}: {} gestures for {} variants of {on}",
+                        gestures.len(),
+                        spec.variants.len()
+                    );
+                    for gesture in gestures {
+                        assert!(KNOWN.contains(&gesture.as_str()), "{tool:?}: {gesture}");
+                    }
+                }
+            }
+        }
+    }
+
+    /// The shortcuts have to be distinct from each other and from the hand
+    /// tool's, or one of them silently never fires.
+    #[test]
+    fn the_palette_shortcuts_are_all_different() {
+        let mut seen = vec!["v".to_owned()];
+        for described in palette() {
+            assert!(
+                !seen.contains(&described.shortcut),
+                "{:?} reuses the shortcut {}",
+                described.tool,
+                described.shortcut
+            );
+            seen.push(described.shortcut);
+        }
+    }
+
+    /// The dependency rules the bar resolves must name options the bar has, or
+    /// it would be resolving them against a value it never holds and would
+    /// treat the option as inert forever.
+    #[test]
+    fn every_dependency_names_an_option_the_bar_holds() {
+        for described in palette() {
+            for option in &described.options {
+                for rule in &option.depends_on {
+                    assert!(
+                        described.options.iter().any(|o| o.property == rule.on),
+                        "{:?}: {} depends on {}, which the bar does not hold",
+                        described.tool,
+                        option.property,
+                        rule.on
+                    );
+                }
+            }
+        }
+    }
+}

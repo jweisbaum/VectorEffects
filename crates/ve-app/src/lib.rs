@@ -11,6 +11,7 @@ pub mod error;
 pub mod export;
 pub mod logging;
 pub mod merge;
+pub mod palette;
 pub mod paths;
 pub mod projects;
 pub mod protocol;
@@ -60,6 +61,7 @@ pub fn run() -> anyhow::Result<()> {
             projects::current_project,
             projects::recent_projects,
             create::create_object,
+            palette::tool_palette,
             edit::add_brush_stroke,
             edit::undo,
             edit::redo,
