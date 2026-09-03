@@ -45,6 +45,7 @@ import {
   release,
   shapeNode,
 } from "./gesture";
+import ToolIcon from "./ToolIcon";
 import ToolOptions, { type ToolPick } from "./ToolOptions";
 import {
   type ActiveTool,
@@ -2199,21 +2200,30 @@ export default function MapView({
 
       <div className="map-toolbar">
         <div className="tools" role="group" aria-label="Tool">
+          {/*
+            Icon-only, so the name has to reach anyone not reading the picture:
+            `aria-label` carries it, and `title` carries it plus the shortcut
+            for anyone who hovers.
+          */}
           <button
-            className={tool === HAND ? "active" : ""}
+            className={tool === HAND ? "icon active" : "icon"}
             onClick={() => setTool(HAND)}
-            title="Pan, select and transform (V) · shift-drag for a rubber band, add cmd to reach across layers · cmd-click to add or remove one object"
+            aria-label="Hand"
+            aria-pressed={tool === HAND}
+            title="Hand (V) · pan, select and transform · shift-drag for a rubber band, add cmd to reach across layers · cmd-click to add or remove one object"
           >
-            Hand
+            <ToolIcon tool={HAND} />
           </button>
           {palette.map((entry) => (
             <button
               key={entry.tool}
-              className={tool === entry.tool ? "active" : ""}
+              className={tool === entry.tool ? "icon active" : "icon"}
               onClick={() => setTool(entry.tool)}
+              aria-label={entry.label}
+              aria-pressed={tool === entry.tool}
               title={`${entry.label} (${entry.shortcut.toUpperCase()})`}
             >
-              {entry.label}
+              <ToolIcon tool={entry.tool} />
             </button>
           ))}
         </div>

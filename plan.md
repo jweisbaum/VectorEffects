@@ -496,11 +496,18 @@ The milestone's real content is therefore D32: the shared behaviour became
 shared code rather than a checklist. See the status notes at the top of this
 file for the five bugs that surfaced along the way, four of them pre-existing.
 
-**Measured on completion.** 539 Rust tests and 213 frontend tests pass, clippy
+**Measured on completion.** 540 Rust tests and 219 frontend tests pass, clippy
 clean at `-D warnings`. The fidelity suite compares 30,647 samples across 120
 generated scenes — worst speed error 0.108 m/s against a 0.25 tolerance, worst
 direction 0.186° against 2° — with 73 samples (0.24%) exempted at a path tangent
 tie. Tile cost is unchanged: 3.87 ms/tile exact on the CPU and 4.20 on the GPU.
+
+**A divergence still open.** Spec 8.1 describes a *left-hand vertical* palette;
+the implementation has it horizontal, in the toolbar across the top of the map,
+which is also where 5.5 puts the option bar. The two need reconciling — either
+the spec follows the build or the palette moves — and the icons make the
+question live, since a vertical strip of marks is what 8.1 was describing. Not
+touched here: it is a layout change, and nobody asked for one.
 
 **Left open.** Nobody has clicked through the six tools in the running app; the
 app builds, starts and loads the frontend cleanly, and the tools are covered end

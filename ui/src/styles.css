@@ -331,6 +331,28 @@ body {
   border-color: #2b7ba4;
 }
 
+/* An icon-only button is square and sized to its glyph. The name is not gone,
+   only unwritten: it is on the button's `aria-label` and in its tooltip. */
+.map-toolbar button.icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 28px;
+  padding: 0;
+}
+/* The icon inherits the button's colour, including the active state's, so the
+   whole set is themed by the button and knows nothing about the theme. */
+.tool-icon {
+  display: block;
+  color: inherit;
+}
+/* Dimmed until the tool is chosen or hovered, so the active one reads at a
+   glance across a row of seven. */
+.map-toolbar button.icon .tool-icon { opacity: 0.75; }
+.map-toolbar button.icon:hover .tool-icon,
+.map-toolbar button.icon.active .tool-icon { opacity: 1; }
+
 .tool-options {
   display: flex;
   flex-wrap: wrap;

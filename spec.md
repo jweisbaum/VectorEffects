@@ -1248,6 +1248,19 @@ Left-hand vertical palette, keyboard-shortcut per tool:
 | 〰 | Curve | `P` |
 | 📏 | Measure (dividers / great circle / range rings) | `M` |
 
+Each button carries **a mark rather than a word**: seven names across the top of
+the map is a row of text where a row of shapes is quicker to find, and the
+option bar beside it needs the room. The marks are inline SVG drawn in the
+frontend — invariant 5 rules out an icon font or a sprite fetched at runtime,
+and a bundled icon package would be a dependency carried for seven glyphs. They
+are stroked in the button's own colour, so the active state reaches them without
+the set knowing anything about the theme.
+
+**The name is unwritten, not gone.** Each button keeps it as its accessible
+label and, with the shortcut, in its tooltip. Replacing a word with a picture
+must not take the word away from anyone reading the page with something other
+than their eyes.
+
 The hand tool is the prominent default and the one the app returns to on
 `Escape`. In it, dragging empty map pans; dragging a *selected* object moves it;
 dragging a handle rotates, scales, or repositions the anchor. Whether a press

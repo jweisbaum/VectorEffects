@@ -224,11 +224,15 @@ fn has_hover(tool: ToolKind) -> bool {
 }
 
 /// The palette shortcut for a tool.
+///
+/// The letters spec 8.1 assigns, which are not all mnemonic — the shape fill is
+/// `U` because `F` and `S` are spoken for elsewhere in the table. Taken from
+/// there rather than chosen here, so the manual and the application agree.
 fn shortcut_for(tool: ToolKind) -> &'static str {
     match tool {
         ToolKind::Brush => "b",
         ToolKind::Circle => "c",
-        ToolKind::ShapeFill => "f",
+        ToolKind::ShapeFill => "u",
         ToolKind::Eraser => "e",
         ToolKind::CloneStamp => "s",
         ToolKind::Curve => "p",
@@ -440,11 +444,34 @@ mod tests {
         }
     }
 
-    /// The shortcuts have to be distinct from each other and from the hand
-    /// tool's, or one of them silently never fires.
+    /// The letters spec 8.1 assigns, restated so a change to one has to be a
+    /// change to both. `V` is the hand's and `M` is the measure tool's, which
+    /// M8 will add; neither may be taken in the meantime.
+    #[test]
+    fn the_palette_shortcuts_are_the_ones_the_spec_assigns() {
+        let shortcuts: Vec<(ToolKind, String)> = palette()
+            .into_iter()
+            .map(|d| (d.tool.kind(), d.shortcut))
+            .collect();
+        assert_eq!(
+            shortcuts,
+            vec![
+                (ToolKind::Brush, "b".to_owned()),
+                (ToolKind::Circle, "c".to_owned()),
+                (ToolKind::ShapeFill, "u".to_owned()),
+                (ToolKind::Eraser, "e".to_owned()),
+                (ToolKind::CloneStamp, "s".to_owned()),
+                (ToolKind::Curve, "p".to_owned()),
+            ]
+        );
+    }
+
+    /// ...and distinct from each other and from the keys the palette does not
+    /// own, or one of them silently never fires.
     #[test]
     fn the_palette_shortcuts_are_all_different() {
-        let mut seen = vec!["v".to_owned()];
+        // `v` is the hand's; `m` is reserved for the measure tool (spec 8.1).
+        let mut seen = vec!["v".to_owned(), "m".to_owned()];
         for described in palette() {
             assert!(
                 !seen.contains(&described.shortcut),
