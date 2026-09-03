@@ -12,6 +12,8 @@ import type { AppInfo } from "./generated/AppInfo";
 import type { FieldSample } from "./generated/FieldSample";
 import type { NewProjectRequest } from "./generated/NewProjectRequest";
 import type { BrushStroke } from "./generated/BrushStroke";
+import type { NewObject } from "./generated/NewObject";
+import type { ToolSchema } from "./generated/ToolSchema";
 import type { DocumentTree } from "./generated/DocumentTree";
 import type { ClipboardState } from "./generated/ClipboardState";
 import type { HistoryView } from "./generated/HistoryView";
@@ -114,6 +116,18 @@ export const api = {
   recentProjects: () => call<RecentProject[]>("recent_projects"),
 
   // --- Editing ---
+
+  /**
+   * Every tool, with its options, its gesture and whether it has a hover
+   * indicator (spec.md 6.2).
+   *
+   * Fetched rather than written out in the frontend: the option bar is the same
+   * question the inspector asks, and one answer keeps them from disagreeing.
+   */
+  toolPalette: () => call<ToolSchema[]>("tool_palette"),
+
+  /** Adds an object drawn with any tool. */
+  createObject: (object: NewObject) => call<ProjectSummary>("create_object", { object }),
 
   /** Adds a painted stroke to the topmost layer. */
   addBrushStroke: (stroke: BrushStroke) =>

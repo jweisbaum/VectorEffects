@@ -2,24 +2,73 @@
 
 **Companion to** `spec.md`. Section references below point into it.
 
-**Status:** M0 through M5 complete and verified (2026-09-03). **The walking
-skeleton is closed**: a new project, a painted stroke, and a GRIB2 file that
-ecCodes parses and whose values decode to exactly what was painted.
+**Status:** M0 through M5 complete and verified; M6 complete and verified by
+test (2026-09-03). **The walking skeleton is closed**: a new project, a painted
+stroke, and a GRIB2 file that ecCodes parses and whose values decode to exactly
+what was painted. **The tool catalogue is complete**: all six tools of spec §6.2
+draw, evaluate, save and export.
 
-**M6 is next**, starting with the circle stamp — see the note under that
-milestone for why it goes first.
+**M7 is next.**
 
-**Spec §6.1 now ends with a "what a tool inherits" checklist**, and M6's
-deliverables restate it as work. Every entry in it came from a bug report
-against the brush: an option bar that ran off the map, a px size that painted an
-ellipse, a preview that vanished on release, an aim point that could be set but
-not moved, a drag that only landed when the pointer came up, an inspector
-showing the reciprocal of the direction that was painted. The brush is not
-special — it is only first — and a tool that reproduces any of these is not
-done. The checklist is the cheapest place to have that argument.
+**M6 complete.** All six tools of the catalogue draw, evaluate, save and export.
+Most of the *evaluation* already existed — every shape, speed mode and direction
+mode landed in M3 — so the milestone was mostly the model's account of what each
+tool offers and the interaction that drives it.
 
-**Not committed.** The repository has no commits: everything below exists in the
-working tree only. That is the first thing to fix, ahead of any new work.
+**The checklist became code.** Spec §6.1's "what a tool inherits" was written
+after a series of bugs in the brush, and a checklist worked through by hand is a
+checklist that gets missed. It is now structural: one creation command for the
+whole catalogue, five gestures rather than one per tool, one schema-driven
+option bar, and one footprint type that the gesture preview, the hover indicator
+and the held preview all draw. A tool supplies its gesture and its footprint and
+inherits the rest, so the eraser and the clone stamp are brush-like *because*
+all three send the same gesture rather than because three code paths were
+written to resemble each other.
+
+The cross-tool rules are tested per tool, parameterised over the catalogue: px
+is round on the map and km round on the ground at 0°, 45° and 70°; `toward` and
+`away` are exact reciprocals; the inspector lists exactly what is live and
+editable; every frozen option is refused after the fact; every tool round-trips
+through save and load; every geometry moves when its frame does. A new tool
+fails these without anyone remembering to write a test for it.
+
+**Five bugs the milestone found, four of them pre-existing.**
+
+- **`path_bearing` on the GPU passed `segment_distance` its arguments
+  reversed**, so a curve's flow followed the tangent of whichever part of the
+  path happened to win. Never caught because the parity generator produced every
+  direction mode except `AlongPath` — the one mode with a shader loop of its own.
+- **`to_global` in the shader implemented only the geodesic branch** while
+  `to_local` handled both. Only `path_bearing` calls it, so a map-space curve
+  went through the ground formula: 410 of 6400 samples outside tolerance in
+  projected space, 14 after the fix.
+- **`clone_source` was never part of the scene hash.** Two clone stamps
+  differing only in where they read from produced the same cache key, so moving
+  a source served the previous source's pixels.
+- **A computed position did not survive a save.** Serde quantised on the way out
+  but nothing quantised on the way in, so a centroid — or a dragged anchor —
+  made the document stop equalling itself. `PropValue::canonical` now applies in
+  `Animatable`'s writers: one place, off the evaluator's per-sample path, where
+  `LonLat::new` would have been on it.
+- **Switching a size between km and px converted in the wrong space.** A pixel
+  number is always a projected measure, and converting the km side in its own
+  space scales by `cos(lat)` — the brush changed size by a fifth at 40° on the
+  way through.
+
+**One design decision worth recording.** A polyline's tangent is genuinely
+discontinuous on the bisector at a corner, so the two backends can land on
+opposite sides of a tie and disagree by the angle of the corner. No tolerance is
+meaningful across a discontinuity, so the fidelity suite steps around it — but
+narrowly: only objects that actually cover the sample count, the exempted
+samples are counted and reported, and the test fails if the exemption grows past
+a twentieth of the suite. Measured, every disagreement sat inside 0.02 of the
+corridor half-width of a tie; the guard is at 0.05, and 73 of 30,720 samples are
+exempted.
+
+**Not verified by hand.** The app builds, starts and loads the frontend with no
+errors, and the tools are covered end to end by the Rust integration tests and
+the frontend unit tests — but nobody has clicked through the six tools in the
+running app. That is the gap M7 should close first.
 
 **M3 progress.** The evaluation engine's core is built and tested: rhumb-line
 geodesy, object-local AEQD frames, signed-distance shapes, scene flattening, and
@@ -430,24 +479,33 @@ message, not at the end of the milestone.
 
 ---
 
-### M6 — Remaining tools
+### M6 — Remaining tools · **complete**
 
 **Goal:** the full tool catalogue from spec §6.2.
 
-**Start with the circle stamp.** Its `circle_space` has been in the schema since
-M1, read by nothing — and the projected frame built for the brush's
-`stamp_space` (D28, spec §7.2) is its implementation. The two vocabularies
-should converge while the work is open: `screen_circular` and `geodesic_circular`
-name exactly what `STAMP_SPACES` calls `projected` and `geodesic`. Its
-`fill_mode` and `speed_min`/`speed_max` also want the property-dependency rule
-that already exists for the brush's direction options (spec §6.1), so the
-inspector stops offering a ring width for a filled disc.
+**What it turned out to be.** Most of the *evaluation* already existed: every
+shape, speed mode and direction mode landed in M3, so the circle stamp's
+gradient, the shape fill's ramp and the curve's along-path flow needed no new
+kernel work. What was missing was the model's account of what each tool
+*offers* — the eraser and the clone stamp had no `brush_shape` or `stamp_space`,
+the shape fill no `shape_source`, the curve no `curve_kind`, and only the brush
+had any dependency rules — and the interaction that drives it, which existed
+only for the brush.
 
-Two of M6's acceptance criteria are already met: `edge_mode` is implemented in
-both kernels (measured: 14.30 m/s blended against 1.90 m/s replaced in a
-feathered overlap), and the eraser and clone stamp share the brush's `Stroke`
-geometry, so they inherit the swept-stamp work in both backends — the GPU
-declines clone-stamp scenes deliberately and routes them to the CPU (D22).
+The milestone's real content is therefore D32: the shared behaviour became
+shared code rather than a checklist. See the status notes at the top of this
+file for the five bugs that surfaced along the way, four of them pre-existing.
+
+**Measured on completion.** 529 Rust tests and 169 frontend tests pass, clippy
+clean at `-D warnings`. The fidelity suite compares 30,647 samples across 120
+generated scenes — worst speed error 0.108 m/s against a 0.25 tolerance, worst
+direction 0.186° against 2° — with 73 samples (0.24%) exempted at a path tangent
+tie. Tile cost is unchanged: 3.87 ms/tile exact on the CPU and 4.20 on the GPU.
+
+**Left open.** Nobody has clicked through the six tools in the running app; the
+app builds, starts and loads the frontend cleanly, and the tools are covered end
+to end by tests, but the interaction itself is unexercised by hand. That is the
+first thing M7 should do.
 
 **Deliverables**
 
@@ -773,6 +831,11 @@ relitigated by accident.
 | D30 | The brush has no `divergence` or `curl`, and its stamp geometry is creation-only | Both components are measured from the object's anchor, and a stroke's anchor is wherever the gesture began — not a centre its flow turns about; the tools that place one keep them. `brush_shape` and `stamp_space` are the stamp's geometry, so changing either re-rasterises the stroke into one nobody drew: they are set at creation and refused afterwards, at the write path and not only in the panel. Removing a property from a tool needs a migration, not just a table edit — `value_at` returns whatever the map holds and only falls back to the schema when the key is absent, so a leftover entry goes on bending a flow nothing shows (schema version 4, spec §6.1, §6.2, §7.5) |
 | D29 | A transform drag previews rather than writes, and commits once on release | A write per pointer report bumps the revision, and the revision addresses every tile, so each report invalidated the visible field and asked for a re-render measured at 109–2000 ms per 24-tile viewport. The renders never completed, so the object moved only when the drag ended. A read-only preview costs 0.036 ms per report and re-renders nothing. The preview and the write are built from the same `placement_of`, so the outline cannot land anywhere but where the release puts it (spec §8.2) |
 | D28 | A size in px selects a projected stamp, not just a conversion factor | A ground disc is an ellipse on the map, twice as wide as tall at 60°, so no px number describes it — measured against either axis the footprint visibly deforms. Asking in pixels is asking for a shape on the map, so px paints one and km keeps painting a ground shape. The object records which (`stamp_space`), because the two paint different fields and export different GRIBs. This replaces §3.5's horizontal-scale rule, whose reasoning was sound only while the ellipse was accepted as the answer (spec §3.5, §7.2) |
+| D32 | One creation command, five gestures, one option bar and one footprint type for the whole catalogue | Spec §6.1's "what a tool inherits" was a checklist, and a checklist worked through by hand is one that gets missed — the brush's bug list is the evidence. The shared behaviour is now shared code: a tool sends a gesture and a set of property values and inherits the aim-mode check, the anchor, the frame, the layer choice, the merge test, the option bar and all three previews. The eraser and the clone stamp are brush-like *because* all three send the same gesture, which is a stronger guarantee than three code paths written to resemble each other (spec §6.1) |
+| D33 | The shape fill's presets are dragged out from their centre, and their size is geometry rather than a property | Centre-out gives all three presets the same anchor as the shape they produce, which is what divergence and curl are measured from and what the handles turn about. The size is part of what the user drew, like a polygon's vertices, so it lives in the geometry and is resized by the same scale handle as everything else — where the circle *stamp*'s diameter is typed and therefore an animatable property. `Geometry::Disc` carries an optional radius to say which of the two a disc is (schema version 6, spec §6.2) |
+| D34 | A clone stamp never merges | Merging re-expresses the absorbed stroke in the target's frame, and a clone stamp samples at a displacement off its own anchor — a different anchor is a different patch of the field. It is the one exception to D24's rule, and it is stated at the merge test rather than buried in it (spec §6.1, §6.2) |
+| D35 | One size unit per tool, not one per field | `stamp_space` is one property of the object, so a circle with a diameter in px and a ring width in km would be asking for a shape that is on the map in one measurement and on the ground in the other. The bar offers the unit once and it governs every size the tool has (spec §3.5) |
+| D36 | Values are quantised where they enter the document, not where they leave it | D17 quantises at the serialisation boundary, which covers a value the user typed and misses one the application computed — a polygon's centroid, a dragged anchor. `PropValue::canonical` now applies in `Animatable`'s writers, which is one place and off the evaluator's per-sample path. Doing it in `LonLat::new` instead would have put a rounding on the clone stamp's inner loop (`ve-core::canonical`) |
 | D17 | Document `f64` values are quantised at the serialisation boundary | `serde_json``s parser is one ULP off on ~10% of `f64` values, so raw floats do not round-trip and a project would not equal itself across save/load. Chosen precisions are far finer than anything observable; `f32` is unaffected (`ve-core::canonical`) |
 
 ---

@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { api } from "../ipc";
-import type { BrushDirectionMode } from "../generated/BrushDirectionMode";
-import type { BrushShape } from "../generated/BrushShape";
+import type { Gesture } from "../generated/Gesture";
+import type { PathPoint } from "../generated/PathPoint";
 import type { ProjectSummary } from "../generated/ProjectSummary";
 import type { ObjectOutline } from "../generated/ObjectOutline";
-import type { StampSpace } from "../generated/StampSpace";
+import type { Tool } from "../generated/Tool";
+import type { ToolSchema } from "../generated/ToolSchema";
 import type { PositionPick } from "../picking";
 import type { SelectionTransform } from "../generated/SelectionTransform";
 import type { TransformPreview } from "../generated/TransformPreview";
@@ -21,15 +22,9 @@ import {
   unproject,
   zoomAbout,
 } from "./camera";
-import {
-  addFootprint,
-  buildStrokePath,
-  footprintRadii,
-  kmFromPixels,
-  pixelsFromKm,
-} from "./footprint";
-import { destination, initialBearing } from "./geo";
-import { glyphGeometry, glyphLayout, latticeUnderStroke } from "./glyph";
+import { buildFootprintPath, footprintHead, footprintRadii } from "./footprint";
+import { destination } from "./geo";
+import { glyphGeometry, glyphLayout, latticeUnder } from "./glyph";
 import { RAMP_STOPS, rampCss } from "./ramp";
 import { parseBasemap } from "./format";
 import { marqueeBounds } from "./marquee";
@@ -38,8 +33,21 @@ import {
   SETTLE_TIMEOUT_MS,
   type HeldPreview,
   type Settling,
-  type StrokePreview,
+  type FieldPreview,
 } from "./preview";
+import ToolOptions, { type ToolPick } from "./ToolOptions";
+import {
+  type ActiveTool,
+  defaultState,
+  liveOptions,
+  footprintOf,
+  gestureKind,
+  HAND,
+  newObject,
+  positionOf,
+  previewField,
+  type ToolState,
+} from "./tools";
 import { MapRenderer, type RenderState } from "./renderer";
 import { TileCache } from "./tiles";
 
@@ -68,9 +76,6 @@ function formatDegrees(value: number, positive: string, negative: string): strin
   return `${Math.abs(value).toFixed(2)}° ${suffix}`;
 }
 
-/** What a pointer drag does. */
-type Tool = "hand" | "brush";
-
 /** Hit radius of a transform handle, in CSS pixels. */
 const HANDLE_RADIUS_CSS = 6;
 
@@ -89,6 +94,90 @@ const GLYPH_INK = "rgba(240, 247, 255, 0.9)";
  * preview the user cannot see is not a preview.
  */
 const PREVIEW_MIN_ALPHA = 0.28;
+
+/**
+ * A gesture part-way through being drawn.
+ *
+ * The four gestures that take longer than an instant. A `point` is not among
+ * them: a click commits it, so it is never in progress.
+ */
+type InProgress =
+  | { kind: "stroke"; points: Array<[number, number]> }
+  | { kind: "extent"; centre: [number, number]; rim: [number, number] }
+  | { kind: "ring"; points: Array<[number, number]> }
+  | { kind: "path"; nodes: PathPoint[] };
+
+/** The finished gesture an in-progress one becomes. */
+function finished(drawing: InProgress): Gesture {
+  switch (drawing.kind) {
+    case "stroke":
+      return { kind: "stroke", points: drawing.points };
+    case "extent":
+      return { kind: "extent", centre: drawing.centre, rim: drawing.rim };
+    case "ring":
+      return { kind: "ring", points: drawing.points };
+    case "path":
+      return { kind: "path", nodes: drawing.nodes };
+  }
+}
+
+/** Whether a gesture has enough placed to be worth committing. */
+function isComplete(drawing: InProgress): boolean {
+  switch (drawing.kind) {
+    case "stroke":
+      return drawing.points.length > 0;
+    case "extent":
+      return drawing.centre[0] !== drawing.rim[0] || drawing.centre[1] !== drawing.rim[1];
+    // A polygon needs three vertices to have an inside, and a curve two nodes
+    // to have a length. Both are the backend's rule as well, so a gesture that
+    // fails here would have been refused there.
+    case "ring":
+      return drawing.points.length >= 3;
+    case "path":
+      return drawing.nodes.length >= 2;
+  }
+}
+
+/**
+ * The latitude a gesture resolves its pixel sizes against.
+ *
+ * Where the gesture *began*, in every case — the point the object will be
+ * anchored at. Taking it from wherever the pointer finished would mean a
+ * footprint that changed size as a drag moved north, and a preview that
+ * disagreed with what got painted.
+ */
+function gestureLatitude(gesture: Gesture): number {
+  switch (gesture.kind) {
+    case "stroke":
+      return gesture.points[0]?.[1] ?? 0;
+    case "point":
+      return gesture.at[1];
+    case "extent":
+      return gesture.centre[1];
+    case "ring":
+      return gesture.points[0]?.[1] ?? 0;
+    case "path":
+      return gesture.nodes[0]?.at[1] ?? 0;
+  }
+}
+
+/**
+ * The gesture a click at `at` would produce, for the hover indicator.
+ *
+ * Only the tools whose hover indicator exists reach this, so the gestures a
+ * click cannot complete need no answer: a `point` is the whole gesture, and a
+ * `stroke` is a one-point one, which is exactly what a click paints.
+ */
+function hoverGesture(
+  schema: ToolSchema,
+  state: ToolState,
+  at: { lon: number; lat: number },
+): Gesture {
+  const kind = gestureKind(schema, state.values);
+  return kind === "point"
+    ? { kind: "point", at: [at.lon, at.lat] }
+    : { kind: "stroke", points: [[at.lon, at.lat]] };
+}
 
 /**
  * Most glyphs one stroke preview will draw.
@@ -148,8 +237,17 @@ export default function MapView({
    * the pre-edit field.
    */
   const projectRef = useRef(project);
-  /** Points of the stroke in progress, as [lon, lat]. */
-  const strokeRef = useRef<Array<[number, number]> | null>(null);
+  /**
+   * The gesture in progress, in the shape the backend will receive.
+   *
+   * One ref for every tool: what is being drawn is a gesture, not a brush
+   * stroke, and holding it in the wire type means the preview and the commit
+   * are looking at exactly the same thing.
+   *
+   * A `point` gesture never appears here — a click commits it at once — so the
+   * in-progress kinds are the four that take more than an instant.
+   */
+  const gestureRef = useRef<InProgress | null>(null);
   /**
    * Strokes that have been committed but whose field is not on screen yet.
    *
@@ -161,6 +259,14 @@ export default function MapView({
   const settling = useRef<HeldPreview[]>([]);
   /** The current `drawOverlay`, for callers that only read refs. */
   const drawOverlayRef = useRef<() => void>(() => {});
+  /**
+   * The current `finishGesture`, for the key handler.
+   *
+   * The handler is bound once and lives above the callback it needs, and
+   * rebinding it on every option change would put a listener churn on the
+   * window for no gain.
+   */
+  const finishGestureRef = useRef<() => void>(() => {});
   const cursorRef = useRef<{ x: number; y: number } | null>(null);
   /**
    * Display options mirrored into refs.
@@ -182,26 +288,32 @@ export default function MapView({
   const [showGraticule, setShowGraticule] = useState(true);
   const [readout, setReadout] = useState<Readout | null>(null);
   const [pending, setPending] = useState(0);
-  const [tool, setTool] = useState<Tool>("hand");
-  const [brushShape, setBrushShape] = useState<BrushShape>("circle");
+  const [tool, setTool] = useState<ActiveTool>(HAND);
   /**
-   * The size the user typed, in whichever unit is selected.
+   * The tool catalogue, as the backend describes it.
    *
-   * Pixels are an input convenience only: they resolve to kilometres against
-   * the map scale at the moment a stroke is committed and are never revisited,
-   * so zooming afterwards cannot resize an existing object (spec.md 3.5).
+   * Fetched rather than written out here: the options a tool has, which of them
+   * a mode makes inert, and which gesture drives it are all facts the property
+   * system already holds, and a second copy in the frontend is a second copy to
+   * get wrong (spec.md 6.1).
    */
-  const [brushSize, setBrushSize] = useState(600);
-  const [brushSizeUnit, setBrushSizeUnit] = useState<"km" | "px">("km");
-  const [brushSpeedKnots, setBrushSpeedKnots] = useState(30);
-  const [brushDirectionMode, setBrushDirectionMode] =
-    useState<BrushDirectionMode>("constant");
-  const [brushDirection, setBrushDirection] = useState(270);
-  /** Where `toward_point` aims, as [lon, lat]. */
-  const [brushTarget, setBrushTarget] = useState<[number, number]>([0, 0]);
-  /** While set, the next click on the map places the target instead of painting. */
-  const [pickingTarget, setPickingTarget] = useState(false);
-  const [brushFeather, setBrushFeather] = useState(0.25);
+  const [palette, setPalette] = useState<ToolSchema[]>([]);
+  /**
+   * What each tool is currently set to, keyed by tool.
+   *
+   * Per tool rather than shared: options freeze onto the object at creation, so
+   * they are the *tool's* settings, and switching away and back must not lose
+   * them.
+   */
+  const [toolStates, setToolStates] = useState<Record<string, ToolState>>({});
+  /**
+   * A position option of the *tool* waiting for a map click.
+   *
+   * The inspector's `picking` does the same for an existing object. Two arms
+   * rather than one because they place different things — a tool option that no
+   * object holds yet, and a property of one that does.
+   */
+  const [toolPick, setToolPick] = useState<ToolPick | null>(null);
   const [busy, setBusy] = useState(false);
   /**
    * Where the selection's handles go.
@@ -246,14 +358,48 @@ export default function MapView({
    * preview.
    */
   const settlingDrag = useRef<(TransformPreview & Settling) | null>(null);
-  /** Set while the aim point is being dragged around the map. */
-  const targetDrag = useRef(false);
+  /**
+   * The tool option whose marker is being dragged, if any.
+   *
+   * A placed position is a handle and takes precedence over what is under it,
+   * on the same rule as the transform handles (spec.md 8.1). Without that a
+   * placed point could never be adjusted on the map, only retyped or re-picked.
+   */
+  const markerDrag = useRef<string | null>(null);
+  /**
+   * Set while a path node's handles are being pulled out.
+   *
+   * The pen places a node on the press and shapes it while the button is held,
+   * so the drag belongs to the node just placed rather than to the gesture.
+   */
+  const nodeDrag = useRef(false);
   /** The rubber band, in device pixels, while one is being dragged. */
   const marquee = useRef<{
     from: { x: number; y: number };
     to: { x: number; y: number };
     crossLayer: boolean;
   } | null>(null);
+
+  /** The active tool's description, or null while the hand tool is chosen. */
+  const schema = palette.find((entry) => entry.tool === tool) ?? null;
+
+  /**
+   * What the active tool is set to.
+   *
+   * Falls back to the schema defaults so the bar renders on the first frame
+   * after the palette arrives, before any option has been touched.
+   */
+  const toolState: ToolState =
+    (schema ? toolStates[schema.tool] : undefined) ??
+    (schema ? defaultState(schema) : { values: {}, unit: "km" });
+
+  const setToolState = useCallback(
+    (next: ToolState) => {
+      if (!schema) return;
+      setToolStates((current) => ({ ...current, [schema.tool]: next }));
+    },
+    [schema],
+  );
 
   const rampMaxKnots = rampMaxKnotsFor(project.field_kind);
   // The renderer works in stored units; the ramp is chosen in displayed ones.
@@ -263,59 +409,138 @@ export default function MapView({
   const lastStep = Math.max(0, project.step_count - 1);
 
   /**
-   * Which space the brush's stamp is a shape in (spec.md 3.5).
+   * The palette, fetched once.
    *
-   * A size in pixels is asking for a shape on the *map*, and a ground disc is
-   * an ellipse there — twice as wide as tall at 60 degrees. So px paints a
-   * projected stamp, which is a circle on screen at any latitude and any zoom;
-   * km paints a geodesic one, which is a circle on the ground.
+   * The tools and their options are the property system's answer, not the
+   * frontend's (spec.md 6.1), so they arrive over IPC like everything else the
+   * document knows.
    */
-  const brushSpace: StampSpace = brushSizeUnit === "px" ? "projected" : "geodesic";
+  useEffect(() => {
+    let live = true;
+    void api
+      .toolPalette()
+      .then((entries) => {
+        if (!live) return;
+        setPalette(entries);
+        setToolStates((current) => {
+          const next = { ...current };
+          for (const entry of entries) next[entry.tool] ??= defaultState(entry);
+          return next;
+        });
+      })
+      .catch((err: unknown) =>
+        void api.frontendLog("error", `tool palette failed: ${String(err)}`),
+      );
+    return () => {
+      live = false;
+    };
+  }, []);
 
-  /**
-   * The brush's stored size in kilometres, for a stamp at `lat`.
-   *
-   * A size already in kilometres is the answer. One in pixels converts against
-   * the map scale, which for a geodesic stamp depends on where it lands — hence
-   * the latitude — and for a projected one does not.
-   */
-  const brushSizeKmAt = useCallback(
-    (lat: number) =>
-      brushSizeUnit === "km"
-        ? brushSize
-        : kmFromPixels(cameraRef.current, lat, brushSize, brushSpace),
-    [brushSize, brushSizeUnit, brushSpace],
+  /** Whether a screen point is within grabbing distance of a marker. */
+  const near = useCallback(
+    (point: { x: number; y: number }, marker: { x: number; y: number }) =>
+      Math.hypot(point.x - marker.x, point.y - marker.y) <=
+      HANDLE_RADIUS_CSS * 2 * (window.devicePixelRatio || 1),
+    [],
   );
 
   /**
-   * The brush's direction as it is stored.
+   * The position option whose marker is under `point`, if any.
    *
-   * The user enters a direction in the project's convention; storage is always
-   * azimuth-toward (spec.md 3.3). One conversion, read by both the preview and
-   * the commit, so the arrows on screen cannot disagree with what gets painted.
+   * Checked across every live position option of the tool, so the rule that a
+   * placed marker is a handle holds for all of them at once (spec.md 6.1).
    */
-  const brushAzimuthToward =
-    project.direction_convention === "from"
-      ? (brushDirection + 180) % 360
-      : brushDirection;
-
-  /** Whether the current aim mode needs a target to mean anything. */
-  const brushAims = brushDirectionMode !== "constant";
-
-  /** The azimuth-toward a stamp at this position will carry (spec.md 6.2). */
-  const brushAzimuthAt = useCallback(
-    (lon: number, lat: number) => {
-      if (!brushAims) return brushAzimuthToward;
-      const toward = initialBearing(
-        { lon, lat },
-        { lon: brushTarget[0], lat: brushTarget[1] },
-      );
-      // Away is the reciprocal at the cell, which is the outward tangent to the
-      // same great circle — not the bearing measured at the target, which is a
-      // different angle once the meridians have converged.
-      return brushDirectionMode === "away_from_point" ? (toward + 180) % 360 : toward;
+  const markerUnder = useCallback(
+    (point: { x: number; y: number }): string | null => {
+      if (!schema) return null;
+      for (const spec of liveOptions(schema, toolState.values)) {
+        if (spec.default.kind !== "position") continue;
+        const [lon, lat] = positionOf(toolState.values, spec.property);
+        if (near(point, toScreen(cameraRef.current, viewRef.current, { lon, lat }))) {
+          return spec.property;
+        }
+      }
+      return null;
     },
-    [brushAims, brushAzimuthToward, brushDirectionMode, brushTarget],
+    [near, schema, toolState],
+  );
+
+  /**
+   * The nodes and vertices placed so far, for a gesture built point by point.
+   *
+   * The footprint preview shows what a polygon or a curve will *paint*; this
+   * shows what has been *placed*, which for the first two vertices is all there
+   * is. Bézier handles are drawn as well, so the pen's pull is visible while it
+   * is being made rather than only in the curve it produced.
+   */
+  const drawPlacedPoints = useCallback(
+    (
+      context: CanvasRenderingContext2D,
+      drawing: Extract<InProgress, { kind: "ring" | "path" }>,
+      dpr: number,
+      cursor: { x: number; y: number } | null,
+    ) => {
+      const camera = cameraRef.current;
+      const view = viewRef.current;
+      const at = (lon: number, lat: number) => toScreen(camera, view, { lon, lat });
+
+      context.save();
+      context.strokeStyle = "rgba(160, 232, 255, 0.95)";
+      context.fillStyle = "rgba(160, 232, 255, 0.95)";
+      context.lineWidth = Math.max(1, dpr);
+
+      const nodes =
+        drawing.kind === "ring"
+          ? drawing.points.map((point) => ({ at: point }) as PathPoint)
+          : drawing.nodes;
+
+      // The chain as placed, closed for a ring because its last edge is
+      // implied and a user cannot see an edge nobody drew.
+      context.beginPath();
+      nodes.forEach((node, index) => {
+        const point = at(node.at[0], node.at[1]);
+        if (index === 0) context.moveTo(point.x, point.y);
+        else context.lineTo(point.x, point.y);
+      });
+      if (drawing.kind === "ring" && nodes.length > 2) context.closePath();
+      context.stroke();
+
+      // The edge the next click would add. Without it there is no way to see
+      // where a vertex is going until it has been placed, which for a polygon
+      // is most of the gesture.
+      const last = nodes[nodes.length - 1];
+      if (cursor && last) {
+        const from = at(last.at[0], last.at[1]);
+        context.save();
+        context.setLineDash([5 * dpr, 4 * dpr]);
+        context.beginPath();
+        context.moveTo(from.x, from.y);
+        context.lineTo(cursor.x, cursor.y);
+        context.stroke();
+        context.restore();
+      }
+
+      for (const node of nodes) {
+        const point = at(node.at[0], node.at[1]);
+        context.beginPath();
+        context.arc(point.x, point.y, 3.5 * dpr, 0, Math.PI * 2);
+        context.fill();
+
+        for (const handle of [node.in_handle, node.out_handle]) {
+          if (!handle) continue;
+          const end = at(handle[0], handle[1]);
+          context.beginPath();
+          context.moveTo(point.x, point.y);
+          context.lineTo(end.x, end.y);
+          context.stroke();
+          context.beginPath();
+          context.arc(end.x, end.y, 2.5 * dpr, 0, Math.PI * 2);
+          context.stroke();
+        }
+      }
+      context.restore();
+    },
+    [],
   );
 
   const draw = useCallback(() => {
@@ -521,13 +746,42 @@ export default function MapView({
       // Never steal a keystroke from a field the user is typing in.
       if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
 
-      if (event.key === "v" || event.key === "V") setTool("hand");
-      if (event.key === "b" || event.key === "B") setTool("brush");
-      if (event.key === "Escape") setTool("hand");
+      const key = event.key.toLowerCase();
+      if (key === "v") {
+        setTool(HAND);
+        return;
+      }
+      // The shortcuts come from the palette, so a tool cannot ship without one
+      // and two tools cannot quietly share.
+      const chosen = palette.find((entry) => entry.shortcut === key);
+      if (chosen) {
+        setTool(chosen.tool);
+        return;
+      }
+
+      // Enter closes a gesture built up click by click — the polygon and the
+      // curve, which have no pointer-up to end them.
+      if (event.key === "Enter") {
+        finishGestureRef.current();
+        return;
+      }
+
+      // Escape abandons a gesture in progress before it abandons the tool: the
+      // first press is what a half-drawn polygon needs, and dropping the tool
+      // as well would be two steps at once.
+      if (event.key === "Escape") {
+        if (gestureRef.current) {
+          gestureRef.current = null;
+          nodeDrag.current = false;
+          drawOverlayRef.current();
+          return;
+        }
+        setTool(HAND);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [palette]);
 
   // The selection's handles, so the map shows what the panels are pointing at
   // and where a drag would act.
@@ -561,11 +815,12 @@ export default function MapView({
     requestDraw();
   }, [project, requestDraw]);
 
-  // Leaving the brush disarms target picking: the panel that shows it is armed
-  // goes away with the tool, and coming back to a brush that swallows the next
-  // click would be a small mystery.
+  // Changing tools disarms a pick and abandons a gesture in progress: the
+  // panel that shows a pick is armed goes away with the tool, and a half-drawn
+  // polygon has no meaning under a different one.
   useEffect(() => {
-    if (tool !== "brush") setPickingTarget(false);
+    setToolPick(null);
+    gestureRef.current = null;
   }, [tool]);
 
   // A project change can shorten the timeline or forbid barbs.
@@ -582,23 +837,6 @@ export default function MapView({
     stepRef.current = step;
     requestDraw();
   }, [requestDraw, step, glyphStyle, showGlyphs, showGraticule]);
-
-  /**
-   * Whether a screen position is close enough to grab the aim point.
-   *
-   * The same reach as a transform handle, so the two feel alike.
-   */
-  const nearTarget = useCallback(
-    (point: { x: number; y: number }) => {
-      const at = toScreen(cameraRef.current, viewRef.current, {
-        lon: brushTarget[0],
-        lat: brushTarget[1],
-      });
-      const reach = HANDLE_RADIUS_CSS * 2 * (window.devicePixelRatio || 1);
-      return Math.hypot(point.x - at.x, point.y - at.y) <= reach;
-    },
-    [brushTarget],
-  );
 
   /**
    * Draws preview glyphs at a set of geographic positions.
@@ -666,56 +904,40 @@ export default function MapView({
   );
 
   /**
-   * The field a stroke will paint: its swept region in the speed colour, with
+   * The field a gesture will paint: its footprint in the speed colour, with
    * direction glyphs over it.
    *
    * Glyphs sit on the map's own globe-anchored lattice, so what the preview
-   * shows is what the field will show once the stroke is committed -- same
+   * shows is what the field will show once the gesture is committed -- same
    * positions, same mark, same direction (spec.md 6.1).
+   *
+   * Generic over the footprint, so a tool previews the field it paints by
+   * saying what it paints. There is no per-tool preview to write, and so no
+   * per-tool preview to get wrong.
    */
-  const drawStrokePreview = useCallback(
-    (context: CanvasRenderingContext2D, preview: StrokePreview, dpr: number) => {
+  const drawFieldPreview = useCallback(
+    (context: CanvasRenderingContext2D, preview: FieldPreview, dpr: number) => {
       const camera = cameraRef.current;
       const view = viewRef.current;
 
-      // Every stamp is its own subpath, so filling once merges the overlapping
+      // Every piece is its own subpath, so filling once merges overlapping
       // footprints into a single silhouette instead of drawing a chain of
-      // outlines on top of each other.
-      const swept = new Path2D();
-      buildStrokePath(
-        swept,
-        camera,
-        view,
-        preview.points,
-        preview.radiusKm,
-        preview.shape,
-        preview.space,
-      );
+      // outlines on top of each other -- and leaves a ring its hole.
+      const region = new Path2D();
+      buildFootprintPath(region, camera, view, preview.footprint);
       context.fillStyle = preview.paint;
-      context.fill(swept);
+      context.fill(region);
 
       if (!showGlyphs) return;
       const { stepDeg } = glyphLayout(glyphStyle, camera.pxPerDeg, dpr);
-      const covered = latticeUnderStroke(
-        preview.points,
-        preview.radiusKm,
-        stepDeg,
-        MAX_PREVIEW_GLYPHS,
-        preview.shape,
-        preview.space,
-      );
-      // A brush narrower than the lattice can cover no point at all. The stroke
+      const covered = latticeUnder(preview.footprint, stepDeg, MAX_PREVIEW_GLYPHS);
+      // A footprint narrower than the lattice can cover no point at all. It
       // still has a direction, and a preview showing none of it is worse than
-      // one glyph off the lattice, so the head of the stroke stands in.
-      drawGlyphs(
-        context,
-        covered.length > 0
-          ? covered
-          : [preview.points[preview.points.length - 1]!],
-        preview.knots,
-        preview.azimuthAt,
-        dpr,
-      );
+      // one glyph off the lattice, so a point on the shape stands in.
+      const head = footprintHead(preview.footprint);
+      const at = covered.length > 0 ? covered : head === null ? [] : [head];
+      if (at.length === 0) return;
+      drawGlyphs(context, at, preview.knots, preview.azimuthAt, dpr);
     },
     [drawGlyphs, glyphStyle, showGlyphs],
   );
@@ -736,15 +958,13 @@ export default function MapView({
       for (const outline of outlines) {
         if (outline.kind === "swept") {
           for (const chain of outline.chains) {
-            buildStrokePath(
-              silhouette,
-              camera,
-              view,
-              chain,
-              outline.radius_km / 2,
-              outline.square ? "square" : "circle",
-              outline.space,
-            );
+            buildFootprintPath(silhouette, camera, view, {
+              kind: "swept",
+              points: chain,
+              radiusKm: outline.radius_km / 2,
+              shape: outline.square ? "square" : "circle",
+              space: outline.space,
+            });
           }
         } else {
           const [first, ...rest] = outline.points;
@@ -929,24 +1149,29 @@ export default function MapView({
     // Strokes already committed, still waiting for their field. Drawn whatever
     // the tool is: they are finished strokes, and switching tools at pointer-up
     // must not blink the paint out either.
-    for (const settled of settling.current) drawStrokePreview(context, settled, dpr);
+    for (const settled of settling.current) drawFieldPreview(context, settled, dpr);
 
-    if (tool !== "brush") return;
+    if (tool === HAND || !schema) return;
 
-    const stroke = strokeRef.current;
-
-    // Where the target is, and where the next click would put it.
-    if (brushAims) {
+    // Every `LonLat` option is placeable by pointing, on every tool that has
+    // one (spec.md 6.1). The markers are drawn for all of them, so a clone
+    // stamp's source and a brush's aim point are the same affordance rather
+    // than two that happen to look alike.
+    for (const spec of liveOptions(schema, toolState.values)) {
+      if (spec.default.kind !== "position") continue;
+      const armed = toolPick?.property === spec.property;
+      const held = markerDrag.current === spec.property;
       const aim =
-        pickingTarget && cursor
+        armed && cursor
           ? unproject(camera, view, cursor)
-          : { lon: brushTarget[0], lat: brushTarget[1] };
+          : (() => {
+              const [lon, lat] = positionOf(toolState.values, spec.property);
+              return { lon, lat };
+            })();
       const at = toScreen(camera, view, aim);
       const arm = 9 * dpr;
-      const armed = pickingTarget || targetDrag.current;
-      context.strokeStyle = armed
-        ? "rgba(255, 214, 120, 0.95)"
-        : "rgba(255, 168, 96, 0.9)";
+      context.strokeStyle =
+        armed || held ? "rgba(255, 214, 120, 0.95)" : "rgba(255, 168, 96, 0.9)";
       context.lineWidth = Math.max(1, dpr);
       context.beginPath();
       context.moveTo(at.x - arm, at.y);
@@ -960,83 +1185,67 @@ export default function MapView({
       const reach = HANDLE_RADIUS_CSS * 2 * dpr;
       context.beginPath();
       context.arc(at.x, at.y, reach, 0, Math.PI * 2);
-      if (targetDrag.current || (!pickingTarget && cursor && nearTarget(cursor))) {
+      if (held || (!armed && cursor && near(cursor, at))) {
         context.fillStyle = "rgba(255, 168, 96, 0.22)";
         context.fill();
       }
       context.stroke();
     }
 
-    // A pixel-valued size resolves against the latitude the commit will use —
-    // the stroke's first point — so what is previewed is what gets painted,
-    // rather than a footprint that changes as the drag moves north.
-    const sizeLat = stroke?.[0]?.[1] ?? (cursor ? unproject(camera, view, cursor).lat : 0);
-    const radiusKm = brushSizeKmAt(sizeLat) / 2;
+    // The colour the field will take once this gesture lands, from the same
+    // ramp the map paints with. A floor under the alpha keeps a calm gesture
+    // visible: the field fades calm out entirely, but a preview the user cannot
+    // see is not a preview.
+    const drawing = gestureRef.current;
+    const inProgress = drawing === null ? null : footprintOf(tool, toolState, drawing, camera);
+    const field = previewField(tool, toolState, inProgress);
+    const paint = rampCss(mpsFromKnots(field.knots), rampMax, PREVIEW_MIN_ALPHA);
 
-    // The colour the field will take once this stroke lands, from the same ramp
-    // the map paints with. A floor under the alpha keeps a calm stroke visible:
-    // the field fades calm out entirely, but a preview the user cannot see is
-    // not a preview.
-    const paint = rampCss(mpsFromKnots(brushSpeedKnots), rampMax, PREVIEW_MIN_ALPHA);
-
-    if (stroke && stroke.length > 0) {
-      drawStrokePreview(
-        context,
-        {
-          points: stroke,
-          radiusKm,
-          shape: brushShape,
-          space: brushSpace,
-          paint,
-          knots: brushSpeedKnots,
-          azimuthAt: brushAzimuthAt,
-        },
-        dpr,
-      );
+    if (inProgress) {
+      drawFieldPreview(context, { footprint: inProgress, paint, ...field }, dpr);
     }
 
-    // Only the brush tip is outlined: it is the thing being aimed, and an
-    // outline per stamp is noise.
-    if (cursor && !pickingTarget) {
+    // A gesture built point by point shows the points it has so far, so the
+    // user can see what has been placed before there is a shape to fill.
+    if (drawing && (drawing.kind === "ring" || drawing.kind === "path")) {
+      drawPlacedPoints(context, drawing, dpr, cursor);
+    }
+
+    // The hover indicator: the exact footprint a click would produce, in the
+    // same colour and with the same glyph as the gesture preview (spec.md 6.1).
+    // Only where the tool has one — a polygon and a curve are built up point by
+    // point, so a single click produces nothing to show (spec.md 6.2).
+    if (cursor && schema.hover && !toolPick && !drawing) {
       const geo = unproject(camera, view, cursor);
-      const tip = new Path2D();
-      addFootprint(tip, camera, view, geo.lon, geo.lat, radiusKm, brushShape, brushSpace);
-      if (!stroke) {
+      const hovered = footprintOf(tool, toolState, hoverGesture(schema, toolState, geo), camera);
+      if (hovered) {
+        const tip = new Path2D();
+        buildFootprintPath(tip, camera, view, hovered);
         context.fillStyle = paint;
         context.fill(tip);
-        // One glyph at the tip, so the aim is readable before the drag starts
-        // rather than only after something has been painted.
         if (showGlyphs) {
-          drawGlyphs(
-            context,
-            [[geo.lon, geo.lat]],
-            brushSpeedKnots,
-            brushAzimuthAt,
-            dpr,
-          );
+          const hoverField = previewField(tool, toolState, hovered);
+          const head = footprintHead(hovered);
+          if (head) drawGlyphs(context, [head], hoverField.knots, hoverField.azimuthAt, dpr);
         }
+        context.strokeStyle = "rgba(160, 232, 255, 0.95)";
+        context.lineWidth = Math.max(1, dpr);
+        context.stroke(tip);
       }
-      context.strokeStyle = "rgba(160, 232, 255, 0.95)";
-      context.lineWidth = Math.max(1, dpr);
-      context.stroke(tip);
     }
   }, [
-    brushAims,
-    brushAzimuthAt,
     drawDragOutlines,
-    nearTarget,
-    brushShape,
-    brushSizeKmAt,
-    brushSpace,
-    brushSpeedKnots,
-    brushTarget,
     drawGlyphs,
-    drawStrokePreview,
+    drawFieldPreview,
+    drawPlacedPoints,
     glyphStyle,
-    pickingTarget,
+    near,
     rampMax,
+    schema,
     showGlyphs,
     tool,
+    toolPick,
+    toolState,
     picking,
     committedTransform,
   ]);
@@ -1196,26 +1405,35 @@ export default function MapView({
       return;
     }
 
-    if (tool === "brush") {
+    if (tool !== HAND && schema) {
       const geo = unproject(cameraRef.current, viewRef.current, point);
-      // While picking, the click places the aim point rather than painting —
-      // one click, one target, and the mode ends itself so the next stroke is
-      // an ordinary one.
-      if (pickingTarget) {
-        setBrushTarget([geo.lon, geo.lat]);
-        setPickingTarget(false);
+
+      // While a pick is armed the click places that option rather than drawing
+      // — one click, one position, and the mode ends itself so the next
+      // gesture is an ordinary one.
+      if (toolPick) {
+        setToolState({
+          ...toolState,
+          values: {
+            ...toolState.values,
+            [toolPick.property]: { kind: "position", lon: geo.lon, lat: geo.lat },
+          },
+        });
+        setToolPick(null);
         return;
       }
-      // The aim point is a handle, and a handle takes precedence over what is
-      // under it — the same rule the transform handles follow (spec.md 8.1).
-      // Without it the marker could be placed but never adjusted except by
+
+      // A placed position is a handle, and a handle takes precedence over what
+      // is under it — the same rule the transform handles follow (spec.md 8.1).
+      // Without it a marker could be placed but never adjusted except by
       // arming the picker again or typing coordinates.
-      if (brushAims && nearTarget(point)) {
-        targetDrag.current = true;
+      const marker = markerUnder(point);
+      if (marker !== null) {
+        markerDrag.current = marker;
         return;
       }
-      strokeRef.current = [[geo.lon, geo.lat]];
-      drawOverlay();
+
+      startGesture(geo, event);
       return;
     }
 
@@ -1290,11 +1508,18 @@ export default function MapView({
     const point = toDevice(event);
     cursorRef.current = point;
 
-    if (targetDrag.current) {
+    // Dragging a placed marker. The state change redraws the overlay: every
+    // glyph aimed at this point swings round as it moves.
+    const dragged = markerDrag.current;
+    if (dragged !== null) {
       const geo = unproject(cameraRef.current, viewRef.current, point);
-      // The overlay redraws off the state change: every glyph in the preview is
-      // aimed at this point, so they all swing round as it moves.
-      setBrushTarget([geo.lon, geo.lat]);
+      setToolState({
+        ...toolState,
+        values: {
+          ...toolState.values,
+          [dragged]: { kind: "position", lon: geo.lon, lat: geo.lat },
+        },
+      });
       return;
     }
 
@@ -1309,8 +1534,8 @@ export default function MapView({
       return;
     }
 
-    const stroke = strokeRef.current;
-    if (stroke) {
+    const drawing = gestureRef.current;
+    if (drawing?.kind === "stroke") {
       // Every position the OS captured, not just the one this frame delivered.
       // A `pointermove` fires about once per frame; a fast drag covers a lot of
       // ground between frames, and without the coalesced samples the stroke
@@ -1326,21 +1551,47 @@ export default function MapView({
       const spacing = 6 * (window.devicePixelRatio || 1);
       for (const sample of samples) {
         const geo = unproject(cameraRef.current, viewRef.current, toDevice(sample));
-        const last = stroke[stroke.length - 1];
+        const last = drawing.points[drawing.points.length - 1];
         const moved =
           last === undefined ||
           Math.hypot(
             normalizeLon(geo.lon - last[0]) * cameraRef.current.pxPerDeg,
             (geo.lat - last[1]) * cameraRef.current.pxPerDeg,
           ) > spacing;
-        if (moved) stroke.push([geo.lon, geo.lat]);
+        if (moved) drawing.points.push([geo.lon, geo.lat]);
       }
       drawOverlay();
       return;
     }
 
-    // The brush's outline follows the cursor, and so does a pick's crosshair.
-    if (tool === "brush" || picking !== null) drawOverlay();
+    // A preset is dragged out from its centre, so the pointer is its rim.
+    if (drawing?.kind === "extent") {
+      const geo = unproject(cameraRef.current, viewRef.current, point);
+      drawing.rim = [geo.lon, geo.lat];
+      drawOverlay();
+      return;
+    }
+
+    // The pen pulls a node's handles out symmetrically while the button is
+    // held, which is how every path tool behaves and what makes a smooth
+    // corner possible without a second gesture.
+    if (drawing?.kind === "path" && nodeDrag.current) {
+      const geo = unproject(cameraRef.current, viewRef.current, point);
+      const node = drawing.nodes[drawing.nodes.length - 1];
+      if (node) {
+        node.out_handle = [geo.lon, geo.lat];
+        node.in_handle = [
+          normalizeLon(node.at[0] - normalizeLon(geo.lon - node.at[0])),
+          node.at[1] - (geo.lat - node.at[1]),
+        ];
+      }
+      drawOverlay();
+      return;
+    }
+
+    // A tool's hover indicator follows the cursor, and so does a pick's
+    // crosshair — and so does the rubber line of a gesture being built up.
+    if (tool !== HAND || picking !== null) drawOverlay();
 
     if (dragging.current) {
       const dx = point.x - dragging.current.x;
@@ -1377,23 +1628,33 @@ export default function MapView({
       .catch(() => setReadout(null));
   };
 
-  const commitStroke = useCallback(
-    async (points: Array<[number, number]>) => {
-      // A pixel size becomes kilometres here and nowhere else: at the latitude
-      // the stroke started, against the camera as it is now (spec.md 3.5). The
-      // document only ever holds the kilometres.
-      const sizeKm = brushSizeKmAt(points[0]?.[1] ?? 0);
+  /**
+   * Commits a finished gesture.
+   *
+   * One path for every tool: the preview it holds, the layer it joins, the
+   * settling rule that retires the preview and the error handling are all the
+   * same question whatever was drawn, and asking it once is what stops a new
+   * tool arriving without one of them (spec.md 6.1).
+   */
+  const commitGesture = useCallback(
+    async (gesture: Gesture, state: ToolState, schema: ToolSchema, tool: Tool) => {
+      const camera = cameraRef.current;
+      const footprint = footprintOf(tool, state, gesture, camera);
+      if (!footprint) return;
 
-      // Keep previewing this stroke until its field is drawn, with the values
-      // it froze rather than whatever the toolbar says by then (spec.md 6.1).
+      // A pixel size becomes kilometres here and nowhere else: at the latitude
+      // the gesture began, against the camera as it is now (spec.md 3.5). The
+      // document only ever holds the kilometres.
+      const lat = gestureLatitude(gesture);
+      const field = previewField(tool, state, footprint);
+
+      // Keep previewing until the field is drawn, with the values the gesture
+      // froze rather than whatever the bar says by then (spec.md 6.1).
       const settled: HeldPreview = {
-        points,
-        radiusKm: sizeKm / 2,
-        shape: brushShape,
-        space: brushSpace,
-        paint: rampCss(mpsFromKnots(brushSpeedKnots), rampMax, PREVIEW_MIN_ALPHA),
-        knots: brushSpeedKnots,
-        azimuthAt: brushAzimuthAt,
+        footprint,
+        paint: rampCss(mpsFromKnots(field.knots), rampMax, PREVIEW_MIN_ALPHA),
+        knots: field.knots,
+        azimuthAt: field.azimuthAt,
         revision: null,
         at: performance.now(),
       };
@@ -1401,23 +1662,9 @@ export default function MapView({
 
       setBusy(true);
       try {
-        const summary = await api.addBrushStroke({
-          points,
-          size_km: sizeKm,
-          speed_mps: mpsFromKnots(brushSpeedKnots),
-          direction_toward_deg: brushAzimuthToward,
-          feather: brushFeather,
-          shape: brushShape,
-          space: brushSpace,
-          direction_mode: brushDirectionMode,
-          // A target is meaningless in constant mode, and sending one anyway
-          // would stop two otherwise identical strokes merging.
-          ...(brushAims ? { target: brushTarget } : {}),
-          // A new object joins the layer that was selected when it was created
-          // (spec.md 6.1). Omitted rather than null when there is none: the
-          // field is optional, and the backend reads its absence as "the top".
-          ...(activeLayer !== null ? { layer: activeLayer } : {}),
-        });
+        const summary = await api.createObject(
+          newObject(tool, gesture, state, schema, camera, lat, activeLayer),
+        );
         settled.revision = summary.revision;
         onProjectChanged(summary);
         // The revision change re-addresses every tile, but if they were all
@@ -1429,36 +1676,107 @@ export default function MapView({
         // Nothing was painted, so nothing should keep looking painted.
         settling.current = settling.current.filter((entry) => entry !== settled);
         drawOverlayRef.current();
-        void api.frontendLog("error", `stroke failed: ${String(err)}`);
+        void api.frontendLog("error", `${tool} gesture failed: ${String(err)}`);
       } finally {
         setBusy(false);
       }
     },
-    [
-      activeLayer,
-      brushAzimuthAt,
-      brushAzimuthToward,
-      brushDirectionMode,
-      brushFeather,
-      brushShape,
-      brushSizeKmAt,
-      brushSpace,
-      brushSpeedKnots,
-      brushTarget,
-      onProjectChanged,
-      rampMax,
-      requestDraw,
-    ],
+    [activeLayer, onProjectChanged, rampMax, requestDraw],
+  );
+
+  /** Commits the gesture in progress, if it has enough placed to mean anything. */
+  const finishGesture = useCallback(() => {
+    const drawing = gestureRef.current;
+    gestureRef.current = null;
+    nodeDrag.current = false;
+    if (!drawing || !schema || tool === HAND) return;
+    // The commit picks the preview up synchronously, so the overlay redraw
+    // never sees a moment with neither the gesture nor its field.
+    if (isComplete(drawing)) void commitGesture(finished(drawing), toolState, schema, tool);
+    drawOverlayRef.current();
+  }, [commitGesture, schema, tool, toolState]);
+
+  useEffect(() => {
+    finishGestureRef.current = finishGesture;
+  }, [finishGesture]);
+
+  /**
+   * Begins, extends or completes a gesture at a pointer press.
+   *
+   * Which of the three depends only on the gesture's kind, so a tool that draws
+   * the way another one does behaves the way it does — the eraser is brush-like
+   * because both send a `stroke`, not because two branches were written alike.
+   */
+  const startGesture = useCallback(
+    (geo: { lon: number; lat: number }, event: React.PointerEvent<HTMLCanvasElement>) => {
+      if (!schema || tool === HAND) return;
+      const kind = gestureKind(schema, toolState.values);
+      const at: [number, number] = [geo.lon, geo.lat];
+
+      switch (kind) {
+        // A stamp: click to place, no drag (spec.md 6.2). Committed on the
+        // press, which is what makes it feel like a stamp rather than a
+        // gesture that happens to be short.
+        case "point":
+          void commitGesture({ kind: "point", at }, toolState, schema, tool);
+          return;
+
+        case "stroke":
+          gestureRef.current = { kind: "stroke", points: [at] };
+          break;
+
+        case "extent":
+          gestureRef.current = { kind: "extent", centre: at, rim: at };
+          break;
+
+        // Built up click by click. A click on the first vertex closes the ring,
+        // which is how a polygon tool is expected to end and avoids needing the
+        // keyboard for the common case.
+        case "ring": {
+          const current = gestureRef.current;
+          if (current?.kind === "ring") {
+            const first = current.points[0];
+            if (
+              first &&
+              current.points.length >= 3 &&
+              near(
+                toDevice(event),
+                toScreen(cameraRef.current, viewRef.current, { lon: first[0], lat: first[1] }),
+              )
+            ) {
+              finishGesture();
+              return;
+            }
+            current.points.push(at);
+          } else {
+            gestureRef.current = { kind: "ring", points: [at] };
+          }
+          break;
+        }
+
+        // The pen: each press places a node, and holding pulls its handles out.
+        case "path": {
+          const current = gestureRef.current;
+          const node: PathPoint = { at };
+          if (current?.kind === "path") current.nodes.push(node);
+          else gestureRef.current = { kind: "path", nodes: [node] };
+          nodeDrag.current = true;
+          break;
+        }
+      }
+      drawOverlay();
+    },
+    [commitGesture, finishGesture, near, schema, tool, toolState],
   );
 
   const endDrag = (event: React.PointerEvent<HTMLCanvasElement>) => {
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
-    // Finish an aim-point drag. Nothing to commit: the target is a tool option,
-    // not document state, until a stroke freezes it (spec.md 6.1).
-    if (targetDrag.current) {
-      targetDrag.current = false;
+    // Finish a marker drag. Nothing to commit: a tool's placed position is an
+    // option, not document state, until a gesture freezes it (spec.md 6.1).
+    if (markerDrag.current !== null) {
+      markerDrag.current = null;
       return;
     }
 
@@ -1548,11 +1866,11 @@ export default function MapView({
     }
     dragging.current = null;
 
-    const stroke = strokeRef.current;
-    strokeRef.current = null;
-    // The commit picks the preview up synchronously, so the overlay redraw
-    // below never sees a moment with neither the stroke nor its field.
-    if (stroke && stroke.length > 0) void commitStroke(stroke);
+    // A gesture that ends with the pointer is finished here; one built up click
+    // by click keeps going until it is closed or cancelled.
+    const drawing = gestureRef.current;
+    nodeDrag.current = false;
+    if (drawing?.kind === "stroke" || drawing?.kind === "extent") finishGesture();
     drawOverlay();
   };
 
@@ -1823,165 +2141,34 @@ export default function MapView({
       <div className="map-toolbar">
         <div className="tools" role="group" aria-label="Tool">
           <button
-            className={tool === "hand" ? "active" : ""}
-            onClick={() => setTool("hand")}
+            className={tool === HAND ? "active" : ""}
+            onClick={() => setTool(HAND)}
             title="Pan, select and transform (V) · shift-drag for a rubber band, add cmd to reach across layers · cmd-click to add or remove one object"
           >
             Hand
           </button>
-          <button
-            className={tool === "brush" ? "active" : ""}
-            onClick={() => setTool("brush")}
-            title="Paint vectors (B)"
-          >
-            Brush
-          </button>
+          {palette.map((entry) => (
+            <button
+              key={entry.tool}
+              className={tool === entry.tool ? "active" : ""}
+              onClick={() => setTool(entry.tool)}
+              title={`${entry.label} (${entry.shortcut.toUpperCase()})`}
+            >
+              {entry.label}
+            </button>
+          ))}
         </div>
 
-        {tool === "brush" && (
-          <div className="brush-options">
-            <label>
-              Shape
-              <select
-                value={brushShape}
-                onChange={(e) => setBrushShape(e.target.value as BrushShape)}
-                title="The stamp swept along the stroke"
-              >
-                <option value="circle">Circle</option>
-                <option value="square">Square</option>
-              </select>
-            </label>
-            <label>
-              Size
-              <input
-                type="number"
-                min={1}
-                max={brushSizeUnit === "km" ? 20000 : 2000}
-                step={brushSizeUnit === "km" ? 50 : 5}
-                value={brushSize}
-                onChange={(e) => setBrushSize(Math.max(1, Number(e.target.value) || 1))}
-              />
-              <select
-                value={brushSizeUnit}
-                onChange={(e) => {
-                  // Carry the size across rather than reinterpreting the
-                  // number: switching units should not resize the brush.
-                  const next = e.target.value === "px" ? "px" : "km";
-                  const lat = cameraRef.current.centerLat;
-                  // The unit also chooses the space, so the conversion is
-                  // between two different stamps. Carrying the north-south
-                  // extent across is what keeps the brush the same height on
-                  // screen through the switch.
-                  const space: StampSpace = next === "px" ? "projected" : "geodesic";
-                  setBrushSize((current) =>
-                    next === brushSizeUnit
-                      ? current
-                      : Math.max(
-                          1,
-                          Math.round(
-                            next === "px"
-                              ? pixelsFromKm(cameraRef.current, lat, current, space)
-                              : kmFromPixels(cameraRef.current, lat, current, brushSpace),
-                          ),
-                        ),
-                  );
-                  setBrushSizeUnit(next);
-                }}
-                title="A size in pixels paints a stamp that is a circle on the map — the same size on screen at any latitude. It resolves to kilometres when the stroke is painted and never changes afterwards."
-              >
-                <option value="km">km</option>
-                <option value="px">px</option>
-              </select>
-            </label>
-            <label>
-              Speed
-              <input
-                type="number"
-                min={0}
-                max={200}
-                step={1}
-                value={brushSpeedKnots}
-                onChange={(e) =>
-                  setBrushSpeedKnots(Math.max(0, Number(e.target.value) || 0))
-                }
-              />
-              kt
-            </label>
-            <label>
-              Aim
-              <select
-                value={brushDirectionMode}
-                onChange={(e) => {
-                  setBrushDirectionMode(e.target.value as BrushDirectionMode);
-                  setPickingTarget(false);
-                }}
-                title="A fixed bearing, or every vector aimed at one point — or straight away from it"
-              >
-                <option value="constant">Fixed bearing</option>
-                <option value="toward_point">Toward a point</option>
-                <option value="away_from_point">Away from a point</option>
-              </select>
-            </label>
-            {!brushAims ? (
-              <label>
-                Dir
-                <input
-                  type="number"
-                  min={0}
-                  max={360}
-                  step={5}
-                  value={brushDirection}
-                  onChange={(e) => setBrushDirection(Number(e.target.value) || 0)}
-                />
-                ° ({project.direction_convention})
-              </label>
-            ) : (
-              <div className="brush-target">
-                <label>
-                  Target
-                  <input
-                    type="number"
-                    step="any"
-                    value={brushTarget[0]}
-                    title="Longitude"
-                    onChange={(e) =>
-                      setBrushTarget(([, lat]) => [Number(e.target.value) || 0, lat])
-                    }
-                  />
-                </label>
-                <input
-                  type="number"
-                  step="any"
-                  value={brushTarget[1]}
-                  title="Latitude"
-                  onChange={(e) =>
-                    setBrushTarget(([lon]) => [
-                      lon,
-                      Math.min(90, Math.max(-90, Number(e.target.value) || 0)),
-                    ])
-                  }
-                />
-                <button
-                  className={pickingTarget ? "active" : ""}
-                  onClick={() => setPickingTarget((on) => !on)}
-                  title="Click the map to place the point every vector aims at. Once placed, drag the marker to move it."
-                >
-                  {pickingTarget ? "Click the map…" : "Pick on map"}
-                </button>
-              </div>
-            )}
-            <label>
-              Feather
-              <input
-                type="range"
-                min={0}
-                max={1}
-                step={0.05}
-                value={brushFeather}
-                onChange={(e) => setBrushFeather(Number(e.target.value))}
-              />
-            </label>
-          </div>
+        {schema && (
+          <ToolOptions
+            schema={schema}
+            state={toolState}
+            onChange={setToolState}
+            convention={project.direction_convention}
+            camera={cameraRef.current}
+            picking={toolPick}
+            onPick={setToolPick}
+          />
         )}
 
         <div className="history" role="group" aria-label="History">

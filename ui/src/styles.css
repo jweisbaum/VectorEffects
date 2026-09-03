@@ -331,7 +331,7 @@ body {
   border-color: #2b7ba4;
 }
 
-.brush-options {
+.tool-options {
   display: flex;
   flex-wrap: wrap;
   gap: 8px 10px;
@@ -341,7 +341,7 @@ body {
 }
 /* Wide enough for a four-figure size in kilometres, and no wider: every column
    the options take is a column the rest of the toolbar has to wrap around. */
-.brush-options input[type="number"] {
+.tool-options input[type="number"] {
   width: 4.25rem;
   background: #0f1a2c;
   color: var(--text);
@@ -350,20 +350,20 @@ body {
   padding: 2px 6px;
   font: inherit;
 }
-.brush-options input[type="range"] { width: 4.5rem; }
-/* The brush's are narrower than the toolbar's; everything else is inherited. */
-.brush-options select { font: inherit; padding: 2px 4px; }
+.tool-options input[type="range"] { width: 4.5rem; }
+/* The bar's are narrower than the toolbar's; everything else is inherited. */
+.tool-options select { font: inherit; padding: 2px 4px; }
 /* Two coordinates and a pick button read as one control, not three. The button
    sits outside the label: inside one, clicking it also activates the label's
    first input, which steals the focus the click never asked for. */
-.brush-options .brush-target {
+.tool-options .tool-position {
   display: flex;
   align-items: center;
   gap: 4px;
 }
-.brush-options .brush-target label { gap: 6px; }
-.brush-options .brush-target input[type="number"] { width: 4rem; }
-.brush-options .brush-target button {
+.tool-options .tool-position label { gap: 6px; }
+.tool-options .tool-position input[type="number"] { width: 4rem; }
+.tool-options .tool-position button {
   background: #0f1a2c;
   color: var(--text);
   border: 1px solid var(--border);
@@ -372,7 +372,7 @@ body {
   font: inherit;
   cursor: pointer;
 }
-.brush-options .brush-target button.active {
+.tool-options .tool-position button.active {
   border-color: #ffa860;
   color: #ffd678;
 }

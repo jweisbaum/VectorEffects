@@ -20,7 +20,7 @@ import type { ToolOptionSpec } from "../generated/ToolOptionSpec";
 import type { ToolSchema } from "../generated/ToolSchema";
 import type { StampSpace } from "../generated/StampSpace";
 import { displayDirection } from "../project/format";
-import type { Camera } from "./camera";
+import { type Camera, normalizeLon } from "./camera";
 import {
   cosLat,
   type Footprint,
@@ -439,4 +439,158 @@ export function flattenPath(
     }
   }
   return out;
+}
+
+/**
+ * How a gesture's preview looks: the speed to colour it and the direction to
+ * draw over it (spec.md 6.1).
+ *
+ * What the user is aiming is a wind, so what the tool shows while aiming is
+ * that wind, in the terms the map already displays it in. This is *overlay*
+ * drawing, not evaluation: the values come from the tool's own options rather
+ * than from a tile, nothing is composited, and spec 7.9's fidelity tolerances
+ * do not apply. A gradient is previewed at its mean and a path's flow at its
+ * chord — approximations a preview is allowed and an export is not.
+ */
+export interface PreviewField {
+  /** Speed in knots, for the ramp colour and the glyphs. */
+  knots: number;
+  /** The azimuth-toward a stamp at this position carries. */
+  azimuthAt: (lon: number, lat: number) => number;
+}
+
+/** The speed in metres per second the preview should paint. */
+function previewSpeedMps(tool: Tool, values: ToolValues): number {
+  // The eraser writes calm, and calm is what its preview should show — the
+  // floor under the preview's opacity is what keeps it visible (spec.md 6.1).
+  if (tool === "eraser") return 0;
+
+  // A gradient has no single speed. Its mean is the honest one number, and the
+  // preview is explicitly a proxy rather than the composited answer.
+  if (tool === "circle" && choiceOf(values, "FillMode") === 2) {
+    return (numberOf(values, "SpeedMin") + numberOf(values, "SpeedMax")) / 2;
+  }
+  if (tool === "shape_fill" && choiceOf(values, "VectorMode") === 1) {
+    return (numberOf(values, "SpeedStart") + numberOf(values, "SpeedEnd")) / 2;
+  }
+  return numberOf(values, "Speed");
+}
+
+/**
+ * The bearing from one position to another, as a true initial azimuth.
+ *
+ * The same great-circle bearing the evaluator takes (`aeqd.rs`), so an aimed
+ * preview points where the committed field will — a local frame angle would
+ * drift by tens of degrees a few thousand kilometres out.
+ */
+function bearingTo(
+  from: readonly [number, number],
+  to: readonly [number, number],
+): number {
+  const toRad = Math.PI / 180;
+  const phi1 = from[1] * toRad;
+  const phi2 = to[1] * toRad;
+  const dLambda = normalizeLon(to[0] - from[0]) * toRad;
+  const y = Math.sin(dLambda) * Math.cos(phi2);
+  const x =
+    Math.cos(phi1) * Math.sin(phi2) - Math.sin(phi1) * Math.cos(phi2) * Math.cos(dLambda);
+  return (Math.atan2(y, x) / toRad + 360) % 360;
+}
+
+/**
+ * How the preview's glyphs should point, for any tool.
+ *
+ * Each branch mirrors the direction mode the evaluator will use, so the arrows
+ * on screen cannot disagree with what gets painted — the one bug this whole
+ * preview path exists to make impossible.
+ */
+export function previewField(
+  tool: Tool,
+  state: ToolState,
+  footprint: Footprint | null,
+): PreviewField {
+  const values = state.values;
+  const knots = previewSpeedMps(tool, values) * KNOTS_PER_MPS;
+  const constant = () => angleOf(values, "Direction");
+
+  // A curve aims along its own path; the offset is added to the local tangent.
+  if (tool === "curve" && choiceOf(values, "CurveDirectionMode") === 1) {
+    const offset = angleOf(values, "Direction");
+    const points = footprint?.kind === "swept" ? footprint.points : [];
+    return {
+      knots,
+      azimuthAt: (lon, lat) => (tangentAt(points, [lon, lat]) + offset + 360) % 360,
+    };
+  }
+
+  // A circle's flow turns about its centre, a quarter turn off the outward
+  // bearing, which side depending on the sense.
+  if (tool === "circle") {
+    const quarter = choiceOf(values, "RotationSense") === 0 ? 90 : -90;
+    const centre =
+      footprint && "centre" in footprint ? footprint.centre : ([0, 0] as const);
+    return {
+      knots,
+      azimuthAt: (lon, lat) => (bearingTo(centre, [lon, lat]) + quarter + 360) % 360,
+    };
+  }
+
+  // The shared aim modes, for every tool that has a target. Mode 1 points at
+  // it and mode 2 directly away — the reciprocal at the cell, which is the
+  // outward tangent to the same great circle rather than the bearing measured
+  // at the target (spec.md 6.2).
+  const aims = choiceOf(values, "DirectionMode");
+  const gradient = tool === "shape_fill" && choiceOf(values, "VectorMode") === 1;
+  if (!gradient && (aims === 1 || aims === 2)) {
+    const target = positionOf(values, "Target");
+    const turn = aims === 2 ? 180 : 0;
+    return {
+      knots,
+      azimuthAt: (lon, lat) => (bearingTo([lon, lat], target) + turn + 360) % 360,
+    };
+  }
+
+  // A gradient ramps between two bearings; its midpoint is the one bearing a
+  // preview can show without evaluating the ramp per glyph.
+  if (gradient) {
+    const start = angleOf(values, "DirectionStart");
+    const end = angleOf(values, "DirectionEnd");
+    // The shortest arc, as everywhere else angles are interpolated.
+    const delta = ((end - start + 540) % 360) - 180;
+    const middle = (start + delta / 2 + 360) % 360;
+    return { knots, azimuthAt: () => middle };
+  }
+
+  return { knots, azimuthAt: () => constant() };
+}
+
+/** Knots per metre per second. Mirrors `ve_core::units`. */
+const KNOTS_PER_MPS = 1.943_844_49;
+
+/** The bearing of the nearest segment of a polyline, in degrees. */
+function tangentAt(
+  points: ReadonlyArray<readonly [number, number]>,
+  at: readonly [number, number],
+): number {
+  if (points.length < 2) return 0;
+  let best = Infinity;
+  let bearing = 0;
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1]!;
+    const b = points[i]!;
+    // Distance in degrees is enough to choose a segment; the bearing itself is
+    // then taken on the globe, so it is a true azimuth (`aeqd.rs`).
+    const ax = normalizeLon(at[0] - a[0]);
+    const ay = at[1] - a[1];
+    const bx = normalizeLon(b[0] - a[0]);
+    const by = b[1] - a[1];
+    const denom = bx * bx + by * by;
+    const t = denom <= 1e-12 ? 0 : Math.max(0, Math.min(1, (ax * bx + ay * by) / denom));
+    const distance = Math.hypot(ax - bx * t, ay - by * t);
+    if (distance < best) {
+      best = distance;
+      bearing = bearingTo(a, b);
+    }
+  }
+  return bearing;
 }

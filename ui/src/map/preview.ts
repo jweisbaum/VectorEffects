@@ -1,31 +1,29 @@
 /**
- * Stroke previews that outlive the gesture that drew them.
+ * Gesture previews that outlive the gesture that drew them.
  *
- * A committed stroke is not on screen yet: the commit is an IPC round trip and
+ * A committed object is not on screen yet: the commit is an IPC round trip and
  * a tile render, and the map keeps drawing the previous revision until the new
  * tiles arrive (spec.md 5.4). Clearing the overlay at pointer-up therefore
- * leaves a gap in which the stroke exists in the document and nothing shows it,
+ * leaves a gap in which the object exists in the document and nothing shows it,
  * which reads as the paint blinking out. The preview is held across that gap.
+ *
+ * Held for *every* tool, not for the brush: what is held is a footprint and the
+ * field it carries, and neither knows which tool produced it.
  */
 
-import type { BrushShape } from "../generated/BrushShape";
-import type { StampSpace } from "../generated/StampSpace";
+import type { Footprint } from "./footprint";
 
 /**
- * Everything needed to draw a stroke preview without reading tool state.
+ * Everything needed to draw a gesture's preview without reading tool state.
  *
- * A held preview carries the values its stroke froze at creation (spec.md 6.1)
- * rather than reading them back: by the time it is dropped the toolbar may say
- * something else entirely, and the stroke would then be previewed as a wind it
- * is not.
+ * A held preview carries the values its gesture froze at creation (spec.md 6.1)
+ * rather than reading them back: by the time it is dropped the option bar may
+ * say something else entirely, and the object would then be previewed as a wind
+ * it is not.
  */
-export interface StrokePreview {
-  points: ReadonlyArray<readonly [number, number]>;
-  /** Half the brush's size in kilometres, resolved at creation (spec.md 3.5). */
-  radiusKm: number;
-  shape: BrushShape;
-  /** Whether the stamp is a shape on the ground or on the map (spec.md 3.5). */
-  space: StampSpace;
+export interface FieldPreview {
+  /** The region the gesture paints. */
+  footprint: Footprint;
   /** Fill colour, from the speed ramp. */
   paint: string;
   /** Speed in knots, for the glyphs. */
@@ -47,8 +45,8 @@ export interface Settling {
   at: number;
 }
 
-/** A stroke preview being held until its field appears. */
-export interface HeldPreview extends StrokePreview, Settling {}
+/** A gesture's preview being held until its field appears. */
+export interface HeldPreview extends FieldPreview, Settling {}
 
 /**
  * How long a preview is held if its field never arrives, in milliseconds.

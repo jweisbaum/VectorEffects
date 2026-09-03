@@ -4,10 +4,13 @@ import { previewHasLanded, SETTLE_TIMEOUT_MS, type HeldPreview } from "./preview
 
 /** A preview committed at t=1000, whose commit returned revision 7. */
 const held: HeldPreview = {
-  points: [[0, 0]],
-  radiusKm: 100,
-  shape: "circle",
-  space: "geodesic",
+  footprint: {
+    kind: "swept",
+    points: [[0, 0]],
+    radiusKm: 100,
+    shape: "circle",
+    space: "geodesic",
+  },
   paint: "rgba(0, 0, 0, 1)",
   knots: 20,
   azimuthAt: () => 90,

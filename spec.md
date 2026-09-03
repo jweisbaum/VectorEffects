@@ -206,6 +206,13 @@ option (§6.1), and it survives in the file. It is not a display setting: a
 projected stamp paints a different field and exports a different GRIB, which is
 why the two are separate objects and never merge.
 
+**One unit per tool, not per field.** `stamp_space` is one property of the
+object, so a circle with a diameter in px and a ring width in km would be
+asking for a shape that is on the map in one of its measurements and on the
+ground in the other. There is no such shape. The option bar therefore offers
+the unit once, beside the tool's first size, and it governs every size that
+tool has.
+
 **A projected object's local frame is map space, not AEQD** (§7.2). That is the
 one exception to the frame rule, and it is a definitional one rather than a
 concession: a shape defined on the map has to be measured on the map. It gives
@@ -666,6 +673,32 @@ The one rule that is genuinely per tool is **whether a hover indicator exists**;
 §6.2 states it for each, and "none" is a decision to be made deliberately rather
 than an omission.
 
+**These are inherited by construction, not by discipline.** A checklist that has
+to be worked through by hand is a checklist that will be missed, so the shared
+behaviour is shared code and a tool supplies only what is genuinely its own:
+
+- **One creation command** for the whole catalogue. A tool sends a *gesture* —
+  the geometry the pointer drew — and its *options*, which are property values
+  keyed by the same ids the inspector uses. The aim-mode check, the anchor, the
+  frame, the layer choice and the merge test are written once. The eraser and
+  the clone stamp are brush-like because all three send the same gesture, not
+  because three code paths were written to resemble each other.
+- **Five gestures, not one per tool**: a stroke, a click, a centre-out drag, a
+  ring of placed vertices, a path of nodes. Two tools that draw the same way
+  share the gesture, so anything true of one is true of the other.
+- **One option bar**, rendered from what the schema says a tool has — the same
+  question the inspector asks, so the two cannot disagree about which options a
+  mode makes inert.
+- **One footprint type** — swept, disc, ring, rectangle, polygon — which the
+  gesture preview, the hover indicator and the held preview all draw. A tool
+  supplies its footprint and inherits all three; a tool that gets it wrong is
+  wrong in all three at once, which is the failure worth having because it
+  shows up immediately rather than in whichever of the three nobody tried.
+
+The two facts about a tool that are *not* properties — which gesture drives it,
+and whether it has a hover indicator — are declared alongside its schema, so
+they cannot be forgotten either.
+
 ### 6.2 Tool catalogue
 
 Property types: `f32` unless noted. All are animatable per §4.4.
@@ -715,8 +748,20 @@ Hover: yes — the disc a click would place, in the speed colour with its glyph.
 
 #### Shape fill
 
-Draw a polygon (click vertices, close), or place a preset (square, rectangle,
-circle) by drag.
+Draw a polygon (click vertices, click the first one again to close), or place a
+preset (square, rectangle, circle) **by dragging out from its centre**.
+
+Centre-out rather than corner-to-corner so that all three presets have the same
+anchor as the shape they produce — which is the point their divergence and curl
+are measured from (§7.5) and the pivot their handles turn them about (§8.2). A
+square takes the larger of the drag's two reaches, so a drag that is mostly
+sideways produces the square it looks like it is producing.
+
+A preset's size is **geometry, not a property**: it is part of what the user
+drew, like a polygon's vertices, and it is resized afterwards by the same scale
+handle every other object uses. The circle stamp is the other way round — its
+diameter is typed, so it is an animatable property — and `Geometry::Disc`
+carries an optional radius to say which of the two a given disc is.
 
 | Option | Type | Notes |
 |---|---|---|
@@ -762,6 +807,8 @@ and a difference between them is a bug in one of them rather than a choice.
 
 Paints by sampling the composite of everything **strictly below it in z-order**,
 at a fixed geodesic offset. See §7.6 for the evaluation rule and recursion cap.
+The GPU declines a scene containing one and routes it to the CPU (§7.8), so
+this is the one tool whose evaluation has a single implementation.
 
 | Option | Type | Notes |
 |---|---|---|
@@ -769,12 +816,18 @@ at a fixed geodesic offset. See §7.6 for the evaluation rule and recursion cap.
 | `size_km` | f32 | px or km input. |
 | `stamp_space` | enum `Geodesic` \| `Projected` | **Fixed at creation**; px selects `projected` (§3.5). |
 | `source_point` | LonLat | Placeable by pointing, on the tool and on the object, like every position option (§6.1) — "a dedicated pick action" is that shared affordance, not a bespoke one. |
-| `offset_mode` | enum `Aligned` \| `Fixed` | `Aligned`: the source moves with the brush, preserving the initial offset. `Fixed`: always samples around `source_point`. |
+| `offset_mode` | enum `Aligned` \| `Fixed` | `Aligned`: the source moves with the brush, preserving the offset the gesture began with, so a long stroke copies a correspondingly long band. `Fixed`: the source stays where it was put, so every stamp along the stroke reads the same neighbourhood of it and a long stroke repeats one patch. The displacement is measured from the object's anchor in the first case and from the nearest point of the stroke's own skeleton — the stamp centre for that cell — in the second. |
 | `feather` | f32 0–1 | |
 
 Hover: yes — footprint at the cursor, plus a crosshair at the current source
 location, drawn the way every position marker is: a handle that can be dragged,
 not a printed mark (§6.1).
+
+**Two clone strokes never merge**, which is the one exception to §6.1's merging
+rule. A merge re-expresses the absorbed stroke in the target's frame, and a
+clone stamp samples at a displacement off its own anchor — a different anchor is
+a different patch of the field. Absorbing one would change what it paints, which
+is the thing a merge may never do.
 
 #### Curve
 
@@ -782,7 +835,8 @@ A polyline or cubic-Bézier path with a vector field along it.
 
 | Option | Type | Notes |
 |---|---|---|
-| `curve_kind` | enum `Polyline` \| `Bezier` | Set at creation. |
+| `curve_kind` | enum `Polyline` \| `Bezier` | **Fixed at creation.** A node's handles are what make a segment a Bézier, so the kind is implied by the geometry — but it is also what the *tool* was set to when the path was drawn, which is what the option bar has to remember. |
+| `stamp_space` | enum `Geodesic` \| `Projected` | **Fixed at creation.** The corridor has a width, so it asks the same question every sized tool asks (§3.5). |
 | `speed` | f32 | |
 | `direction_mode` | enum `Absolute` \| `RelativeToPath` | **Its own property**, not the shared `direction_mode`: a curve aims along its path, where the shared modes aim at a point. A tool may add modes of its own; it may not redefine a shared one. |
 | `direction` | Angle | `Absolute`: fixed bearing, a flow direction shown in the project's convention (§3.3). `RelativeToPath`: an *offset* added to the path's local tangent, so 0 = along the path and 90 = across it — an offset is not an azimuth and must not be converted. The two readings of one property are why it is displayed by mode, not by unit. |
