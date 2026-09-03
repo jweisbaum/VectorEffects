@@ -71,7 +71,7 @@ impl Animatable {
     /// A constant property with no keyframes.
     pub fn constant(base: PropValue) -> Self {
         Self {
-            base,
+            base: base.canonical(),
             keys: Vec::new(),
         }
     }
@@ -82,8 +82,13 @@ impl Animatable {
     }
 
     /// Replaces the base value.
+    ///
+    /// Quantised on the way in, like every value that enters the document: a
+    /// computed position carries more precision than the project file keeps,
+    /// and one that is not quantised here makes the document stop equalling
+    /// itself across a save and a load (`crate::canonical`).
     pub fn set_base(&mut self, value: PropValue) {
-        self.base = value;
+        self.base = value.canonical();
     }
 
     /// The keyframes, sorted by step.
@@ -113,7 +118,7 @@ impl Animatable {
         };
         let key = Keyframe {
             step,
-            value,
+            value: value.canonical(),
             interp,
         };
         match self.keys.binary_search_by_key(&step, |k| k.step) {

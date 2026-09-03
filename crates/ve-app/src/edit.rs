@@ -6,17 +6,12 @@
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
-use ve_core::angle::Angle;
-use ve_core::command::Command;
-use ve_core::document::{Geometry, Layer, LocalPoint, Object};
-use ve_core::schema::{PropId, ToolKind};
-use ve_core::{LonLat, PropValue};
-use ve_render::aeqd::{Frame, Local, Space};
-use ve_render::scene::flatten_object;
-use ve_render::sdf::chains_distance;
+use ve_core::schema::PropId;
 
 use crate::commands::AppState;
-use crate::error::{AppError, Result};
+use crate::create::{Gesture, NewObject, Tool, ToolOption, create};
+use crate::document::PropertyValue;
+use crate::error::Result;
 use crate::projects::{ProjectSummary, with_session};
 
 /// Which stamp the brush sweeps along the stroke (spec.md 6.2).
@@ -67,11 +62,6 @@ impl BrushDirectionMode {
             Self::AwayFromPoint => 2,
         }
     }
-
-    /// Whether the mode needs a target to mean anything.
-    fn needs_target(self) -> bool {
-        matches!(self, Self::TowardPoint | Self::AwayFromPoint)
-    }
 }
 
 /// Which space a stamp's footprint is a circle in (spec.md 3.5).
@@ -95,14 +85,6 @@ impl StampSpace {
         match self {
             Self::Geodesic => 0,
             Self::Projected => 1,
-        }
-    }
-
-    /// The render frame's matching space.
-    fn frame_space(self) -> Space {
-        match self {
-            Self::Geodesic => Space::Geodesic,
-            Self::Projected => Space::Projected,
         }
     }
 }
@@ -163,276 +145,82 @@ pub fn add_brush_stroke(
     paint(&state, stroke)
 }
 
-/// How far a merged stroke may reach from its anchor, in metres.
-///
-/// Geometry lives in an azimuthal-equidistant frame, which is well conditioned
-/// near its anchor and degenerates at the antipode. A quarter of the earth's
-/// circumference is a wide margin from that, and a stroke wanting to reach
-/// further is better off as its own object with its own anchor.
-const MERGE_MAX_RADIUS_M: f64 = 10_007_543.0;
-
 /// Implementation of [`add_brush_stroke`], callable without a Tauri handle.
+///
+/// A thin translation onto [`crate::create::create`] rather than a write path
+/// of its own. The brush was the first tool and had the only one; keeping it
+/// separate is how the next tool ends up with subtly different merging, naming
+/// or layer rules, which is the class of bug spec 6.1 exists to prevent.
 pub fn paint(state: &AppState, stroke: BrushStroke) -> Result<ProjectSummary> {
-    let first = *stroke
-        .points
-        .first()
-        .ok_or_else(|| AppError::Internal("a stroke needs at least one point".to_owned()))?;
-    let anchor = LonLat::new(first[0], first[1])?;
-
-    // A stroke aimed at nothing has no direction to paint, and falling back to
-    // the constant bearing would quietly paint a stroke nobody asked for. So
-    // the mode and its point are validated together, before anything is
-    // written.
-    let target = if stroke.direction_mode.needs_target() {
-        let point = stroke.target.ok_or(AppError::BadOption {
-            field: "target",
-            value: "absent, but the direction mode aims at a point".to_owned(),
-        })?;
-        Some(LonLat::new(point[0], point[1])?)
-    } else {
-        None
-    };
-
-    // Geographic points are kept alongside the object: a merge re-expresses the
-    // stroke in the *target's* frame, which is not known until a target is
-    // found.
-    let mut positions = Vec::with_capacity(stroke.points.len());
-    for point in &stroke.points {
-        positions.push(LonLat::new(point[0], point[1])?);
-    }
-
-    with_session(state, |session| {
-        let open = session.require_open()?;
-        let step_count = open.project.settings.step_count;
-
-        // Geometry is stored in the object's own frame, in metres, so the
-        // stroke stays pinned to the earth under pan and zoom (spec.md 7.2).
-        // Which frame depends on what the stamp is a circle in: a projected
-        // stroke's points are map-space metres, and converting them with a
-        // ground frame would bend the stroke away from where it was drawn.
-        let frame = Frame::in_space(anchor, 0.0, 100.0, stroke.space.frame_space());
-        let chain: Vec<LocalPoint> = positions
-            .iter()
-            .map(|position| {
-                let local = frame.to_local(*position);
-                LocalPoint::new(local[0], local[1])
-            })
-            .collect();
-
-        let index = open.project.layers.len();
-        let mut object = Object::new(ToolKind::Brush, format!("Stroke {index}"), step_count);
-        object.geometry = Geometry::Stroke {
-            chains: vec![chain],
-        };
-
-        let mut set = |id: PropId, value: PropValue| {
-            if let Some(prop) = object.props.get_mut(id) {
-                prop.set_base(value);
-            }
-        };
-        set(PropId::Position, PropValue::LonLat(anchor));
-        set(PropId::SizeKm, PropValue::F32(stroke.size_km.max(1.0)));
-        set(PropId::Speed, PropValue::F32(stroke.speed_mps.max(0.0)));
-        set(
+    let mut options = vec![
+        option(
+            PropId::SizeKm,
+            PropertyValue::Number {
+                value: f64::from(stroke.size_km.max(1.0)),
+            },
+        ),
+        option(
+            PropId::Speed,
+            PropertyValue::Number {
+                value: f64::from(stroke.speed_mps.max(0.0)),
+            },
+        ),
+        option(
             PropId::Direction,
-            PropValue::Angle(Angle::new(stroke.direction_toward_deg)),
-        );
-        set(
+            PropertyValue::Angle {
+                degrees: stroke.direction_toward_deg,
+            },
+        ),
+        option(
             PropId::Feather,
-            PropValue::F32(stroke.feather.clamp(0.0, 1.0)),
-        );
-        set(PropId::BrushShape, PropValue::Enum(stroke.shape.variant()));
-        set(PropId::StampSpace, PropValue::Enum(stroke.space.variant()));
-        set(
+            PropertyValue::Number {
+                value: f64::from(stroke.feather.clamp(0.0, 1.0)),
+            },
+        ),
+        option(
+            PropId::BrushShape,
+            PropertyValue::Choice {
+                index: stroke.shape.variant(),
+            },
+        ),
+        option(
+            PropId::StampSpace,
+            PropertyValue::Choice {
+                index: stroke.space.variant(),
+            },
+        ),
+        option(
             PropId::DirectionMode,
-            PropValue::Enum(stroke.direction_mode.variant()),
-        );
-        // Left at its default in constant mode, so two strokes painted with the
-        // same options still compare equal and can merge.
-        if let Some(target) = target {
-            set(PropId::Target, PropValue::LonLat(target));
-        }
-
-        // A new object joins the layer that was selected when it was created
-        // (spec.md 6.1); with no selection that is the top of the stack.
-        let layer = match stroke.layer {
-            Some(raw) => open
-                .project
-                .layers
-                .iter()
-                .find(|layer| layer.id.raw() == raw)
-                .filter(|layer| !layer.locked)
-                .ok_or(AppError::Core(ve_core::CoreError::MissingLayer(raw)))?,
-            None => open
-                .project
-                .layers
-                .last()
-                .ok_or_else(|| AppError::Internal("project has no layers".to_owned()))?,
-        };
-
-        // A stroke that lands on an identical one becomes another chain of it
-        // rather than a second object, so repeatedly going over an area leaves
-        // one thing to select, move and animate (spec.md 6.1).
-        let command = match merge_target(layer, &object, &positions) {
-            Some((target, merged)) => Command::SetGeometry {
-                object: target,
-                before: Box::new(
-                    layer
-                        .objects
-                        .iter()
-                        .find(|o| o.id == target)
-                        .map(|o| o.geometry.clone())
-                        .ok_or_else(|| AppError::Internal("merge target vanished".to_owned()))?,
-                ),
-                after: Box::new(merged),
+            PropertyValue::Choice {
+                index: stroke.direction_mode.variant(),
             },
-            None => Command::AddObject {
-                layer: layer.id,
-                index: layer.objects.len(),
-                object: Box::new(object),
+        ),
+    ];
+    // Left at its default in constant mode, so two strokes painted with the
+    // same options still compare equal and can merge.
+    if let Some([lon, lat]) = stroke.target {
+        options.push(option(PropId::Target, PropertyValue::Position { lon, lat }));
+    }
+
+    create(
+        state,
+        NewObject {
+            tool: Tool::Brush,
+            gesture: Gesture::Stroke {
+                points: stroke.points,
             },
-        };
-
-        let open = session.require_open()?;
-        let (project, history) = (&mut open.project, &mut open.history);
-        history.push(project, command)?;
-        open.touch();
-
-        Ok(ProjectSummary::of(session.require_open()?))
-    })
+            options,
+            layer: stroke.layer,
+        },
+    )
 }
 
-/// Finds the object `stroke` should be merged into, with the merged geometry.
-///
-/// Merging is only safe when it changes nothing about how the layer composites.
-/// That needs three things, checked from the top of the stack down:
-///
-///  * the target renders identically to the new stroke apart from where it sits
-///    (every property equal, keyframes included);
-///  * their footprints actually overlap, or the two would read as one object
-///    while looking like two;
-///  * nothing between them in z-order overlaps the new stroke, or absorbing it
-///    downwards would move it beneath something it was painted on top of.
-fn merge_target(
-    layer: &Layer,
-    stroke: &Object,
-    positions: &[LonLat],
-) -> Option<(ve_core::id::Id, Geometry)> {
-    let flat_stroke = flatten_object(stroke, 0)?;
-    // Both brush shapes sweep the same chains; the reach that decides whether
-    // two strokes touch is the stamp's half-width either way. For a square that
-    // is measured across the flats rather than the diagonal, so the overlap
-    // test below is slightly strict — and strict is the safe direction, since
-    // refusing a merge only costs tidiness while a wrong one changes the layer.
-    let reach_m = match flat_stroke.shape {
-        ve_render::sdf::Shape::Capsule { radius_m, .. } => radius_m,
-        ve_render::sdf::Shape::SweptSquare { half_size_m, .. } => half_size_m,
-        _ => return None,
-    };
-
-    for candidate in layer.objects.iter().rev() {
-        if let Some(merged) = merged_geometry(candidate, stroke, positions, reach_m) {
-            return Some((candidate.id, merged));
-        }
-        // Not a merge target: if it overlaps the new stroke it stands between
-        // the stroke and anything below, and the search stops.
-        if blocks(candidate, &flat_stroke) {
-            return None;
-        }
+/// One option, named the way the schema names it.
+fn option(id: PropId, value: PropertyValue) -> ToolOption {
+    ToolOption {
+        property: format!("{id:?}"),
+        value,
     }
-    None
-}
-
-/// The geometry `candidate` would have with `stroke` merged into it, if the two
-/// may be merged at all.
-fn merged_geometry(
-    candidate: &Object,
-    stroke: &Object,
-    positions: &[LonLat],
-    reach_m: f64,
-) -> Option<Geometry> {
-    if candidate.tool != stroke.tool || candidate.active_range != stroke.active_range {
-        return None;
-    }
-    let Geometry::Stroke { chains } = &candidate.geometry else {
-        return None;
-    };
-
-    // Position differs by definition; everything else, keyframes included, must
-    // match or the merged object could not render both strokes as they were
-    // painted.
-    if candidate.props.len() != stroke.props.len() {
-        return None;
-    }
-    for (id, anim) in candidate.props.iter() {
-        if *id == PropId::Position {
-            // An animated position moves the whole object, so the frame the new
-            // stroke would be expressed in is not the frame it was painted in.
-            if anim.is_animated() {
-                return None;
-            }
-            continue;
-        }
-        if stroke.props.get(*id) != Some(anim) {
-            return None;
-        }
-    }
-
-    // Re-express the new stroke in the candidate's frame. Identical properties
-    // mean identical scale and rotation, so only the anchor differs.
-    let flat = flatten_object(candidate, 0)?;
-    let chain: Vec<Local> = positions
-        .iter()
-        .map(|position| flat.frame.to_local(*position))
-        .collect();
-    if chain
-        .iter()
-        .any(|p| p[0].hypot(p[1]) * flat.frame.scale > MERGE_MAX_RADIUS_M)
-    {
-        return None;
-    }
-
-    let existing: Vec<Vec<Local>> = chains
-        .iter()
-        .map(|chain| chain.iter().map(|p| [p.x, p.y]).collect())
-        .collect();
-    if chains_distance(&existing, std::slice::from_ref(&chain)) > reach_m * 2.0 {
-        return None;
-    }
-
-    let mut merged = chains.clone();
-    merged.push(chain.iter().map(|p| LocalPoint::new(p[0], p[1])).collect());
-    Some(Geometry::Stroke { chains: merged })
-}
-
-/// Whether `candidate` stands between the new stroke and anything below it.
-///
-/// Checked over the candidate's whole lifetime, not just the step being edited:
-/// an object that only appears later, or that moves, still covers the stroke
-/// when it does, and the stack order has to hold at every step.
-fn blocks(candidate: &Object, stroke: &ve_render::scene::FlatObject) -> bool {
-    let range = candidate.active_range;
-    // A still object has one footprint, so one step answers for every step.
-    let last = if candidate.props.iter().any(|(_, anim)| anim.is_animated()) {
-        range.end
-    } else {
-        range.start
-    };
-    (range.start..=last).any(|step| {
-        flatten_object(candidate, step).is_some_and(|flat| footprints_may_overlap(&flat, stroke))
-    })
-}
-
-/// Whether two footprints can touch, judged by bounding circles.
-///
-/// Deliberately conservative: an approximation that says "maybe" too often
-/// costs a merge, while one that says "no" too often would reorder the stack.
-fn footprints_may_overlap(
-    a: &ve_render::scene::FlatObject,
-    b: &ve_render::scene::FlatObject,
-) -> bool {
-    let reach = |o: &ve_render::scene::FlatObject| o.shape.bounding_radius_m() * o.frame.scale;
-    a.frame.anchor.distance_m(b.frame.anchor) <= reach(a) + reach(b)
 }
 
 /// Reverses the most recent change.
@@ -473,7 +261,6 @@ fn step_history(state: &AppState, backwards: bool) -> Result<ProjectSummary> {
 mod tests {
     use super::*;
     use ve_core::schema::{BRUSH_SHAPES, DIRECTION_MODES};
-    use ve_core::value::Interpolation;
 
     /// The wire enums are indices into the schema's variant lists. Written as
     /// literals for legibility, so something has to notice when a list is
@@ -500,55 +287,5 @@ mod tests {
             DIRECTION_MODES[BrushDirectionMode::AwayFromPoint.variant() as usize],
             "away_from_point"
         );
-    }
-
-    fn brush(anchor: LonLat, chain: Vec<[f64; 2]>) -> Object {
-        let mut object = Object::new(ToolKind::Brush, "s", 12);
-        object.geometry = Geometry::Stroke {
-            chains: vec![
-                chain
-                    .into_iter()
-                    .map(|p| LocalPoint::new(p[0], p[1]))
-                    .collect(),
-            ],
-        };
-        if let Some(prop) = object.props.get_mut(PropId::Position) {
-            prop.set_base(PropValue::LonLat(anchor));
-        }
-        object
-    }
-
-    /// The frame a stroke is expressed in is the frame it was painted in. An
-    /// animated position moves that frame, so the merged stroke would travel
-    /// somewhere it was never painted.
-    #[test]
-    fn a_moving_object_does_not_absorb_a_stroke() {
-        let anchor = LonLat::new(0.0, 0.0).unwrap();
-        let target = brush(anchor, vec![[0.0, 0.0], [200_000.0, 0.0]]);
-        let painted = brush(
-            LonLat::new(1.0, 0.0).unwrap(),
-            vec![[0.0, 0.0], [200_000.0, 0.0]],
-        );
-        let positions = [
-            LonLat::new(1.0, 0.0).unwrap(),
-            LonLat::new(2.0, 0.0).unwrap(),
-        ];
-
-        let mut layer = Layer::new("L");
-        layer.objects.push(target.clone());
-        assert!(
-            merge_target(&layer, &painted, &positions).is_some(),
-            "the two overlap and match, so they would otherwise merge"
-        );
-
-        let mut moving = target;
-        moving.props.get_mut(PropId::Position).unwrap().set_key(
-            6,
-            PropValue::LonLat(LonLat::new(40.0, 20.0).unwrap()),
-            Interpolation::Linear,
-        );
-        let mut layer = Layer::new("L");
-        layer.objects.push(moving);
-        assert!(merge_target(&layer, &painted, &positions).is_none());
     }
 }

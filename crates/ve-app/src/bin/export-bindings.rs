@@ -9,6 +9,7 @@ use std::path::PathBuf;
 
 use ts_rs::{Config, TS};
 use ve_app::commands::{AppInfo, EvaluatorSelection, FieldSample};
+use ve_app::create::{Gesture, NewObject, PathPoint, Tool, ToolOption};
 use ve_app::document::{
     ClipboardState, DocumentTree, HistoryEntry, HistoryView, LayerNode, ObjectNode, PropertyValue,
     PropertyView,
@@ -40,6 +41,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     BrushStroke::export_all(&cfg)?;
     BrushShape::export_all(&cfg)?;
     BrushDirectionMode::export_all(&cfg)?;
+    Tool::export_all(&cfg)?;
+    Gesture::export_all(&cfg)?;
+    PathPoint::export_all(&cfg)?;
+    ToolOption::export_all(&cfg)?;
+    NewObject::export_all(&cfg)?;
     DocumentTree::export_all(&cfg)?;
     ve_app::transform::SelectionTransform::export_all(&cfg)?;
     ve_app::transform::TransformKind::export_all(&cfg)?;

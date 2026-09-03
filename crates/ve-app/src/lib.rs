@@ -4,11 +4,13 @@
 //! frontend can reach goes through [`commands`].
 
 pub mod commands;
+pub mod create;
 pub mod document;
 pub mod edit;
 pub mod error;
 pub mod export;
 pub mod logging;
+pub mod merge;
 pub mod paths;
 pub mod projects;
 pub mod protocol;
@@ -57,6 +59,7 @@ pub fn run() -> anyhow::Result<()> {
             projects::close_project,
             projects::current_project,
             projects::recent_projects,
+            create::create_object,
             edit::add_brush_stroke,
             edit::undo,
             edit::redo,

@@ -114,7 +114,7 @@ impl PropertyValue {
     }
 
     /// Converts back, checking the shape matches what the property holds.
-    fn into_prop(self, expected: PropKind) -> Result<PropValue> {
+    pub fn into_prop(self, expected: PropKind) -> Result<PropValue> {
         let bad = |got: &str| AppError::BadOption {
             field: "property value",
             value: format!("{got} where {expected:?} was expected"),

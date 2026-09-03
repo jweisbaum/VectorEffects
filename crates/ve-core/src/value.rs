@@ -70,6 +70,32 @@ impl PropValue {
         }
     }
 
+    /// Quantises to the precision the project file keeps (`crate::canonical`).
+    ///
+    /// A value typed by the user is already canonical — nobody enters a
+    /// longitude to fifteen places. A value the application *computes* is not:
+    /// a polygon's centroid, a dragged anchor, an interpolated position. Those
+    /// carry more precision than the file can hold, so an uncanonicalised one
+    /// makes the document stop equalling itself across a save and a load, which
+    /// is what invariant 4 rests on.
+    ///
+    /// Applied where a value enters the document rather than where it is
+    /// written out, so the in-memory document and the file agree at all times —
+    /// and deliberately not inside `LonLat::new`, which the evaluator calls
+    /// once per sample on the clone-stamp path.
+    ///
+    /// `f32` needs none of this and is returned unchanged; see `canonical`.
+    pub fn canonical(self) -> Self {
+        match self {
+            Self::Angle(a) => Self::Angle(Angle::new(crate::canonical::degrees(a.degrees()))),
+            Self::LonLat(p) => Self::LonLat(LonLat {
+                lon: crate::canonical::degrees(p.lon),
+                lat: crate::canonical::degrees(p.lat),
+            }),
+            Self::F32(_) | Self::Bool(_) | Self::Enum(_) => self,
+        }
+    }
+
     /// Extracts an `f32`, or `None` if this is another kind.
     pub fn as_f32(self) -> Option<f32> {
         match self {
