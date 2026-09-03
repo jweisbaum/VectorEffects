@@ -299,6 +299,17 @@ export default function MapView({
    */
   const [committedTransform, setTransform] = useState<SelectionTransform | null>(null);
   /**
+   * The document revision `committedTransform` was fetched for.
+   *
+   * A drag's held preview retires when the field it produced is on screen —
+   * but the committed handles are fetched separately, and if every tile was
+   * already cached the field lands before the fetch returns. Dropping the
+   * preview then draws the handles from the *previous* revision: they snap back
+   * to where the drag started and jump forward again a round trip later. The
+   * preview is held until this has caught up as well.
+   */
+  const transformRevision = useRef(-1);
+  /**
    * The drag in progress.
    *
    * The backend holds the baseline; this only remembers what kind of drag it is
@@ -571,7 +582,12 @@ export default function MapView({
     const settled = settlingDrag.current;
     if (
       settled &&
-      previewHasLanded(settled, projectRef.current.revision, stats?.pending ?? 0, performance.now())
+      previewHasLanded(settled, projectRef.current.revision, stats?.pending ?? 0, performance.now()) &&
+      // ...and the handles it hands back to describe the same revision. The
+      // timeout inside `previewHasLanded` still bounds the wait.
+      (settled.revision === null ||
+        transformRevision.current >= settled.revision ||
+        performance.now() - settled.at >= SETTLE_TIMEOUT_MS)
     ) {
       settlingDrag.current = null;
     }
@@ -771,10 +787,13 @@ export default function MapView({
       return;
     }
     let cancelled = false;
+    const revision = project.revision;
     api
       .selectionTransform(selection, step)
       .then((value) => {
-        if (!cancelled) setTransform(value);
+        if (cancelled) return;
+        transformRevision.current = revision;
+        setTransform(value);
       })
       .catch(() => setTransform(null));
     return () => {
@@ -971,6 +990,21 @@ export default function MapView({
   );
 
   /**
+   * The handles as they are on screen right now.
+   *
+   * A drag in flight, then a drag whose field has not landed, then the
+   * selection as the document has it. Drawing and hit-testing both read this,
+   * and only this: the bug it closes is a handle drawn in one place and grabbed
+   * in another, which is what happened when the overlay followed the preview
+   * and the hit test followed the document.
+   */
+  const shownTransform = useCallback(
+    (): SelectionTransform | null =>
+      dragPreview.current?.handles ?? settlingDrag.current?.handles ?? committedTransform,
+    [committedTransform],
+  );
+
+  /**
    * Tool feedback, drawn on a 2D canvas over the WebGL one.
    *
    * Separate from the renderer because it changes on every pointer move and has
@@ -991,7 +1025,8 @@ export default function MapView({
     // which is deliberately not being written until the pointer comes up.
     const live = dragPreview.current ?? settlingDrag.current;
     if (live) drawDragOutlines(context, live.outlines, window.devicePixelRatio || 1);
-    const transform = live?.handles ?? committedTransform;
+    // The same answer the hit test uses, so a handle is grabbed where it is drawn.
+    const transform = shownTransform();
 
     // Handles are drawn whatever tool is active: what the panels are editing
     // does not stop mattering while painting.
@@ -1238,7 +1273,7 @@ export default function MapView({
     toolPick,
     toolState,
     picking,
-    committedTransform,
+    shownTransform,
   ]);
 
   useEffect(() => {
@@ -1315,25 +1350,27 @@ export default function MapView({
 
   /** Screen positions of the handles, or null when nothing is selected. */
   const handlePositions = useCallback(() => {
-    if (!committedTransform) return null;
+    const transform = shownTransform();
+    if (!transform) return null;
     const camera = cameraRef.current;
     const view = viewRef.current;
-    const anchor = { lon: committedTransform.lon, lat: committedTransform.lat };
+    const anchor = { lon: transform.lon, lat: transform.lat };
     return {
       pivot: anchor,
       centre: toScreen(camera, view, anchor),
       rotate: toScreen(
         camera,
         view,
-        destination(anchor, committedTransform.rotation_deg, committedTransform.radius_m),
+        destination(anchor, transform.rotation_deg, transform.radius_m),
       ),
       scale: toScreen(
         camera,
         view,
-        destination(anchor, committedTransform.rotation_deg + 90, committedTransform.radius_m),
+        destination(anchor, transform.rotation_deg + 90, transform.radius_m),
       ),
+      count: transform.count,
     };
-  }, [committedTransform]);
+  }, [shownTransform]);
 
   /**
    * Captures the drag baseline on the backend and starts a gesture.
@@ -1408,8 +1445,8 @@ export default function MapView({
    * makes a repeated position a no-op rather than a nudge.
    */
   const commitDrag = useCallback(
-    (geo: { lon: number; lat: number }) => {
-      void api
+    (geo: { lon: number; lat: number }): Promise<void> =>
+      api
         .dragTransform(geo.lon, geo.lat)
         .then((summary) => {
           if (settlingDrag.current) settlingDrag.current.revision = summary.revision;
@@ -1425,8 +1462,7 @@ export default function MapView({
           settlingDrag.current = null;
           drawOverlayRef.current();
           void api.frontendLog("error", `drag failed: ${String(err)}`);
-        });
-    },
+        }),
     [onProjectChanged, requestDraw],
   );
 
@@ -1499,7 +1535,7 @@ export default function MapView({
 
     // A handle takes precedence over everything else under the pointer.
     const handles = handlePositions();
-    if (handles && committedTransform) {
+    if (handles) {
       const reach = HANDLE_RADIUS_CSS * 2 * (window.devicePixelRatio || 1);
       const near = (target: { x: number; y: number }) =>
         Math.hypot(point.x - target.x, point.y - target.y) <= reach;
@@ -1512,7 +1548,7 @@ export default function MapView({
         : near(handles.scale)
           ? "scale"
           : near(handles.centre)
-            ? committedTransform.count === 1
+            ? handles.count === 1
               ? "anchor"
               : "move"
             : null;
@@ -1868,8 +1904,9 @@ export default function MapView({
         })
         .catch(() => undefined)
         .finally(() => {
-          commitDrag(release);
-          void api.endGesture();
+          // The write, *then* the end of the gesture — `endGesture` drops the
+          // baseline the write reads, so the two must not be left to race.
+          void commitDrag(release).finally(() => void api.endGesture());
         });
       return;
     }

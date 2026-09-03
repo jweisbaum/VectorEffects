@@ -608,3 +608,93 @@ fn moving_an_anchor_leaves_the_geometry_on_the_ground() {
         "including the end the anchor moved away from"
     );
 }
+
+// --- The handles must not move when a drag begins -----------------------------
+
+/// The handles a drag *previews* and the handles the selection *has* are built
+/// by two functions, and the moment the pointer goes down the map switches from
+/// one to the other. If they disagree, the dashed circle and both knobs jump at
+/// the instant of the grab and jump back on release — which is exactly what a
+/// user reports as "the handles render wrong when I drag".
+///
+/// Checked at 100% and at 250%, because the two agreed at 100% by coincidence:
+/// the preview scaled a reach that already carried the object's scale, so it
+/// was only ever right for an object that had never been scaled.
+#[test]
+fn a_drag_preview_starts_where_the_committed_handles_are() {
+    for scale_pct in [100.0_f64, 250.0, 40.0] {
+        let (_root, state) = project("handles-agree");
+        let a = dot(&state, 10.0, 20.0, 0.0);
+        document::set_property(
+            &state,
+            a,
+            "ScalePct",
+            document::PropertyValue::Number { value: scale_pct },
+        )
+        .expect("scale");
+
+        let committed = transform::transform_of(&state, &[a], 0)
+            .expect("transform")
+            .expect("present");
+
+        // Grab the rotate handle and do not move: the preview at the grab point
+        // is the selection as it is.
+        transform::start_transform(
+            &state,
+            &[a],
+            0,
+            TransformKind::Rotate,
+            committed.lon,
+            committed.lat + 1.0,
+        )
+        .expect("begin");
+        let preview = transform::peek_transform(&state, committed.lon, committed.lat + 1.0)
+            .expect("preview")
+            .expect("present")
+            .handles;
+        document::finish_gesture(&state).expect("end");
+
+        assert!(
+            (preview.radius_m - committed.radius_m).abs() < 1.0,
+            "at {scale_pct}%: the preview's reach is {} m where the selection's is {} m",
+            preview.radius_m,
+            committed.radius_m
+        );
+        assert!(
+            (preview.rotation_deg - committed.rotation_deg).abs() < 1e-9
+                && (preview.scale_pct - committed.scale_pct).abs() < 1e-9,
+            "at {scale_pct}%: the preview's orientation differs from the selection's"
+        );
+        assert!(
+            distance_m((preview.lon, preview.lat), (committed.lon, committed.lat)) < 1.0,
+            "at {scale_pct}%: the preview's pivot moved"
+        );
+    }
+}
+
+/// A scale drag grows the reach *linearly* with the scale. Doubling the object
+/// doubles the dashed circle; a preview that multiplied an already-scaled reach
+/// by the scale again grew it four times over.
+#[test]
+fn a_scale_drag_grows_the_handles_with_the_object_not_faster() {
+    let (_root, state) = project("handles-scale");
+    let a = dot(&state, 0.0, 0.0, 0.0);
+    let before = transform::transform_of(&state, &[a], 0)
+        .expect("transform")
+        .expect("present");
+
+    // Grab 5° east, drag to 10°: about a factor of two.
+    transform::start_transform(&state, &[a], 0, TransformKind::Scale, 5.0, 0.0).expect("begin");
+    let doubled = transform::peek_transform(&state, 10.0, 0.0)
+        .expect("preview")
+        .expect("present")
+        .handles;
+    document::finish_gesture(&state).expect("end");
+
+    let grew = doubled.radius_m / before.radius_m;
+    let scaled = doubled.scale_pct / before.scale_pct;
+    assert!(
+        (grew / scaled - 1.0).abs() < 0.05,
+        "the object scaled by {scaled} and its reach by {grew}; they should match"
+    );
+}

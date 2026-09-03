@@ -496,7 +496,7 @@ The milestone's real content is therefore D32: the shared behaviour became
 shared code rather than a checklist. See the status notes at the top of this
 file for the five bugs that surfaced along the way, four of them pre-existing.
 
-**Measured on completion.** 540 Rust tests and 219 frontend tests pass, clippy
+**Measured on completion.** 542 Rust tests and 219 frontend tests pass, clippy
 clean at `-D warnings`. The fidelity suite compares 30,647 samples across 120
 generated scenes — worst speed error 0.108 m/s against a 0.25 tolerance, worst
 direction 0.186° against 2° — with 73 samples (0.24%) exempted at a path tangent
@@ -508,6 +508,21 @@ which is also where 5.5 puts the option bar. The two need reconciling — either
 the spec follows the build or the palette moves — and the icons make the
 question live, since a vertical strip of marks is what 8.1 was describing. Not
 touched here: it is a layout change, and nobody asked for one.
+
+**A handle bug found by hand, after the fact.** The drag preview's handles
+were built by one function and the selection's by another, and the preview
+scaled a reach that already carried the object's scale. At 100% the two agreed
+by coincidence; on any object that had ever been scaled, the dashed circle and
+both knobs jumped the instant it was grabbed and snapped back on release. Two
+frontend faults compounded it: the handles were drawn from the live preview but
+hit-tested from the document, so after a release you grabbed where the knob
+*had* been; and the held preview retired when the tiles landed, independently
+of the refetched handles, so with a warm cache they flashed back to the old
+position and forward again. All three are closed — one source for "the handles
+as shown", used for drawing and grabbing alike; the held preview waits for the
+handles to catch up; and `selection.rs` now pins the preview to the committed
+handles at 40%, 100% and 250%. The write and the gesture's end are sequenced
+too, rather than raced.
 
 **Left open.** Nobody has clicked through the six tools in the running app; the
 app builds, starts and loads the frontend cleanly, and the tools are covered end

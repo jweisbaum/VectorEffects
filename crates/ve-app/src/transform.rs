@@ -324,7 +324,12 @@ pub fn peek_transform(state: &AppState, lon: f64, lat: f64) -> Result<Option<Tra
                 Frame::in_space(to.anchor, to.rotation_deg, to.scale_pct, item.space)
             };
             outlines.push(outline_of(&item.outline, &frame));
-            placed.push((to, item.reach_m));
+            // The reach as it would be at 100%, so that `handles_for` can apply
+            // the *placed* scale to it. `reach_m` was captured from the flat
+            // object and already carries the scale the object had; applying
+            // the new scale on top of that multiplied the two, and the handles
+            // of any object not at 100% jumped the moment it was grabbed.
+            placed.push((to, item.reach_m * 100.0 / item.scale_pct.max(1.0)));
         }
 
         Ok(Some(TransformPreview {
@@ -368,6 +373,10 @@ fn outline_of(outline: &BaselineOutline, frame: &Frame) -> ObjectOutline {
 }
 
 /// Handles for a set of placements, the same shape [`Baseline::handles`] makes.
+///
+/// Each placement carries its reach *at 100%*; the placed scale is applied
+/// here. That is the one place a drag's handles can disagree with the
+/// selection's, and `selection.rs` holds the two together at several scales.
 fn handles_for(placed: &[(Placement, f64)], count: usize) -> SelectionTransform {
     let pivot = centroid(placed.iter().map(|(to, _)| to.anchor));
     let single = if placed.len() == 1 {
