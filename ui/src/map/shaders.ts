@@ -56,6 +56,41 @@ void main() { fragColor = uColor; }
  * therefore done here, by decoding four texels and interpolating the decoded
  * speeds, which is correct and costs three extra taps.
  */
+/**
+ * The live-operator mask.
+ *
+ * A gesture with the eraser or the clone stamp is an operation on the field
+ * that is already drawn, and the 2D overlay cannot express one: it sits above
+ * the field and can add pixels, never take them away (spec.md 6.1). So the mask
+ * is applied here, where the field itself is drawn.
+ *
+ * It is a screen-space coverage texture — the swept footprint, rasterised by
+ * the same path builder the overlay uses — so it needs no knowledge of what
+ * shape the gesture is, and a new tool inherits it by supplying a footprint.
+ */
+const MASK = `
+uniform sampler2D uMask;    // screen-space coverage of the gesture, in alpha
+uniform vec2 uMaskSize;     // the framebuffer's size, to read gl_FragCoord
+uniform int uMaskMode;      // 0 none, 1 cut the covered part, 2 keep only it
+
+// How much of this fragment the gesture covers, 0 to 1.
+float maskCoverage() {
+  if (uMaskMode == 0) return 0.0;
+  return texture(uMask, gl_FragCoord.xy / uMaskSize).a;
+}
+
+// The factor the fragment's alpha is multiplied by.
+float maskFactor() {
+  if (uMaskMode == 0) return 1.0;
+  float covered = maskCoverage();
+  // Mode 1 takes the field away where the gesture covers, which is what an
+  // eraser does and what a clone does before it puts the source in its place.
+  // Mode 2 keeps only what the gesture covers, which is how the source is
+  // drawn into it.
+  return uMaskMode == 1 ? 1.0 - covered : covered;
+}
+`;
+
 export const RASTER_VERT = `#version 300 es
 precision highp float;
 in vec2 aCorner;            // 0..1 across the tile
@@ -79,6 +114,7 @@ uniform sampler2D uTile;
 uniform float uSpeedScale;  // full-scale speed, m/s
 uniform float uRampMax;     // speed mapped to the top of the ramp
 uniform float uDim;         // 1.0 normally, lower while a frame is stale
+${MASK}
 out vec4 fragColor;
 
 float decodeSpeed(ivec2 texel) {
@@ -128,7 +164,7 @@ void main() {
   // Capped below 1 so the basemap stays visible through the field; calm areas
   // fade out entirely so the map is readable where there is nothing to show.
   float alpha = clamp(speed / (uRampMax * 0.06), 0.0, 1.0) * 0.72;
-  fragColor = vec4(colour * uDim, alpha);
+  fragColor = vec4(colour * uDim, alpha * maskFactor());
 }
 `;
 
@@ -306,6 +342,9 @@ export const GLYPH_FRAG = `#version 300 es
 precision highp float;
 in float vShade;
 uniform vec4 uColor;
+${MASK}
 out vec4 fragColor;
-void main() { fragColor = vec4(uColor.rgb, uColor.a * vShade); }
+// The glyphs follow the field they describe: a glyph left standing over an
+// erased patch would be pointing at a wind that is no longer there.
+void main() { fragColor = vec4(uColor.rgb, uColor.a * vShade * maskFactor()); }
 `;

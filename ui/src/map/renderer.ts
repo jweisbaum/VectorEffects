@@ -29,8 +29,46 @@ import type { TileCache } from "./tiles";
 
 /** Full-scale speed of the tile encoding. Mirrors `ve_render::tile`. */
 export const SPEED_SCALE_MPS = 100.0;
+
+/**
+ * Texture unit the live-gesture mask is bound to.
+ *
+ * Unit 0 is the tile every pass is already reading, so the mask needs one of
+ * its own rather than a bind between draws.
+ */
+const MASK_UNIT = 1;
 /** Vertices per glyph instance; see the glyph vertex shader. */
 const GLYPH_VERTICES = 54;
+
+/**
+ * A gesture in progress that operates on the field rather than adding one.
+ *
+ * The eraser and the clone stamp are defined against what is already there
+ * (spec.md 6.2), so previewing them means changing what the map draws — the 2D
+ * overlay sits above the field and can add pixels, never take them away. This
+ * is how the two get a live preview at all, and it is why they are the only two
+ * that need one.
+ */
+export interface OperatorPreview {
+  /**
+   * The gesture's coverage, in screen space and at the framebuffer's size.
+   *
+   * Rasterised by the same path builder the overlay draws with, so this carries
+   * no notion of which tool made it or what shape it is: a new tool inherits
+   * the live preview by supplying a footprint.
+   */
+  mask: TexImageSource;
+  /** Whether the covered field is taken away, or replaced from elsewhere. */
+  kind: "erase" | "clone";
+  /**
+   * For a clone, the camera the source is read through.
+   *
+   * The main camera shifted so that the source lands where the brush is. A
+   * plain translation, because the projection is equirectangular: a constant
+   * offset in degrees is a constant offset in pixels at every latitude.
+   */
+  source?: Camera;
+}
 
 /** What to draw. */
 export interface RenderState {
@@ -52,6 +90,8 @@ export interface RenderState {
    * they come out half-size on a retina display.
    */
   pixelRatio: number;
+  /** A gesture that operates on the field, while one is being drawn. */
+  operator?: OperatorPreview | null;
 }
 
 const SEA: [number, number, number, number] = [0.043, 0.078, 0.133, 1];
@@ -123,6 +163,8 @@ export class MapRenderer {
   private graticule: { vao: WebGLVertexArrayObject; buffer: WebGLBuffer; count: number } | null =
     null;
   private graticuleKey = "";
+  /** Screen-space coverage of the gesture in progress, uploaded per frame. */
+  private maskTexture: WebGLTexture | null = null;
 
   /** Set to have the next render read its pixels back. */
   private captureRequest: ((data: ImageData | null) => void) | null = null;
@@ -137,11 +179,12 @@ export class MapRenderer {
 
     const shared = ["uCamera", "uViewport", "uLonOffset"];
     this.geoUniforms = uniforms(gl, this.geoProgram, [...shared, "uColor"]);
+    const mask = ["uMask", "uMaskSize", "uMaskMode"];
     this.rasterUniforms = uniforms(gl, this.rasterProgram, [
-      ...shared, "uTileGeo", "uTile", "uSpeedScale", "uRampMax", "uDim",
+      ...shared, ...mask, "uTileGeo", "uTile", "uSpeedScale", "uRampMax", "uDim",
     ]);
     this.glyphUniforms = uniforms(gl, this.glyphProgram, [
-      ...shared, "uTileGeo", "uGlyphOrigin", "uGlyphStep", "uGrid", "uSpacing",
+      ...shared, ...mask, "uTileGeo", "uGlyphOrigin", "uGlyphStep", "uGrid", "uSpacing",
       "uTile", "uSpeedScale", "uStyle", "uSizeScale", "uColor", "uPixelRatio",
     ]);
 
@@ -207,16 +250,87 @@ export class MapRenderer {
     return out.length > 0 ? out : [0];
   }
 
-  private setShared(u: Uniforms, state: RenderState, lonOffset: number): void {
+  private setShared(
+    u: Uniforms,
+    camera: Camera,
+    view: Viewport,
+    lonOffset: number,
+  ): void {
     const gl = this.gl;
-    gl.uniform3f(
-      u.uCamera ?? null,
-      state.camera.centerLon,
-      state.camera.centerLat,
-      state.camera.pxPerDeg,
-    );
-    gl.uniform2f(u.uViewport ?? null, state.view.width, state.view.height);
+    gl.uniform3f(u.uCamera ?? null, camera.centerLon, camera.centerLat, camera.pxPerDeg);
+    gl.uniform2f(u.uViewport ?? null, view.width, view.height);
     gl.uniform1f(u.uLonOffset ?? null, lonOffset);
+  }
+
+  /**
+   * Points a program's mask uniforms at the gesture in progress.
+   *
+   * Mode 0 leaves the field alone. Mode 1 takes it away where the gesture
+   * covers — an eraser, and a clone before its source is drawn in. Mode 2 keeps
+   * only what the gesture covers, which is how that source arrives.
+   */
+  private setMask(u: Uniforms, view: Viewport, mode: 0 | 1 | 2): void {
+    const gl = this.gl;
+    gl.uniform1i(u.uMaskMode ?? null, mode);
+    gl.uniform2f(u.uMaskSize ?? null, view.width, view.height);
+    gl.uniform1i(u.uMask ?? null, MASK_UNIT);
+  }
+
+  /**
+   * Uploads the gesture's coverage, and returns whether there is any.
+   *
+   * The mask is the swept footprint rasterised by the same path builder the
+   * overlay draws with, so this knows nothing about which tool is being used or
+   * what shape it makes — a new tool inherits the live preview by supplying a
+   * footprint, exactly as it inherits the overlay one.
+   */
+  private uploadMask(source: TexImageSource | null): boolean {
+    const gl = this.gl;
+    if (!source) return false;
+    if (!this.maskTexture) {
+      const texture = gl.createTexture();
+      if (!texture) return false;
+      this.maskTexture = texture;
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      // Clamped and linear: the mask is a coverage field, so a soft edge is
+      // wanted and sampling past the edge must read as "not covered".
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    }
+    gl.activeTexture(gl.TEXTURE0 + MASK_UNIT);
+    gl.bindTexture(gl.TEXTURE_2D, this.maskTexture);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    return true;
+  }
+
+  /** The speed raster, for one camera and one mask mode. */
+  private drawRaster(state: RenderState, camera: Camera, mode: 0 | 1 | 2): void {
+    const gl = this.gl;
+    gl.useProgram(this.rasterProgram);
+    gl.bindVertexArray(this.quadVao);
+    gl.uniform1i(this.rasterUniforms.uTile ?? null, 0);
+    gl.uniform1f(this.rasterUniforms.uSpeedScale ?? null, SPEED_SCALE_MPS);
+    gl.uniform1f(this.rasterUniforms.uRampMax ?? null, state.rampMax);
+    gl.uniform1f(this.rasterUniforms.uDim ?? null, state.stale ? 0.55 : 1.0);
+    this.setMask(this.rasterUniforms, state.view, mode);
+    gl.activeTexture(gl.TEXTURE0);
+
+    for (const tile of visibleTiles(camera, state.view)) {
+      const texture = this.tiles.get(state.frame, tile.z, tile.x, tile.y);
+      if (!texture) continue;
+      const b = tileBounds(tile.z, tile.x, tile.y);
+      this.setShared(this.rasterUniforms, camera, state.view, tile.lonOffset);
+      gl.uniform4f(
+        this.rasterUniforms.uTileGeo ?? null,
+        b.west, b.north, b.east - b.west, b.north - b.south,
+      );
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+    }
   }
 
   /** Graticule interval that keeps lines at least ~70 px apart. */
@@ -264,6 +378,67 @@ export class MapRenderer {
     return pxPerDeg < 6 ? 110 : 50;
   }
 
+  /** The direction glyphs, for one camera and one mask mode. */
+  private drawGlyphs(state: RenderState, camera: Camera, mode: 0 | 1 | 2): void {
+    const gl = this.gl;
+    // Spacing is resolved to a whole-degree lattice step so the grid is
+    // globally anchored. `glyphLayout` is shared with the gesture preview,
+    // which draws the same glyphs on the same lattice.
+    const { stepDeg, spacing } = glyphLayout(
+      state.glyphStyle,
+      camera.pxPerDeg,
+      state.pixelRatio,
+    );
+    gl.useProgram(this.glyphProgram);
+    gl.bindVertexArray(this.glyphVao);
+    gl.uniform1i(this.glyphUniforms.uTile ?? null, 0);
+    gl.uniform1f(this.glyphUniforms.uSpeedScale ?? null, SPEED_SCALE_MPS);
+    gl.uniform1f(this.glyphUniforms.uSpacing ?? null, spacing);
+    gl.uniform1f(this.glyphUniforms.uGlyphStep ?? null, stepDeg);
+    gl.uniform1i(this.glyphUniforms.uStyle ?? null, state.glyphStyle === "barb" ? 1 : 0);
+    gl.uniform1f(this.glyphUniforms.uSizeScale ?? null, GLYPH_SIZE_SCALE[state.glyphStyle]);
+    gl.uniform1f(this.glyphUniforms.uPixelRatio ?? null, state.pixelRatio);
+    gl.uniform4f(this.glyphUniforms.uColor ?? null, ...GLYPH);
+    this.setMask(this.glyphUniforms, state.view, mode);
+    gl.activeTexture(gl.TEXTURE0);
+
+    for (const tile of visibleTiles(camera, state.view)) {
+      const texture = this.tiles.get(state.frame, tile.z, tile.x, tile.y);
+      if (!texture) continue;
+      const b = tileBounds(tile.z, tile.x, tile.y);
+      const originX =
+        (b.west + tile.lonOffset - camera.centerLon) * camera.pxPerDeg + state.view.width / 2;
+      const originY = (camera.centerLat - b.north) * camera.pxPerDeg + state.view.height / 2;
+      const widthPx = (b.east - b.west) * camera.pxPerDeg;
+      const heightPx = (b.north - b.south) * camera.pxPerDeg;
+
+      // Entirely off screen: skip before spending instances on it.
+      if (
+        originX + widthPx < 0 || originX > state.view.width ||
+        originY + heightPx < 0 || originY > state.view.height
+      ) {
+        continue;
+      }
+
+      const lattice = glyphLattice(b, stepDeg);
+      if (lattice.cols === 0 || lattice.rows === 0) continue;
+      if (lattice.cols * lattice.rows > 4096) continue;
+
+      this.setShared(this.glyphUniforms, camera, state.view, tile.lonOffset);
+      gl.uniform4f(
+        this.glyphUniforms.uTileGeo ?? null,
+        b.west, b.north, b.east - b.west, b.north - b.south,
+      );
+      gl.uniform2f(
+        this.glyphUniforms.uGlyphOrigin ?? null,
+        lattice.originLon, lattice.originLat,
+      );
+      gl.uniform2f(this.glyphUniforms.uGrid ?? null, lattice.cols, lattice.rows);
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      gl.drawArraysInstanced(gl.TRIANGLES, 0, GLYPH_VERTICES, lattice.cols * lattice.rows);
+    }
+  }
+
   render(state: RenderState): void {
     const gl = this.gl;
     const offsets = this.worldOffsets(state);
@@ -273,6 +448,20 @@ export class MapRenderer {
     gl.clearColor(...SEA);
     gl.clear(gl.COLOR_BUFFER_BIT);
 
+    // The gesture in progress, if it operates on the field rather than adding
+    // one of its own (spec.md 6.1). Uploading it is what makes an eraser erase
+    // and a clone clone *while the pointer is down*, rather than at the commit
+    // a round trip later.
+    const operating = this.uploadMask(state.operator?.mask ?? null);
+    const mode: 0 | 1 | 2 = operating ? 1 : 0;
+    // A clone draws the field a second time, read through a camera shifted so
+    // the source lands where the brush is, and kept only where the gesture
+    // covers. The shift is a plain translation because the projection is
+    // equirectangular: a constant offset in degrees is a constant offset in
+    // pixels, at every latitude (spec.md 5.1).
+    const source =
+      operating && state.operator?.kind === "clone" ? (state.operator.source ?? null) : null;
+
     // --- Land and coastlines ---
     gl.useProgram(this.geoProgram);
     const land = this.landByLod.get(lod);
@@ -281,32 +470,16 @@ export class MapRenderer {
       gl.bindVertexArray(land.vao);
       gl.uniform4f(this.geoUniforms.uColor ?? null, ...LAND);
       for (const offset of offsets) {
-        this.setShared(this.geoUniforms, state, offset);
+        this.setShared(this.geoUniforms, state.camera, state.view, offset);
         gl.drawElements(gl.TRIANGLES, land.indexCount, gl.UNSIGNED_INT, 0);
       }
     }
-    // --- Speed raster ---
-    const tiles = visibleTiles(state.camera, state.view);
-    gl.useProgram(this.rasterProgram);
-    gl.bindVertexArray(this.quadVao);
-    gl.uniform1i(this.rasterUniforms.uTile ?? null, 0);
-    gl.uniform1f(this.rasterUniforms.uSpeedScale ?? null, SPEED_SCALE_MPS);
-    gl.uniform1f(this.rasterUniforms.uRampMax ?? null, state.rampMax);
-    gl.uniform1f(this.rasterUniforms.uDim ?? null, state.stale ? 0.55 : 1.0);
-    gl.activeTexture(gl.TEXTURE0);
 
-    for (const tile of tiles) {
-      const texture = this.tiles.get(state.frame, tile.z, tile.x, tile.y);
-      if (!texture) continue;
-      const b = tileBounds(tile.z, tile.x, tile.y);
-      this.setShared(this.rasterUniforms, state, tile.lonOffset);
-      gl.uniform4f(
-        this.rasterUniforms.uTileGeo ?? null,
-        b.west, b.north, b.east - b.west, b.north - b.south,
-      );
-      gl.bindTexture(gl.TEXTURE_2D, texture);
-      gl.drawArrays(gl.TRIANGLES, 0, 6);
-    }
+    // --- Speed raster ---
+    // The basemap is never masked: an eraser takes away the field, not the
+    // coastline underneath it.
+    this.drawRaster(state, state.camera, mode);
+    if (source) this.drawRaster(state, source, 2);
 
     // --- Coastlines, above the raster ---
     // The field covers land as well as sea, so a coastline drawn underneath it
@@ -316,7 +489,7 @@ export class MapRenderer {
       gl.bindVertexArray(coast.vao);
       gl.uniform4f(this.geoUniforms.uColor ?? null, ...COAST);
       for (const offset of offsets) {
-        this.setShared(this.geoUniforms, state, offset);
+        this.setShared(this.geoUniforms, state.camera, state.view, offset);
         gl.drawElements(gl.LINES, coast.indexCount, gl.UNSIGNED_INT, 0);
       }
     }
@@ -329,7 +502,7 @@ export class MapRenderer {
         gl.bindVertexArray(this.graticule.vao);
         gl.uniform4f(this.geoUniforms.uColor ?? null, ...GRATICULE);
         for (const offset of offsets) {
-          this.setShared(this.geoUniforms, state, offset);
+          this.setShared(this.geoUniforms, state.camera, state.view, offset);
           gl.drawArrays(gl.LINES, 0, this.graticule.count);
         }
       }
@@ -337,65 +510,8 @@ export class MapRenderer {
 
     // --- Glyphs ---
     if (state.showGlyphs) {
-      // Spacing is resolved to a whole-degree lattice step so the grid is
-      // globally anchored. `glyphLayout` is shared with the brush preview,
-      // which draws the same glyphs on the same lattice.
-      const { stepDeg, spacing } = glyphLayout(
-        state.glyphStyle,
-        state.camera.pxPerDeg,
-        state.pixelRatio,
-      );
-      gl.useProgram(this.glyphProgram);
-      gl.bindVertexArray(this.glyphVao);
-      gl.uniform1i(this.glyphUniforms.uTile ?? null, 0);
-      gl.uniform1f(this.glyphUniforms.uSpeedScale ?? null, SPEED_SCALE_MPS);
-      gl.uniform1f(this.glyphUniforms.uSpacing ?? null, spacing);
-      gl.uniform1f(this.glyphUniforms.uGlyphStep ?? null, stepDeg);
-      gl.uniform1i(this.glyphUniforms.uStyle ?? null, state.glyphStyle === "barb" ? 1 : 0);
-      gl.uniform1f(this.glyphUniforms.uSizeScale ?? null, GLYPH_SIZE_SCALE[state.glyphStyle]);
-      gl.uniform1f(this.glyphUniforms.uPixelRatio ?? null, state.pixelRatio);
-      gl.uniform4f(this.glyphUniforms.uColor ?? null, ...GLYPH);
-      gl.activeTexture(gl.TEXTURE0);
-
-      for (const tile of tiles) {
-        const texture = this.tiles.get(state.frame, tile.z, tile.x, tile.y);
-        if (!texture) continue;
-        const b = tileBounds(tile.z, tile.x, tile.y);
-        const originX =
-          (b.west + tile.lonOffset - state.camera.centerLon) * state.camera.pxPerDeg +
-          state.view.width / 2;
-        const originY =
-          (state.camera.centerLat - b.north) * state.camera.pxPerDeg + state.view.height / 2;
-        const widthPx = (b.east - b.west) * state.camera.pxPerDeg;
-        const heightPx = (b.north - b.south) * state.camera.pxPerDeg;
-
-        // Entirely off screen: skip before spending instances on it.
-        if (
-          originX + widthPx < 0 || originX > state.view.width ||
-          originY + heightPx < 0 || originY > state.view.height
-        ) {
-          continue;
-        }
-
-        const lattice = glyphLattice(b, stepDeg);
-        if (lattice.cols === 0 || lattice.rows === 0) continue;
-        if (lattice.cols * lattice.rows > 4096) continue;
-
-        this.setShared(this.glyphUniforms, state, tile.lonOffset);
-        gl.uniform4f(
-          this.glyphUniforms.uTileGeo ?? null,
-          b.west, b.north, b.east - b.west, b.north - b.south,
-        );
-        gl.uniform2f(
-          this.glyphUniforms.uGlyphOrigin ?? null,
-          lattice.originLon, lattice.originLat,
-        );
-        gl.uniform2f(this.glyphUniforms.uGrid ?? null, lattice.cols, lattice.rows);
-        gl.bindTexture(gl.TEXTURE_2D, texture);
-        gl.drawArraysInstanced(
-          gl.TRIANGLES, 0, GLYPH_VERTICES, lattice.cols * lattice.rows,
-        );
-      }
+      this.drawGlyphs(state, state.camera, mode);
+      if (source) this.drawGlyphs(state, source, 2);
     }
 
     gl.bindVertexArray(null);

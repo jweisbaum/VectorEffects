@@ -286,6 +286,7 @@ describe("hoverGesture", () => {
       label: "",
       shortcut: "b",
       hover: true,
+      preview: "field",
       gesture: { kind: "always", gesture },
       sizing: null,
       options: [],

@@ -606,3 +606,40 @@ function tangentAt(
   }
   return bearing;
 }
+
+/**
+ * The camera a clone stamp's source is read through.
+ *
+ * The main camera shifted so that what is at the source appears where the brush
+ * is. A plain translation, because the projection is equirectangular: a
+ * constant offset in degrees is a constant offset in pixels at every latitude
+ * (spec.md 5.1). `null` when the gesture has nothing placed yet.
+ *
+ * Which offset depends on the mode (spec.md 6.2). `Aligned` measures it from
+ * the object's anchor — where the gesture began — and is exact everywhere.
+ * `Fixed` measures it per cell from the nearest point of the stroke, which no
+ * single translation can express; the preview uses the pointer's own position,
+ * which is exact where the user is looking and approximate behind it. A preview
+ * is allowed to approximate, and this one says where it does.
+ */
+export function cloneSourceCamera(
+  state: ToolState,
+  gesture: Gesture,
+  camera: Camera,
+): Camera | null {
+  if (gesture.kind !== "stroke") return null;
+  const points = gesture.points;
+  const anchor = points[0];
+  const pointer = points[points.length - 1];
+  if (!anchor || !pointer) return null;
+
+  // Offset mode 1 is the fixed source.
+  const from = choiceOf(state.values, "OffsetMode") === 1 ? pointer : anchor;
+  const [sourceLon, sourceLat] = positionOf(state.values, "SourcePoint");
+
+  return {
+    centerLon: camera.centerLon - normalizeLon(from[0] - sourceLon),
+    centerLat: camera.centerLat - (from[1] - sourceLat),
+    pxPerDeg: camera.pxPerDeg,
+  };
+}

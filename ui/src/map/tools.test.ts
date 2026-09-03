@@ -14,6 +14,7 @@ import type { Camera } from "./camera";
 import { KM_PER_DEGREE } from "./footprint";
 import {
   choiceOf,
+  cloneSourceCamera,
   convertSizes,
   defaultState,
   extentOf,
@@ -52,6 +53,7 @@ const shapeFill: ToolSchema = {
   label: "Shape fill",
   shortcut: "f",
   hover: false,
+  preview: "field",
   gesture: {
     kind: "by_choice",
     on: "ShapeSource",
@@ -116,6 +118,7 @@ const brush: ToolSchema = {
   label: "Brush",
   shortcut: "b",
   hover: true,
+  preview: "field",
   gesture: { kind: "always", gesture: "stroke" },
   sizing: { depends_on: [] },
   options: [
@@ -569,5 +572,99 @@ describe("choiceOf", () => {
     expect(choiceOf({ Mode: { kind: "choice", index: 2 } }, "Mode")).toBe(2);
     expect(choiceOf({}, "Mode")).toBe(0);
     expect(choiceOf({ Mode: { kind: "number", value: 3 } }, "Mode")).toBe(0);
+  });
+});
+
+describe("cloneSourceCamera", () => {
+  const state = (source: [number, number], mode = 0): ToolState => ({
+    values: {
+      SourcePoint: { kind: "position", lon: source[0], lat: source[1] },
+      OffsetMode: { kind: "choice", index: mode },
+    },
+    unit: "km",
+  });
+
+  /**
+   * The camera the source is read through is the map's own, shifted so that
+   * what is at the source lands where the brush is. Shifted the *other* way and
+   * the preview would show a patch from twice the offset away, which looks
+   * plausible and is wrong.
+   */
+  it("shifts the camera so the source lands under the brush", () => {
+    const gesture = { kind: "stroke" as const, points: [[10, 20] as [number, number]] };
+    const source = cloneSourceCamera(state([40, 5]), gesture, camera);
+
+    // The brush is at 10E 20N and reads from 40E 5N, so the offset is
+    // -30 degrees of longitude and +15 of latitude.
+    expect(source).toEqual({
+      centerLon: camera.centerLon - (10 - 40),
+      centerLat: camera.centerLat - (20 - 5),
+      pxPerDeg: camera.pxPerDeg,
+    });
+  });
+
+  /** The zoom is the map's: a clone copies the field, not a magnification. */
+  it("keeps the map's own scale", () => {
+    const gesture = { kind: "stroke" as const, points: [[0, 0] as [number, number]] };
+    expect(cloneSourceCamera(state([40, 0]), gesture, camera)?.pxPerDeg).toBe(camera.pxPerDeg);
+  });
+
+  /**
+   * `Aligned` measures the offset from where the gesture *began*, so the source
+   * travels with the brush and the whole stroke reads one continuous band.
+   * `Fixed` measures it from where the pointer is now, so the source stays put
+   * — exact at the head of the stroke, which is where the user is looking.
+   */
+  it("measures the offset from the anchor when aligned and the pointer when fixed", () => {
+    const gesture = {
+      kind: "stroke" as const,
+      points: [[0, 0], [20, 0]] as Array<[number, number]>,
+    };
+
+    const aligned = cloneSourceCamera(state([40, 0], 0), gesture, camera);
+    expect(aligned?.centerLon).toBeCloseTo(camera.centerLon - (0 - 40), 9);
+
+    const fixed = cloneSourceCamera(state([40, 0], 1), gesture, camera);
+    expect(fixed?.centerLon).toBeCloseTo(camera.centerLon - (20 - 40), 9);
+  });
+
+  /**
+   * An offset across the dateline is the short way, like every other one: a
+   * brush at 179°W reading from 179°E is two degrees along, not 358.
+   *
+   * Asserted as the property the shift exists for — the source point lands
+   * where the brush is — rather than as a centre value, because the map draws a
+   * copy of the world every 360° and the two are the same place.
+   */
+  it("takes the shorter way round the dateline", () => {
+    const brush: [number, number] = [-179, 0];
+    const source: [number, number] = [179, 0];
+    const shifted = cloneSourceCamera(state(source), {
+      kind: "stroke",
+      points: [brush],
+    }, camera);
+    expect(shifted).not.toBeNull();
+
+    // Where the source sits under the shifted camera is where the brush sits
+    // under the real one.
+    const under = (lon: number, centre: number) => {
+      const delta = ((lon - centre + 540) % 360) - 180;
+      return delta;
+    };
+    expect(under(source[0], shifted!.centerLon)).toBeCloseTo(
+      under(brush[0], camera.centerLon),
+      9,
+    );
+
+    // ...and the shift really was two degrees, not the long way round.
+    expect(Math.abs(shifted!.centerLon - camera.centerLon)).toBeCloseTo(2, 9);
+  });
+
+  /** Only a stroke clones, and only once it has a point to clone from. */
+  it("has no answer for a gesture that is not a stroke", () => {
+    expect(cloneSourceCamera(state([40, 0]), { kind: "point", at: [0, 0] }, camera)).toBeNull();
+    expect(
+      cloneSourceCamera(state([40, 0]), { kind: "stroke", points: [] }, camera),
+    ).toBeNull();
   });
 });

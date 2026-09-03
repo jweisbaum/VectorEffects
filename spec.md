@@ -633,6 +633,28 @@ All tools produce **objects**. Common rules:
   what the tool shows while aiming is that wind, in the terms the map already
   displays it in.
 
+  **The two operators are previewed on the map itself.** The eraser writes calm
+  and the clone stamp reads the composite beneath it, so what either one paints
+  is defined by what is already there — and a coloured wash would be showing
+  something neither tool does. Nor could an overlay show a removal at all: it is
+  a canvas stacked above the field, and it can add pixels, never take them away.
+
+  So a gesture with either one is applied to the field *while the pointer is
+  down*: the swept footprint becomes a screen-space mask, and the map is drawn
+  through it. The eraser's covered region loses its field, leaving the basemap —
+  which is never masked, since something has to be left to see. The clone's
+  loses it and gains the field from the source instead, drawn through a camera
+  shifted so the source lands under the brush; a shift is enough because the
+  projection is equirectangular, where a constant offset in degrees is a
+  constant offset in pixels at every latitude (§5.1). The overlay draws the
+  footprint's outline and nothing else.
+
+  The mask is the same footprint the overlay would have drawn, so a tool
+  declares how it previews and inherits the rest. It is rasterised at half the
+  framebuffer's resolution: it is uploaded on every pointer report, and the
+  softened edge is a preview's to give away where the frame budget is not
+  (§7.9, §13).
+
   This is overlay drawing, not evaluation: the colour comes from the tool's own
   options rather than from a tile, so §7.9's fidelity tolerances do not apply to
   it and nothing is evaluated on the pointer path. It is deliberately not the
@@ -673,7 +695,7 @@ built differently. A new tool gets them all, and the checklist below is what
 |---|---|---|
 | Option bar | Spans the map view and wraps within it. A tool's options grow with the tool, and a bar that sizes to its contents puts the last ones off screen where they cannot be reached. Nothing else may occupy the map's top edge. | §5.5 |
 | Sizes in px | A size given in px selects `stamp_space: projected` and one in km selects `geodesic`, for **every** tool with a size. px means a shape on the map, at any latitude and zoom; km means one on the ground. One vocabulary, one property — and one control: the unit, never the space beside it. | §3.5 |
-| Gesture preview | Every gesture previews the field it will paint — speed colour and direction glyphs, not an outline — and the preview is held after release until the new revision's tiles are drawn. | §6.1 |
+| Gesture preview | Every gesture previews the field it will paint — speed colour and direction glyphs, not an outline — and the preview is held after release until the new revision's tiles are drawn. A tool that *operates* on the field rather than adding one is previewed by applying the operation to the map, live, and that too is held until the commit lands. | §6.1 |
 | Hover indicator | Where a tool has one, it is the exact footprint a click would produce, in the same colour and with the same glyph as the gesture preview. | §6.1 |
 | Chrome | Handles, markers and previews are drawn in the same frame as the map, and never overlap each other. | §5.5 |
 | Position options | Every `LonLat` option is placeable by pointing: on the tool while setting it up, and on an existing object through the inspector. Typing coordinates is the alternative, never the only way. | §6.1 |

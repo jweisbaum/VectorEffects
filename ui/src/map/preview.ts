@@ -12,6 +12,7 @@
  */
 
 import type { Footprint } from "./footprint";
+import type { OperatorPreview } from "./renderer";
 
 /**
  * Everything needed to draw a gesture's preview without reading tool state.
@@ -46,7 +47,18 @@ export interface Settling {
 }
 
 /** A gesture's preview being held until its field appears. */
-export interface HeldPreview extends FieldPreview, Settling {}
+export interface HeldPreview extends FieldPreview, Settling {
+  /**
+   * The live operation this gesture was showing, for a tool that operates on
+   * the field rather than adding one (spec.md 6.2).
+   *
+   * Held across the same gap the rest of the preview is. Dropping it at
+   * pointer-up would let the erased region fill back in for the round trip it
+   * takes the commit to arrive, and then empty again — the paint blinking out,
+   * in reverse.
+   */
+  operator?: OperatorPreview;
+}
 
 /**
  * How long a preview is held if its field never arrives, in milliseconds.

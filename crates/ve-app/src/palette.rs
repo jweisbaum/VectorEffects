@@ -90,6 +90,30 @@ pub enum GestureSelector {
     },
 }
 
+/// How a gesture with this tool previews itself (spec.md 6.1).
+///
+/// Most tools carry a field of their own, so the preview draws it: the swept
+/// region in the speed colour with direction glyphs over it. Two do not. The
+/// eraser writes calm and the clone stamp reads the composite beneath it, so
+/// what either one *paints* is defined by what is already there — and a preview
+/// that drew a flat colour would be showing something the tool does not do.
+///
+/// Those two are previewed by operating on the map itself rather than by
+/// drawing over it, which is the only way to show a removal at all: the overlay
+/// is a canvas stacked above the field and can add pixels, never take them
+/// away.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "PreviewKind.ts")]
+pub enum PreviewKind {
+    /// Draw the field the gesture carries.
+    Field,
+    /// Take the field away where the gesture covers.
+    Erase,
+    /// Show the field from the source, where the gesture covers.
+    Clone,
+}
+
 /// The km/px control a tool offers, and when it is live.
 ///
 /// The unit *is* the `stamp_space` control (spec.md 3.5): px asks for a shape
@@ -126,6 +150,8 @@ pub struct ToolSchema {
     /// (spec.md 6.2): both are built up point by point, so a single click
     /// produces nothing to show.
     pub hover: bool,
+    /// How a gesture with this tool previews itself.
+    pub preview: PreviewKind,
     /// The unit control, when the tool's shapes are measured at all.
     ///
     /// `None` for a tool with nothing to measure. `Some` for the shape fill as
@@ -171,6 +197,19 @@ fn gesture_for(tool: ToolKind) -> GestureSelector {
                 "extent".to_owned(),
             ],
         },
+    }
+}
+
+/// How a gesture with this tool previews itself (spec.md 6.1).
+fn preview_for(tool: ToolKind) -> PreviewKind {
+    match tool {
+        ToolKind::Eraser => PreviewKind::Erase,
+        ToolKind::CloneStamp => PreviewKind::Clone,
+        // Everything else paints a field of its own, which is what its gesture
+        // shows.
+        ToolKind::Brush | ToolKind::Circle | ToolKind::ShapeFill | ToolKind::Curve => {
+            PreviewKind::Field
+        }
     }
 }
 
@@ -244,6 +283,7 @@ fn describe(tool: ToolKind) -> ToolSchema {
         shortcut: shortcut_for(tool).to_owned(),
         gesture: gesture_for(tool),
         hover: has_hover(tool),
+        preview: preview_for(tool),
         // Declaring a stamp space is what it means for a tool's shapes to be
         // measured, whether the measurement is typed or dragged out.
         sizing: schema::spec_for(tool, PropId::StampSpace).map(|_| Sizing {
@@ -312,6 +352,40 @@ mod tests {
                 schema::spec_for(tool, PropId::StampSpace).is_some(),
                 "{tool:?}: offering a unit and having a stamp space are one claim"
             );
+        }
+    }
+
+    /// The two tools with no field of their own are exactly the two that are
+    /// defined against what is beneath them — the eraser writes calm and the
+    /// clone stamp reads the composite. A tool that carried a speed *and*
+    /// previewed as an operator would be claiming both.
+    #[test]
+    fn a_tool_previews_as_an_operator_exactly_when_it_has_no_speed_of_its_own() {
+        for described in palette() {
+            let tool = described.tool.kind();
+            let carries_a_field = schema::spec_for(tool, PropId::Speed).is_some()
+                || schema::spec_for(tool, PropId::SpeedMin).is_some();
+            assert_eq!(
+                described.preview == PreviewKind::Field,
+                carries_a_field,
+                "{tool:?}: previewing a field and having one are the same claim"
+            );
+        }
+    }
+
+    /// A clone stamp needs somewhere to read from for its preview to mean
+    /// anything, and the eraser needs nothing at all — which is the difference
+    /// between the two operators.
+    #[test]
+    fn only_the_clone_reads_from_somewhere() {
+        for described in palette() {
+            let tool = described.tool.kind();
+            if described.preview == PreviewKind::Clone {
+                assert!(
+                    schema::spec_for(tool, PropId::SourcePoint).is_some(),
+                    "{tool:?} previews a clone but has no source to read"
+                );
+            }
         }
     }
 

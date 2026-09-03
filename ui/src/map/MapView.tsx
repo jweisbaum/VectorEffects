@@ -48,6 +48,7 @@ import {
 import ToolOptions, { type ToolPick } from "./ToolOptions";
 import {
   type ActiveTool,
+  cloneSourceCamera,
   defaultState,
   liveOptions,
   footprintOf,
@@ -58,7 +59,7 @@ import {
   previewField,
   type ToolState,
 } from "./tools";
-import { MapRenderer, type RenderState } from "./renderer";
+import { MapRenderer, type OperatorPreview, type RenderState } from "./renderer";
 import { TileCache } from "./tiles";
 
 interface Readout {
@@ -104,6 +105,35 @@ const GLYPH_INK = "rgba(240, 247, 255, 0.9)";
  * preview the user cannot see is not a preview.
  */
 const PREVIEW_MIN_ALPHA = 0.28;
+
+/**
+ * Resolution of the live-gesture mask, as a fraction of the framebuffer.
+ *
+ * The mask is uploaded on every pointer report, and a full-resolution one is
+ * about 19 MB of texture at 2880x1684 — a cost paid many times a second, in the
+ * middle of the interaction the frame budget exists to protect (spec.md 13).
+ * Halving each axis quarters it.
+ *
+ * What it costs is a slightly soft edge on the erased region, sampled back with
+ * linear filtering. The preview is a proxy and is allowed to approximate
+ * (spec.md 7.9); the field that lands when the gesture commits is exact.
+ */
+const MASK_SCALE = 0.5;
+
+/**
+ * The operation a committed gesture is still waiting to see landed.
+ *
+ * The most recent, because two erases in flight at once both apply and the
+ * later one is what the map has not caught up with. There is never more than
+ * one in practice: a gesture is a pointer drag, and there is one pointer.
+ */
+function heldOperator(held: readonly HeldPreview[]): OperatorPreview | null {
+  for (let i = held.length - 1; i >= 0; i--) {
+    const operator = held[i]?.operator;
+    if (operator) return operator;
+  }
+  return null;
+}
 
 /**
  * Most glyphs one stroke preview will draw.
@@ -193,7 +223,26 @@ export default function MapView({
    * window for no gain.
    */
   const finishGestureRef = useRef<() => void>(() => {});
+  /** Drops a gesture's live preview, for callers that only read refs. */
+  const abandonRef = useRef<() => void>(() => {});
   const cursorRef = useRef<{ x: number; y: number } | null>(null);
+  /**
+   * The gesture in progress, when it operates on the field rather than adding
+   * one — the eraser and the clone stamp (spec.md 6.2).
+   *
+   * Held in a ref and read by `draw`, because the map itself has to change: the
+   * overlay sits above the field and can add pixels, never take them away, so
+   * there is no way to show a removal from up there.
+   */
+  const operatorRef = useRef<OperatorPreview | null>(null);
+  /**
+   * Where the gesture's coverage is rasterised, for the mask.
+   *
+   * One canvas reused across the drag rather than one per pointer move: it is
+   * the size of the framebuffer, and allocating that per report is the kind of
+   * thing that shows up as jank on a fast stroke.
+   */
+  const maskCanvas = useRef<HTMLCanvasElement | null>(null);
   /**
    * Display options mirrored into refs.
    *
@@ -485,6 +534,9 @@ export default function MapView({
       rampMax,
       stale: (tilesRef.current?.stats().pending ?? 0) > 0,
       pixelRatio: window.devicePixelRatio || 1,
+      // The gesture's own operation while it is being drawn, and the one it
+      // committed while its tiles are still on their way.
+      operator: operatorRef.current ?? heldOperator(settling.current),
     };
 
     try {
@@ -699,7 +751,7 @@ export default function MapView({
         if (gestureRef.current) {
           gestureRef.current = null;
           nodeDrag.current = false;
-          drawOverlayRef.current();
+          abandonRef.current();
           return;
         }
         setTool(HAND);
@@ -747,6 +799,7 @@ export default function MapView({
   useEffect(() => {
     setToolPick(null);
     gestureRef.current = null;
+    abandonRef.current();
   }, [tool]);
 
   // A project change can shorten the timeline or forbid barbs.
@@ -1127,7 +1180,16 @@ export default function MapView({
     const field = previewField(tool, toolState, inProgress);
     const paint = rampCss(mpsFromKnots(field.knots), rampMax, PREVIEW_MIN_ALPHA);
 
-    if (inProgress) {
+    // A tool that operates on the field is previewed by the map itself, so the
+    // overlay draws only its outline: a coloured wash over an erased patch
+    // would be showing a wind the eraser is in the middle of removing.
+    if (inProgress && schema.preview !== "field") {
+      const region = new Path2D();
+      buildFootprintPath(region, camera, view, inProgress);
+      context.strokeStyle = "rgba(160, 232, 255, 0.95)";
+      context.lineWidth = Math.max(1, dpr);
+      context.stroke(region);
+    } else if (inProgress) {
       drawFieldPreview(context, { footprint: inProgress, paint, ...field }, dpr);
     }
 
@@ -1147,9 +1209,11 @@ export default function MapView({
       if (hovered) {
         const tip = new Path2D();
         buildFootprintPath(tip, camera, view, hovered);
-        context.fillStyle = paint;
-        context.fill(tip);
-        if (showGlyphs) {
+        if (schema.preview === "field") {
+          context.fillStyle = paint;
+          context.fill(tip);
+        }
+        if (showGlyphs && schema.preview === "field") {
           const hoverField = previewField(tool, toolState, hovered);
           const head = footprintHead(hovered);
           if (head) drawGlyphs(context, [head], hoverField.knots, hoverField.azimuthAt, dpr);
@@ -1180,6 +1244,73 @@ export default function MapView({
     drawOverlayRef.current = drawOverlay;
     drawOverlay();
   }, [drawOverlay]);
+
+  /**
+   * Refreshes the live operator preview, and says whether the map must redraw.
+   *
+   * The eraser and the clone stamp paint what is *already there*, so a preview
+   * drawn on the overlay could only ever be a coloured guess at it (spec.md
+   * 6.1). Instead the gesture's coverage is rasterised into a mask and the map
+   * is drawn through it: the field is taken away where the eraser covers, and
+   * replaced from the source where the clone does.
+   *
+   * Nothing here is per tool. The footprint comes from the same builder the
+   * overlay uses, so a new tool that operated on the field would inherit this
+   * by declaring how it previews.
+   */
+  const refreshOperator = useCallback(
+    (drawing: InProgress | null): boolean => {
+      const had = operatorRef.current !== null;
+      const kind = schema?.preview;
+      const operates = kind === "erase" || kind === "clone";
+      const footprint =
+        drawing && operates && tool !== HAND
+          ? footprintOf(tool, toolState, finished(drawing), cameraRef.current)
+          : null;
+
+      if (!footprint || !drawing || !operates) {
+        operatorRef.current = null;
+        return had;
+      }
+
+      const view = viewRef.current;
+      const width = Math.max(1, Math.round(view.width * MASK_SCALE));
+      const height = Math.max(1, Math.round(view.height * MASK_SCALE));
+      const canvas = (maskCanvas.current ??= document.createElement("canvas"));
+      if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+      }
+      const context = canvas.getContext("2d");
+      if (!context) {
+        operatorRef.current = null;
+        return had;
+      }
+      context.setTransform(1, 0, 0, 1, 0, 0);
+      context.clearRect(0, 0, width, height);
+      // The footprint is built in framebuffer pixels, so the context is scaled
+      // rather than the path: the shader samples by a normalised coordinate and
+      // does not care what size the mask is.
+      context.scale(MASK_SCALE, MASK_SCALE);
+      const region = new Path2D();
+      buildFootprintPath(region, cameraRef.current, view, footprint);
+      // Only the alpha is read, so the colour is arbitrary; opaque white is
+      // the one that says "fully covered" at a glance in a debugger.
+      context.fillStyle = "#fff";
+      context.fill(region);
+
+      const gesture = finished(drawing);
+      const source =
+        kind === "clone" ? cloneSourceCamera(toolState, gesture, cameraRef.current) : null;
+      operatorRef.current = {
+        mask: canvas,
+        kind,
+        ...(source ? { source } : {}),
+      };
+      return true;
+    },
+    [schema, tool, toolState],
+  );
 
   /** Screen positions of the handles, or null when nothing is selected. */
   const handlePositions = useCallback(() => {
@@ -1486,6 +1617,10 @@ export default function MapView({
           ) > spacing;
         if (moved) drawing.points.push([geo.lon, geo.lat]);
       }
+      // For a tool that operates on the field, the map *is* the preview, so the
+      // GL pass has to run too. No tile is refetched — the revision has not
+      // moved — so this redraws textures that are already resident.
+      if (refreshOperator(drawing)) requestDraw();
       drawOverlay();
       return;
     }
@@ -1494,6 +1629,7 @@ export default function MapView({
     if (drawing?.kind === "extent") {
       const geo = unproject(cameraRef.current, viewRef.current, point);
       drawing.rim = [geo.lon, geo.lat];
+      if (refreshOperator(drawing)) requestDraw();
       drawOverlay();
       return;
     }
@@ -1569,6 +1705,7 @@ export default function MapView({
 
       // Keep previewing until the field is drawn, with the values the gesture
       // froze rather than whatever the bar says by then (spec.md 6.1).
+      const operator = operatorRef.current;
       const settled: HeldPreview = {
         footprint,
         paint: rampCss(mpsFromKnots(field.knots), rampMax, PREVIEW_MIN_ALPHA),
@@ -1576,6 +1713,9 @@ export default function MapView({
         azimuthAt: field.azimuthAt,
         revision: null,
         at: performance.now(),
+        // A tool that operates on the field keeps operating until its own field
+        // arrives; one that adds a field keeps showing the field it added.
+        ...(operator ? { operator } : {}),
       };
       settling.current = [...settling.current, settled];
 
@@ -1608,6 +1748,7 @@ export default function MapView({
     const drawing = gestureRef.current;
     gestureRef.current = null;
     nodeDrag.current = false;
+
     if (!drawing || !schema || tool === HAND) return;
     // The commit picks the preview up synchronously, so the overlay redraw
     // never sees a moment with neither the gesture nor its field.
@@ -1615,14 +1756,25 @@ export default function MapView({
     // with a pixel of tremor describes an object the user cannot see and did
     // not ask for. Both are no gesture at all.
     if (isComplete(drawing, cameraRef.current.pxPerDeg)) {
+      // The commit takes the live operation over as a held one, so the map
+      // never stops showing the erasure between the release and the tiles.
       void commitGesture(finished(drawing), toolState, schema, tool);
     }
+    // ...and once it has, the live one is done with either way.
+    if (refreshOperator(null)) requestDraw();
     drawOverlayRef.current();
-  }, [commitGesture, schema, tool, toolState]);
+  }, [commitGesture, refreshOperator, requestDraw, schema, tool, toolState]);
 
   useEffect(() => {
     finishGestureRef.current = finishGesture;
   }, [finishGesture]);
+
+  useEffect(() => {
+    abandonRef.current = () => {
+      if (refreshOperator(null)) requestDraw();
+      drawOverlayRef.current();
+    };
+  }, [refreshOperator, requestDraw]);
 
   /**
    * Begins, extends or completes a gesture at a pointer press.
@@ -1669,9 +1821,10 @@ export default function MapView({
           nodeDrag.current = outcome.shapeHandles;
           break;
       }
+      if (refreshOperator(gestureRef.current)) requestDraw();
       drawOverlay();
     },
-    [commitGesture, finishGesture, near, schema, tool, toolState],
+    [commitGesture, finishGesture, near, refreshOperator, requestDraw, schema, tool, toolState],
   );
 
   const endDrag = (event: React.PointerEvent<HTMLCanvasElement>) => {
