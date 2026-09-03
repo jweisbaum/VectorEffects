@@ -1240,13 +1240,18 @@ Left-hand vertical palette, keyboard-shortcut per tool:
 | | Tool | Key |
 |---|---|---|
 | ✋ | Hand / select — pan the map, click objects to select | `V` |
-| 🖌 | Brush | `B` |
+| 🖌 | Brush | `P` |
 | ⭕ | Circle stamp | `C` |
-| ⬟ | Shape fill | `U` |
+| ⬟ | Shape fill | `F` |
 | ⌫ | Eraser | `E` |
 | ⧉ | Clone stamp | `S` |
-| 〰 | Curve | `P` |
+| 〰 | Curve | `B` |
 | 📏 | Measure (dividers / great circle / range rings) | `M` |
+
+`P` for the brush and `B` for the curve follow the conventions of other paint
+applications — the brush is the *pen* tool and the curve the *Bézier* — rather
+than the tools' initials, so hands that already know those keys need not
+relearn them.
 
 Each button carries **a mark rather than a word**: seven names across the top of
 the map is a row of text where a row of shapes is quicker to find, and the

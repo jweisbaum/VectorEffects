@@ -225,17 +225,18 @@ fn has_hover(tool: ToolKind) -> bool {
 
 /// The palette shortcut for a tool.
 ///
-/// The letters spec 8.1 assigns, which are not all mnemonic — the shape fill is
-/// `U` because `F` and `S` are spoken for elsewhere in the table. Taken from
-/// there rather than chosen here, so the manual and the application agree.
+/// The letters spec 8.1 assigns. Two are the conventions of other paint
+/// applications rather than initials: `P` is the brush (the *pen*), and `B` is
+/// the Bézier curve. Taken from the spec rather than chosen here, so the manual
+/// and the application agree.
 fn shortcut_for(tool: ToolKind) -> &'static str {
     match tool {
-        ToolKind::Brush => "b",
+        ToolKind::Brush => "p",
         ToolKind::Circle => "c",
-        ToolKind::ShapeFill => "u",
+        ToolKind::ShapeFill => "f",
         ToolKind::Eraser => "e",
         ToolKind::CloneStamp => "s",
-        ToolKind::Curve => "p",
+        ToolKind::Curve => "b",
     }
 }
 
@@ -456,12 +457,12 @@ mod tests {
         assert_eq!(
             shortcuts,
             vec![
-                (ToolKind::Brush, "b".to_owned()),
+                (ToolKind::Brush, "p".to_owned()),
                 (ToolKind::Circle, "c".to_owned()),
-                (ToolKind::ShapeFill, "u".to_owned()),
+                (ToolKind::ShapeFill, "f".to_owned()),
                 (ToolKind::Eraser, "e".to_owned()),
                 (ToolKind::CloneStamp, "s".to_owned()),
-                (ToolKind::Curve, "p".to_owned()),
+                (ToolKind::Curve, "b".to_owned()),
             ]
         );
     }
