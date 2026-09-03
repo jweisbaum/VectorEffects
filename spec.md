@@ -213,6 +213,21 @@ ground in the other. There is no such shape. The option bar therefore offers
 the unit once, beside the tool's first size, and it governs every size that
 tool has.
 
+**The unit is the only control.** `stamp_space` is never offered as an option
+of its own, because the unit already asks exactly that question and a tool that
+offered both would have two controls for one property — with the space as the
+one that did nothing, since it is the unit the gesture freezes. So the bar shows
+`km`/`px` and the object stores `geodesic`/`projected`, and the mapping between
+them is the whole of the rule.
+
+It follows that a tool has a unit exactly when it has a `stamp_space`, and that
+the unit inherits that property's dependencies: the shape fill's freehand
+polygon places its vertices geographically one by one, so it has no size, and
+is offered no unit to measure one in. A tool whose sizes are *dragged out*
+rather than typed — the shape fill's presets — still has the unit, because a
+drag is still a measurement and is still made either on the ground or on the
+map; it simply has no number beside it.
+
 **A projected object's local frame is map space, not AEQD** (§7.2). That is the
 one exception to the frame rule, and it is a definitional one rather than a
 concession: a shape defined on the map has to be measured on the map. It gives
@@ -657,7 +672,7 @@ built differently. A new tool gets them all, and the checklist below is what
 | Inherited | Rule | Where |
 |---|---|---|
 | Option bar | Spans the map view and wraps within it. A tool's options grow with the tool, and a bar that sizes to its contents puts the last ones off screen where they cannot be reached. Nothing else may occupy the map's top edge. | §5.5 |
-| Sizes in px | A size given in px selects `stamp_space: projected` and one in km selects `geodesic`, for **every** tool with a size. px means a shape on the map, at any latitude and zoom; km means one on the ground. One vocabulary, one property. | §3.5 |
+| Sizes in px | A size given in px selects `stamp_space: projected` and one in km selects `geodesic`, for **every** tool with a size. px means a shape on the map, at any latitude and zoom; km means one on the ground. One vocabulary, one property — and one control: the unit, never the space beside it. | §3.5 |
 | Gesture preview | Every gesture previews the field it will paint — speed colour and direction glyphs, not an outline — and the preview is held after release until the new revision's tiles are drawn. | §6.1 |
 | Hover indicator | Where a tool has one, it is the exact footprint a click would produce, in the same colour and with the same glyph as the gesture preview. | §6.1 |
 | Chrome | Handles, markers and previews are drawn in the same frame as the map, and never overlap each other. | §5.5 |
@@ -712,7 +727,7 @@ swept capsule chain of the brush shape along that polyline.
 |---|---|---|
 | `brush_shape` | enum `Circle` \| `Square` | **Fixed at creation** (§6.1). The stamp swept along the polyline; the square is axis-aligned in the object's frame, so rotating the object turns it. |
 | `size_km` | f32 | Entered as px or km; stored km (§3.5). The disc's **diameter** and the square's **side**, so the two shapes agree across the flats and differ only at the corners. Measured north-south, which is the axis both stamp spaces share. |
-| `stamp_space` | enum `Geodesic` \| `Projected` | **Fixed at creation** (§6.1), being the stamp's geometry like `brush_shape`. Whether the stamp is a shape on the ground or a shape on the map (§3.5). Chosen by the size's unit: km paints geodesic, px paints projected. Two strokes differing in it never merge — the footprints are different shapes. |
+| `stamp_space` | enum `Geodesic` \| `Projected` | **Fixed at creation** (§6.1), being the stamp's geometry like `brush_shape`. Whether the stamp is a shape on the ground or a shape on the map (§3.5). **Not a control of its own**: the size's unit chooses it, km paints geodesic and px paints projected. Two strokes differing in it never merge — the footprints are different shapes. |
 | `speed` | f32 m/s | |
 | `direction_mode` | enum `Constant` \| `TowardPoint` \| `AwayFromPoint` | Step-interpolated. `AwayFromPoint` is the reciprocal of `TowardPoint` at every cell, so a field radiating out of a low and one converging on it are the same stroke with one option flipped. |
 | `direction` | Angle | Used when `Constant`. |
@@ -740,7 +755,7 @@ Click to place; no drag.
 | `speed_min`, `speed_max` | f32 | `FilledGradient`: radial ramp, centre→edge. |
 | `rotation_sense` | enum `CW` \| `CCW` | Tangential flow direction. |
 | `diameter_km` | f32 | px or km input; stored km (§3.5). |
-| `stamp_space` | enum `Geodesic` \| `Projected` | **Fixed at creation.** The same property the brush carries, and chosen the same way — px paints `projected`, a circle on the map at any latitude; km paints `geodesic`, a constant-radius cap that appears stretched near the poles. It was once `circle_space`, with its own `ScreenCircular`/`GeodesicCircular` vocabulary; one question deserves one name (§6.1). |
+| `stamp_space` | enum `Geodesic` \| `Projected` | **Fixed at creation**, and set by the diameter's unit rather than by a control of its own — px paints `projected`, a circle on the map at any latitude; km paints `geodesic`, a constant-radius cap that appears stretched near the poles. The unit governs the ring width too: one space per object means one unit per tool (§3.5). It was once `circle_space`, with its own `ScreenCircular`/`GeodesicCircular` vocabulary; one question deserves one name (§6.1). |
 | `feather` | f32 0–1 | |
 | `divergence`, `curl` | f32 | Kept here, unlike the brush: a circle *has* a centre, which is what both are measured from (§7.5). |
 
@@ -766,7 +781,7 @@ carries an optional radius to say which of the two a given disc is.
 | Option | Type | Notes |
 |---|---|---|
 | `shape_source` | enum `Polygon` \| `Square` \| `Rectangle` \| `Circle` | **Fixed at creation**: it decides which geometry the object *is*. |
-| `stamp_space` | enum `Geodesic` \| `Projected` | **Fixed at creation.** Applies to the dragged-out presets, which have a size: px gives a shape that keeps its proportions on the map, km one that keeps them on the ground. A freehand polygon has no size input — its vertices are placed geographically, one by one — so the question does not arise and the property is inert for it (§6.1). |
+| `stamp_space` | enum `Geodesic` \| `Projected` | **Fixed at creation**, and set by the tool's unit rather than by a control of its own. Applies to the dragged-out presets: px gives a shape that keeps its proportions on the map, km one that keeps them on the ground. The presets type no number, so the unit stands alone — a drag is still a measurement. A freehand polygon has no size at all, its vertices being placed geographically one by one, so the question does not arise, the property is inert for it, and the unit is not offered (§6.1). |
 | `vector_mode` | enum `Constant` \| `Gradient` | |
 | `speed` | f32 | `Constant`. |
 | `speed_start`, `speed_end` | f32 | `Gradient`. |
@@ -792,7 +807,7 @@ restoring what was underneath.
 |---|---|
 | `brush_shape` | enum `Circle` \| `Square` — **fixed at creation**, as on the brush |
 | `size_km` | f32 (px or km input) |
-| `stamp_space` | enum `Geodesic` \| `Projected` — **fixed at creation**; px selects `projected`, as on the brush (§3.5) |
+| `stamp_space` | enum `Geodesic` \| `Projected` — **fixed at creation**; set by the size's unit, px selecting `projected`, as on the brush (§3.5) |
 | `feather` | f32 0–1 — ramps *toward* 0 speed, i.e. blends back toward the underlying field's speed at the edge |
 
 Hover: yes — the same footprint outline the brush shows, since it sweeps the
@@ -814,7 +829,7 @@ this is the one tool whose evaluation has a single implementation.
 |---|---|---|
 | `brush_shape` | enum `Circle` \| `Square` | **Fixed at creation**, as on the brush. |
 | `size_km` | f32 | px or km input. |
-| `stamp_space` | enum `Geodesic` \| `Projected` | **Fixed at creation**; px selects `projected` (§3.5). |
+| `stamp_space` | enum `Geodesic` \| `Projected` | **Fixed at creation**; set by the size's unit, px selecting `projected` (§3.5). |
 | `source_point` | LonLat | Placeable by pointing, on the tool and on the object, like every position option (§6.1) — "a dedicated pick action" is that shared affordance, not a bespoke one. |
 | `offset_mode` | enum `Aligned` \| `Fixed` | `Aligned`: the source moves with the brush, preserving the offset the gesture began with, so a long stroke copies a correspondingly long band. `Fixed`: the source stays where it was put, so every stamp along the stroke reads the same neighbourhood of it and a long stroke repeats one patch. The displacement is measured from the object's anchor in the first case and from the nearest point of the stroke's own skeleton — the stamp centre for that cell — in the second. |
 | `feather` | f32 0–1 | |
@@ -836,7 +851,7 @@ A polyline or cubic-Bézier path with a vector field along it.
 | Option | Type | Notes |
 |---|---|---|
 | `curve_kind` | enum `Polyline` \| `Bezier` | **Fixed at creation.** A node's handles are what make a segment a Bézier, so the kind is implied by the geometry — but it is also what the *tool* was set to when the path was drawn, which is what the option bar has to remember. |
-| `stamp_space` | enum `Geodesic` \| `Projected` | **Fixed at creation.** The corridor has a width, so it asks the same question every sized tool asks (§3.5). |
+| `stamp_space` | enum `Geodesic` \| `Projected` | **Fixed at creation**; set by the width's unit. The corridor has a width, so it asks the same question every sized tool asks (§3.5). |
 | `speed` | f32 | |
 | `direction_mode` | enum `Absolute` \| `RelativeToPath` | **Its own property**, not the shared `direction_mode`: a curve aims along its path, where the shared modes aim at a point. A tool may add modes of its own; it may not redefine a shared one. |
 | `direction` | Angle | `Absolute`: fixed bearing, a flow direction shown in the project's convention (§3.3). `RelativeToPath`: an *offset* added to the path's local tangent, so 0 = along the path and 90 = across it — an offset is not an azimuth and must not be converted. The two readings of one property are why it is displayed by mode, not by unit. |

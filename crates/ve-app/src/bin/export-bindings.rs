@@ -17,7 +17,7 @@ use ve_app::document::{
 use ve_app::edit::{BrushDirectionMode, BrushShape, BrushStroke};
 use ve_app::error::AppErrorPayload;
 use ve_app::export::{ExportEstimate, ExportProgress, ExportRequest, ExportResult};
-use ve_app::palette::{GestureSelector, OptionDependency, ToolOptionSpec, ToolSchema};
+use ve_app::palette::{GestureSelector, OptionDependency, Sizing, ToolOptionSpec, ToolSchema};
 use ve_app::projects::{NewProjectRequest, ProjectSummary, RecentProject};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -51,6 +51,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ToolOptionSpec::export_all(&cfg)?;
     OptionDependency::export_all(&cfg)?;
     GestureSelector::export_all(&cfg)?;
+    Sizing::export_all(&cfg)?;
     DocumentTree::export_all(&cfg)?;
     ve_app::transform::SelectionTransform::export_all(&cfg)?;
     ve_app::transform::TransformKind::export_all(&cfg)?;

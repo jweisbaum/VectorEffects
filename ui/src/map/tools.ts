@@ -106,9 +106,17 @@ export function defaultState(schema: ToolSchema): ToolState {
   return { values, unit: "km" };
 }
 
-/** Whether a tool has any option measured in kilometres. */
-export function hasSize(schema: ToolSchema): boolean {
-  return schema.options.some((spec) => spec.unit === "kilometres");
+/**
+ * Whether the tool's unit control is live, given the modes it is in.
+ *
+ * The unit *is* the stamp-space control (spec.md 3.5), so it carries that
+ * property's dependency rules: the shape fill's freehand polygon has no size,
+ * and so is offered no unit to measure one in.
+ */
+export function offersUnit(schema: ToolSchema, values: ToolValues): boolean {
+  const sizing = schema.sizing;
+  if (!sizing) return false;
+  return sizing.depends_on.every((rule) => rule.live_for.includes(choiceOf(values, rule.on)));
 }
 
 /**
@@ -226,9 +234,13 @@ export function frozenOptions(
   }
 
   // The unit chose the space, and the space is a property of the object
-  // (spec.md 3.5). Appended last so it overrides anything the bar was holding:
-  // the unit selector is the control, and a stale value behind it is not.
-  if (hasSize(schema)) {
+  // (spec.md 3.5). Sent from the unit and never from the bar's values, because
+  // the unit is the only control there is: the tool offers no stamp-space
+  // option of its own, so there is nothing else it could come from.
+  //
+  // Sent even where the mode makes it inert — a polygon's, say. Hidden is not
+  // deleted, and the object still carries the property at a known value.
+  if (schema.sizing) {
     const space = spaceFor(state.unit);
     options.push({
       property: "StampSpace",

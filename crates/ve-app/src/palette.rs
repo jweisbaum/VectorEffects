@@ -90,6 +90,24 @@ pub enum GestureSelector {
     },
 }
 
+/// The km/px control a tool offers, and when it is live.
+///
+/// The unit *is* the `stamp_space` control (spec.md 3.5): px asks for a shape
+/// on the map and km for one on the ground, so offering the space beside the
+/// unit would be two controls for one property, and the space would be the one
+/// that did nothing. `stamp_space` is therefore not among a tool's options, and
+/// this stands in its place — carrying the same dependency rules, so a control
+/// the mode makes inert is still hidden.
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export, export_to = "Sizing.ts")]
+pub struct Sizing {
+    /// What makes the unit inert, if anything.
+    ///
+    /// The shape fill's freehand polygon is the case: its vertices are placed
+    /// geographically one by one, so it has no size and no space to size it in.
+    pub depends_on: Vec<OptionDependency>,
+}
+
 /// Everything the palette and the option bar need for one tool.
 #[derive(Debug, Clone, Serialize, TS)]
 #[ts(export, export_to = "ToolSchema.ts")]
@@ -108,6 +126,13 @@ pub struct ToolSchema {
     /// (spec.md 6.2): both are built up point by point, so a single click
     /// produces nothing to show.
     pub hover: bool,
+    /// The unit control, when the tool's shapes are measured at all.
+    ///
+    /// `None` for a tool with nothing to measure. `Some` for the shape fill as
+    /// well as the typed ones: its presets are dragged out rather than typed,
+    /// but a drag is still a measurement and is still made either on the ground
+    /// or on the map.
+    pub sizing: Option<Sizing>,
     /// Its options, in the order the bar should show them.
     pub options: Vec<ToolOptionSpec>,
 }
@@ -171,10 +196,28 @@ fn shortcut_for(tool: ToolKind) -> &'static str {
     }
 }
 
+/// What makes one of `tool`'s properties inert, in wire form.
+fn dependencies_of(tool: ToolKind, prop: PropId) -> Vec<OptionDependency> {
+    schema::dependencies(tool)
+        .iter()
+        .filter(|rule| rule.prop == prop)
+        .map(|rule| OptionDependency {
+            on: format!("{:?}", rule.on),
+            live_for: rule.live_for.to_vec(),
+        })
+        .collect()
+}
+
 /// Describes one tool.
 fn describe(tool: ToolKind) -> ToolSchema {
     let options = schema::tool_specs(tool)
         .iter()
+        // `stamp_space` is not offered as an option of its own. It asks exactly
+        // the question the size's unit already asks — px is a shape on the map,
+        // km one on the ground (spec.md 3.5) — and a bar that offered both
+        // would have two controls for one property, one of which does nothing.
+        // The unit is the control; [`ToolSchema::sized`] says the tool has one.
+        .filter(|spec| spec.id != PropId::StampSpace)
         .chain(
             // The one common property a tool bar owns. The rest of `COMMON` is
             // the object's placement and lifetime, which a gesture decides and
@@ -191,14 +234,7 @@ fn describe(tool: ToolKind) -> ToolSchema {
             max: spec.range.map(|(_, max)| max),
             variants: spec.variants.iter().map(|v| (*v).to_owned()).collect(),
             creation_only: spec.creation_only,
-            depends_on: schema::dependencies(tool)
-                .iter()
-                .filter(|rule| rule.prop == spec.id)
-                .map(|rule| OptionDependency {
-                    on: format!("{:?}", rule.on),
-                    live_for: rule.live_for.to_vec(),
-                })
-                .collect(),
+            depends_on: dependencies_of(tool, spec.id),
         })
         .collect();
 
@@ -208,6 +244,11 @@ fn describe(tool: ToolKind) -> ToolSchema {
         shortcut: shortcut_for(tool).to_owned(),
         gesture: gesture_for(tool),
         hover: has_hover(tool),
+        // Declaring a stamp space is what it means for a tool's shapes to be
+        // measured, whether the measurement is typed or dragged out.
+        sizing: schema::spec_for(tool, PropId::StampSpace).map(|_| Sizing {
+            depends_on: dependencies_of(tool, PropId::StampSpace),
+        }),
         options,
     }
 }
@@ -227,14 +268,26 @@ pub fn palette() -> Vec<ToolSchema> {
 mod tests {
     use super::*;
 
-    /// The bar must offer every option a tool has, or an option that is
-    /// creation-only becomes unreachable — settable nowhere and editable
+    /// Every property a tool has must be *settable at creation*, or a
+    /// creation-only one becomes unreachable — settable nowhere and editable
     /// nowhere, which spec 6.1 says does not belong on the tool at all.
+    ///
+    /// `stamp_space` is settable without being listed: the size's unit is its
+    /// control, and a tool that has the property must therefore have the unit.
+    /// That is the whole of the exception, and it is checked rather than
+    /// assumed.
     #[test]
-    fn every_tool_property_reaches_the_option_bar() {
+    fn every_tool_property_is_settable_at_creation() {
         for described in palette() {
             let tool = described.tool.kind();
             for spec in schema::tool_specs(tool) {
+                if spec.id == PropId::StampSpace {
+                    assert!(
+                        described.sizing.is_some(),
+                        "{tool:?} has a stamp space but no unit to select it with"
+                    );
+                    continue;
+                }
                 assert!(
                     described
                         .options
@@ -244,6 +297,39 @@ mod tests {
                     spec.id
                 );
             }
+        }
+    }
+
+    /// The converse: a tool that says it is sized must actually have the
+    /// property its unit selects, or the bar would offer a control that writes
+    /// nowhere.
+    #[test]
+    fn a_sized_tool_has_a_stamp_space_to_select() {
+        for described in palette() {
+            let tool = described.tool.kind();
+            assert_eq!(
+                described.sizing.is_some(),
+                schema::spec_for(tool, PropId::StampSpace).is_some(),
+                "{tool:?}: offering a unit and having a stamp space are one claim"
+            );
+        }
+    }
+
+    /// Spec 3.5 and 6.1: one question, one control. The unit says whether a
+    /// shape is measured on the map or on the ground, so a `stamp_space`
+    /// dropdown beside it would be a second control for the same property —
+    /// and the loser of the two, since the unit is what the gesture freezes.
+    #[test]
+    fn no_tool_offers_a_stamp_space_option() {
+        for described in palette() {
+            assert!(
+                !described
+                    .options
+                    .iter()
+                    .any(|o| o.property == format!("{:?}", PropId::StampSpace)),
+                "{:?} offers a stamp space beside its unit",
+                described.tool
+            );
         }
     }
 
@@ -298,14 +384,17 @@ mod tests {
 
     /// The dependency rules the bar resolves must name options the bar has, or
     /// it would be resolving them against a value it never holds and would
-    /// treat the option as inert forever.
+    /// treat the option as inert forever. The unit's rules are checked with the
+    /// rest: they are inherited from the stamp space it stands in for, and a
+    /// rule keyed on something the bar cannot see would hide the unit always.
     #[test]
     fn every_dependency_names_an_option_the_bar_holds() {
         for described in palette() {
+            let holds = |name: &str| described.options.iter().any(|o| o.property == name);
             for option in &described.options {
                 for rule in &option.depends_on {
                     assert!(
-                        described.options.iter().any(|o| o.property == rule.on),
+                        holds(&rule.on),
                         "{:?}: {} depends on {}, which the bar does not hold",
                         described.tool,
                         option.property,
@@ -313,6 +402,41 @@ mod tests {
                     );
                 }
             }
+            for rule in described.sizing.iter().flat_map(|s| &s.depends_on) {
+                assert!(
+                    holds(&rule.on),
+                    "{:?}: the unit depends on {}, which the bar does not hold",
+                    described.tool,
+                    rule.on
+                );
+            }
+        }
+    }
+
+    /// The unit stands in for `stamp_space`, so it must be live in exactly the
+    /// modes the property is read in. The shape fill is the case that matters:
+    /// a freehand polygon has no size, so it must not be offered a unit.
+    #[test]
+    fn the_unit_is_live_exactly_where_the_stamp_space_is() {
+        let fill = palette()
+            .into_iter()
+            .find(|d| d.tool == Tool::ShapeFill)
+            .expect("the shape fill is in the palette");
+        let sizing = fill.sizing.expect("the shape fill measures its presets");
+
+        let live_for = |index: u8| {
+            sizing
+                .depends_on
+                .iter()
+                .all(|rule| rule.live_for.contains(&index))
+        };
+        // Shape source 0 is the freehand polygon; 1 to 3 are the presets.
+        assert!(
+            !live_for(0),
+            "a polygon was offered a unit it has no size for"
+        );
+        for preset in 1..=3 {
+            assert!(live_for(preset), "preset {preset} was not offered a unit");
         }
     }
 }

@@ -19,6 +19,7 @@ import type { Camera } from "./camera";
 import {
   convertSizes,
   liveOptions,
+  offersUnit,
   type SizeUnit,
   shownAngle,
   type ToolState,
@@ -67,10 +68,14 @@ export default function ToolOptions({
     onChange({ ...state, values: { ...state.values, [property]: value } });
 
   const options = liveOptions(schema, state.values);
+  const setUnit = (unit: SizeUnit) =>
+    onChange(convertSizes(state, schema, unit, camera, camera.centerLat));
+
   // The unit selector belongs to the first size the tool has, and governs all
   // of them: `stamp_space` is one property per object, so a diameter in px and
   // a ring width in km would describe a shape that does not exist (spec.md 3.5).
   const firstSize = options.find((spec) => spec.unit === "kilometres")?.property;
+  const unitIsLive = offersUnit(schema, state.values);
 
   return (
     <div className="tool-options">
@@ -80,18 +85,48 @@ export default function ToolOptions({
           spec={spec}
           state={state}
           convention={convention}
-          showUnit={spec.property === firstSize}
+          showUnit={unitIsLive && spec.property === firstSize}
           picking={picking}
           onPick={onPick}
           onValue={(value) => set(spec.property, value)}
-          onUnit={(unit) =>
-            onChange(convertSizes(state, schema, unit, camera, camera.centerLat))
-          }
+          onUnit={setUnit}
         />
       ))}
+
+      {/*
+        A tool that measures but types no number: the shape fill, whose presets
+        are dragged out on the map. The unit is still the question of whether
+        what was dragged is a shape on the ground or one on the map (spec.md
+        3.5), so it is asked here rather than nowhere.
+      */}
+      {unitIsLive && firstSize === undefined && (
+        <label>
+          Size in
+          <select value={state.unit} onChange={(e) => setUnit(unitOf(e.target.value))} title={UNIT_TITLE}>
+            <option value="km">km (on the ground)</option>
+            <option value="px">px (on the map)</option>
+          </select>
+        </label>
+      )}
     </div>
   );
 }
+
+/** Reads a unit off a select, defaulting to kilometres. */
+function unitOf(value: string): SizeUnit {
+  return value === "px" ? "px" : "km";
+}
+
+/**
+ * What the unit means, for the control's tooltip.
+ *
+ * Shared by both places the unit is offered, so the two cannot come to explain
+ * it differently.
+ */
+const UNIT_TITLE =
+  "A size in pixels paints a shape on the map — the same size on screen at any latitude. " +
+  "It resolves to kilometres when the object is created and never changes afterwards. " +
+  "One unit for the whole tool, because the space it selects is one property of the object.";
 
 function Option({
   spec,
@@ -269,8 +304,8 @@ function Option({
           {size && showUnit && (
             <select
               value={state.unit}
-              onChange={(e) => onUnit(e.target.value === "px" ? "px" : "km")}
-              title="A size in pixels paints a shape on the map — the same size on screen at any latitude. It resolves to kilometres when the object is created and never changes afterwards. One unit for the whole tool, because the space it selects is one property of the object."
+              onChange={(e) => onUnit(unitOf(e.target.value))}
+              title={UNIT_TITLE}
             >
               <option value="km">km</option>
               <option value="px">px</option>

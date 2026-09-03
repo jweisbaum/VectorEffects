@@ -23,6 +23,7 @@ import {
   gestureKind,
   isLive,
   liveOptions,
+  offersUnit,
   shownAngle,
   sizeKm,
   spaceFor,
@@ -56,6 +57,9 @@ const shapeFill: ToolSchema = {
     on: "ShapeSource",
     gestures: ["ring", "extent", "extent", "extent"],
   },
+  // Presets are measured; a freehand polygon is not, so the unit is inert for
+  // it — the same rule `stamp_space` carries, which the unit stands in for.
+  sizing: { depends_on: [{ on: "ShapeSource", live_for: [1, 2, 3] }] },
   options: [
     option({
       property: "ShapeSource",
@@ -113,6 +117,7 @@ const brush: ToolSchema = {
   shortcut: "b",
   hover: true,
   gesture: { kind: "always", gesture: "stroke" },
+  sizing: { depends_on: [] },
   options: [
     option({
       property: "BrushShape",
@@ -225,6 +230,41 @@ describe("gestureKind", () => {
   });
 });
 
+describe("offersUnit", () => {
+  /**
+   * The unit is the stamp-space control, so a tool must never offer both —
+   * two controls for one property, and the space would be the one that did
+   * nothing. The backend leaves the space out of the options; this checks the
+   * bar does not put it back.
+   */
+  it("is the only control for the space", () => {
+    for (const schema of [brush, shapeFill]) {
+      expect(schema.options.some((o) => o.property === "StampSpace")).toBe(false);
+    }
+  });
+
+  it("is offered by a tool that measures", () => {
+    expect(offersUnit(brush, defaultState(brush).values)).toBe(true);
+  });
+
+  it("is not offered by a tool that measures nothing", () => {
+    expect(offersUnit({ ...brush, sizing: null }, {})).toBe(false);
+  });
+
+  /**
+   * A freehand polygon places its vertices geographically, one by one, so it
+   * has no size — and no unit to measure one in. The presets do, so the same
+   * tool offers the unit in three of its four modes.
+   */
+  it("follows the same rule the space it selects follows", () => {
+    const source = (index: number) => ({ ShapeSource: { kind: "choice" as const, index } });
+    expect(offersUnit(shapeFill, source(0))).toBe(false);
+    for (const preset of [1, 2, 3]) {
+      expect(offersUnit(shapeFill, source(preset))).toBe(true);
+    }
+  });
+});
+
 describe("sizes in px and km", () => {
   /** px is a shape on the map, km one on the ground (spec.md 3.5). */
   it("selects the stamp space from the unit", () => {
@@ -323,9 +363,23 @@ describe("frozenOptions", () => {
     expect(sent).toContain("Target");
   });
 
-  /** A tool with no size has no space to send. */
-  it("sends no stamp space for a tool that has no size", () => {
+  /**
+   * A tool that measures anything sends the space its unit selected, even for
+   * a mode that does not read it — hidden is not deleted, and the object still
+   * carries the property at a known value (spec.md 6.1).
+   */
+  it("sends the space for a tool that measures, whatever its mode", () => {
     const sent = frozenOptions(defaultState(shapeFill), shapeFill, camera, 0);
+    expect(sent).toContainEqual({
+      property: "StampSpace",
+      value: { kind: "choice", index: 0 },
+    });
+  });
+
+  /** A tool that measures nothing has no space to send. */
+  it("sends no stamp space for a tool that measures nothing", () => {
+    const measureless: ToolSchema = { ...shapeFill, sizing: null };
+    const sent = frozenOptions(defaultState(measureless), measureless, camera, 0);
     expect(sent.some((o) => o.property === "StampSpace")).toBe(false);
   });
 });
