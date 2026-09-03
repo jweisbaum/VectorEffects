@@ -248,8 +248,11 @@ fn shape_of(object: &Object, step: u32) -> Option<(Shape, Vec<Local>)> {
             };
             Some((shape, path))
         }
-        Geometry::Disc => {
-            let radius_m = km(PropId::DiameterKm) / 2.0;
+        Geometry::Disc { radius_m } => {
+            // A dragged-out circle carries its own radius; a stamp reads the
+            // diameter it was given. Which of the two an object is was decided
+            // when it was drawn, so there is no mode to consult here.
+            let radius_m = radius_m.unwrap_or_else(|| km(PropId::DiameterKm) / 2.0);
             // Fill mode 1 is the perimeter ring; 0 and 2 are filled.
             let shape = if choice(object, PropId::FillMode, step) == 1 {
                 Shape::Annulus {

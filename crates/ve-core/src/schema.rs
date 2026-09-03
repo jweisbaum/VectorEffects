@@ -152,6 +152,13 @@ pub enum PropId {
     // --- Shape fill ---
     /// Constant vector, or a gradient.
     VectorMode,
+    /// Which geometry the shape fill *is*: a freehand polygon or a preset.
+    ///
+    /// Creation-only, like every property that decides what an object is: a
+    /// polygon and a dragged-out rectangle are different geometries, and
+    /// switching between them afterwards has no honest answer for the
+    /// vertices the user placed.
+    ShapeSource,
 
     // --- Clone stamp ---
     /// Where the clone samples from.
@@ -162,6 +169,13 @@ pub enum PropId {
     // --- Curve ---
     /// Absolute bearing, or relative to the path tangent.
     CurveDirectionMode,
+    /// Whether the path's segments are straight or cubic Béziers.
+    ///
+    /// Implied by the geometry — a node with handles is a Bézier control —
+    /// but carried as a property too, because it is what the *tool* was set to
+    /// when the gesture was drawn and what the option bar has to remember.
+    /// Creation-only for the same reason [`Self::ShapeSource`] is.
+    CurveKind,
 }
 
 /// A unit, for display and for the inspector's suffix.
@@ -386,6 +400,11 @@ pub const FILL_MODES: &[&str] = &["filled", "perimeter", "filled_gradient"];
 pub const ROTATION_SENSES: &[&str] = &["cw", "ccw"];
 /// Variants of [`PropId::VectorMode`].
 pub const VECTOR_MODES: &[&str] = &["constant", "gradient"];
+/// Variants of [`PropId::ShapeSource`]. Index 0 is the freehand polygon, which
+/// is the only one with no size to drag out.
+pub const SHAPE_SOURCES: &[&str] = &["polygon", "square", "rectangle", "circle"];
+/// Variants of [`PropId::CurveKind`].
+pub const CURVE_KINDS: &[&str] = &["polyline", "bezier"];
 /// Variants of [`PropId::OffsetMode`].
 pub const OFFSET_MODES: &[&str] = &["aligned", "fixed"];
 /// Variants of [`PropId::CurveDirectionMode`].
@@ -481,6 +500,14 @@ const CIRCLE: &[PropSpec] = &[
 ];
 
 const SHAPE_FILL: &[PropSpec] = &[
+    // Which geometry the object is. Frozen for the same reason the brush's
+    // stamp is: a polygon's vertices and a dragged-out rectangle's extents are
+    // not convertible into one another.
+    frozen(choice(PropId::ShapeSource, "Shape", 0, SHAPE_SOURCES)),
+    // Applies to the presets, which have a size dragged out on the map. A
+    // freehand polygon's vertices are placed geographically one by one, so
+    // there is no size for a space to interpret and `DEPENDENCIES` hides it.
+    frozen(choice(PropId::StampSpace, "Stamp space", 0, STAMP_SPACES)),
     choice(PropId::VectorMode, "Vector mode", 0, VECTOR_MODES),
     num(PropId::Speed, "Speed", 10.0, 0.0, 120.0, Unit::Speed),
     num(
@@ -510,7 +537,13 @@ const SHAPE_FILL: &[PropSpec] = &[
     num(PropId::Curl, "Curl", 0.0, -1.0, 1.0, Unit::None),
 ];
 
+// "Identical interaction to the brush" is binding (spec.md 6.2): the eraser
+// sweeps the same stamp along the same kind of polyline, so it carries the same
+// stamp properties. Anything else and a px-sized eraser would paint an ellipse
+// over a stroke that is a circle on the map.
 const ERASER: &[PropSpec] = &[
+    frozen(choice(PropId::BrushShape, "Brush shape", 0, BRUSH_SHAPES)),
+    frozen(choice(PropId::StampSpace, "Stamp space", 0, STAMP_SPACES)),
     num(
         PropId::SizeKm,
         "Size",
@@ -523,6 +556,8 @@ const ERASER: &[PropSpec] = &[
 ];
 
 const CLONE_STAMP: &[PropSpec] = &[
+    frozen(choice(PropId::BrushShape, "Brush shape", 0, BRUSH_SHAPES)),
+    frozen(choice(PropId::StampSpace, "Stamp space", 0, STAMP_SPACES)),
     num(
         PropId::SizeKm,
         "Size",
@@ -537,6 +572,10 @@ const CLONE_STAMP: &[PropSpec] = &[
 ];
 
 const CURVE: &[PropSpec] = &[
+    frozen(choice(PropId::CurveKind, "Curve", 0, CURVE_KINDS)),
+    // The corridor has a width, so it asks the same question every sized tool
+    // asks: a width in px is a corridor that keeps its thickness on the map.
+    frozen(choice(PropId::StampSpace, "Stamp space", 0, STAMP_SPACES)),
     num(
         PropId::WidthKm,
         "Width",
@@ -593,11 +632,58 @@ const BRUSH_DEPENDENCIES: &[Dependency] = &[
     dep(PropId::Target, PropId::DirectionMode, &[1, 2]),
 ];
 
+/// Which of the circle stamp's properties depend on its fill mode.
+///
+/// Fill modes are `filled`, `perimeter`, `filled_gradient` in that order. A
+/// filled disc has no ring to be thick, and a gradient reads its two ends
+/// rather than the single speed — so the panel offering a ring width for a
+/// filled disc is offering a control that does nothing.
+const CIRCLE_DEPENDENCIES: &[Dependency] = &[
+    dep(PropId::RingWidthKm, PropId::FillMode, &[1]),
+    dep(PropId::Speed, PropId::FillMode, &[0, 1]),
+    dep(PropId::SpeedMin, PropId::FillMode, &[2]),
+    dep(PropId::SpeedMax, PropId::FillMode, &[2]),
+];
+
+/// Which of the shape fill's properties depend on another.
+///
+/// Two axes cross here. `vector_mode` chooses between one vector everywhere and
+/// a ramp across the shape, and the constant branch then has the brush's three
+/// aim modes inside it — so `direction` is live only when the object is both
+/// constant *and* on a fixed bearing. [`is_live`] ands the rules together,
+/// which is what lets that be written as two independent lines.
+const SHAPE_FILL_DEPENDENCIES: &[Dependency] = &[
+    // Vector mode 0 is the constant vector; 1 is the gradient.
+    dep(PropId::Speed, PropId::VectorMode, &[0]),
+    dep(PropId::DirectionMode, PropId::VectorMode, &[0]),
+    dep(PropId::Direction, PropId::VectorMode, &[0]),
+    dep(PropId::Target, PropId::VectorMode, &[0]),
+    dep(PropId::SpeedStart, PropId::VectorMode, &[1]),
+    dep(PropId::SpeedEnd, PropId::VectorMode, &[1]),
+    dep(PropId::DirectionStart, PropId::VectorMode, &[1]),
+    dep(PropId::DirectionEnd, PropId::VectorMode, &[1]),
+    dep(PropId::GradientAxis, PropId::VectorMode, &[1]),
+    // ...and inside the constant branch, the same rule the brush has.
+    dep(PropId::Direction, PropId::DirectionMode, &[0]),
+    dep(PropId::Target, PropId::DirectionMode, &[1, 2]),
+    // Shape source 0 is the freehand polygon, whose vertices are placed
+    // geographically one at a time. It has no size, so no space to size it in.
+    dep(PropId::StampSpace, PropId::ShapeSource, &[1, 2, 3]),
+];
+
 /// The dependencies among `tool`'s properties.
+///
+/// The eraser has none — every option it has is read in every mode — and
+/// neither does the clone stamp: both of its offset modes read `source_point`,
+/// one as a fixed sample centre and the other as the origin of the offset. The
+/// curve reads `direction` in both of its modes too, which is exactly why the
+/// rule is scoped per tool rather than keyed on the property alone.
 pub fn dependencies(tool: ToolKind) -> &'static [Dependency] {
     match tool {
         ToolKind::Brush => BRUSH_DEPENDENCIES,
-        _ => &[],
+        ToolKind::Circle => CIRCLE_DEPENDENCIES,
+        ToolKind::ShapeFill => SHAPE_FILL_DEPENDENCIES,
+        ToolKind::Eraser | ToolKind::CloneStamp | ToolKind::Curve => &[],
     }
 }
 
@@ -802,6 +888,209 @@ mod tests {
             panic!("not an enum")
         };
         assert_eq!(spec.variants[idx as usize], "blend");
+    }
+
+    /// The dependency tables are hand-written and name properties by id, so
+    /// the realistic failure is a rule about a property the tool does not have,
+    /// or one keyed on a variant index that does not exist. Both make an option
+    /// silently vanish from the panel rather than crashing.
+    #[test]
+    fn every_dependency_names_properties_its_tool_actually_has() {
+        for tool in ToolKind::ALL {
+            for rule in dependencies(tool) {
+                let ctx = format!("{tool:?}: {:?} on {:?}", rule.prop, rule.on);
+                assert!(
+                    spec_for(tool, rule.prop).is_some(),
+                    "{ctx}: the dependent property is not one of {tool:?}'s"
+                );
+                let on = spec_for(tool, rule.on)
+                    .unwrap_or_else(|| panic!("{ctx}: the deciding property is not {tool:?}'s"));
+                assert_eq!(
+                    on.kind(),
+                    PropKind::Enum,
+                    "{ctx}: only a choice can decide what is live"
+                );
+                assert!(!rule.live_for.is_empty(), "{ctx}: live for nothing at all");
+                for index in rule.live_for {
+                    assert!(
+                        (*index as usize) < on.variants.len(),
+                        "{ctx}: variant {index} is outside {:?}",
+                        on.variants
+                    );
+                }
+                assert_ne!(rule.prop, rule.on, "{ctx}: a property cannot hide itself");
+            }
+        }
+    }
+
+    /// A creation-only property is set once and never edited, so a rule that
+    /// hides it would hide a value nothing can change anyway — and, worse, one
+    /// that the tool's own option bar has to keep offering. The one exception
+    /// is a property whose *whole* meaning depends on what the object is: the
+    /// shape fill's stamp space, which a freehand polygon has no size for.
+    #[test]
+    fn a_hidden_creation_only_property_depends_on_another_creation_only_one() {
+        for tool in ToolKind::ALL {
+            for rule in dependencies(tool) {
+                let Some(spec) = spec_for(tool, rule.prop) else {
+                    continue;
+                };
+                if !spec.creation_only {
+                    continue;
+                }
+                let decider = spec_for(tool, rule.on).expect("checked above");
+                assert!(
+                    decider.creation_only,
+                    "{tool:?}: {:?} is frozen but hidden by {:?}, which can change \
+                     afterwards — the option would appear and disappear on an \
+                     object nobody can edit",
+                    rule.prop, rule.on
+                );
+            }
+        }
+    }
+
+    /// Every mode of a choice must leave something to edit. A variant that
+    /// hides every one of a tool's options is a mode with an empty panel, which
+    /// is always a mistake in the table rather than an intended design.
+    #[test]
+    fn no_mode_hides_every_option_a_tool_has() {
+        for tool in ToolKind::ALL {
+            let deciders: Vec<PropId> = dependencies(tool).iter().map(|d| d.on).collect();
+            for decider in deciders {
+                let spec = spec_for(tool, decider).expect("checked above");
+                for index in 0..spec.variants.len() as u8 {
+                    let live = tool_specs(tool)
+                        .iter()
+                        .filter(|s| {
+                            is_live(tool, s.id, |id| {
+                                if id == decider {
+                                    index
+                                } else {
+                                    spec_for(tool, id)
+                                        .and_then(|s| match s.default {
+                                            PropDefault::Enum(v) => Some(v),
+                                            _ => None,
+                                        })
+                                        .unwrap_or(0)
+                                }
+                            })
+                        })
+                        .count();
+                    assert!(
+                        live > 0,
+                        "{tool:?}: {decider:?} = {:?} leaves nothing editable",
+                        spec.variants[index as usize]
+                    );
+                }
+            }
+        }
+    }
+
+    /// Spec 6.1: an option that can be neither set at creation nor edited
+    /// afterwards can only ever hold its default, and does not belong on the
+    /// tool. Creation-only is therefore a claim about the *tool's* options, and
+    /// this is the half of it the schema can check: that such a property is one
+    /// of the tool's own rather than inherited from `COMMON`, which the tools
+    /// do not offer at creation.
+    #[test]
+    fn nothing_common_is_creation_only() {
+        for spec in COMMON {
+            assert!(
+                !spec.creation_only,
+                "{:?} is common to every tool, so no tool's option bar owns it",
+                spec.id
+            );
+        }
+    }
+
+    /// Spec 6.1: a creation-only property is not animatable, because a keyframe
+    /// is an edit spread over time and the two rules would contradict. The
+    /// document cannot enforce that on its own — `Animatable` holds keys for any
+    /// property — so the rule lives at the write path, and this records which
+    /// properties it has to cover.
+    #[test]
+    fn the_frozen_properties_are_the_ones_that_decide_what_an_object_is() {
+        let mut frozen: Vec<(ToolKind, PropId)> = Vec::new();
+        for tool in ToolKind::ALL {
+            for spec in all_specs(tool) {
+                if spec.creation_only {
+                    frozen.push((tool, spec.id));
+                }
+            }
+        }
+
+        // Named rather than counted: each of these is a claim that the property
+        // is part of the geometry the gesture laid down (spec.md 6.1).
+        assert_eq!(
+            frozen,
+            vec![
+                (ToolKind::Brush, PropId::BrushShape),
+                (ToolKind::Brush, PropId::StampSpace),
+                (ToolKind::Circle, PropId::StampSpace),
+                (ToolKind::ShapeFill, PropId::ShapeSource),
+                (ToolKind::ShapeFill, PropId::StampSpace),
+                (ToolKind::Eraser, PropId::BrushShape),
+                (ToolKind::Eraser, PropId::StampSpace),
+                (ToolKind::CloneStamp, PropId::BrushShape),
+                (ToolKind::CloneStamp, PropId::StampSpace),
+                (ToolKind::Curve, PropId::CurveKind),
+                (ToolKind::Curve, PropId::StampSpace),
+            ]
+        );
+    }
+
+    /// Spec 3.5 and 6.1: px selects `projected` for *every* tool with a size,
+    /// so every tool that has one must carry the property that records the
+    /// choice. Without it the tool's px option would have nowhere to land and
+    /// would quietly paint on the ground instead.
+    ///
+    /// One direction only. The shape fill has a stamp space and no size
+    /// property, because its presets are dragged out and carry their extents in
+    /// the geometry — but the space still decides whether what was dragged is a
+    /// shape on the map or one on the ground.
+    #[test]
+    fn every_tool_with_a_size_property_carries_a_stamp_space() {
+        const SIZES: [PropId; 4] = [
+            PropId::SizeKm,
+            PropId::DiameterKm,
+            PropId::WidthKm,
+            PropId::RingWidthKm,
+        ];
+        for tool in ToolKind::ALL {
+            if !tool_specs(tool).iter().any(|s| SIZES.contains(&s.id)) {
+                continue;
+            }
+            assert!(
+                spec_for(tool, PropId::StampSpace).is_some(),
+                "{tool:?} has a size but no space to size it in"
+            );
+        }
+    }
+
+    /// Spec 6.1: the three shared aim modes mean the same thing for every tool
+    /// that has a target, and are the same property with the same variant
+    /// indices. A tool that offers `toward_point` without a `target` would aim
+    /// at nothing.
+    #[test]
+    fn every_tool_with_an_aim_mode_has_a_target() {
+        for tool in ToolKind::ALL {
+            let Some(mode) = spec_for(tool, PropId::DirectionMode) else {
+                assert!(
+                    spec_for(tool, PropId::Target).is_none(),
+                    "{tool:?} has a target but no mode that reads it"
+                );
+                continue;
+            };
+            assert_eq!(
+                mode.variants, DIRECTION_MODES,
+                "{tool:?} redefines the modes"
+            );
+            assert!(
+                spec_for(tool, PropId::Target).is_some(),
+                "{tool:?} can aim at a point but has no point to aim at"
+            );
+        }
     }
 
     #[test]

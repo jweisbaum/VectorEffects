@@ -764,7 +764,7 @@ fn anchor_commands(gesture: &TransformGesture, pointer: LonLat) -> Vec<Command> 
             // A disc or a rectangle *is* centred on its anchor. There is no
             // geometry to leave behind, so moving the anchor moves the object,
             // which is the only answer that keeps the two consistent.
-            Geometry::Disc | Geometry::Rect { .. } => None,
+            Geometry::Disc { .. } | Geometry::Rect { .. } => None,
         };
 
         commands.push(set_position(item, pointer));

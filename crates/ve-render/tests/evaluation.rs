@@ -88,7 +88,7 @@ fn filled_square(anchor: LonLat, half_km: f64, speed: f32, dir: f64) -> Object {
 /// (spec.md 6.2, 7.5).
 fn disc(anchor: LonLat, diameter_km: f32, speed: f32) -> Object {
     let mut object = Object::new(ToolKind::Circle, "disc", 24);
-    object.geometry = Geometry::Disc;
+    object.geometry = Geometry::Disc { radius_m: None };
     set(&mut object, PropId::Position, PropValue::LonLat(anchor));
     set_num(&mut object, PropId::DiameterKm, diameter_km);
     set_num(&mut object, PropId::Speed, speed);
@@ -487,7 +487,7 @@ fn scale_grows_the_footprint_on_the_ground() {
 fn a_circle_gradient_ramps_from_the_centre_outward() {
     let anchor = ll(0.0, 0.0);
     let mut object = Object::new(ToolKind::Circle, "low", 24);
-    object.geometry = Geometry::Disc;
+    object.geometry = Geometry::Disc { radius_m: None };
     set(&mut object, PropId::Position, PropValue::LonLat(anchor));
     set(&mut object, PropId::FillMode, PropValue::Enum(2));
     set_num(&mut object, PropId::DiameterKm, 2000.0);
@@ -515,7 +515,7 @@ fn a_circle_gradient_ramps_from_the_centre_outward() {
 fn a_circle_rotates_around_its_anchor() {
     let anchor = ll(0.0, 0.0);
     let mut object = Object::new(ToolKind::Circle, "low", 24);
-    object.geometry = Geometry::Disc;
+    object.geometry = Geometry::Disc { radius_m: None };
     set(&mut object, PropId::Position, PropValue::LonLat(anchor));
     set_num(&mut object, PropId::DiameterKm, 2000.0);
     set_num(&mut object, PropId::Speed, 20.0);
@@ -545,7 +545,7 @@ fn a_circle_rotates_around_its_anchor() {
 
     // Counter-clockwise reverses it.
     let mut ccw = Object::new(ToolKind::Circle, "high", 24);
-    ccw.geometry = Geometry::Disc;
+    ccw.geometry = Geometry::Disc { radius_m: None };
     set(&mut ccw, PropId::Position, PropValue::LonLat(anchor));
     set_num(&mut ccw, PropId::DiameterKm, 2000.0);
     set_num(&mut ccw, PropId::Speed, 20.0);
@@ -563,7 +563,7 @@ fn a_circle_rotates_around_its_anchor() {
 fn a_circle_perimeter_leaves_its_hole_empty() {
     let anchor = ll(0.0, 0.0);
     let mut object = Object::new(ToolKind::Circle, "ring", 24);
-    object.geometry = Geometry::Disc;
+    object.geometry = Geometry::Disc { radius_m: None };
     set(&mut object, PropId::Position, PropValue::LonLat(anchor));
     set(&mut object, PropId::FillMode, PropValue::Enum(1));
     set_num(&mut object, PropId::DiameterKm, 2000.0);

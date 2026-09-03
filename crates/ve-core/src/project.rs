@@ -16,7 +16,7 @@ use crate::vector::DirectionConvention;
 /// The document schema version this build writes.
 ///
 /// Opening a newer version is refused; older versions migrate forward on open.
-pub const SCHEMA_VERSION: u32 = 5;
+pub const SCHEMA_VERSION: u32 = 6;
 
 /// The largest number of time steps a project may have.
 pub const MAX_STEPS: u32 = 240;

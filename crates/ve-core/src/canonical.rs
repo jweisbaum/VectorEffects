@@ -104,6 +104,25 @@ rounding_serde!(
     "Serde helper for a dimensionless value."
 );
 
+/// Serde helper for an optional distance in metres.
+///
+/// The same quantisation as [`metres_field`], for a field that may be absent.
+/// `#[serde(with)]` applies to the whole `Option`, not to what is inside it, so
+/// an optional `f64` needs its own helper rather than reusing that one.
+pub mod optional_metres_field {
+    use super::*;
+
+    /// Rounds, then serialises.
+    pub fn serialize<S: Serializer>(value: &Option<f64>, s: S) -> Result<S::Ok, S::Error> {
+        value.map(metres).serialize(s)
+    }
+
+    /// Deserialises, then rounds.
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
+        Ok(Option::<f64>::deserialize(d)?.map(metres))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

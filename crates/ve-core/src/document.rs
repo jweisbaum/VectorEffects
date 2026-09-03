@@ -74,8 +74,24 @@ pub enum Geometry {
         /// One polyline per stroke that has been merged into this object.
         chains: Vec<Vec<LocalPoint>>,
     },
-    /// A circle centred on the anchor. Diameter comes from a property.
-    Disc,
+    /// A circle centred on the anchor.
+    ///
+    /// The radius comes from one of two places, which is what the `Option`
+    /// records. The circle *stamp* types a diameter, so its size is the
+    /// animatable `diameter_km` property and the geometry carries `None`. The
+    /// shape fill's circle preset is *dragged out* on the map, so its size is
+    /// part of what the user drew and lives here — the same place a dragged
+    /// rectangle's extents live, and resized afterwards by the same scale
+    /// handle rather than by a number nobody typed.
+    Disc {
+        /// Radius in metres, for a circle whose size was dragged out.
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            with = "crate::canonical::optional_metres_field"
+        )]
+        radius_m: Option<f64>,
+    },
     /// An arbitrary closed polygon.
     Polygon {
         /// Vertices in order. Implicitly closed.
@@ -104,7 +120,7 @@ impl Geometry {
             ToolKind::Brush | ToolKind::Eraser | ToolKind::CloneStamp => {
                 Self::Stroke { chains: Vec::new() }
             }
-            ToolKind::Circle => Self::Disc,
+            ToolKind::Circle => Self::Disc { radius_m: None },
             ToolKind::ShapeFill => Self::Polygon { points: Vec::new() },
             ToolKind::Curve => Self::Path { nodes: Vec::new() },
         }
@@ -124,7 +140,9 @@ impl Geometry {
     /// the spherical cap it culls against (spec.md 7.3).
     pub fn bounding_radius_m(&self) -> f64 {
         match self {
-            Self::Disc => 0.0,
+            // A stamp's radius comes from its property, which the geometry
+            // does not see; a dragged-out circle carries its own.
+            Self::Disc { radius_m } => radius_m.unwrap_or(0.0),
             Self::Stroke { chains } => chains
                 .iter()
                 .flatten()
@@ -150,7 +168,7 @@ impl Geometry {
     /// Whether every coordinate is finite, so the object can be saved.
     pub fn is_finite(&self) -> bool {
         match self {
-            Self::Disc => true,
+            Self::Disc { radius_m } => radius_m.is_none_or(|r| r.is_finite()),
             Self::Stroke { chains } => chains.iter().flatten().all(|p| p.is_finite()),
             Self::Polygon { points } => points.iter().all(|p| p.is_finite()),
             Self::Rect {
@@ -353,7 +371,14 @@ mod tests {
 
     #[test]
     fn bounding_radius_covers_every_geometry() {
-        assert_eq!(Geometry::Disc.bounding_radius_m(), 0.0);
+        assert_eq!(Geometry::Disc { radius_m: None }.bounding_radius_m(), 0.0);
+        assert_eq!(
+            Geometry::Disc {
+                radius_m: Some(7.0)
+            }
+            .bounding_radius_m(),
+            7.0
+        );
 
         let stroke = Geometry::Stroke {
             chains: vec![vec![LocalPoint::new(0.0, 0.0), LocalPoint::new(3.0, 4.0)]],
@@ -400,7 +425,13 @@ mod tests {
         };
         assert!(!bad_handle.is_finite());
 
-        assert!(Geometry::Disc.is_finite());
+        assert!(Geometry::Disc { radius_m: None }.is_finite());
+        assert!(
+            !Geometry::Disc {
+                radius_m: Some(f64::NAN)
+            }
+            .is_finite()
+        );
     }
 
     #[test]
@@ -409,7 +440,7 @@ mod tests {
             let g = Geometry::default_for(tool);
             assert!(g.is_finite());
             match tool {
-                ToolKind::Circle => assert_eq!(g, Geometry::Disc),
+                ToolKind::Circle => assert_eq!(g, Geometry::Disc { radius_m: None }),
                 ToolKind::Curve => assert!(matches!(g, Geometry::Path { .. })),
                 _ => {}
             }

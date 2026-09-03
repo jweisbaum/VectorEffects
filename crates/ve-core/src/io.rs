@@ -32,6 +32,7 @@ const MIGRATIONS: &[(u32, Migration)] = &[
     (2, brush_fill_mode_becomes_brush_shape),
     (3, brush_loses_divergence_and_curl),
     (4, circle_space_becomes_stamp_space),
+    (5, disc_carries_an_optional_radius),
 ];
 
 /// Version 1 stored a stroke as one polyline: `{"stroke": {"points": [...]}}`.
@@ -184,6 +185,34 @@ fn circle_space_becomes_stamp_space(value: &mut Value) -> Result<()> {
             );
         }
     }
+    Ok(())
+}
+
+/// `Geometry::Disc` gained a field, so it is an object rather than a string.
+///
+/// Version 5 wrote a disc as the bare tag `"disc"`, its size always coming from
+/// the `diameter_km` property. The shape fill's circle preset is dragged out
+/// instead of typed, so its radius is part of the geometry — which makes the
+/// variant a struct, and `"disc"` no longer parses as one.
+///
+/// Every existing disc is a circle stamp, and a stamp's radius still comes from
+/// its property, so the field is simply absent.
+fn disc_carries_an_optional_radius(value: &mut Value) -> Result<()> {
+    fn convert(node: &mut Value) {
+        match node {
+            Value::Object(map) => {
+                if map.get("geometry").and_then(Value::as_str) == Some("disc") {
+                    map.insert("geometry".to_owned(), serde_json::json!({ "disc": {} }));
+                }
+                for child in map.values_mut() {
+                    convert(child);
+                }
+            }
+            Value::Array(items) => items.iter_mut().for_each(convert),
+            _ => {}
+        }
+    }
+    convert(value);
     Ok(())
 }
 
@@ -581,6 +610,28 @@ mod tests {
         }
     }
 
+    /// A version-5 disc was the bare tag `"disc"`, and every one of them is a
+    /// circle stamp whose radius comes from `diameter_km`. After the migration
+    /// it must still be a disc, and must still take its size from there — a
+    /// radius appearing in the geometry would override the property and freeze
+    /// the diameter an animation was driving.
+    #[test]
+    fn a_version_5_disc_gains_no_radius_of_its_own() {
+        let mut value: Value = serde_json::to_value(sample()).unwrap();
+        value["schema_version"] = Value::from(5);
+        let object = &mut value["layers"][0]["objects"][0];
+        object["tool"] = Value::from("circle");
+        object["geometry"] = serde_json::json!("disc");
+        object["props"]["diameter_km"] = serde_json::json!({ "base": { "f32": 800.0 } });
+
+        let project = from_json(&serde_json::to_string(&value).unwrap()).expect("migrates");
+        assert_eq!(
+            project.layers[0].objects[0].geometry,
+            crate::document::Geometry::Disc { radius_m: None },
+            "a stamp's size stays in its property"
+        );
+    }
+
     /// The circle stamp keeps its own `divergence` and `curl`: it has a centre
     /// to define them about, and stripping them would flatten every rotating
     /// circle into a straight flow.
@@ -746,6 +797,14 @@ mod tests {
             half_height_m: HOSTILE[1],
         };
         project.layers[0].objects.push(rect);
+
+        // A dragged-out circle's radius is geometry, so it needs the same
+        // quantisation the rectangle's extents get.
+        let mut circle = Object::new(ToolKind::ShapeFill, "circle", 24);
+        circle.geometry = Geometry::Disc {
+            radius_m: Some(HOSTILE[1]),
+        };
+        project.layers[0].objects.push(circle);
 
         // One cycle canonicalises; every later cycle must be a fixed point.
         let first = to_canonical_json(&project).unwrap();
