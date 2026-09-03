@@ -13,6 +13,11 @@ import type { FieldSample } from "./generated/FieldSample";
 import type { NewProjectRequest } from "./generated/NewProjectRequest";
 import type { BrushStroke } from "./generated/BrushStroke";
 import type { NewObject } from "./generated/NewObject";
+import type { ObjectTracks } from "./generated/ObjectTracks";
+import type { InterpolationView } from "./generated/InterpolationView";
+import type { ShrinkImpact } from "./generated/ShrinkImpact";
+import type { TileAddress } from "./generated/TileAddress";
+import type { TimelineReadiness } from "./generated/TimelineReadiness";
 import type { ToolSchema } from "./generated/ToolSchema";
 import type { DocumentTree } from "./generated/DocumentTree";
 import type { ClipboardState } from "./generated/ClipboardState";
@@ -170,9 +175,58 @@ export const api = {
     property: string,
     value: PropertyValue,
     gesture?: string,
-  ) => call<ProjectSummary>("set_object_property", { object, property, value, gesture }),
+    keyStep?: number,
+  ) =>
+    call<ProjectSummary>("set_object_property", {
+      object,
+      property,
+      value,
+      gesture: gesture ?? null,
+      keyStep: keyStep ?? null,
+    }),
 
-  /** Ends the current gesture, so the next change starts a new undo entry. */
+  // --- Animation (spec.md 9) ---
+
+  /** An object's tracks: base, keys and allowed easings per property. */
+  objectTracks: (object: number, step: number) =>
+    call<ObjectTracks>("object_tracks", { object, step }),
+
+  /** Adds or replaces a key; without a value, pins what the step shows. */
+  setKeyframe: (object: number, property: string, step: number, value?: PropertyValue) =>
+    call<ProjectSummary>("set_keyframe", { object, property, step, value: value ?? null }),
+
+  removeKeyframe: (object: number, property: string, step: number) =>
+    call<ProjectSummary>("remove_keyframe", { object, property, step }),
+
+  moveKeyframe: (object: number, property: string, from: number, to: number, gesture?: string) =>
+    call<ProjectSummary>("move_keyframe", {
+      object,
+      property,
+      from,
+      to,
+      gesture: gesture ?? null,
+    }),
+
+  setInterpolation: (object: number, property: string, step: number, interp: InterpolationView) =>
+    call<ProjectSummary>("set_interpolation", { object, property, step, interp }),
+
+  /** What shrinking the timeline would delete (spec.md 4.1). */
+  stepCountImpact: (stepCount: number) =>
+    call<ShrinkImpact>("step_count_impact", { stepCount }),
+
+  setStepCount: (stepCount: number) => call<ProjectSummary>("set_step_count", { stepCount }),
+
+  setStartTime: (startUnixS: number | null) =>
+    call<ProjectSummary>("set_start_time", { startUnixS }),
+
+  /** Queues the viewport's tiles for the steps around the playhead (spec.md 9.5). */
+  renderAhead: (current: number, tiles: TileAddress[]) =>
+    call<void>("render_ahead", { current, tiles }),
+
+  /** How ready every step is, for the viewport. */
+  frameReadiness: (tiles: TileAddress[]) =>
+    call<TimelineReadiness>("frame_readiness", { tiles }),
+
   endGesture: () => call<void>("end_gesture"),
 
   /** The selected object's transform, for the on-map handles. */

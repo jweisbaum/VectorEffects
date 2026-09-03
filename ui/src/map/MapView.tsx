@@ -5,6 +5,7 @@ import type { Gesture } from "../generated/Gesture";
 import type { PathPoint } from "../generated/PathPoint";
 import type { ProjectSummary } from "../generated/ProjectSummary";
 import type { ObjectOutline } from "../generated/ObjectOutline";
+import type { TileAddress } from "../generated/TileAddress";
 import type { Tool } from "../generated/Tool";
 import type { ToolSchema } from "../generated/ToolSchema";
 import type { PositionPick } from "../picking";
@@ -20,6 +21,7 @@ import {
   normalizeLon,
   project as toScreen,
   unproject,
+  visibleTiles,
   zoomAbout,
 } from "./camera";
 import {
@@ -75,6 +77,7 @@ import {
   type ToolState,
 } from "./tools";
 import { MapRenderer, type OperatorPreview, type RenderState } from "./renderer";
+import { uniqueTiles } from "../timeline/playback";
 import { TileCache } from "./tiles";
 
 interface Readout {
@@ -239,6 +242,7 @@ export default function MapView({
   onProjectChanged,
   onStepChange,
   onSelect,
+  onViewport,
 }: {
   project: ProjectSummary;
   step: number;
@@ -250,6 +254,12 @@ export default function MapView({
   onProjectChanged: (project: ProjectSummary) => void;
   onStepChange: (step: number) => void;
   onSelect: (objects: number[]) => void;
+  /**
+   * Called when the set of visible tiles changes, for render-ahead and
+   * readiness (spec.md 9.5). The map is the only thing that knows its
+   * viewport; the timeline is the only thing that needs it.
+   */
+  onViewport: (tiles: TileAddress[]) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const rendererRef = useRef<MapRenderer | null>(null);
@@ -365,6 +375,10 @@ export default function MapView({
   const sweptCache = useRef(new WeakMap<object, SweptEntry>());
   /** An overlay-only redraw waiting for the next frame. */
   const overlayScheduled = useRef<number | null>(null);
+  /** The last viewport reported, so the same one is not reported per frame. */
+  const reportedViewport = useRef("");
+  const onViewportRef = useRef(onViewport);
+  onViewportRef.current = onViewport;
   const [pending, setPending] = useState(0);
   const [tool, setTool] = useState<ActiveTool>(HAND);
   /**
@@ -658,6 +672,15 @@ export default function MapView({
       // committed while its tiles are still on their way.
       operator: operatorRef.current ?? heldOperator(settling.current),
     };
+
+    // Tell the timeline which tiles are on screen, once per change rather
+    // than per frame: a pan delivers many frames and one viewport.
+    const unique = uniqueTiles(visibleTiles(state.camera, state.view));
+    const key = unique.map((t) => `${t.z}/${t.x}/${t.y}`).join(",");
+    if (key !== reportedViewport.current) {
+      reportedViewport.current = key;
+      onViewportRef.current(unique);
+    }
 
     try {
       renderer.render(state);
@@ -2503,16 +2526,9 @@ export default function MapView({
           />
           Graticule
         </label>
-        <label className="step">
+        <span className="step muted" title="Scrub the timeline below to change the step">
           Step {step} / {lastStep} (+{step * project.step_hours} h)
-          <input
-            type="range"
-            min={0}
-            max={lastStep}
-            value={step}
-            onChange={(e) => onStepChange(Number(e.target.value))}
-          />
-        </label>
+        </span>
         {pending > 0 && <span className="activity">rendering {pending}…</span>}
       </div>
 

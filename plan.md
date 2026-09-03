@@ -2,13 +2,45 @@
 
 **Companion to** `spec.md`. Section references below point into it.
 
-**Status:** M0 through M5 complete and verified; M6 complete and verified by
-test (2026-09-03). **The walking skeleton is closed**: a new project, a painted
+**Status:** M0 through M5 complete and verified; M6 and M7 complete and
+verified by test (2026-09-03). **The walking skeleton is closed**: a new project, a painted
 stroke, and a GRIB2 file that ecCodes parses and whose values decode to exactly
 what was painted. **The tool catalogue is complete**: all six tools of spec §6.2
 draw, evaluate, save and export.
 
-**M7 is next.**
+**M8 is next.**
+
+**M7 complete.** Keyframe editing end to end, a render pool that works ahead
+of the playhead, a readiness strip with the distinct stale state, and the
+timeline dock: ruler, transport, playback that holds rather than stutters,
+range bars, key diamonds with drag, box-select and per-segment easing, the
+step-count shrink behind its quantified confirmation, and a start time for the
+ruler's UTC labels.
+
+**The design that made it small.** The render pool calls the same function the
+map's own tile requests go through, so a tile rendered ahead is byte for byte
+the tile that will later be served and "ready" means "will be a cache hit".
+Invalidation was never implemented: keys are content hashes, so an edit changes
+exactly the keys of the steps it changes the look of, and the pool only has to
+look again. `readiness.rs` holds the property rather than a mechanism — the
+acceptance criterion verbatim (an object alive for three steps invalidates
+exactly three frames), plus renames changing nothing, a keyframe edit changing
+only the segments through it, and a re-request rendering only what moved.
+
+**Two things the tests taught.** Outside the keyed range the *nearest key*
+holds, not the base (spec 4.5) — a lone "off" key at step 3 switches an object
+off from step 0 — so the timeline marks where a value is held rather than
+keyed. And steps that look the same share their tiles: a still scene is one
+frame, rendered once, solid everywhere at once; three tests had counted entries
+per step and were wrong for that reason.
+
+**Measured.** A warm tile is served in 63 µs on the backend against a 50 ms
+budget for the whole step switch. 583 Rust tests and 274 frontend tests pass.
+
+**Not verified by hand.** The dock, like the tools before it, has been driven
+only by tests: the pure rules (`playback.ts`) and the backend commands are
+covered, the app builds and boots, and nobody has scrubbed the ruler, dragged
+a key or watched playback buffer. That gap is now two milestones deep.
 
 **M6 complete.** All six tools of the catalogue draw, evaluate, save and export.
 Most of the *evaluation* already existed — every shape, speed mode and direction
@@ -609,9 +641,19 @@ a pointer could reach, which narrows the gap considerably but does not close it.
 
 ---
 
-### M7 — Timeline and animation
+### M7 — Timeline and animation · **complete**
 
 **Goal:** everything animates; playback is smooth; readiness is visible.
+
+**Against the acceptance list.** Position, scale, rotation, an enum and a
+boolean each have a test asserting spec 4.5's rule for that kind, read back
+through the evaluator. An object alive for three steps invalidates exactly
+three frames, by hash and by the pool's readiness alike. Playback holds and
+reports buffering rather than advancing into anything but a solid frame
+(`playback.test.ts`). A warm tile is served in 63 µs. The step-count shrink
+reports an exact count and names the objects, deletes exactly that, clamps
+lifetimes, and undoes to an identical document. Three decisions recorded as
+D39–D41.
 
 **Deliverables**
 
@@ -874,6 +916,9 @@ relitigated by accident.
 | D33 | The shape fill's presets are dragged out from their centre, and their size is geometry rather than a property | Centre-out gives all three presets the same anchor as the shape they produce, which is what divergence and curl are measured from and what the handles turn about. The size is part of what the user drew, like a polygon's vertices, so it lives in the geometry and is resized by the same scale handle as everything else — where the circle *stamp*'s diameter is typed and therefore an animatable property. `Geometry::Disc` carries an optional radius to say which of the two a disc is (schema version 6, spec §6.2) |
 | D34 | A clone stamp never merges | Merging re-expresses the absorbed stroke in the target's frame, and a clone stamp samples at a displacement off its own anchor — a different anchor is a different patch of the field. It is the one exception to D24's rule, and it is stated at the merge test rather than buried in it (spec §6.1, §6.2) |
 | D35 | The size's unit is the only control for `stamp_space`, and there is one per tool | The unit already asks the space's question — px is a shape on the map, km one on the ground — so a bar offering both would have two controls for one property, and the space would be the one that did nothing, since the unit is what the gesture freezes. `stamp_space` is therefore not among a tool's options at all; the unit stands in its place and inherits its dependencies, so the shape fill's freehand polygon, which has no size, is offered no unit either. One unit per tool rather than per field for the same reason: a circle with a diameter in px and a ring width in km would be asking for a shape that is on the map in one measurement and on the ground in the other. A tool whose sizes are dragged rather than typed still has the unit, with no number beside it — a drag is a measurement too (spec §3.5) |
+| D41 | Nothing in the render pool is cancelled; the queue is replaced | A unit in flight when an edit lands finishes into a content-hashed key that is merely unreachable — one tile of wasted work and no bookkeeping that could be wrong. Cancellation would need the pool to know which units an edit affected, which is exactly the tracking content addressing exists to avoid (spec §9.5) |
+| D40 | "Stale" is the frontend's memory | The backend reports what the cache holds now; "was solid at an earlier revision, is not at this one" needs the earlier revision, which only the timeline saw. Playback treats stale as not ready: the tiles on screen for it belong to a revision that no longer exists (spec §9.4, §9.5) |
+| D39 | The render pool renders through `protocol::serve`, the function that answers the map's own tile requests | The key, the backend, the quality and the encoding are decided once, so a tile rendered ahead is byte for byte the tile the map will fetch and "ready" means "will be a cache hit". A pool that chose any of those differently would fill the cache with tiles nobody asks for and report frames ready that are not (spec §9.5) |
 | D38 | No tool has `divergence` or `curl`; an object's direction mode is the whole of its direction | Reverses the half of D30 that kept them on the tools with a centre. What it costs is the spiral: a radial component is what makes a low converge rather than merely turn, so a cyclone is now built from more than one object — a circle for the rotation, a larger one aimed at its centre for the inflow. What it buys is that a direction is decided in one place, and that nothing in the evaluator depends on an object's *anchor* rather than its geometry any more. Measured: GPU–CPU agreement tightened from 0.108 m/s to 0.0009 and from 0.186° to 0.004°, the radial terms having been the main source of `f32` disagreement between the kernels. Removing a property from a tool is a migration, never only a table edit (schema version 7, spec §7.5) |
 | D37 | The eraser and the clone stamp are previewed by operating on the map, not by drawing over it | Both are defined against what is already beneath them, so a coloured wash on the overlay would show something neither tool does — and an overlay cannot show a removal at all, being a canvas above the field that can add pixels and never take them away. A gesture with either one becomes a screen-space mask and the map is drawn through it: the eraser's region loses its field, the clone's loses it and gains the source's, through a camera shifted so the source lands under the brush. The basemap is never masked, since something has to be left to see. A tool declares *how* it previews (`PreviewKind`) and supplies a footprint; nothing else about it is per tool (spec §6.1) |
 | D36 | Values are quantised where they enter the document, not where they leave it | D17 quantises at the serialisation boundary, which covers a value the user typed and misses one the application computed — a polygon's centroid, a dragged anchor. `PropValue::canonical` now applies in `Animatable`'s writers, which is one place and off the evaluator's per-sample path. Doing it in `LonLat::new` instead would have put a rounding on the clone stamp's inner loop (`ve-core::canonical`) |

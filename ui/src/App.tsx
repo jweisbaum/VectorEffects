@@ -5,6 +5,7 @@ import HistoryPanel from "./panels/HistoryPanel";
 import Inspector from "./panels/Inspector";
 import LayerPanel from "./panels/LayerPanel";
 import MapView from "./map/MapView";
+import Timeline from "./timeline/Timeline";
 import NewProjectDialog from "./project/NewProjectDialog";
 import StartScreen from "./project/StartScreen";
 import UnsavedChangesDialog from "./project/UnsavedChangesDialog";
@@ -13,6 +14,7 @@ import { pickProjectToOpen, pickProjectToSave } from "./project/dialogs";
 import { api, IpcError } from "./ipc";
 import type { AppInfo } from "./generated/AppInfo";
 import type { ProjectSummary } from "./generated/ProjectSummary";
+import type { TileAddress } from "./generated/TileAddress";
 import type { PositionPick } from "./picking";
 
 /**
@@ -50,6 +52,17 @@ export default function App() {
   // property of this object.
   const [picking, setPicking] = useState<PositionPick | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Auto-key (spec.md 9.3): while on, an edit in the inspector keys the
+  // current step instead of changing the property's base.
+  const [autoKey, setAutoKey] = useState(false);
+  // The map's visible tiles, which the timeline renders ahead for and asks
+  // readiness about (spec.md 9.5). The map reports them; nothing else knows.
+  const [viewport, setViewport] = useState<TileAddress[]>([]);
+
+  // A shorter timeline cannot leave the playhead past its end.
+  useEffect(() => {
+    if (project && step > project.step_count - 1) setStep(Math.max(0, project.step_count - 1));
+  }, [project, step]);
 
   // An armed pick belongs to a selected object. Leaving it armed after the
   // selection moves on would send the next click to something the panels are no
@@ -275,6 +288,7 @@ export default function App() {
           onProjectChanged={setProject}
           onStepChange={setStep}
           onSelect={setSelection}
+          onViewport={setViewport}
         />
 
         <aside className="sidebar right">
@@ -282,6 +296,7 @@ export default function App() {
             project={project}
             selection={selection}
             step={step}
+            autoKey={autoKey}
             picking={picking}
             onPick={setPicking}
             onChanged={setProject}
@@ -289,6 +304,18 @@ export default function App() {
           <HistoryPanel project={project} onChanged={setProject} />
         </aside>
       </div>
+
+      <Timeline
+        project={project}
+        step={step}
+        onStepChange={setStep}
+        selection={selection}
+        onSelect={setSelection}
+        viewport={viewport}
+        autoKey={autoKey}
+        onAutoKey={setAutoKey}
+        onChanged={setProject}
+      />
 
       {exporting && (
         <ExportDialog project={project} onClose={() => setExporting(false)} />

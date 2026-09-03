@@ -39,4 +39,13 @@ variants: Array<string>,
 /**
  * Whether the property has keyframes.
  */
-animated: boolean, };
+animated: boolean, 
+/**
+ * Whether a key sits on the step being viewed (spec.md 9.3).
+ */
+keyed_here: boolean, 
+/**
+ * Whether the value shown is interpolated between keys rather than keyed
+ * or held (spec.md 9.3).
+ */
+interpolated_here: boolean, };

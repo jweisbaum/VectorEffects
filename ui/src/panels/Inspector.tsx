@@ -51,6 +51,7 @@ export default function Inspector({
   project,
   selection,
   step,
+  autoKey,
   picking,
   onPick,
   onChanged,
@@ -58,6 +59,8 @@ export default function Inspector({
   project: ProjectSummary;
   selection: number[];
   step: number;
+  /** Whether an edit keys the current step rather than the base (spec.md 9.3). */
+  autoKey: boolean;
   picking: PositionPick | null;
   onPick: (pick: PositionPick | null) => void;
   onChanged: (project: ProjectSummary) => void;
@@ -96,7 +99,17 @@ export default function Inspector({
   const write = (property: string, value: PropertyValue) => {
     setError(null);
     api
-      .setObjectProperty(object, property, value)
+      // With auto-key on, the edit becomes a key at this step and the rest
+      // of the animation is left alone (spec.md 9.3).
+      .setObjectProperty(object, property, value, undefined, autoKey ? step : undefined)
+      .then(onChanged)
+      .catch((err: unknown) => setError(String(err)));
+  };
+
+  /** Keys the property at this step, or removes the key that is there. */
+  const toggleKey = (property: string, keyed: boolean) => {
+    setError(null);
+    (keyed ? api.removeKeyframe(object, property, step) : api.setKeyframe(object, property, step))
       .then(onChanged)
       .catch((err: unknown) => setError(String(err)));
   };
@@ -121,11 +134,26 @@ export default function Inspector({
             >
               <span className="property-label">
                 {property.label}
-                {property.animated && (
-                  <span className="keyed" title="Has keyframes">
-                    ◆
-                  </span>
-                )}
+                {/* The diamond: filled when this step is keyed, hollow when the
+                    value is interpolated, dim otherwise. Clicking keys or
+                    unkeys this step (spec.md 9.3). */}
+                <button
+                  type="button"
+                  className={`key-here${property.keyed_here ? " on" : property.interpolated_here ? " between" : ""}`}
+                  title={
+                    property.keyed_here
+                      ? "Keyed at this step — click to remove the key"
+                      : property.interpolated_here
+                        ? "Interpolated at this step — click to key it here"
+                        : "Click to key this property at this step"
+                  }
+                  onClick={(event) => {
+                    event.preventDefault();
+                    toggleKey(property.id, property.keyed_here);
+                  }}
+                >
+                  ◆
+                </button>
               </span>
 
               {property.value.kind === "number" && (

@@ -597,6 +597,18 @@ body {
 .property.stacked .property-editor { flex-wrap: wrap; }
 .property-label { display: flex; align-items: center; gap: 5px; }
 .keyed { color: var(--accent); font-size: 9px; }
+/* The inspector's key diamond (spec.md 9.3). */
+.key-here {
+  background: none;
+  border: none;
+  color: #4b5d7a;
+  cursor: pointer;
+  font-size: 10px;
+  padding: 0 3px;
+  margin-left: 4px;
+}
+.key-here.on { color: #ffd678; }
+.key-here.between { color: var(--accent); opacity: 0.7; }
 .property-editor { display: flex; align-items: center; gap: 4px; }
 .property-editor input[type="number"] {
   width: 5.5rem;
@@ -651,3 +663,197 @@ body {
   border-left-color: var(--accent);
   background: #17304a;
 }
+
+/* --- Timeline dock (spec.md 9) ------------------------------------------- */
+
+.timeline {
+  display: flex;
+  flex-direction: column;
+  height: 220px;
+  min-height: 120px;
+  border-top: 1px solid var(--border);
+  background: #0d1526;
+  position: relative;
+}
+.tl-transport {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+}
+.tl-transport button {
+  background: #16233a;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 2px 9px;
+  cursor: pointer;
+  font: inherit;
+  min-width: 30px;
+}
+.tl-transport button:hover { background: #1d2d49; }
+.tl-transport button.active { background: #1d5a7a; border-color: #2b7ba4; }
+.tl-transport button.autokey.active { background: #6b3a12; border-color: #b9701f; color: #ffd678; }
+.tl-transport label { display: flex; gap: 6px; align-items: center; }
+.tl-transport input[type="number"] { width: 4rem; }
+.tl-transport input {
+  background: #0f1a2c;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 2px 6px;
+  font: inherit;
+}
+.tl-position { color: var(--text); }
+.tl-buffering { color: #ffd678; }
+
+/* Rows share one horizontal scroll; the labels column is sticky. */
+.tl-scroll { flex: 1; overflow: auto; position: relative; user-select: none; }
+.tl-row { display: flex; height: 22px; align-items: stretch; border-bottom: 1px solid #16223a; }
+.tl-labels {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  flex: 0 0 200px;
+  width: 200px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  background: #0d1526;
+  border-right: 1px solid var(--border);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.tl-grid { position: relative; flex: 0 0 auto; height: 100%; }
+
+.tl-ruler { height: 30px; position: sticky; top: 0; z-index: 3; background: #0d1526; }
+.tl-ruler-label { color: var(--muted); }
+.tl-ruler .tl-grid { cursor: ew-resize; }
+.tl-tick {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  border-left: 1px solid #1c2a44;
+  font-size: 10px;
+  color: var(--muted);
+  overflow: visible;
+}
+.tl-tick-label { position: absolute; top: 2px; left: 3px; white-space: nowrap; }
+/* Readiness (spec.md 9.5): empty, partial (with progress), solid, and the
+   distinct stale state. */
+.tl-ready { position: absolute; bottom: 0; left: 0; height: 5px; background: transparent; }
+.tl-tick.partial .tl-ready { background: #3f6f9c; }
+.tl-tick.solid .tl-ready { background: var(--accent); width: 100% !important; }
+.tl-tick.stale .tl-ready { background: #c46a3a; width: 100% !important; }
+.tl-tick.stale { border-left-color: #6b3a12; }
+.tl-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: #ffd678;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.tl-layer-row { background: rgba(255, 255, 255, 0.025); }
+.tl-layer-row .tl-labels { color: var(--muted); font-weight: 600; }
+.tl-object-row.selected .tl-labels { color: var(--accent); }
+.tl-disclose {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0 2px;
+  font: inherit;
+}
+.tl-object-name { cursor: pointer; overflow: hidden; text-overflow: ellipsis; }
+/* The lifetime bar (spec.md 9.2): objects have one, layers do not. */
+.tl-range {
+  position: absolute;
+  top: 5px;
+  height: 12px;
+  background: rgba(111, 217, 255, 0.28);
+  border: 1px solid rgba(111, 217, 255, 0.6);
+  border-radius: 3px;
+}
+.tl-range-end {
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  left: -3px;
+  width: 6px;
+  cursor: ew-resize;
+  background: rgba(111, 217, 255, 0.9);
+  border-radius: 2px;
+}
+.tl-range-end.right { left: auto; right: -3px; }
+
+.tl-track { height: 20px; }
+.tl-track.interpolated .tl-track-label { color: var(--muted); }
+.tl-track-label { padding-left: 28px; font-size: 12px; }
+.tl-track-label span:first-child { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.tl-key-here {
+  background: none;
+  border: none;
+  color: #4b5d7a;
+  cursor: pointer;
+  font-size: 11px;
+  padding: 0 2px;
+}
+.tl-key-here.on { color: #ffd678; }
+/* Keyframe diamonds (spec.md 9.3). A holding key is drawn hollow. */
+.tl-key {
+  position: absolute;
+  top: 50%;
+  width: 9px;
+  height: 9px;
+  margin: -4.5px 0 0 -4.5px;
+  transform: rotate(45deg);
+  background: var(--accent);
+  border: 1px solid #0d1526;
+  cursor: grab;
+  z-index: 1;
+}
+.tl-key.hold { background: transparent; border-color: var(--accent); }
+.tl-key.selected { background: #ffd678; border-color: #ffd678; }
+.tl-key.hold.selected { background: transparent; }
+
+.tl-box {
+  position: absolute;
+  border: 1px dashed rgba(160, 232, 255, 0.9);
+  background: rgba(111, 217, 255, 0.1);
+  pointer-events: none;
+  z-index: 4;
+}
+.tl-menu {
+  position: fixed;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  min-width: 160px;
+  background: #16233a;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+.tl-menu-title { color: var(--muted); font-size: 11px; padding: 4px 8px; }
+.tl-menu button {
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--text);
+  padding: 4px 8px;
+  cursor: pointer;
+  font: inherit;
+  border-radius: 4px;
+}
+.tl-menu button:hover { background: #1d5a7a; }
+.tl-error { color: #ff9a8b; padding: 4px 10px; font-size: 12px; }
+.tl-impact { max-height: 140px; overflow: auto; margin: 6px 0; padding-left: 20px; }

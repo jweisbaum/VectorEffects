@@ -160,6 +160,11 @@ pub struct PropertyView {
     pub variants: Vec<String>,
     /// Whether the property has keyframes.
     pub animated: bool,
+    /// Whether a key sits on the step being viewed (spec.md 9.3).
+    pub keyed_here: bool,
+    /// Whether the value shown is interpolated between keys rather than keyed
+    /// or held (spec.md 9.3).
+    pub interpolated_here: bool,
 }
 
 fn tool_name(tool: ToolKind) -> &'static str {
@@ -275,6 +280,16 @@ pub fn properties(state: &AppState, object: u64, step: u32) -> Result<Vec<Proper
                     max: spec.range.map(|(_, high)| high),
                     variants: spec.variants.iter().map(|v| (*v).to_owned()).collect(),
                     animated: animatable.is_animated(),
+                    keyed_here: animatable.keys().iter().any(|key| key.step == step),
+                    interpolated_here: !animatable.keys().iter().any(|key| key.step == step)
+                        && animatable
+                            .keys()
+                            .first()
+                            .is_some_and(|first| first.step < step)
+                        && animatable
+                            .keys()
+                            .last()
+                            .is_some_and(|last| last.step > step),
                 })
             })
             .collect())

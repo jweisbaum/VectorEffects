@@ -363,7 +363,14 @@ tool-specific ones:
 | `Geometry` | none | Not animatable. Move/scale/rotate the object instead. |
 
 Evaluation at a step outside the keyframe range holds the nearest key's value
-(no extrapolation). With zero keys, `base` is used at every step.
+(no extrapolation). With zero keys, `base` is used at every step. **This holds
+for holding kinds too**: a lone `enabled = false` key at step 3 switches the
+object off from step 0, because before the first key it is the first key that
+holds, not the base. The timeline marks where a value is held rather than
+keyed so this is visible.
+
+A new key takes `Linear` wherever the kind allows it and `Step` otherwise. A
+keyed speed or position is nearly always meant to move between its keys.
 
 ### 4.6 Active range
 
@@ -1407,6 +1414,12 @@ concept per the requirements.
   frame at a user-set rate (default 8 steps/s), not real time.
 - Playback only advances into frames that are ready; if the next frame is not
   cached, playback holds and shows a buffering state rather than stuttering.
+  "Ready" means **solid** in §9.5's terms — a stale frame is not ready, since
+  the tiles on screen for it belong to a revision that no longer exists.
+- A stall of several intervals — a slow render, a suspended window — resumes
+  at the *next* step. Advancing as many steps as the clock says would turn a
+  long render into a skip.
+- `Space` plays and pauses.
 
 ### 9.5 Background rendering and readiness
 
@@ -1425,6 +1438,19 @@ A worker pool renders frames ahead of the playhead.
   whole timeline.
 - Changing zoom or panning far requeues, but previously rendered tiles at other
   zooms remain cached.
+- **The pool renders through the same function that serves the map's own tile
+  requests.** The key, the backend, the quality and the encoding are decided
+  once, so a tile rendered ahead is byte for byte the tile the map will fetch,
+  and "ready" means "will be a cache hit". Readiness is a probe of the cache
+  index by content hash; it reads no tile and reorders no eviction.
+- Nothing is cancelled. A unit in flight when an edit lands finishes into a key
+  that is merely unreachable — one tile of wasted work, and no bookkeeping that
+  could be wrong.
+- **Stale** is the frontend's memory: the backend reports what the cache holds,
+  and "was solid at an earlier revision, is not at this one" is the timeline
+  remembering. It clears when the frame is solid again.
+- Steps that look the same share their tiles: a still scene is one frame,
+  rendered once, and solid at every step at once.
 
 ---
 

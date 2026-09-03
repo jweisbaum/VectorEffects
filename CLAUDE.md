@@ -280,6 +280,21 @@ to the hash input is a correctness bug that shows up as stale frames.
   and the whole toolbar to refresh four spans. It is an external store now
   (`createReadoutStore`), and only `MapReadout` subscribes. Its IPC sample is
   one-in-flight, latest-wins — the same pattern as the drag preview.
+- **A tile rendered ahead is the tile that will be served.** `protocol::serve`
+  is the one path a tile takes — the key, the backend, the quality and the
+  encoding are decided there — and the render pool calls it. A pool that chose
+  any of those differently would fill the cache with tiles the map never asks
+  for and report frames ready that are not. Readiness (`frame_readiness`) is a
+  probe of the cache index by content hash, via `RenderCache::contains`, which
+  must not touch the disk or the LRU clock.
+- **Steps that look the same share their tiles.** A still scene hashes alike at
+  every step, so rendering one tile readies every step at once and the cache
+  holds one frame, not `step_count`. Any test that counts entries or observes
+  render order per step has to animate the scene first (`readiness.rs`).
+- **Stale is frontend memory.** The backend reports what the cache holds now;
+  "solid at an earlier revision, not at this one" is the timeline remembering
+  (`playback.ts`, `classify`). Playback advances only into a *solid* step and
+  otherwise holds with a buffering flag — never into stale.
 - **A stroke preview is extended, never rebuilt.** `extendStrokePath` and
   `extendLatticeUnderStroke` resume from a carried `progress`; the from-scratch
   `buildStrokePath` / `latticeUnderStroke` are those same walks started at
