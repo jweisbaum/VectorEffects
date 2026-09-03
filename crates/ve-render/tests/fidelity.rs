@@ -59,7 +59,7 @@ fn object(rng: &mut Rng) -> FlatObject {
     };
     let extent = rng.range(200_000.0, 2_000_000.0);
 
-    let shape = match rng.index(8) {
+    let shape = match rng.index(10) {
         0 => Shape::Disc { radius_m: extent },
         1 => Shape::Annulus {
             radius_m: extent,
@@ -105,12 +105,27 @@ fn object(rng: &mut Rng) -> FlatObject {
             ],
             half_size_m: extent * 0.2,
         },
-        _ => Shape::Polygon {
+        8 => Shape::Polygon {
             ring: vec![
                 [-extent, -extent * 0.5],
                 [extent, -extent * 0.7],
                 [extent * 0.4, extent],
                 [-extent * 0.6, extent * 0.8],
+            ],
+        },
+        // A concave ring. A backend that answered "inside" with a winding rule
+        // where the other used a crossing count would agree on every convex
+        // case and disagree only here.
+        _ => Shape::Polygon {
+            ring: vec![
+                [-extent, -extent * 0.6],
+                [extent, -extent * 0.6],
+                [extent, extent * 0.6],
+                [extent * 0.2, extent * 0.6],
+                [extent * 0.2, -extent * 0.1],
+                [-extent * 0.2, -extent * 0.1],
+                [-extent * 0.2, extent * 0.6],
+                [-extent, extent * 0.6],
             ],
         },
     };
@@ -128,7 +143,17 @@ fn object(rng: &mut Rng) -> FlatObject {
         },
     };
 
-    let direction = match rng.index(5) {
+    // The curve's corridor and its path have to be the same polyline, or the
+    // flow would follow one line while the footprint covered another. Built
+    // once here and used by both.
+    let path: Vec<[f64; 2]> = vec![
+        [-extent, -extent * 0.3],
+        [-extent * 0.2, extent * 0.4],
+        [extent * 0.5, -extent * 0.1],
+        [extent, extent * 0.5],
+    ];
+
+    let direction = match rng.index(6) {
         0 => DirectionMode::Constant(Angle::new(rng.range(0.0, 360.0))),
         1 => DirectionMode::Toward(LonLat {
             lon: rng.range(-179.0, 179.0),
@@ -144,9 +169,30 @@ fn object(rng: &mut Rng) -> FlatObject {
             start: Angle::new(rng.range(0.0, 360.0)),
             end: Angle::new(rng.range(0.0, 360.0)),
         },
+        // The curve's mode. The GPU uploads the path in a second region and
+        // walks it in the shader, so this is where a mismatched offset, a
+        // reversed segment or a tangent taken at the wrong end shows up — and
+        // the only case in which `path` is read at all.
+        5 => DirectionMode::AlongPath {
+            offset: Angle::new(rng.range(0.0, 360.0)),
+        },
         _ => DirectionMode::Tangential {
             clockwise: rng.next() > 0.5,
         },
+    };
+
+    // A curve is a corridor swept along its own path, so when the direction
+    // follows the path the shape has to be that corridor.
+    let (shape, path) = if matches!(direction, DirectionMode::AlongPath { .. }) {
+        (
+            Shape::Capsule {
+                chains: vec![path.clone()],
+                radius_m: extent * 0.3,
+            },
+            path,
+        )
+    } else {
+        (shape, Vec::new())
     };
 
     // A third of the objects live in map space. The two backends convert to the
@@ -175,7 +221,7 @@ fn object(rng: &mut Rng) -> FlatObject {
         },
         gradient_axis: Angle::new(rng.range(0.0, 360.0)),
         gradient_extent: extent * 1.4,
-        path: Vec::new(),
+        path,
         clone_source: None,
         clone_offset: ve_render::scene::OffsetMode::Aligned,
     }
@@ -213,6 +259,73 @@ fn bearing_delta(a: f64, b: f64) -> f64 {
     raw.min(360.0 - raw)
 }
 
+/// How close the sample is to a point where a path's tangent jumps, as a
+/// fraction of the corridor's half-width. Zero means it is on the jump.
+///
+/// A polyline's local tangent is genuinely discontinuous on the bisector at a
+/// corner: two segments are equidistant there, and the flow either follows one
+/// or the other. That is what `relative_to_path` means, not an artefact — but
+/// it does mean the two backends can land on opposite sides of the tie for the
+/// usual `f32`-against-`f64` reasons, and disagree by the angle of the corner.
+///
+/// No tolerance is meaningful across a discontinuity, so the comparison steps
+/// around it — the same exemption `DIRECTION_FLOOR` already makes where a speed
+/// is too low for its direction to mean anything. It is deliberately narrow:
+/// the margin is measured, the exempted samples are counted, and the test
+/// reports the count so the exemption cannot quietly grow to cover a real bug.
+///
+/// The *whole sample* is exempted, not just its direction. A blended edge mixes
+/// the object's vector into what is beneath it, so two directions a corner
+/// apart compose to two different speeds — the disagreement arrives at the
+/// speed comparison rather than the direction one.
+fn tangent_margin(object: &FlatObject, position: LonLat) -> f64 {
+    if object.path.len() < 2 {
+        return f64::INFINITY;
+    }
+    let local = object.frame.to_local(position);
+    let mut distances: Vec<f64> = object
+        .path
+        .windows(2)
+        .map(|pair| {
+            let (a, b) = (pair[0], pair[1]);
+            let (pax, pay) = (local[0] - a[0], local[1] - a[1]);
+            let (bax, bay) = (b[0] - a[0], b[1] - a[1]);
+            let denom = bax * bax + bay * bay;
+            let t = if denom <= f64::EPSILON {
+                0.0
+            } else {
+                ((pax * bax + pay * bay) / denom).clamp(0.0, 1.0)
+            };
+            (pax - bax * t).hypot(pay - bay * t)
+        })
+        .collect();
+    distances.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    if distances.len() < 2 {
+        return f64::INFINITY;
+    }
+    let reference = object.shape.feather_reference_m().max(1.0);
+    (distances[1] - distances[0]) / reference
+}
+
+/// Within this fraction of the corridor half-width of a tangent tie, direction
+/// is not compared. Measured: every disagreement the suite found sat inside
+/// 0.02, and none outside it.
+const TANGENT_TIE: f64 = 0.05;
+
+/// Whether any object in the scene has an ambiguous path tangent here.
+///
+/// Only an object that actually contributes at this point counts. A curve's
+/// medial axis runs on past the ends of its corridor, and exempting samples
+/// along that line — where the curve paints nothing and its tangent is read by
+/// no one — would exempt a fifth of the suite for no reason.
+fn at_a_tangent_tie(scene: &Scene, position: LonLat) -> bool {
+    scene.objects.iter().any(|object| {
+        matches!(object.direction, DirectionMode::AlongPath { .. })
+            && ve_render::scene::covers(object, position)
+            && tangent_margin(object, position) < TANGENT_TIE
+    })
+}
+
 #[test]
 fn gpu_and_cpu_agree_within_the_preview_tolerance() {
     let gpu = match GpuEvaluator::new() {
@@ -228,6 +341,7 @@ fn gpu_and_cpu_agree_within_the_preview_tolerance() {
     let mut rng = Rng(0x2545_f491_4f6c_dd1d);
     let mut worst_speed: f64 = 0.0;
     let mut worst_direction: f64 = 0.0;
+    let mut skipped_ties = 0usize;
     let mut compared = 0usize;
 
     for case in 0..120 {
@@ -243,6 +357,13 @@ fn gpu_and_cpu_agree_within_the_preview_tolerance() {
                 got.u.is_finite() && got.v.is_finite(),
                 "case {case}: {got:?}"
             );
+
+            // A finite answer is still required of the GPU here; only the
+            // comparison is skipped.
+            if at_a_tangent_tie(&scene, points[index]) {
+                skipped_ties += 1;
+                continue;
+            }
 
             let (want_speed, want_dir) = speed_azimuth_from_uv(*want);
             let (got_speed, got_dir) = speed_azimuth_from_uv(*got);
@@ -275,7 +396,17 @@ fn gpu_and_cpu_agree_within_the_preview_tolerance() {
     println!(
         "compared {compared} samples: worst speed error {worst_speed:.4} m/s \
          (tolerance {SPEED_ABS}), worst direction error {worst_direction:.3} deg \
-         (tolerance {DIRECTION_DEG})"
+         (tolerance {DIRECTION_DEG}); {skipped_ties} samples not compared at a \
+         path tangent tie"
+    );
+
+    // The exemption must stay an exemption. If it ever covers a large share of
+    // the samples, it is hiding something rather than stepping around a
+    // discontinuity, and the number above stops being worth reading.
+    assert!(
+        skipped_ties * 20 < compared,
+        "{skipped_ties} of {compared} samples were exempted as tangent ties, \
+         which is too many for the exemption to be trustworthy"
     );
 }
 

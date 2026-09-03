@@ -273,7 +273,25 @@ fn destination(origin: vec2<f32>, bearing_deg: f32, distance: f32) -> vec2<f32> 
     return vec2<f32>(normalize_lon(lambda2 / DEG), phi2 / DEG);
 }
 
+// The inverse of `to_local`, and it has to answer for both spaces the way that
+// one does. Only `path_bearing` calls it, which is why a map-space frame going
+// through the ground formula stayed hidden until the curve's direction mode was
+// compared: it put the segment endpoints tens of degrees from where the CPU had
+// them, and the tangent between them is what the flow follows.
 fn to_global(object: Object, local: vec2<f32>) -> vec2<f32> {
+    if (object.space == 1u) {
+        // Undo `to_local`'s rotation, then read the offset back as degrees.
+        let theta = object.rotation_deg * DEG;
+        let c = cos(theta);
+        let s = sin(theta);
+        let east = local.x * c + local.y * s;
+        let north = -local.x * s + local.y * c;
+        let lon = object.anchor.x + east * object.scale / M_PER_DEGREE;
+        // Clamped rather than wrapped, as in `Frame::to_global`: a shape
+        // reaching past a pole flattens against it, which is what the map shows.
+        let lat = clamp(object.anchor.y + north * object.scale / M_PER_DEGREE, -90.0, 90.0);
+        return vec2<f32>(normalize_lon(lon), lat);
+    }
     let radius = length(local);
     if (radius < 1e-6) { return object.anchor; }
     let bearing = atan2(local.x, local.y) / DEG + object.rotation_deg;
@@ -287,7 +305,12 @@ fn path_bearing(object: Object, local: vec2<f32>) -> f32 {
     var best = 1e30;
     var best_index = 0u;
     for (var i = 0u; i + 1u < n; i = i + 1u) {
-        let d = segment_distance(p_of(object, i), local, p_of(object, i + 1u));
+        // The sample against the segment, in that order. Reversed, this asked
+        // for the distance from vertex i to the segment running from the sample
+        // to vertex i+1 — a different number, minimised by a different segment,
+        // so the flow followed the tangent of whichever part of the curve
+        // happened to win.
+        let d = segment_distance(local, p_of(object, i), p_of(object, i + 1u));
         if (d < best) { best = d; best_index = i; }
     }
     // The bearing is taken between the segment's endpoints on the globe, not
