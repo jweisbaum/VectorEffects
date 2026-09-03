@@ -45,6 +45,10 @@ step_hours: number,
  */
 step_count: number, 
 /**
+ * When step 0 is, as seconds since the Unix epoch, if set (spec.md 9.1).
+ */
+start_unix_s: number | null, 
+/**
  * `"from"` or `"toward"`: how directions are shown (spec.md 3.3).
  */
 direction_convention: string, 

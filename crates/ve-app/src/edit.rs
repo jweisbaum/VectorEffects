@@ -241,6 +241,12 @@ pub fn undo_for_test(state: &AppState) -> Result<ProjectSummary> {
     step_history(state, true)
 }
 
+/// Reapplies the most recently undone change. Exposed for tests, which drive
+/// the same path the command does.
+pub fn redo_for_test(state: &AppState) -> Result<ProjectSummary> {
+    step_history(state, false)
+}
+
 fn step_history(state: &AppState, backwards: bool) -> Result<ProjectSummary> {
     with_session(state, |session| {
         let open = session.require_open()?;

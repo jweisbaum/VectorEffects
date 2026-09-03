@@ -484,6 +484,7 @@ fn a_gesture_collapses_into_one_undo_entry() {
             "RotationDeg",
             PropertyValue::Angle { degrees },
             Some("rotate:1".to_owned()),
+            None,
         )
         .expect("rotate");
     }
@@ -518,6 +519,7 @@ fn separate_gestures_undo_separately() {
         "RotationDeg",
         PropertyValue::Angle { degrees: 30.0 },
         Some("rotate:1".to_owned()),
+        None,
     )
     .expect("first");
     document::finish_gesture(&state).expect("end");
@@ -528,6 +530,7 @@ fn separate_gestures_undo_separately() {
         "RotationDeg",
         PropertyValue::Angle { degrees: 90.0 },
         Some("rotate:2".to_owned()),
+        None,
     )
     .expect("second");
     document::finish_gesture(&state).expect("end");

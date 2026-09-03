@@ -3,6 +3,7 @@
 //! Rust owns the entire domain; the webview is a view layer. Everything the
 //! frontend can reach goes through [`commands`].
 
+pub mod animation;
 pub mod commands;
 pub mod create;
 pub mod document;
@@ -94,7 +95,15 @@ pub fn run() -> anyhow::Result<()> {
             document::paste_objects,
             document::clipboard_state,
             document::history_view,
-            document::jump_to_history
+            document::jump_to_history,
+            animation::object_tracks,
+            animation::set_keyframe,
+            animation::remove_keyframe,
+            animation::move_keyframe,
+            animation::set_interpolation,
+            animation::step_count_impact,
+            animation::set_step_count,
+            animation::set_start_time
         ])
         .run(tauri::generate_context!())?;
 

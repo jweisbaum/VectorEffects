@@ -8,6 +8,7 @@
 use std::path::PathBuf;
 
 use ts_rs::{Config, TS};
+use ve_app::animation::{InterpolationView, KeyframeView, ObjectTracks, ShrinkImpact, TrackView};
 use ve_app::commands::{AppInfo, EvaluatorSelection, FieldSample};
 use ve_app::create::{Gesture, NewObject, PathPoint, Tool, ToolOption};
 use ve_app::document::{
@@ -55,6 +56,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     GestureSelector::export_all(&cfg)?;
     Sizing::export_all(&cfg)?;
     PreviewKind::export_all(&cfg)?;
+    ObjectTracks::export_all(&cfg)?;
+    TrackView::export_all(&cfg)?;
+    KeyframeView::export_all(&cfg)?;
+    InterpolationView::export_all(&cfg)?;
+    ShrinkImpact::export_all(&cfg)?;
     DocumentTree::export_all(&cfg)?;
     ve_app::transform::SelectionTransform::export_all(&cfg)?;
     ve_app::transform::TransformKind::export_all(&cfg)?;

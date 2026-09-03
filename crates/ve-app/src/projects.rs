@@ -40,6 +40,8 @@ pub struct ProjectSummary {
     pub step_hours: u32,
     /// Number of time steps.
     pub step_count: u32,
+    /// When step 0 is, as seconds since the Unix epoch, if set (spec.md 9.1).
+    pub start_unix_s: Option<i64>,
     /// `"from"` or `"toward"`: how directions are shown (spec.md 3.3).
     pub direction_convention: String,
     /// Number of layers.
@@ -75,6 +77,7 @@ impl ProjectSummary {
             grid_nj: settings.resolution.nj(),
             step_hours: settings.step_hours.hours(),
             step_count: settings.step_count,
+            start_unix_s: settings.start_unix_s,
             direction_convention: match settings.direction_convention {
                 DirectionConvention::From => "from",
                 DirectionConvention::Toward => "toward",

@@ -170,6 +170,13 @@ pub enum Command {
         /// New name.
         after: String,
     },
+    /// Sets when step 0 is (spec.md 9.1).
+    SetStartTime {
+        /// Previous start, seconds since the epoch.
+        before: Option<i64>,
+        /// New start.
+        after: Option<i64>,
+    },
     /// Changes the number of time steps.
     ///
     /// Shrinking deletes keyframes past the new end (decision D13). Everything
@@ -235,6 +242,7 @@ impl Command {
             Self::SetGeometry { .. } => "Edit shape".into(),
             Self::SetProperty { prop, .. } => format!("Change {prop:?}"),
             Self::SetProjectName { .. } => "Rename project".into(),
+            Self::SetStartTime { .. } => "Set start time".into(),
             Self::SetStepCount { .. } => "Change duration".into(),
         }
     }
@@ -342,6 +350,10 @@ impl Command {
 
             Self::SetProjectName { after, .. } => {
                 project.name = after.clone();
+                Ok(())
+            }
+            Self::SetStartTime { after, .. } => {
+                project.settings.start_unix_s = *after;
                 Ok(())
             }
             Self::SetStepCount { after, restore, .. } => {
@@ -459,6 +471,10 @@ impl Command {
                 project.name = before.clone();
                 Ok(())
             }
+            Self::SetStartTime { before, .. } => {
+                project.settings.start_unix_s = *before;
+                Ok(())
+            }
             Self::SetStepCount {
                 before, restore, ..
             } => {
@@ -571,6 +587,10 @@ impl Command {
             }
             (Self::SetProjectName { after, .. }, Self::SetProjectName { after: n, .. }) => {
                 after.clone_from(n);
+                true
+            }
+            (Self::SetStartTime { after, .. }, Self::SetStartTime { after: n, .. }) => {
+                *after = *n;
                 true
             }
             _ => false,

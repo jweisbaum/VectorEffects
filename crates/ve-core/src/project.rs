@@ -136,6 +136,17 @@ impl StepHours {
     }
 }
 
+/// What a shrink of the timeline would delete (spec.md 4.1).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ShrinkImpact {
+    /// Keyframes past the new end, across every object.
+    pub keyframes: u32,
+    /// Objects whose `active_range` reaches past the new end and will be clamped.
+    pub clamped_ranges: u32,
+    /// Every object touched, by id and name, in z-order.
+    pub objects: Vec<(Id, String)>,
+}
+
 /// Project-wide settings (spec.md 4.1).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct ProjectSettings {
@@ -152,6 +163,15 @@ pub struct ProjectSettings {
     /// There is no companion speed setting: speed is stored in m/s and always
     /// shown in knots (`ve_core::units`).
     pub direction_convention: DirectionConvention,
+    /// When step 0 is, as seconds since the Unix epoch, UTC (spec.md 3).
+    ///
+    /// Unset until the user sets it: the ruler labels steps by forecast hour
+    /// either way, and by absolute time once this is known (spec.md 9.1).
+    /// Seconds rather than a date type, so the file needs no calendar library
+    /// and the value survives a round trip exactly. Display only for now — the
+    /// GRIB reference time is chosen at export (spec.md 12.1).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_unix_s: Option<i64>,
 }
 
 impl ProjectSettings {
@@ -170,6 +190,7 @@ impl ProjectSettings {
             resolution,
             step_hours,
             step_count: step_count.clamp(1, MAX_STEPS),
+            start_unix_s: None,
             direction_convention: match field_kind {
                 FieldKind::Wind => DirectionConvention::From,
                 FieldKind::Current => DirectionConvention::Toward,
@@ -378,6 +399,27 @@ impl Project {
         if self.view.current_step > last {
             self.view.current_step = last;
         }
+    }
+
+    /// What reducing the timeline to `step_count` steps would delete.
+    ///
+    /// Spec 4.1 gates the shrink behind a confirmation that states the exact
+    /// count and names the objects, so the number has to be computed *before*
+    /// the command runs and has to be what the command then deletes. Both read
+    /// the same predicate.
+    pub fn shrink_impact(&self, step_count: u32) -> ShrinkImpact {
+        let last = step_count.clamp(1, MAX_STEPS).saturating_sub(1);
+        let mut impact = ShrinkImpact::default();
+        for object in self.layers.iter().flat_map(|layer| &layer.objects) {
+            let keys = object.props.count_after(last);
+            let clamped = object.active_range.end > last;
+            if keys > 0 || clamped {
+                impact.keyframes += keys as u32;
+                impact.clamped_ranges += u32::from(clamped);
+                impact.objects.push((object.id, object.name.clone()));
+            }
+        }
+        impact
     }
 
     /// Checks the document is internally consistent and saveable.
