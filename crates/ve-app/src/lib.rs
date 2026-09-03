@@ -1,0 +1,97 @@
+//! VectorEffects desktop application.
+//!
+//! Rust owns the entire domain; the webview is a view layer. Everything the
+//! frontend can reach goes through [`commands`].
+
+pub mod commands;
+pub mod document;
+pub mod edit;
+pub mod error;
+pub mod export;
+pub mod logging;
+pub mod paths;
+pub mod projects;
+pub mod protocol;
+pub mod session;
+pub mod transform;
+
+use commands::AppState;
+use paths::AppPaths;
+
+/// Starts the application. Returns only when the last window closes.
+pub fn run() -> anyhow::Result<()> {
+    let paths = AppPaths::resolve()?;
+    // Held for the process lifetime; dropping it loses buffered log lines.
+    let _log_guard = logging::init(&paths.log_dir);
+
+    let state = AppState::new(paths);
+    tracing::info!(
+        backend = %state.evaluators.selection.backend,
+        reason = ?state.evaluators.selection.fallback_reason,
+        "starting VectorEffects"
+    );
+
+    // Fail loudly at startup rather than showing a blank map later.
+    let basemap = ve_render::basemap::inspect(ve_render::basemap::EMBEDDED)?;
+    tracing::info!(lods = basemap.lods.len(), "basemap asset validated");
+
+    tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .manage(state)
+        .manage(protocol::SceneCache::default())
+        .manage(export::ExportCancel::default())
+        .register_uri_scheme_protocol(protocol::SCHEME, |ctx, request| {
+            protocol::handle(ctx.app_handle(), &request)
+        })
+        .invoke_handler(tauri::generate_handler![
+            commands::app_info,
+            commands::basemap,
+            commands::tile_base_url,
+            commands::sample_field,
+            commands::save_debug_capture,
+            commands::frontend_log,
+            projects::new_project,
+            projects::open_project,
+            projects::save_project,
+            projects::save_project_as,
+            projects::close_project,
+            projects::current_project,
+            projects::recent_projects,
+            edit::add_brush_stroke,
+            edit::undo,
+            edit::redo,
+            export::export_grib,
+            export::export_estimate,
+            export::cancel_export,
+            document::document_tree,
+            document::object_properties,
+            document::set_object_property,
+            document::add_layer,
+            document::remove_layer,
+            document::rename_layer,
+            document::set_layer_visible,
+            document::set_layer_locked,
+            document::move_layer,
+            document::rename_object,
+            document::remove_object,
+            document::move_object,
+            document::duplicate_object,
+            document::set_active_range,
+            document::object_at,
+            transform::selection_transform,
+            transform::begin_transform,
+            transform::preview_transform,
+            transform::drag_transform,
+            transform::objects_in_region,
+            document::end_gesture,
+            document::copy_objects,
+            document::cut_objects,
+            document::paste_objects,
+            document::clipboard_state,
+            document::history_view,
+            document::jump_to_history
+        ])
+        .run(tauri::generate_context!())?;
+
+    Ok(())
+}

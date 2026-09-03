@@ -1,0 +1,3 @@
+# CLAUDE.md forbids unwrap/expect in library code but allows them in tests.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true

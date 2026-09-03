@@ -1,0 +1,76 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/ve-core",
+    "crates/ve-render",
+    "crates/ve-grib",
+    "crates/ve-polar",
+    "crates/ve-app",
+    "tools/basemap-builder",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/jweisbaum/VectorEffects"
+
+[workspace.dependencies]
+ve-core = { path = "crates/ve-core" }
+ve-grib = { path = "crates/ve-grib" }
+ve-polar = { path = "crates/ve-polar" }
+ve-render = { path = "crates/ve-render" }
+
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tracing = "0.1"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+
+# Release profile favours the export path, which is CPU-bound and allowed to be
+# slow to compile. See spec.md 13.
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+
+# Dev builds still need the evaluator to be usable interactively.
+#
+# `profile.dev.package."*"` covers dependencies only -- it does *not* reach the
+# workspace's own crates, which is where the field sampling lives. Without the
+# `[profile.dev]` entry below, tile rendering ran about 2.4x slower under
+# `tauri dev` than in release, for no reason anyone would guess from the config.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 2
+
+# The app crate builds unoptimised, deliberately.
+#
+# At the `opt-level = 1` above, an *incremental* rebuild of `ve-app` produces an
+# rlib whose codegen units reference each other's internalised `.llvm.*`
+# symbols. The linker pulls archive members on demand under `-dead_strip`,
+# leaves those members out, and every binary in the package then fails with
+# "Undefined symbols for architecture x86_64" -- `tauri dev` included, on every
+# single edit. The only recovery was deleting the rlib by hand. Reproduced on
+# Rust 1.97.1, x86_64-apple-darwin: `touch` any ve-app source and rebuild.
+#
+# `codegen-units = 1` fixes it too, by leaving no cross-unit references to lose,
+# but costs 126 s for a one-file edit against 6 s here.
+#
+# Nothing is given up. This crate is IPC glue: every field evaluation,
+# rasterisation and geodesy call it makes is in `ve-render` or `ve-core`, which
+# keep their optimisation, and the tile budgets in spec.md 13 are measured
+# there. `CARGO_INCREMENTAL=0` is the other workaround, and it costs 27 s.
+[profile.dev.package.ve-app]
+opt-level = 0

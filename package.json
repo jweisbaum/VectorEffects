@@ -1,0 +1,22 @@
+{
+  "name": "vectoreffects",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "ui"
+  ],
+  "scripts": {
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "tauri": "tauri",
+    "ui:dev": "npm run dev -w ui",
+    "ui:typecheck": "npm run typecheck -w ui",
+    "ui:test": "npm run test -w ui",
+    "ui:build": "npm run build -w ui",
+    "bindings": "cargo run -p ve-app --bin export-bindings",
+    "check:offline": "./tools/check-offline.sh"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.11.4"
+  }
+}

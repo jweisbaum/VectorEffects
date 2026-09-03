@@ -1,0 +1,47 @@
+[package]
+name = "ve-app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "VectorEffects desktop application."
+# The crate also ships `export-bindings`; without this, `tauri dev`'s
+# bare `cargo run` cannot choose between them.
+default-run = "ve-app"
+
+[lib]
+name = "ve_app"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[[bin]]
+name = "ve-app"
+path = "src/main.rs"
+
+[dependencies]
+ve-core = { workspace = true }
+ve-grib = { workspace = true }
+ve-polar = { workspace = true }
+ve-render = { workspace = true }
+
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+# The tile pipeline uses `register_uri_scheme_protocol` (ve-tile://), not the
+# asset protocol, so no extra features are needed here.
+tauri = { version = "2.11.5", features = [] }
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
+directories = "6.0.0"
+ts-rs = "12.0.1"
+tracing-appender = "0.2.5"
+tauri-plugin-dialog = "2.7.3"
+
+[dev-dependencies]
+ve-grib = { workspace = true, features = ["testing"] }
+
+[lints]
+workspace = true
+
+[build-dependencies]
+tauri-build = { version = "2.6.3", features = [] }

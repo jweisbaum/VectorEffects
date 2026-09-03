@@ -1,0 +1,22 @@
+[package]
+name = "ve-grib"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "GRIB2 encoder. The decoder lives in this crate's tests only."
+
+[dependencies]
+ve-core = { workspace = true }
+thiserror = { workspace = true }
+
+[features]
+# A minimal reader for verifying what the writer produces. Never enabled for
+# the shipped binary; see src/reader.rs.
+testing = []
+
+[dev-dependencies]
+ve-grib = { path = ".", features = ["testing"] }
+
+[lints]
+workspace = true

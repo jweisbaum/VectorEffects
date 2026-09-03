@@ -1,0 +1,631 @@
+/* System font stack only: no webfont is fetched, ever (invariant 5). */
+:root {
+  --bg: #0b1220;
+  --panel: rgba(18, 28, 46, 0.86);
+  --border: #24344f;
+  --text: #e8eef7;
+  --muted: #8fa4c0;
+  --accent: #6fd9ff;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root { height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  overflow: hidden;
+}
+
+.app { display: flex; flex-direction: column; height: 100%; }
+
+.workspace {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.sidebar {
+  width: 250px;
+  flex: 0 0 250px;
+  min-height: 0;
+  overflow-y: auto;
+  background: #0d1526;
+  display: flex;
+  flex-direction: column;
+}
+.sidebar.left { border-right: 1px solid var(--border); }
+.sidebar.right { border-left: 1px solid var(--border); }
+
+.map { position: relative; flex: 1; min-width: 0; min-height: 0; }
+
+.map-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+  touch-action: none;
+}
+.map-canvas:active { cursor: grabbing; }
+
+.map-status,
+.map-error {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  color: var(--muted);
+}
+.map-error { color: #ff9c8a; }
+
+/*
+ * Spans the map rather than sizing to its contents: the brush options are wide
+ * enough to run off the right-hand edge, and a control that is off screen is
+ * one the user cannot reach. Bounded on both sides, the row wraps instead.
+ */
+.map-toolbar {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  right: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  align-items: center;
+  padding: 8px 12px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  backdrop-filter: blur(6px);
+}
+
+.map-toolbar label { display: flex; gap: 6px; align-items: center; color: var(--muted); }
+.map-toolbar select,
+.map-toolbar input[type="range"] { accent-color: var(--accent); }
+.map-toolbar select {
+  background: #0f1a2c;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 2px 6px;
+}
+.map-toolbar .step { min-width: 190px; }
+.map-toolbar .step input { flex: 1; }
+.activity { color: var(--accent); font-variant-numeric: tabular-nums; }
+
+/*
+ * Bottom right, out of the toolbar's way. The toolbar now spans the map and
+ * grows downwards as it wraps, so anything pinned to the top right is sooner or
+ * later underneath it.
+ */
+.map-legend {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  width: 190px;
+  padding: 8px 10px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.legend-bar { height: 9px; border-radius: 3px; }
+.legend-labels {
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 11px;
+  margin-top: 4px;
+}
+
+.map-readout {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  display: flex;
+  gap: 14px;
+  padding: 6px 12px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * The export button sits at the far right of the status bar: it is the app's
+ * product, not a file operation, and the title bar's row is for the latter.
+ */
+.statusbar .export {
+  background: #16233a;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 2px 10px;
+  cursor: pointer;
+  font: inherit;
+}
+.statusbar .export:hover { background: #1d2d49; }
+
+.statusbar {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  padding: 6px 12px;
+  border-top: 1px solid var(--border);
+  background: #0d1526;
+  font-size: 12px;
+}
+.brand { font-weight: 600; letter-spacing: 0.02em; }
+.muted { color: var(--muted); }
+.accent { color: var(--accent); }
+.error { color: #ff9c8a; }
+
+/* --- Title bar --------------------------------------------------------- */
+
+.titlebar {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--border);
+  background: #0d1526;
+  font-size: 12px;
+}
+.titlebar button {
+  background: #16233a;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+.titlebar button:hover { background: #1d2d49; }
+.project-name { font-weight: 600; }
+.dirty { color: var(--accent); }
+.project-meta { font-variant: small-caps; }
+.spacer { flex: 1; }
+.statusbar .path {
+  max-width: 40ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+}
+
+/* --- Start screen ------------------------------------------------------ */
+
+.start {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  padding: 2rem;
+  overflow: auto;
+  background:
+    radial-gradient(1200px 600px at 50% -10%, #16273f 0%, var(--bg) 60%);
+}
+
+.start-panel {
+  width: min(780px, 100%);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 1.75rem 2rem 2rem;
+}
+.start-panel header { margin-bottom: 1.5rem; }
+.start-panel h1 { margin: 0 0 0.25rem; font-size: 1.4rem; }
+.start-panel h2 { font-size: 0.95rem; margin: 0 0 0.9rem; }
+.start-panel h3 { font-size: 0.8rem; margin: 1rem 0 0.4rem; font-weight: 500; }
+.start-panel p { margin: 0; }
+
+.start-new,
+.start-open {
+  border-top: 1px solid var(--border);
+  padding-top: 1.1rem;
+  margin-top: 1.1rem;
+}
+.start-panel header + .start-new { border-top: 0; margin-top: 0; padding-top: 0; }
+
+.start-new label {
+  display: grid;
+  grid-template-columns: 8rem 1fr;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+  color: var(--muted);
+}
+.start-new input,
+.start-new select {
+  background: #0f1a2c;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 8px;
+  font: inherit;
+}
+.start-implications { margin: 0.9rem 0 1.1rem; font-size: 12px; line-height: 1.6; }
+.warn-note { color: #e8b45f; }
+
+.start-panel button,
+.modal .start-new button {
+  background: #16233a;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 7px 14px;
+  cursor: pointer;
+  font: inherit;
+}
+.start-panel button:hover:not(:disabled),
+.modal .start-new button:hover:not(:disabled) { background: #1d2d49; }
+.start-panel button:disabled,
+.modal .start-new button:disabled { opacity: 0.5; cursor: default; }
+.start-panel button.primary,
+.modal .start-new button.primary {
+  background: #1d5a7a;
+  border-color: #2b7ba4;
+  font-weight: 600;
+}
+.start-panel button.primary:hover:not(:disabled),
+.modal .start-new button.primary:hover:not(:disabled) { background: #246d93; }
+/* The form carries its own separator on the start screen; in a modal the
+   heading is separator enough. */
+.modal .start-new { border-top: 0; margin-top: 0; padding-top: 0; }
+
+.recent { list-style: none; margin: 0; padding: 0; }
+.recent li { margin-bottom: 4px; }
+.recent-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+  text-align: left;
+  gap: 2px;
+}
+.recent-name { font-weight: 500; }
+.recent-path {
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* --- Tool overlay ------------------------------------------------------ */
+
+.map-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.map-canvas.painting { cursor: crosshair; }
+
+.map-toolbar .tools,
+.map-toolbar .history {
+  display: flex;
+  gap: 4px;
+}
+.map-toolbar button {
+  background: #16233a;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 3px 10px;
+  cursor: pointer;
+  font: inherit;
+}
+.map-toolbar button:hover:not(:disabled) { background: #1d2d49; }
+.map-toolbar button:disabled { opacity: 0.45; cursor: default; }
+.map-toolbar button.active {
+  background: #1d5a7a;
+  border-color: #2b7ba4;
+}
+
+.brush-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  align-items: center;
+  padding-left: 10px;
+  border-left: 1px solid var(--border);
+}
+/* Wide enough for a four-figure size in kilometres, and no wider: every column
+   the options take is a column the rest of the toolbar has to wrap around. */
+.brush-options input[type="number"] {
+  width: 4.25rem;
+  background: #0f1a2c;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 2px 6px;
+  font: inherit;
+}
+.brush-options input[type="range"] { width: 4.5rem; }
+/* The brush's are narrower than the toolbar's; everything else is inherited. */
+.brush-options select { font: inherit; padding: 2px 4px; }
+/* Two coordinates and a pick button read as one control, not three. The button
+   sits outside the label: inside one, clicking it also activates the label's
+   first input, which steals the focus the click never asked for. */
+.brush-options .brush-target {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.brush-options .brush-target label { gap: 6px; }
+.brush-options .brush-target input[type="number"] { width: 4rem; }
+.brush-options .brush-target button {
+  background: #0f1a2c;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 2px 8px;
+  font: inherit;
+  cursor: pointer;
+}
+.brush-options .brush-target button.active {
+  border-color: #ffa860;
+  color: #ffd678;
+}
+
+/* --- Modal dialog ------------------------------------------------------ */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(4, 8, 16, 0.62);
+  display: grid;
+  place-items: center;
+  z-index: 10;
+}
+
+.modal {
+  width: min(560px, 92vw);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.25rem 1.5rem 1.5rem;
+  backdrop-filter: blur(8px);
+}
+.modal h2 { margin: 0 0 0.5rem; font-size: 1.05rem; }
+.modal-summary { margin: 0 0 1rem; font-size: 12px; }
+
+.modal fieldset {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem 1rem 1rem;
+  margin: 0 0 1rem;
+}
+.modal legend { color: var(--muted); padding: 0 6px; font-size: 12px; }
+.modal-row { display: flex; gap: 12px; }
+.modal label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.modal-centre { margin-top: 0.75rem; }
+.modal input {
+  background: #0f1a2c;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 4px 7px;
+  font: inherit;
+  width: 6.5rem;
+}
+
+.progress { margin-bottom: 1rem; }
+.progress-bar {
+  height: 6px;
+  background: #0f1a2c;
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+.progress-fill { height: 100%; background: var(--accent); transition: width 120ms linear; }
+
+.modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.modal-actions button {
+  background: #16233a;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 6px 14px;
+  cursor: pointer;
+  font: inherit;
+}
+.modal-actions button:hover { background: #1d2d49; }
+.modal-actions button.primary {
+  background: #1d5a7a;
+  border-color: #2b7ba4;
+  font-weight: 600;
+}
+/* Discarding unsaved work is the one irreversible button in the app. */
+.modal-actions button.danger { color: #f0a0a0; border-color: #5c2b2b; }
+.modal-actions button.danger:hover { background: #3a1d1d; }
+
+.modal-narrow { width: min(420px, 92vw); }
+
+/* --- Panels ------------------------------------------------------------ */
+
+.panel-empty {
+  padding: 1rem;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.layer-panel header,
+.inspector header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  background: #0d1526;
+  z-index: 1;
+}
+.layer-panel h2,
+.inspector h2 {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  flex: 1;
+}
+
+.layer-panel button,
+.inspector button {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 1px 5px;
+  cursor: pointer;
+  font: inherit;
+  line-height: 1.3;
+}
+.layer-panel button:hover:not(:disabled) {
+  background: #1d2d49;
+  color: var(--text);
+}
+.layer-panel button:disabled { opacity: 0.3; cursor: default; }
+.layer-panel .eye.on, .layer-panel .lock.on { color: var(--accent); }
+
+.layers, .objects { list-style: none; margin: 0; padding: 0; }
+
+.layer { border-bottom: 1px solid #16223a; }
+.layer-header {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 5px 8px;
+  font-size: 12px;
+}
+.layer-header .name { font-weight: 600; cursor: text; }
+/* The active layer receives new objects and scopes a plain marquee, so it has
+   to be visible at a glance rather than inferred from the selection. */
+.layer-header.active { background: #16263d; border-left: 2px solid var(--accent); }
+.layer-header.active .name { color: var(--accent); }
+
+/* Reordering feedback: the row a drop would land on. */
+.layer-header.drop-target,
+.object.drop-target { outline: 1px dashed var(--accent); outline-offset: -1px; }
+.layer-header input,
+.object input {
+  background: #0f1a2c;
+  color: var(--text);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font: inherit;
+  min-width: 0;
+  flex: 1;
+}
+
+.objects { padding-left: 14px; }
+.object {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px 3px 4px;
+  font-size: 12px;
+  cursor: pointer;
+  border-left: 2px solid transparent;
+}
+.object:hover { background: #141f34; }
+.object.selected {
+  background: #17304a;
+  border-left-color: var(--accent);
+}
+.object.inactive { opacity: 0.45; }
+.object.empty { cursor: default; font-style: italic; }
+.object .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.object .tool { font-size: 10px; }
+.object[draggable="true"], .layer-header[draggable="true"] { cursor: grab; }
+.object[draggable="true"]:active, .layer-header[draggable="true"]:active { cursor: grabbing; }
+
+/* --- Inspector --------------------------------------------------------- */
+
+.properties { padding: 6px 10px 12px; }
+.property {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.property.stacked { grid-template-columns: 1fr; gap: 4px; }
+.property.stacked .property-editor { flex-wrap: wrap; }
+.property-label { display: flex; align-items: center; gap: 5px; }
+.keyed { color: var(--accent); font-size: 9px; }
+.property-editor { display: flex; align-items: center; gap: 4px; }
+.property-editor input[type="number"] {
+  width: 5.5rem;
+  background: #0f1a2c;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 2px 6px;
+  font: inherit;
+}
+.property-editor.position input[type="number"] { width: 4.2rem; }
+.property-editor select {
+  background: #0f1a2c;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 2px 5px;
+  font: inherit;
+  max-width: 8.5rem;
+}
+.property-editor .suffix { font-size: 11px; }
+/* Matches the brush toolbar's picker, because it does the same job. */
+.property-editor button {
+  background: #0f1a2c;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 2px 8px;
+  font: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.property-editor button:hover { background: #16233a; }
+.property-editor button.active {
+  border-color: #ffa860;
+  color: #ffd678;
+}
+
+/* --- History ----------------------------------------------------------- */
+
+.history-panel { border-top: 1px solid var(--border); margin-top: 6px; }
+.history { list-style: none; margin: 0; padding: 4px 0 10px; }
+.history .entry {
+  padding: 3px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  border-left: 2px solid transparent;
+}
+.history .entry:hover { background: #141f34; }
+.history .entry.undone { opacity: 0.4; }
+.history .entry.current {
+  border-left-color: var(--accent);
+  background: #17304a;
+}

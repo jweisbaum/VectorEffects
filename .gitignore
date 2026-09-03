@@ -1,0 +1,20 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# Node
+node_modules/
+ui/dist/
+
+# Tauri generated
+crates/ve-app/gen/
+
+# OS
+.DS_Store
+
+# Logs and local scratch
+*.log
+
+# Python bytecode from tools/
+__pycache__/
+*.pyc

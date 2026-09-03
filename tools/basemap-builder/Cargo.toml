@@ -1,0 +1,15 @@
+[package]
+name = "basemap-builder"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Build-time converter: Natural Earth GeoJSON to the compact basemap binary."
+publish = false
+
+[dependencies]
+earcutr = "0.4"
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

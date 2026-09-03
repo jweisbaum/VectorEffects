@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 465ab399269c8dc04dacb548ce7a69a17ce669914e0ddc2f8dde75f2be524673 # shrinks to recipe = ProjectRecipe { name: "a", field_kind: 0, resolution: 0, step_hours: 0, step_count: 1, layers: [("a", false, false, [ObjectRecipe { tool: 0, name: " ", range: (0, 0), points: [(380812.35841535684, 0.0)], keys: [] }])] }
