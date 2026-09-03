@@ -17,7 +17,7 @@ use std::sync::Mutex;
 use crate::aeqd::Space;
 use crate::error::{RenderError, Result};
 use crate::preview::Quality;
-use crate::scene::{DirectionMode, EdgeMode, FlatObject, Scene, SpeedMode};
+use crate::scene::{DirectionMode, EdgeMode, FlatObject, OffsetMode, Scene, SpeedMode};
 use crate::sdf::Shape;
 use crate::tile::TileId;
 
@@ -169,6 +169,24 @@ fn hash_object(hasher: &mut blake3::Hasher, object: &FlatObject) {
     }
 
     hash_points(hasher, &object.path);
+
+    // Where a clone stamp reads from, and whether that place travels with the
+    // brush. Both change every pixel the object paints without touching its
+    // footprint, so a tile keyed without them would be served from the cache
+    // after the source moved — the stale-frame failure the cache exists to
+    // avoid rather than to cause.
+    match object.clone_source {
+        None => hasher.update(&[0]),
+        Some(source) => {
+            hasher.update(&[1]);
+            hash_f64(hasher, source.lon);
+            hash_f64(hasher, source.lat);
+            hasher.update(&[match object.clone_offset {
+                OffsetMode::Aligned => 0,
+                OffsetMode::Fixed => 1,
+            }])
+        }
+    };
 }
 
 fn hash_points(hasher: &mut blake3::Hasher, points: &[[f64; 2]]) {
@@ -429,6 +447,7 @@ mod tests {
             gradient_extent: 500_000.0,
             path: Vec::new(),
             clone_source: None,
+            clone_offset: OffsetMode::Aligned,
         }
     }
 
@@ -489,6 +508,42 @@ mod tests {
         let mut added = base.clone();
         added.objects.push(object(5.0));
         assert_ne!(scene_hash(&added), original, "another object");
+
+        // A clone stamp's whole output is decided by where it reads from and
+        // whether that place moves with the brush. Neither touches the
+        // footprint, so a hash taken from the geometry alone would serve the
+        // previous source's pixels from the cache.
+        let mut cloning = base.clone();
+        cloning.objects[0].clone_source = Some(LonLat {
+            lon: 40.0,
+            lat: 0.0,
+        });
+        let becomes_a_clone = scene_hash(&cloning);
+        assert_ne!(becomes_a_clone, original, "becoming a clone stamp");
+
+        let mut moved_source = cloning.clone();
+        moved_source.objects[0].clone_source = Some(LonLat {
+            lon: 41.0,
+            lat: 0.0,
+        });
+        assert_ne!(scene_hash(&moved_source), becomes_a_clone, "clone source");
+
+        let mut fixed = cloning.clone();
+        fixed.objects[0].clone_offset = OffsetMode::Fixed;
+        assert_ne!(scene_hash(&fixed), becomes_a_clone, "offset mode");
+    }
+
+    /// The offset mode means nothing without a source, so it must not change
+    /// the hash of an object that is not a clone stamp — a hash that moved
+    /// would evict every tile whenever an unrelated default was touched.
+    #[test]
+    fn the_offset_mode_alone_does_not_change_a_hash() {
+        let base = Scene {
+            objects: vec![object(10.0)],
+        };
+        let mut fixed = base.clone();
+        fixed.objects[0].clone_offset = OffsetMode::Fixed;
+        assert_eq!(scene_hash(&fixed), scene_hash(&base));
     }
 
     /// Z-order is visible, so reordering must invalidate.

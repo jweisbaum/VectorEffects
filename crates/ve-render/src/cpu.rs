@@ -12,7 +12,7 @@ use ve_core::{LonLat, geo};
 use crate::aeqd::Local;
 use crate::error::Result;
 use crate::evaluator::{FieldEvaluator, SamplePoint};
-use crate::scene::{DirectionMode, EdgeMode, FlatObject, Scene, SpeedMode};
+use crate::scene::{DirectionMode, EdgeMode, FlatObject, OffsetMode, Scene, SpeedMode};
 
 /// Below this distance from the anchor, radial and tangential directions are
 /// undefined, so divergence and curl are skipped rather than producing a
@@ -287,8 +287,20 @@ fn clone_weight(object: &FlatObject, position: LonLat) -> Option<f64> {
 /// The displacement is preserved in the object's own frame and replayed from
 /// the source anchor, so the copied patch keeps its shape and orientation on
 /// the globe rather than being sheared by however far apart the two points are.
+///
+/// Which displacement depends on the offset mode (spec.md 6.2). `Aligned`
+/// measures it from the object's anchor, so the source travels with the brush
+/// and a long stroke copies a correspondingly long band. `Fixed` measures it
+/// from the nearest point of the stroke's own skeleton — the stamp centre for
+/// this cell — so the source stays where it was put and every stamp along the
+/// stroke reads the same neighbourhood of it.
 fn clone_source_position(object: &FlatObject, source: LonLat, position: LonLat) -> LonLat {
-    let local = object.frame.to_local(position);
+    let mut local = object.frame.to_local(position);
+    if object.clone_offset == OffsetMode::Fixed
+        && let Some(centre) = object.shape.nearest_on_skeleton(local)
+    {
+        local = [local[0] - centre[0], local[1] - centre[1]];
+    }
     let source_frame = crate::aeqd::Frame {
         anchor: source,
         // The displacement is replayed in the object's own space: a projected

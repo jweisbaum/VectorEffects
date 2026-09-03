@@ -155,6 +155,26 @@ impl Shape {
         }
     }
 
+    /// Where the stamp that covered `p` sits, for a swept shape.
+    ///
+    /// A swept footprint is a stamp dragged along a skeleton, so every point
+    /// inside it has a stamp centre: the nearest point of that skeleton. The
+    /// clone stamp's fixed offset mode measures its displacement from there, so
+    /// that the source stays put while the brush moves over it.
+    ///
+    /// `None` for the shapes that are not swept, which have a single centre —
+    /// their anchor — and therefore nothing for this to add.
+    pub fn nearest_on_skeleton(&self, p: Local) -> Option<Local> {
+        match self {
+            Self::Capsule { chains, .. } | Self::SweptSquare { chains, .. } => {
+                nearest_on_chains(chains, p)
+            }
+            Self::Disc { .. } | Self::Annulus { .. } | Self::Rect { .. } | Self::Polygon { .. } => {
+                None
+            }
+        }
+    }
+
     /// Whether the shape can cover anything at all.
     pub fn is_empty(&self) -> bool {
         match self {
@@ -246,6 +266,54 @@ fn segment_distance_inf(p: Local, a: Local, b: Local) -> f64 {
     consider(ey - ex, dx - dy); // the two terms meet, same sign
     consider(-(ex + ey), dx + dy); // the two terms meet, opposite signs
     best
+}
+
+/// The point on `a`–`b` closest to `p`.
+///
+/// The same projection [`segment_distance`] takes the length of, kept separate
+/// so a caller that wants the point does not have to recompute it from the
+/// distance and thereby pick the wrong side of the segment.
+fn segment_nearest(p: Local, a: Local, b: Local) -> Local {
+    let (pax, pay) = (p[0] - a[0], p[1] - a[1]);
+    let (bax, bay) = (b[0] - a[0], b[1] - a[1]);
+    let denom = bax * bax + bay * bay;
+    let t = if denom <= f64::EPSILON {
+        0.0
+    } else {
+        ((pax * bax + pay * bay) / denom).clamp(0.0, 1.0)
+    };
+    [a[0] + bax * t, a[1] + bay * t]
+}
+
+/// The point on the nearest of several polylines to `p`, in local metres.
+///
+/// The *skeleton* the stamp is swept along, not the footprint's boundary. Both
+/// stamp shapes sweep the same chains, so this is where a swept footprint's
+/// stamp centre is for any point inside it — which is what the clone stamp's
+/// fixed offset mode measures its displacement from.
+///
+/// `None` when there is nothing to be near: a chainless stroke has no skeleton.
+pub fn nearest_on_chains(chains: &[Vec<Local>], p: Local) -> Option<Local> {
+    let mut best: Option<(f64, Local)> = None;
+    let mut consider = |candidate: Local| {
+        let distance = (p[0] - candidate[0]).hypot(p[1] - candidate[1]);
+        if best.is_none_or(|(far, _)| distance < far) {
+            best = Some((distance, candidate));
+        }
+    };
+
+    for chain in chains {
+        match chain.as_slice() {
+            [] => {}
+            [only] => consider(*only),
+            _ => {
+                for pair in chain.windows(2) {
+                    consider(segment_nearest(p, pair[0], pair[1]));
+                }
+            }
+        }
+    }
+    best.map(|(_, point)| point)
 }
 
 /// Minimum distance between two sets of polylines, in metres.

@@ -177,6 +177,7 @@ fn object(rng: &mut Rng) -> FlatObject {
         gradient_extent: extent * 1.4,
         path: Vec::new(),
         clone_source: None,
+        clone_offset: ve_render::scene::OffsetMode::Aligned,
     }
 }
 

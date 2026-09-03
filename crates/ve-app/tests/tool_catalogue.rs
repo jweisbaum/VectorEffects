@@ -323,6 +323,69 @@ fn a_clone_stamp_reproduces_what_is_under_its_source() {
     );
 }
 
+/// Spec 6.2: `Aligned` moves the source with the brush, so a long stroke copies
+/// a correspondingly long band; `Fixed` leaves it where it was put, so every
+/// stamp along the stroke reads the same neighbourhood of it.
+///
+/// The two are told apart by painting over a source region that is *not*
+/// uniform: a narrow band of fast flow with calm either side of it. Aligned
+/// drags the reading window across that band and picks up the calm; fixed keeps
+/// reading the band's middle all the way along. A uniform source would make the
+/// two modes indistinguishable, which is why the fixture has an edge in it.
+#[test]
+fn the_two_clone_offset_modes_read_from_different_places() {
+    let mut painted = Vec::new();
+
+    for mode in [0u8, 1] {
+        let (_root, state) = project("offset");
+
+        // A short band of fast flow around 40°E, calm to the east of it.
+        draw(
+            &state,
+            Tool::Brush,
+            Gesture::Stroke {
+                points: vec![[39.0, 0.0], [41.0, 0.0]],
+            },
+            vec![
+                number(PropId::SizeKm, 500.0),
+                number(PropId::Speed, 25.0),
+                number(PropId::Feather, 0.0),
+                option(PropId::Direction, PropertyValue::Angle { degrees: 90.0 }),
+            ],
+        );
+
+        // A stroke running well east of the band's width, from the origin.
+        draw(
+            &state,
+            Tool::CloneStamp,
+            Gesture::Stroke {
+                points: vec![[0.0, 0.0], [10.0, 0.0], [20.0, 0.0]],
+            },
+            vec![
+                number(PropId::SizeKm, 400.0),
+                number(PropId::Feather, 0.0),
+                at(PropId::SourcePoint, 40.0, 0.0),
+                pick(PropId::OffsetMode, mode),
+            ],
+        );
+
+        // Far along the stroke: aligned has dragged its window off the band
+        // and reads calm, fixed is still reading the band's middle.
+        painted.push(sample(&state, ll(20.0, 0.0)).0);
+    }
+
+    assert!(
+        painted[0] < 1.0,
+        "aligned kept painting {} m/s after its source left the band",
+        painted[0]
+    );
+    assert!(
+        painted[1] > 20.0,
+        "fixed read {} m/s where its source holds 25",
+        painted[1]
+    );
+}
+
 /// Spec 6.2: `RelativeToPath` at 0° is flow along the curve, and at 90° across
 /// it. Checked on a curve running due east, where "along" and "across" have
 /// known bearings rather than ones read back off the implementation.

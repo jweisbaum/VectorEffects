@@ -76,6 +76,19 @@ pub enum DirectionMode {
     },
 }
 
+/// Where a clone stamp's source sits as the brush moves (spec.md 6.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OffsetMode {
+    /// The source moves with the brush, preserving the offset the gesture
+    /// began with. Painting a long stroke copies a correspondingly long band
+    /// of the field, shifted by that offset.
+    Aligned,
+    /// The source stays where it was put, so every stamp along the stroke reads
+    /// the same neighbourhood of it. Painting a long stroke repeats one patch
+    /// rather than copying a band.
+    Fixed,
+}
+
 /// Whether a feathered edge blends with what is beneath it (decision D12).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EdgeMode {
@@ -118,6 +131,12 @@ pub struct FlatObject {
     /// the composite beneath it rather than producing a field of its own
     /// (spec.md 7.6).
     pub clone_source: Option<LonLat>,
+    /// Whether that source travels with the brush.
+    ///
+    /// Meaningless without [`Self::clone_source`], and carried beside it rather
+    /// than inside it so the evaluator's "is this a clone stamp" test stays one
+    /// `Option` check on the hot path.
+    pub clone_offset: OffsetMode,
 }
 
 /// A whole time step, ready to evaluate. Objects are in z-order, bottom first.
@@ -410,6 +429,12 @@ pub fn flatten_object(object: &Object, step: u32) -> Option<FlatObject> {
             Some(position(object, PropId::SourcePoint, step)?)
         } else {
             None
+        },
+        // Offset mode 1 is the fixed source.
+        clone_offset: if choice(object, PropId::OffsetMode, step) == 1 {
+            OffsetMode::Fixed
+        } else {
+            OffsetMode::Aligned
         },
     })
 }
