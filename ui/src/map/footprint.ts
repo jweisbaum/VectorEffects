@@ -147,6 +147,27 @@ export function addFootprint(
 const MAX_FOOTPRINTS = 4000;
 
 /**
+ * How far along a stroke its swept path has been built.
+ *
+ * A stroke in progress gains a point per pointer report, and rebuilding the
+ * whole swept path each time is quadratic in the stroke's length — a thousand
+ * points is a million stamps over the drag. The path is built by extension
+ * instead: the stamps already added stay, and only the new segment is walked.
+ * This is the state that makes the extension exact.
+ */
+export interface SweptPathProgress {
+  /** How many of the stroke's points have been walked. */
+  done: number;
+  /** Stamps added so far, against the cap. */
+  drawn: number;
+}
+
+/** The state of a swept path with nothing built yet. */
+export function freshSweptPath(): SweptPathProgress {
+  return { done: 0, drawn: 0 };
+}
+
+/**
  * Builds the swept region of a stroke.
  *
  * Every stamp is added as its own subpath, so filling once merges them into a
@@ -157,6 +178,10 @@ const MAX_FOOTPRINTS = 4000;
  * *field* needs no more than that. The preview does: stamping only the recorded
  * points leaves visible gaps whenever a drag outruns the pointer sample rate,
  * which reads as a broken brush even though what gets painted is solid.
+ *
+ * The whole stroke from nothing. {@link extendStrokePath} is the same walk from
+ * wherever it left off, and this is that walk started at zero — so the two
+ * cannot disagree about what a stroke looks like.
  */
 export function buildStrokePath(
   sink: PathSink,
@@ -167,18 +192,41 @@ export function buildStrokePath(
   shape: BrushShape = "circle",
   space: StampSpace = "geodesic",
 ): void {
-  let drawn = 0;
+  extendStrokePath(sink, camera, view, points, freshSweptPath(), radiusKm, shape, space);
+}
+
+/**
+ * Adds to a swept path the stamps for the points walked since `progress`.
+ *
+ * Exact, not approximate: a stamp depends only on the segment it lies on, and
+ * the cap on stamps is carried in `progress`, so extending point by point adds
+ * the same stamps in the same order as building from scratch. The caller keeps
+ * `sink` and `progress` together and passes the same stroke back, longer.
+ */
+export function extendStrokePath(
+  sink: PathSink,
+  camera: Camera,
+  view: Viewport,
+  points: ReadonlyArray<readonly [number, number]>,
+  progress: SweptPathProgress,
+  radiusKm: number,
+  shape: BrushShape = "circle",
+  space: StampSpace = "geodesic",
+): void {
   const stamp = (lon: number, lat: number) => {
-    if (drawn >= MAX_FOOTPRINTS) return;
+    if (progress.drawn >= MAX_FOOTPRINTS) return;
     addFootprint(sink, camera, view, lon, lat, radiusKm, shape, space);
-    drawn += 1;
+    progress.drawn += 1;
   };
 
-  const first = points[0];
-  if (first === undefined) return;
-  stamp(first[0], first[1]);
+  if (progress.done === 0) {
+    const first = points[0];
+    if (first === undefined) return;
+    stamp(first[0], first[1]);
+    progress.done = 1;
+  }
 
-  for (let i = 1; i < points.length; i++) {
+  for (let i = progress.done; i < points.length; i++) {
     const from = points[i - 1]!;
     const to = points[i]!;
 
@@ -197,9 +245,9 @@ export function buildStrokePath(
       const t = step / steps;
       stamp(normalizeLon(from[0] + dLon * t), from[1] + dLat * t);
     }
+    progress.done = i + 1;
   }
 }
-
 
 /**
  * The region a gesture will paint, in geographic terms.

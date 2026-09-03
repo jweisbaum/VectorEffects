@@ -11,6 +11,8 @@
  * nothing here. If it ever needs more, the fix belongs in the property system.
  */
 
+import { memo } from "react";
+
 import type { PropertyValue } from "../generated/PropertyValue";
 import type { ToolOptionSpec } from "../generated/ToolOptionSpec";
 import type { ToolSchema } from "../generated/ToolSchema";
@@ -44,7 +46,7 @@ export interface ToolPick {
   label: string;
 }
 
-export default function ToolOptions({
+function ToolOptions({
   schema,
   state,
   onChange,
@@ -318,3 +320,10 @@ function Option({
     }
   }
 }
+
+/**
+ * Memoised: the map re-renders on things the bar does not show — the pointer
+ * readout, the busy flag — and rebuilding every control each time was a cost
+ * paid on every pointer move for no change on screen.
+ */
+export default memo(ToolOptions);

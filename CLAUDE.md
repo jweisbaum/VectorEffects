@@ -270,7 +270,22 @@ to the hash input is a correctness bug that shows up as stale frames.
   through `requestDraw`; nothing should call `drawOverlay` after moving the
   camera. The bug this prevents: the wheel handler asked for an overlay redraw
   and the pan and resize handlers did not, so a selected object's handles sat
-  still while the map moved under them.
+  still while the map moved under them. **Overlay-only changes go through
+  `requestOverlay`**, which waits for the next frame and stands down when a GL
+  frame is already pending (that frame draws the overlay). Pointer reports
+  arrive faster than frames are shown; a synchronous `drawOverlay` per report
+  drew the overlay twice per frame on a fast drag.
+- **Nothing that changes per pointer move may be `MapView` state.** The cursor
+  readout was, and every pointer report re-rendered two thousand lines of hooks
+  and the whole toolbar to refresh four spans. It is an external store now
+  (`createReadoutStore`), and only `MapReadout` subscribes. Its IPC sample is
+  one-in-flight, latest-wins — the same pattern as the drag preview.
+- **A stroke preview is extended, never rebuilt.** `extendStrokePath` and
+  `extendLatticeUnderStroke` resume from a carried `progress`; the from-scratch
+  `buildStrokePath` / `latticeUnderStroke` are those same walks started at
+  zero, and `incremental.test.ts` holds them equal op for op. Rebuilding on
+  every pointer report was quadratic in the stroke: a thousand points was a
+  million stamps over the drag. `previewCost.test.ts` reports the numbers.
 - **WKWebView suspends `requestAnimationFrame`** whenever the window is not
   being composited — occluded, minimised, or on another space. The redraw
   scheduler in `MapView` pairs every frame request with a timer fallback; without

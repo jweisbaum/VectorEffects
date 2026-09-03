@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 import { api } from "../ipc";
 import type { Gesture } from "../generated/Gesture";
@@ -22,9 +22,23 @@ import {
   unproject,
   zoomAbout,
 } from "./camera";
-import { buildFootprintPath, footprintHead, footprintRadii } from "./footprint";
+import {
+  buildFootprintPath,
+  extendStrokePath,
+  footprintHead,
+  footprintRadii,
+  freshSweptPath,
+  type SweptPathProgress,
+} from "./footprint";
 import { destination } from "./geo";
-import { glyphGeometry, glyphLayout, latticeUnder } from "./glyph";
+import {
+  extendLatticeUnderStroke,
+  freshLattice,
+  glyphGeometry,
+  glyphLayout,
+  type LatticeProgress,
+  latticeUnder,
+} from "./glyph";
 import { RAMP_STOPS, rampCss } from "./ramp";
 import { parseBasemap } from "./format";
 import { marqueeBounds } from "./marquee";
@@ -70,6 +84,77 @@ interface Readout {
   speedKnots: number;
   /** Direction, already converted to the project's convention. */
   directionDeg: number;
+}
+
+/** What the readout shows: the sample under the cursor, and the zoom. */
+interface ReadoutSnapshot {
+  sample: Readout | null;
+  zoomPercent: number;
+}
+
+/**
+ * The readout's state, kept outside React.
+ *
+ * It changes on every pointer move, and as component state it re-rendered the
+ * whole map view — two thousand lines of hooks and a toolbar — at pointer rate
+ * to refresh four spans at the bottom of the screen. As a store, only the
+ * component that subscribes to it renders.
+ */
+function createReadoutStore() {
+  let snapshot: ReadoutSnapshot = { sample: null, zoomPercent: 100 };
+  const listeners = new Set<() => void>();
+  return {
+    get: () => snapshot,
+    set(next: Partial<ReadoutSnapshot>) {
+      snapshot = { ...snapshot, ...next };
+      for (const listener of listeners) listener();
+    },
+    subscribe(listener: () => void) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+  };
+}
+
+type ReadoutStore = ReturnType<typeof createReadoutStore>;
+
+/** The cursor readout: position, field, zoom. */
+function MapReadout({ store, convention }: { store: ReadoutStore; convention: string }) {
+  const { sample, zoomPercent } = useSyncExternalStore(store.subscribe, store.get);
+  return (
+    <div className="map-readout">
+      {sample ? (
+        <>
+          <span>{formatDegrees(sample.lat, "N", "S")}</span>
+          <span>{formatDegrees(normalizeLon(sample.lon), "E", "W")}</span>
+          <span className="accent">{sample.speedKnots.toFixed(1)} kt</span>
+          <span>
+            {Math.round(sample.directionDeg)}° ({convention})
+          </span>
+          <span className="muted">{zoomPercent}%</span>
+        </>
+      ) : (
+        <span className="muted">move the cursor over the map</span>
+      )}
+    </div>
+  );
+}
+
+/**
+ * A stroke preview's swept path and lattice, kept between pointer reports.
+ *
+ * Keyed by the stroke's own point array, which a gesture in progress mutates
+ * in place — so the entry survives from one report to the next and only the
+ * new segment is walked. `key` names everything else the geometry depends on;
+ * a change to any of it rebuilds from nothing.
+ */
+interface SweptEntry {
+  key: string;
+  path: Path2D;
+  progress: SweptPathProgress;
+  lattice: LatticeProgress;
 }
 
 /**
@@ -262,7 +347,24 @@ export default function MapView({
   const [glyphStyle, setGlyphStyle] = useState<"arrow" | "barb">("barb");
   const [showGlyphs, setShowGlyphs] = useState(true);
   const [showGraticule, setShowGraticule] = useState(true);
-  const [readout, setReadout] = useState<Readout | null>(null);
+  const readoutStore = useRef<ReadoutStore | null>(null);
+  readoutStore.current ??= createReadoutStore();
+  /**
+   * The field sample in flight for the readout, and the position waiting
+   * behind it.
+   *
+   * One request at a time, latest wins: the pointer reports more often than a
+   * round trip completes, and a request per report queued up behind itself
+   * until the readout was answering positions the cursor had left long ago.
+   */
+  const sampling = useRef<{ inFlight: boolean; queued: { lon: number; lat: number } | null }>({
+    inFlight: false,
+    queued: null,
+  });
+  /** Swept previews being extended, keyed by their stroke's point array. */
+  const sweptCache = useRef(new WeakMap<object, SweptEntry>());
+  /** An overlay-only redraw waiting for the next frame. */
+  const overlayScheduled = useRef<number | null>(null);
   const [pending, setPending] = useState(0);
   const [tool, setTool] = useState<ActiveTool>(HAND);
   /**
@@ -534,6 +636,12 @@ export default function MapView({
     const renderer = rendererRef.current;
     if (!renderer) return;
 
+    // This frame draws the overlay too, so one waiting on its own is redundant.
+    if (overlayScheduled.current !== null) {
+      cancelAnimationFrame(overlayScheduled.current);
+      overlayScheduled.current = null;
+    }
+
     const state: RenderState = {
       camera: cameraRef.current,
       view: viewRef.current,
@@ -631,6 +739,24 @@ export default function MapView({
       timer: window.setTimeout(run, 200),
     };
   }, [draw]);
+
+  /**
+   * Redraws the overlay on the next frame.
+   *
+   * Pointer reports arrive faster than frames are shown, and an overlay drawn
+   * synchronously on each one was drawn twice per frame on a fast drag. Nothing
+   * a pointer report changes is visible before the next frame anyway, so the
+   * draw waits for it. A pending GL frame already draws the overlay in the same
+   * frame — the rule that keeps the two canvases together — so nothing is
+   * scheduled behind one.
+   */
+  const requestOverlay = useCallback(() => {
+    if (scheduled.current !== null || overlayScheduled.current !== null) return;
+    overlayScheduled.current = requestAnimationFrame(() => {
+      overlayScheduled.current = null;
+      drawOverlayRef.current();
+    });
+  }, []);
 
   // --- Set up GL once ---
   useEffect(() => {
@@ -922,14 +1048,46 @@ export default function MapView({
       // Every piece is its own subpath, so filling once merges overlapping
       // footprints into a single silhouette instead of drawing a chain of
       // outlines on top of each other -- and leaves a ring its hole.
-      const region = new Path2D();
-      buildFootprintPath(region, camera, view, preview.footprint);
-      context.fillStyle = preview.paint;
-      context.fill(region);
-
-      if (!showGlyphs) return;
       const { stepDeg } = glyphLayout(glyphStyle, camera.pxPerDeg, dpr);
-      const covered = latticeUnder(preview.footprint, stepDeg, MAX_PREVIEW_GLYPHS);
+      const footprint = preview.footprint;
+      let covered: Array<[number, number]>;
+
+      if (footprint.kind === "swept") {
+        // A stroke gains a point per pointer report. Its path and lattice are
+        // extended by the new segment rather than rebuilt from the first point
+        // — the same walk, resumed — so a long stroke costs the same per
+        // report as a short one. The key holds everything the geometry depends
+        // on besides the points; a zoom mid-stroke rebuilds from nothing.
+        const key = [
+          camera.centerLon, camera.centerLat, camera.pxPerDeg,
+          view.width, view.height,
+          footprint.radiusKm, footprint.shape, footprint.space,
+          stepDeg, MAX_PREVIEW_GLYPHS,
+        ].join("|");
+        let entry = sweptCache.current.get(footprint.points);
+        if (!entry || entry.key !== key) {
+          entry = { key, path: new Path2D(), progress: freshSweptPath(), lattice: freshLattice() };
+          sweptCache.current.set(footprint.points, entry);
+        }
+        extendStrokePath(
+          entry.path, camera, view, footprint.points, entry.progress,
+          footprint.radiusKm, footprint.shape, footprint.space,
+        );
+        context.fillStyle = preview.paint;
+        context.fill(entry.path);
+        if (!showGlyphs) return;
+        covered = extendLatticeUnderStroke(
+          footprint.points, entry.lattice, footprint.radiusKm, stepDeg,
+          MAX_PREVIEW_GLYPHS, footprint.shape, footprint.space,
+        );
+      } else {
+        const region = new Path2D();
+        buildFootprintPath(region, camera, view, footprint);
+        context.fillStyle = preview.paint;
+        context.fill(region);
+        if (!showGlyphs) return;
+        covered = latticeUnder(footprint, stepDeg, MAX_PREVIEW_GLYPHS);
+      }
       // A footprint narrower than the lattice can cover no point at all. It
       // still has a direction, and a preview showing none of it is worse than
       // one glyph off the lattice, so a point on the shape stands in.
@@ -1624,7 +1782,7 @@ export default function MapView({
 
     if (marquee.current) {
       marquee.current.to = point;
-      drawOverlay();
+      requestOverlay();
       return;
     }
 
@@ -1658,7 +1816,7 @@ export default function MapView({
       // GL pass has to run too. No tile is refetched — the revision has not
       // moved — so this redraws textures that are already resident.
       if (refreshOperator(drawing)) requestDraw();
-      drawOverlay();
+      requestOverlay();
       return;
     }
 
@@ -1667,7 +1825,7 @@ export default function MapView({
       const geo = unproject(cameraRef.current, viewRef.current, point);
       drawing.rim = [geo.lon, geo.lat];
       if (refreshOperator(drawing)) requestDraw();
-      drawOverlay();
+      requestOverlay();
       return;
     }
 
@@ -1677,13 +1835,13 @@ export default function MapView({
     if (drawing?.kind === "path" && nodeDrag.current) {
       const geo = unproject(cameraRef.current, viewRef.current, point);
       shapeNode(drawing, [geo.lon, geo.lat]);
-      drawOverlay();
+      requestOverlay();
       return;
     }
 
     // A tool's hover indicator follows the cursor, and so does a pick's
     // crosshair — and so does the rubber line of a gesture being built up.
-    if (tool !== HAND || picking !== null) drawOverlay();
+    if (tool !== HAND || picking !== null) requestOverlay();
 
     if (dragging.current) {
       const dx = point.x - dragging.current.x;
@@ -1703,21 +1861,50 @@ export default function MapView({
       requestDraw();
     }
 
-    const geo = unproject(cameraRef.current, viewRef.current, point);
+    readoutStore.current?.set({
+      zoomPercent: Math.round(
+        (cameraRef.current.pxPerDeg / minPxPerDeg(viewRef.current)) * 100,
+      ),
+    });
+    sampleAt(unproject(cameraRef.current, viewRef.current, point));
+  };
+
+  /**
+   * Samples the field under the pointer for the readout — one request in
+   * flight, the newest position waiting behind it.
+   */
+  const sampleAt = (geo: { lon: number; lat: number }) => {
+    const state = sampling.current;
+    if (state.inFlight) {
+      state.queued = geo;
+      return;
+    }
+    state.inFlight = true;
+    const store = readoutStore.current;
     void api
-      .sampleField(geo.lon, geo.lat, step)
+      // Read from the refs rather than the closure: a queued request runs from
+      // an earlier pointer report's promise, after the step may have moved.
+      .sampleField(geo.lon, geo.lat, stepRef.current)
       .then((sample) =>
-        setReadout({
-          lon: geo.lon,
-          lat: geo.lat,
-          speedKnots: knotsFromMps(sample.speed_mps),
-          directionDeg: displayDirection(
-            project.direction_convention,
-            sample.azimuth_toward_deg,
-          ),
+        store?.set({
+          sample: {
+            lon: geo.lon,
+            lat: geo.lat,
+            speedKnots: knotsFromMps(sample.speed_mps),
+            directionDeg: displayDirection(
+              projectRef.current.direction_convention,
+              sample.azimuth_toward_deg,
+            ),
+          },
         }),
       )
-      .catch(() => setReadout(null));
+      .catch(() => store?.set({ sample: null }))
+      .finally(() => {
+        state.inFlight = false;
+        const next = state.queued;
+        state.queued = null;
+        if (next) sampleAt(next);
+      });
   };
 
   /**
@@ -2212,10 +2399,6 @@ export default function MapView({
     requestDraw,
   ]);
 
-  const zoomPercent = Math.round(
-    (cameraRef.current.pxPerDeg / minPxPerDeg(viewRef.current)) * 100,
-  );
-
   return (
     <div className="map">
       <canvas
@@ -2344,21 +2527,7 @@ export default function MapView({
         </div>
       </div>
 
-      <div className="map-readout">
-        {readout ? (
-          <>
-            <span>{formatDegrees(readout.lat, "N", "S")}</span>
-            <span>{formatDegrees(normalizeLon(readout.lon), "E", "W")}</span>
-            <span className="accent">{readout.speedKnots.toFixed(1)} kt</span>
-            <span>
-              {Math.round(readout.directionDeg)}° ({project.direction_convention})
-            </span>
-            <span className="muted">{zoomPercent}%</span>
-          </>
-        ) : (
-          <span className="muted">move the cursor over the map</span>
-        )}
-      </div>
+      <MapReadout store={readoutStore.current} convention={project.direction_convention} />
     </div>
   );
 }

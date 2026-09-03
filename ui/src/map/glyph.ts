@@ -154,11 +154,40 @@ const MAX_STAMPS = 4000;
 const MAX_SEGMENT_STEPS = 512;
 
 /**
- * The lattice points a stroke covers, as [lon, lat].
+ * How far along a stroke its lattice walk has got.
  *
- * The map draws its glyphs on a lattice anchored to the globe (`glyphLattice`),
- * and the brush preview draws them in the same places, so what is previewed is
- * what the field will show once the stroke is committed.
+ * The lattice under a stroke in progress is extended a segment at a time
+ * rather than re-walked from the first point on every pointer report; the
+ * visited set and the caps are carried here so the extension is exact.
+ */
+export interface LatticeProgress {
+  /** How many of the stroke's points have been walked. */
+  done: number;
+  /** Stamps placed so far, against the cap. */
+  stamps: number;
+  /** Lattice keys already collected, so a point is never placed twice. */
+  seen: Set<number>;
+  /** The points collected, in the order they were found. */
+  found: Array<[number, number]>;
+  /**
+   * Whether a cap was hit. Once one is, the walk stops for good: extending
+   * further would add points a fresh walk of the same stroke would never
+   * reach, and the two must agree.
+   */
+  exhausted: boolean;
+}
+
+/** A lattice walk with nothing walked yet. */
+export function freshLattice(): LatticeProgress {
+  return { done: 0, stamps: 0, seen: new Set(), found: [], exhausted: false };
+}
+
+/**
+ * The lattice points a stroke covers, for its preview glyphs.
+ *
+ * The map draws glyphs on a globe-anchored lattice (`glyphLattice` in
+ * `renderer.ts`), and the brush preview draws them in the same places, so what
+ * is previewed is what the field will show once the stroke is committed.
  *
  * Walks the stroke and collects the lattice points inside each stamp rather
  * than testing every point in the stroke's bounding box against it. The work
@@ -169,6 +198,9 @@ const MAX_SEGMENT_STEPS = 512;
  *
  * `limit` caps the result; a stroke around the world at a fine lattice would
  * ask for more glyphs than are worth drawing on a preview.
+ *
+ * The whole stroke from nothing: {@link extendLatticeUnderStroke} started at
+ * zero, so the two cannot disagree.
  */
 export function latticeUnderStroke(
   points: ReadonlyArray<readonly [number, number]>,
@@ -178,21 +210,37 @@ export function latticeUnderStroke(
   shape: BrushShape = "circle",
   space: StampSpace = "geodesic",
 ): Array<[number, number]> {
-  const found: Array<[number, number]> = [];
-  const first = points[0];
-  if (first === undefined || limit <= 0) return found;
+  return extendLatticeUnderStroke(points, freshLattice(), radiusKm, stepDeg, limit, shape, space);
+}
+
+/**
+ * Collects the lattice points under the segments walked since `progress`.
+ *
+ * Returns `progress.found`, which now holds every point under the stroke so
+ * far. Exact for the same reason {@link extendStrokePath} is: a segment's
+ * stamps depend only on that segment, and everything that spans segments — the
+ * visited set, the stamp count, the result cap — is carried in `progress`.
+ */
+export function extendLatticeUnderStroke(
+  points: ReadonlyArray<readonly [number, number]>,
+  progress: LatticeProgress,
+  radiusKm: number,
+  stepDeg: number,
+  limit: number,
+  shape: BrushShape = "circle",
+  space: StampSpace = "geodesic",
+): Array<[number, number]> {
+  const { found, seen } = progress;
+  if (progress.exhausted || limit <= 0) return found;
 
   // Every ladder step divides 360, so a column index wraps exactly.
   const columns = Math.round(360 / stepDeg);
   const lastRow = Math.round(180 / stepDeg);
   const radiusDeg = radiusKm / KM_PER_DEGREE;
 
-  const seen = new Set<number>();
-  let stamps = 0;
-
   /** Collects the lattice points inside one footprint. */
   const stamp = (lon: number, lat: number): boolean => {
-    if (stamps++ >= MAX_STAMPS) return false;
+    if (progress.stamps++ >= MAX_STAMPS) return false;
     // A geodesic footprint spans more longitude the further from the equator; a
     // projected one is the same in both axes by construction (spec.md 3.5).
     const radiusLon = space === "projected" ? radiusDeg : radiusDeg / cosLat(lat);
@@ -229,9 +277,20 @@ export function latticeUnderStroke(
     return true;
   };
 
-  if (!stamp(first[0], first[1])) return found;
+  /** Stops the walk, now and for every extension after this one. */
+  const stop = () => {
+    progress.exhausted = true;
+    return found;
+  };
 
-  for (let i = 1; i < points.length; i++) {
+  if (progress.done === 0) {
+    const first = points[0];
+    if (first === undefined) return found;
+    progress.done = 1;
+    if (!stamp(first[0], first[1])) return stop();
+  }
+
+  for (let i = progress.done; i < points.length; i++) {
     const from = points[i - 1]!;
     const to = points[i]!;
 
@@ -250,8 +309,9 @@ export function latticeUnderStroke(
 
     for (let step = 1; step <= steps; step++) {
       const t = step / steps;
-      if (!stamp(normalizeLon(from[0] + dLon * t), from[1] + dLat * t)) return found;
+      if (!stamp(normalizeLon(from[0] + dLon * t), from[1] + dLat * t)) return stop();
     }
+    progress.done = i + 1;
   }
 
   return found;

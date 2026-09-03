@@ -8,6 +8,7 @@
  */
 
 import {
+  type VisibleTile,
   type Camera,
   type Viewport,
   glyphLattice,
@@ -308,7 +309,12 @@ export class MapRenderer {
   }
 
   /** The speed raster, for one camera and one mask mode. */
-  private drawRaster(state: RenderState, camera: Camera, mode: 0 | 1 | 2): void {
+  private drawRaster(
+    state: RenderState,
+    camera: Camera,
+    tiles: readonly VisibleTile[],
+    mode: 0 | 1 | 2,
+  ): void {
     const gl = this.gl;
     gl.useProgram(this.rasterProgram);
     gl.bindVertexArray(this.quadVao);
@@ -319,7 +325,7 @@ export class MapRenderer {
     this.setMask(this.rasterUniforms, state.view, mode);
     gl.activeTexture(gl.TEXTURE0);
 
-    for (const tile of visibleTiles(camera, state.view)) {
+    for (const tile of tiles) {
       const texture = this.tiles.get(state.frame, tile.z, tile.x, tile.y);
       if (!texture) continue;
       const b = tileBounds(tile.z, tile.x, tile.y);
@@ -379,7 +385,12 @@ export class MapRenderer {
   }
 
   /** The direction glyphs, for one camera and one mask mode. */
-  private drawGlyphs(state: RenderState, camera: Camera, mode: 0 | 1 | 2): void {
+  private drawGlyphs(
+    state: RenderState,
+    camera: Camera,
+    tiles: readonly VisibleTile[],
+    mode: 0 | 1 | 2,
+  ): void {
     const gl = this.gl;
     // Spacing is resolved to a whole-degree lattice step so the grid is
     // globally anchored. `glyphLayout` is shared with the gesture preview,
@@ -402,7 +413,7 @@ export class MapRenderer {
     this.setMask(this.glyphUniforms, state.view, mode);
     gl.activeTexture(gl.TEXTURE0);
 
-    for (const tile of visibleTiles(camera, state.view)) {
+    for (const tile of tiles) {
       const texture = this.tiles.get(state.frame, tile.z, tile.x, tile.y);
       if (!texture) continue;
       const b = tileBounds(tile.z, tile.x, tile.y);
@@ -462,6 +473,11 @@ export class MapRenderer {
     const source =
       operating && state.operator?.kind === "clone" ? (state.operator.source ?? null) : null;
 
+    // Which tiles each camera sees, once per frame rather than once per pass:
+    // the raster and the glyphs walk the same set.
+    const tiles = visibleTiles(state.camera, state.view);
+    const sourceTiles = source ? visibleTiles(source, state.view) : [];
+
     // --- Land and coastlines ---
     gl.useProgram(this.geoProgram);
     const land = this.landByLod.get(lod);
@@ -478,8 +494,8 @@ export class MapRenderer {
     // --- Speed raster ---
     // The basemap is never masked: an eraser takes away the field, not the
     // coastline underneath it.
-    this.drawRaster(state, state.camera, mode);
-    if (source) this.drawRaster(state, source, 2);
+    this.drawRaster(state, state.camera, tiles, mode);
+    if (source) this.drawRaster(state, source, sourceTiles, 2);
 
     // --- Coastlines, above the raster ---
     // The field covers land as well as sea, so a coastline drawn underneath it
@@ -510,8 +526,8 @@ export class MapRenderer {
 
     // --- Glyphs ---
     if (state.showGlyphs) {
-      this.drawGlyphs(state, state.camera, mode);
-      if (source) this.drawGlyphs(state, source, 2);
+      this.drawGlyphs(state, state.camera, tiles, mode);
+      if (source) this.drawGlyphs(state, source, sourceTiles, 2);
     }
 
     gl.bindVertexArray(null);

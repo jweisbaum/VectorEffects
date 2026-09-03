@@ -496,7 +496,7 @@ The milestone's real content is therefore D32: the shared behaviour became
 shared code rather than a checklist. See the status notes at the top of this
 file for the five bugs that surfaced along the way, four of them pre-existing.
 
-**Measured on completion.** 542 Rust tests and 219 frontend tests pass, clippy
+**Measured on completion.** 542 Rust tests and 256 frontend tests pass, clippy
 clean at `-D warnings`. The fidelity suite compares 30,647 samples across 120
 generated scenes — worst speed error 0.108 m/s against a 0.25 tolerance, worst
 direction 0.186° against 2° — with 73 samples (0.24%) exempted at a path tangent
@@ -523,6 +523,21 @@ as shown", used for drawing and grabbing alike; the held preview waits for the
 handles to catch up; and `selection.rs` now pins the preview to the committed
 handles at 40%, 100% and 250%. The write and the gesture's end are sequenced
 too, rather than raced.
+
+**A performance pass over the UI, with no behaviour change.** Three structural
+costs, each paid on every pointer move whatever the tool: an IPC field sample
+whose result was `MapView` state, so every report re-rendered the whole
+component to refresh the readout; an overlay drawn synchronously per report,
+twice per frame on a fast drag; and a stroke preview rebuilt from its first
+point on every report, quadratic in the stroke. The readout is an external
+store now and only its own component renders; overlay redraws wait for the
+frame and stand down behind a pending GL frame; and the preview's path and
+lattice are extended by the new segment — the same walk resumed, held equal to
+a rebuild by 36 op-for-op tests. Measured on the pure geometry: a 1000-point
+drag fell from 580 ms (1,001,000 stamps) to 1.0 ms (2,000). The canvas fill,
+which cannot be timed here, scales the same way. Also: the renderer computes
+each camera's visible tiles once per frame rather than once per pass, and the
+option bar is memoised.
 
 **Left open.** Nobody has clicked through the six tools in the running app; the
 app builds, starts and loads the frontend cleanly, and the tools are covered end
