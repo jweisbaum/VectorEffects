@@ -281,6 +281,17 @@ impl RenderCache {
         self.root.join(digest)
     }
 
+    /// Whether a tile is cached, without reading it.
+    ///
+    /// A readiness probe, not a fetch: it neither touches the disk nor marks
+    /// the entry recently used. A timeline asking after every tile of every
+    /// step several times a second must not reorder eviction by asking.
+    pub fn contains(&self, key: &TileKey) -> bool {
+        self.index
+            .lock()
+            .is_ok_and(|index| index.entries.contains_key(&key.digest()))
+    }
+
     /// Reads a tile, if it is cached.
     pub fn get(&self, key: &TileKey) -> Option<Vec<u8>> {
         let digest = key.digest();
@@ -572,6 +583,25 @@ mod tests {
             ..base
         };
         assert_ne!(base.digest(), other_quality.digest());
+    }
+
+    /// The probe answers exactly what `get` would, and answering does not
+    /// count as use — the entry's place in the eviction order is unchanged.
+    #[test]
+    fn contains_reports_without_touching() {
+        let temp = TempCache::new("contains", 1 << 20);
+        let cache = &temp.cache;
+        let key = key(&Scene {
+            objects: vec![object(10.0)],
+        });
+        assert!(!cache.contains(&key));
+        cache.put(&key, &[1, 2, 3]).expect("put");
+        assert!(cache.contains(&key));
+
+        let before = cache.index.lock().expect("lock").entries[&key.digest()].1;
+        assert!(cache.contains(&key));
+        let after = cache.index.lock().expect("lock").entries[&key.digest()].1;
+        assert_eq!(before, after, "a probe must not mark the entry used");
     }
 
     #[test]

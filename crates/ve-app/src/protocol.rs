@@ -133,14 +133,32 @@ pub fn handle(app: &tauri::AppHandle, request: &Request<Vec<u8>>) -> Response<Ve
         return respond(409, Vec::new());
     };
 
+    match serve(&state, &scene, parsed.id) {
+        Ok(encoded) => respond(200, encoded),
+        Err(err) => {
+            tracing::error!(%err, "tile evaluation failed");
+            respond(500, Vec::new())
+        }
+    }
+}
+
+/// How a scene will be evaluated: which backend, and how coarsely.
+///
+/// One decision, made here for the protocol, the render pool and the readiness
+/// probe alike. The key a tile is cached under includes the quality, so a pool
+/// that chose differently from the protocol would fill the cache with tiles the
+/// map never asks for and report frames ready that are not.
+pub fn plan_for<'a>(
+    state: &'a AppState,
+    scene: &Scene,
+) -> (Option<&'a ve_render::gpu::GpuEvaluator>, Quality) {
     // The GPU when it can take the scene, the CPU otherwise. A clone stamp
     // needs recursion, which a compute shader cannot do, so the fallback is
     // used even on a machine with a perfectly good GPU.
     let gpu = match &state.evaluators.gpu {
-        Some(gpu) if ve_render::gpu::supports(&scene) => Some(gpu),
+        Some(gpu) if ve_render::gpu::supports(scene) => Some(gpu),
         _ => None,
     };
-
     // Coarse evaluation pays on the CPU and costs on the GPU. Measured on a
     // dense scene: the CPU goes from 45.8 to 23.3 ms a tile with a stride of
     // four, while the GPU goes from 3.9 to 5.0 — three dispatches instead of
@@ -151,13 +169,38 @@ pub fn handle(app: &tauri::AppHandle, request: &Request<Vec<u8>>) -> Response<Ve
     } else {
         Quality::Standard
     };
+    (gpu, quality)
+}
+
+/// The cache key a tile of `scene` is served under.
+pub fn key_for(state: &AppState, scene: &Scene, id: tile::TileId) -> TileKey {
+    let (_, quality) = plan_for(state, scene);
+    TileKey {
+        scene: scene_hash(scene),
+        tile: id,
+        quality,
+    }
+}
+
+/// A tile of `scene`, from the cache or freshly rendered into it.
+///
+/// **The one path a tile takes**, whether the map asked for it now or the
+/// render pool is working ahead of the playhead: the key, the backend, the
+/// quality and the encoding are decided once here, so a tile rendered ahead
+/// is exactly the tile that will later be served.
+pub fn serve(
+    state: &AppState,
+    scene: &Scene,
+    id: tile::TileId,
+) -> ve_render::error::Result<Vec<u8>> {
+    let (gpu, quality) = plan_for(state, scene);
     let key = TileKey {
-        scene: scene_hash(&scene),
-        tile: parsed.id,
+        scene: scene_hash(scene),
+        tile: id,
         quality,
     };
     if let Some(cached) = state.tiles.get(&key) {
-        return respond(200, cached);
+        return Ok(cached);
     }
 
     // A preview may evaluate coarsely and interpolate: the view is a proxy,
@@ -167,21 +210,13 @@ pub fn handle(app: &tauri::AppHandle, request: &Request<Vec<u8>>) -> Response<Ve
         Some(gpu) => gpu,
         None => &CpuEvaluator,
     };
-
-    let samples = match render_tile(evaluator, &scene, parsed.id, quality) {
-        Ok(samples) => samples,
-        Err(err) => {
-            tracing::error!(%err, "tile evaluation failed");
-            return respond(500, Vec::new());
-        }
-    };
-
+    let samples = render_tile(evaluator, scene, id, quality)?;
     let encoded = tile::encode(&samples);
     if let Err(err) = state.tiles.put(&key, &encoded) {
         // A cache write failure must not fail the request.
         tracing::warn!(%err, "could not cache tile");
     }
-    respond(200, encoded)
+    Ok(encoded)
 }
 
 #[cfg(test)]

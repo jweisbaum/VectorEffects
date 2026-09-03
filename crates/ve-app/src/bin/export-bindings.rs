@@ -22,6 +22,7 @@ use ve_app::palette::{
     GestureSelector, OptionDependency, PreviewKind, Sizing, ToolOptionSpec, ToolSchema,
 };
 use ve_app::projects::{NewProjectRequest, ProjectSummary, RecentProject};
+use ve_app::render_pool::{RenderProgress, StepReadiness, TileAddress, TimelineReadiness};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Resolved against the manifest rather than the cwd, so the command works
@@ -61,6 +62,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     KeyframeView::export_all(&cfg)?;
     InterpolationView::export_all(&cfg)?;
     ShrinkImpact::export_all(&cfg)?;
+    TileAddress::export_all(&cfg)?;
+    StepReadiness::export_all(&cfg)?;
+    TimelineReadiness::export_all(&cfg)?;
+    RenderProgress::export_all(&cfg)?;
     DocumentTree::export_all(&cfg)?;
     ve_app::transform::SelectionTransform::export_all(&cfg)?;
     ve_app::transform::TransformKind::export_all(&cfg)?;

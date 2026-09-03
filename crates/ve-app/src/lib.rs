@@ -16,6 +16,7 @@ pub mod palette;
 pub mod paths;
 pub mod projects;
 pub mod protocol;
+pub mod render_pool;
 pub mod session;
 pub mod transform;
 
@@ -44,6 +45,20 @@ pub fn run() -> anyhow::Result<()> {
         .manage(state)
         .manage(protocol::SceneCache::default())
         .manage(export::ExportCancel::default())
+        .manage(std::sync::Arc::new(render_pool::RenderPool::new()))
+        .setup(|app| {
+            use tauri::{Emitter, Manager};
+            // The pool renders ahead of the playhead for the life of the
+            // process, and tells the frontend as each tile lands so the
+            // readiness strip can catch up (spec.md 9.5).
+            let pool = app.state::<std::sync::Arc<render_pool::RenderPool>>();
+            let handle = app.handle().clone();
+            pool.on_progress(move |progress| {
+                let _ = handle.emit("render://progress", progress);
+            });
+            pool.start(app.handle().clone());
+            Ok(())
+        })
         .register_uri_scheme_protocol(protocol::SCHEME, |ctx, request| {
             protocol::handle(ctx.app_handle(), &request)
         })
@@ -103,7 +118,9 @@ pub fn run() -> anyhow::Result<()> {
             animation::set_interpolation,
             animation::step_count_impact,
             animation::set_step_count,
-            animation::set_start_time
+            animation::set_start_time,
+            render_pool::render_ahead,
+            render_pool::frame_readiness
         ])
         .run(tauri::generate_context!())?;
 
