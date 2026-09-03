@@ -171,8 +171,11 @@ fn pack(scene: &Scene) -> Packed {
 
         push_f32(&mut objects, dir_b);
         push_f32(&mut objects, object.feather as f32);
-        push_f32(&mut objects, object.divergence as f32);
-        push_f32(&mut objects, object.curl as f32);
+        // Where `divergence` and `curl` were: no tool has them (spec.md 7.5).
+        // Left as padding rather than closing the gap, because the WGSL struct
+        // has to stay a multiple of 16 bytes and 26 words is not one.
+        push_f32(&mut objects, 0.0);
+        push_f32(&mut objects, 0.0);
 
         push_u32(
             &mut objects,

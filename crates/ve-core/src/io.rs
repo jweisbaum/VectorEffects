@@ -33,6 +33,7 @@ const MIGRATIONS: &[(u32, Migration)] = &[
     (3, brush_loses_divergence_and_curl),
     (4, circle_space_becomes_stamp_space),
     (5, disc_carries_an_optional_radius),
+    (6, no_tool_has_divergence_or_curl),
 ];
 
 /// Version 1 stored a stroke as one polyline: `{"stroke": {"points": [...]}}`.
@@ -213,6 +214,38 @@ fn disc_carries_an_optional_radius(value: &mut Value) -> Result<()> {
         }
     }
     convert(value);
+    Ok(())
+}
+
+/// No tool has `divergence` or `curl` any more (spec.md 6.2, 7.5).
+///
+/// The brush lost both at version 3 for want of a centre to measure them from;
+/// the circle stamp and the shape fill kept theirs, and now nothing has them.
+///
+/// A migration and not just a table change, for the reason version 3's was:
+/// [`crate::schema::PropertyMap::value_at`] returns whatever the map holds and
+/// only falls back to the schema when the key is absent. A leftover entry would
+/// go on bending the flow of an object whose panel no longer shows it and whose
+/// tool no longer defines it — invisible, unreachable, and still in the export.
+///
+/// Applied to every object rather than to the two tools that had them, because
+/// the property is gone from the model entirely: after this, an object holding
+/// one would fail to deserialise at all.
+fn no_tool_has_divergence_or_curl(value: &mut Value) -> Result<()> {
+    let Some(layers) = value.get_mut("layers").and_then(Value::as_array_mut) else {
+        return Ok(());
+    };
+    for layer in layers {
+        let Some(objects) = layer.get_mut("objects").and_then(Value::as_array_mut) else {
+            continue;
+        };
+        for object in objects {
+            if let Some(Value::Object(props)) = object.get_mut("props") {
+                props.remove("divergence");
+                props.remove("curl");
+            }
+        }
+    }
     Ok(())
 }
 
@@ -572,18 +605,16 @@ mod tests {
         object["props"]["curl"] = serde_json::json!({ "base": { "f32": -1.0 } });
 
         let project = from_json(&serde_json::to_string(&value).unwrap()).expect("migrates");
+        // Named rather than looked up by id: the ids are gone from the model,
+        // which is what version 7 finished. What has to survive is that a
+        // document carrying them still opens, and opens without them.
         let props = &project.layers[0].objects[0].props;
-        assert!(
-            props.get(PropId::Divergence).is_none(),
-            "the orphan is gone"
-        );
-        assert!(props.get(PropId::Curl).is_none(), "the orphan is gone");
-        // And nothing reads them back into the flow.
-        assert_eq!(
-            props.value_at(ToolKind::Brush, PropId::Curl, 0),
-            None,
-            "a brush has no curl to resolve at all"
-        );
+        for name in ["Divergence", "Curl"] {
+            assert!(
+                props.iter().all(|(id, _)| format!("{id:?}") != name),
+                "the orphan {name} is gone"
+            );
+        }
     }
 
     /// A version-4 circle's `circle_space` becomes `stamp_space`, and the
@@ -632,27 +663,29 @@ mod tests {
         );
     }
 
-    /// The circle stamp keeps its own `divergence` and `curl`: it has a centre
-    /// to define them about, and stripping them would flatten every rotating
-    /// circle into a straight flow.
+    /// Version 6 was the last with `divergence` and `curl`, on the circle stamp
+    /// and the shape fill. A leftover entry is not inert: `value_at` returns
+    /// whatever the map holds, so it would go on bending a flow that no panel
+    /// shows and no tool defines — and after the property left the model, it
+    /// would not even deserialise.
     #[test]
-    fn the_circle_stamp_keeps_its_divergence_and_curl() {
+    fn a_version_6_circle_loses_its_divergence_and_curl() {
         let mut value: Value = serde_json::to_value(sample()).unwrap();
-        value["schema_version"] = Value::from(3);
+        value["schema_version"] = Value::from(6);
         let object = &mut value["layers"][0]["objects"][0];
         object["tool"] = Value::from("circle");
-        object["geometry"] = serde_json::json!("disc");
+        object["geometry"] = serde_json::json!({ "disc": {} });
         object["props"]["curl"] = serde_json::json!({ "base": { "f32": 1.0 } });
+        object["props"]["divergence"] = serde_json::json!({ "base": { "f32": -0.5 } });
 
         let project = from_json(&serde_json::to_string(&value).unwrap()).expect("migrates");
-        assert_eq!(
-            project.layers[0].objects[0]
-                .props
-                .get(PropId::Curl)
-                .map(Animatable::base),
-            Some(PropValue::F32(1.0)),
-            "a circle's curl is its own"
-        );
+        let props = &project.layers[0].objects[0].props;
+        for name in ["Divergence", "Curl"] {
+            assert!(
+                props.iter().all(|(id, _)| format!("{id:?}") != name),
+                "{name} survived the migration"
+            );
+        }
     }
 
     /// The circle stamp keeps its own `fill_mode`: stripping it would turn

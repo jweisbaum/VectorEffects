@@ -212,8 +212,6 @@ fn object(rng: &mut Rng) -> FlatObject {
         speed,
         direction,
         feather: rng.range(0.0, 1.0),
-        divergence: rng.range(-1.0, 1.0),
-        curl: rng.range(-1.0, 1.0),
         edge_mode: if rng.next() > 0.7 {
             EdgeMode::Replace
         } else {

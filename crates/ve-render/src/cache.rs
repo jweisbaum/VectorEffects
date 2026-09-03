@@ -58,8 +58,6 @@ fn hash_object(hasher: &mut blake3::Hasher, object: &FlatObject) {
     }]);
     hash_f64(hasher, object.cap_radius_m);
     hash_f64(hasher, object.feather);
-    hash_f64(hasher, object.divergence);
-    hash_f64(hasher, object.curl);
     hash_f64(hasher, object.gradient_axis.degrees());
     hash_f64(hasher, object.gradient_extent);
     hasher.update(&[match object.edge_mode {
@@ -440,8 +438,6 @@ mod tests {
             speed: SpeedMode::Constant(speed),
             direction: DirectionMode::Constant(Angle::new(90.0)),
             feather: 0.2,
-            divergence: 0.0,
-            curl: 0.0,
             edge_mode: EdgeMode::Blend,
             gradient_axis: Angle::new(90.0),
             gradient_extent: 500_000.0,

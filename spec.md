@@ -586,8 +586,8 @@ All tools produce **objects**. Common rules:
   **Some properties are fixed once the object exists.** They describe what the
   object *is* rather than a parameter of it, and changing one afterwards re-makes
   it into something the user did not draw: the brush's `brush_shape` is part of
-  the geometry the stroke painted, and its `divergence` and `curl` shape the flow
-  the gesture laid down. Getting a different one means painting a different
+  the geometry the stroke painted, and its `stamp_space` is the space that
+  geometry was measured in. Getting a different one means painting a different
   stroke. Such a property is marked `creation_only` in the schema, and the rule
   is enforced at the write path as well as in the panel — a rule the document
   does not enforce is decorative, and the timeline would walk straight through
@@ -597,8 +597,8 @@ All tools produce **objects**. Common rules:
   The corollary is that a creation-only property must be settable *at* creation,
   which means the tool's own options. One that is neither editable nor offered
   by its tool cannot be set to anything but its default, and does not belong on
-  the tool at all — which is why the brush has neither `divergence` nor `curl`
-  rather than two frozen zeroes.
+  the tool at all — which is why a property no tool offers is removed from the
+  model rather than left frozen at its default (§7.5).
 
   **A property its object's own mode makes inert is not listed.** A brush aimed
   at a point never reads its constant bearing; one on a constant bearing never
@@ -756,10 +756,9 @@ swept capsule chain of the brush shape along that polyline.
 | `target` | LonLat | Used by both aimed modes: each cell's azimuth is the initial great-circle bearing from that cell to the target, and `AwayFromPoint` adds 180° to it — the outward tangent to the same great circle. **Not** the bearing measured at the target: that differs from the reciprocal by the meridian convergence between the two points, which is tens of degrees for a distant target. Set three ways — typing coordinates, arming **Pick on map** and clicking, or dragging the marker itself. The marker is a handle and takes precedence over painting under it, on the same rule as §8.1's transform handles: without that, a placed target could never be adjusted on the map, only retyped or re-picked. |
 | `feather` | f32 0–1 | Fraction of the radius over which speed falls to zero at the edge. |
 
-The brush has **no `divergence` or `curl`**. Both are defined against the
-bearing from an object's anchor (§7.5), and a stroke's anchor is just where the
-gesture happened to start — it is not a centre the flow turns about. The tools
-that place one keep them.
+**No tool has `divergence` or `curl`** (§7.5). An object's direction mode is
+the whole of its direction; a field that converges as well as turns is built
+from more than one object.
 
 
 Hover: yes — outline of the brush footprint at the cursor, filled in the speed
@@ -779,7 +778,6 @@ Click to place; no drag.
 | `diameter_km` | f32 | px or km input; stored km (§3.5). |
 | `stamp_space` | enum `Geodesic` \| `Projected` | **Fixed at creation**, and set by the diameter's unit rather than by a control of its own — px paints `projected`, a circle on the map at any latitude; km paints `geodesic`, a constant-radius cap that appears stretched near the poles. The unit governs the ring width too: one space per object means one unit per tool (§3.5). It was once `circle_space`, with its own `ScreenCircular`/`GeodesicCircular` vocabulary; one question deserves one name (§6.1). |
 | `feather` | f32 0–1 | |
-| `divergence`, `curl` | f32 | Kept here, unlike the brush: a circle *has* a centre, which is what both are measured from (§7.5). |
 
 Hover: yes — the disc a click would place, in the speed colour with its glyph.
 
@@ -794,8 +792,8 @@ is what `shape_source` decides — so a preset cannot acquire an interaction of
 its own by accident.
 
 Centre-out rather than corner-to-corner so that all three presets have the same
-anchor as the shape they produce — which is the point their divergence and curl
-are measured from (§7.5) and the pivot their handles turn them about (§8.2). A
+anchor as the shape they produce — the pivot their handles turn them about
+(§8.2). A
 square takes the larger of the drag's two reaches, so a drag that is mostly
 sideways produces the square it looks like it is producing.
 
@@ -824,7 +822,6 @@ carries an optional radius to say which of the two a given disc is.
 | `direction` | Angle | Used when `direction_mode` is `Constant`. |
 | `target` | LonLat | Used by both aimed modes. Placeable by pointing, on the tool and on the object (§6.1). |
 | `feather` | f32 0–1 | |
-| `divergence`, `curl` | f32 | Measured from the shape's anchor (§7.5). |
 
 Hover: **none**, deliberately. A polygon is built vertex by vertex and a preset
 is dragged out, so there is nothing a *click* would produce to preview; the
@@ -969,7 +966,8 @@ the same numbers; feather is a fraction of the shape's own extent (§7.4), so it
 is scale-free; and the cull radius still bounds the reach, because a projected
 metre is never *more* than a ground metre — the bound errs conservatively, which
 is the only direction a cull may err in. Directions never come from the frame in
-either space (above), so divergence, curl and every aiming mode are untouched.
+either space (above), so a circle's rotation and every aiming mode are
+untouched.
 
 The antimeridian and the poles stay ordinary here too, for a different reason:
 the longitude delta is normalised, and nothing divides by `cos(lat)`, so there
@@ -1068,33 +1066,35 @@ The eraser is a natural consequence of this model rather than a special case: it
 is an object whose speed is 0, so its feathered edge blends the underlying field
 back toward calm.
 
-### 7.5 Divergence and curl
+### 7.5 No tool shapes its flow with divergence or curl
 
-Both are added as components relative to the object's anchor, computed in the
-local AEQD frame. With `r̂` the unit radial vector from the anchor to the cell
-and `t̂` the unit tangential vector (90° CCW from `r̂`):
+Earlier versions gave the tools that place a centre a radial and a tangential
+component, added to the base direction as multiples of the speed. Nothing has
+them now. **An object's direction mode is the whole of its direction.**
 
-```
-v_out = v_base + divergence * speed * r̂ + curl * speed * t̂
-```
+What this costs is the spiral. A radial component is what makes a low converge
+rather than merely turn, so a cyclone painted with the circle tool is a pure
+rotation and the inflow has to be built from other objects — a second, larger
+circle aimed at the centre, or a shape fill on `toward_point`. The aimed
+direction modes reach the same fields; they take more than one object to do it.
 
-Values are dimensionless multipliers in `[-1, 1]`. `divergence > 0` flows
-outward, `curl > 0` flows counter-clockwise. At the anchor itself both terms are
-zero (degenerate `r̂`); the field is smoothed over the first cell to avoid a
-singularity.
+What it buys is that a direction is decided in exactly one place. The components
+were the last thing that could modify a vector after its mode had produced it,
+and they were the last thing in the evaluator whose result depended on the
+object's *anchor* rather than on its geometry — which is why removing them
+tightened GPU–CPU agreement by two orders of magnitude, from 0.108 m/s to 0.0009.
 
-**They belong to the tools that place a centre**, which is why the brush has
-neither (§6.2). Both are measured from the anchor, and a stroke's anchor is
-wherever the gesture started — not a centre its flow turns about. A brush stroke
-shapes its flow along the polyline instead: by its direction mode, and by being
-painted where the user wanted it.
+The circle tool's `rotation_sense` was never sugar over curl and is unaffected.
+Curl *added* to a base direction, and the circle has no direction property of
+its own, so a curl-based rotation defaulted that base to north and produced a
+circle that drifted northward while it turned. Rotation is its own direction
+mode — flow tangential to the anchor at the object's `speed` — and now the only
+thing a circle does.
 
-The circle tool's `rotation_sense` is **not** sugar over `curl`. Curl *adds* to
-an object's base direction, and the circle has no direction property of its own,
-so a curl-based rotation defaulted that base to north and produced a circle that
-drifted northward while it turned. Rotation is its own direction mode — flow
-tangential to the anchor at the object's `speed` — with divergence and curl
-still available on top to make it spiral.
+Removing a property from a tool is a migration, never only a table edit: a
+`PropertyMap` returns whatever it holds and falls back to the schema only when
+the key is absent, so a leftover entry goes on bending a flow that no panel
+shows and no tool defines (§4.7, schema version 7).
 
 ### 7.6 Compositing
 
@@ -1552,7 +1552,7 @@ property.
 | Ownership | Properties | On re-solve |
 |---|---|---|
 | Solver-owned | `speed`, `direction`, geometry (the leg path), `active_range` | Always recomputed |
-| User-owned | `width_km`, `feather`, `edge_mode`, `name`, `enabled`, `divergence`, `curl` | Preserved once modified; otherwise follow the solver's default |
+| User-owned | `width_km`, `feather`, `edge_mode`, `name`, `enabled` | Preserved once modified; otherwise follow the solver's default |
 
 If the user manually edited a solver-owned property, re-solving overwrites it and
 lists the overwrites in the route report — a notice, not a prompt.

@@ -59,33 +59,7 @@ fn brush(anchor: LonLat, points: Vec<[f64; 2]>, size_km: f32, speed: f32, dir: f
     object
 }
 
-/// A filled square of side `2 * half_km` at `anchor`, flowing toward `dir`.
-///
-/// The vehicle for divergence and curl where a *constant* base flow is needed:
-/// the shape fill has one, where the circle's flow is tangential by definition.
-fn filled_square(anchor: LonLat, half_km: f64, speed: f32, dir: f64) -> Object {
-    let mut object = Object::new(ToolKind::ShapeFill, "fill", 24);
-    object.geometry = Geometry::Rect {
-        half_width_m: half_km * 1000.0,
-        half_height_m: half_km * 1000.0,
-    };
-    set(&mut object, PropId::Position, PropValue::LonLat(anchor));
-    set_num(&mut object, PropId::Speed, speed);
-    set(
-        &mut object,
-        PropId::Direction,
-        PropValue::Angle(Angle::new(dir)),
-    );
-    set_num(&mut object, PropId::Feather, 0.0);
-    object
-}
-
 /// A filled disc of `diameter_km` at `anchor`, flowing at `speed`.
-///
-/// The vehicle for divergence and curl: both are defined against the bearing
-/// from the anchor, so they belong to the tools that place a centre. The brush
-/// has none — it paints a flow along a stroke — and no longer carries them
-/// (spec.md 6.2, 7.5).
 fn disc(anchor: LonLat, diameter_km: f32, speed: f32) -> Object {
     let mut object = Object::new(ToolKind::Circle, "disc", 24);
     object.geometry = Geometry::Disc { radius_m: None };
@@ -93,9 +67,6 @@ fn disc(anchor: LonLat, diameter_km: f32, speed: f32) -> Object {
     set_num(&mut object, PropId::DiameterKm, diameter_km);
     set_num(&mut object, PropId::Speed, speed);
     set_num(&mut object, PropId::Feather, 0.0);
-    // The circle's own flow is tangential; zeroed so the test reads only the
-    // component it is about.
-    set_num(&mut object, PropId::Curl, 0.0);
     object
 }
 
@@ -384,60 +355,58 @@ fn toward_point_aims_every_vector_at_the_target() {
     );
 }
 
+/// Spec 7.5: nothing shapes a flow with a radial or tangential component any
+/// more. A circle turns about its centre and a shape fill flows the way it was
+/// given; neither has anything added on top.
+///
+/// Checked as a *field* property rather than by looking for absent properties,
+/// because that is what the removal was for: a disc's flow is purely
+/// tangential, so at any point on it the vector is perpendicular to the bearing
+/// from the centre. Any outward or inward component would be divergence by
+/// another name, whatever it was called.
 #[test]
-fn curl_turns_the_field_around_the_anchor() {
+fn a_circle_flows_purely_about_its_centre() {
     let anchor = ll(0.0, 20.0);
-    // Base flow due east, so the added tangential term does not simply cancel
-    // it on the axis being checked.
-    let mut object = filled_square(anchor, 1000.0, 10.0, 90.0);
-    set_num(&mut object, PropId::Curl, 1.0);
-    let scene = scene_of(vec![object]);
+    let scene = scene_of(vec![disc(anchor, 2000.0, 10.0)]);
 
-    // Curl is tangential, 90 degrees clockwise of the outward bearing.
-    let east = anchor.destination(Angle::new(90.0), 400_000.0);
-    let uv = sample_scene(&scene, east);
-    assert!(
-        uv.v < -1.0,
-        "east of the anchor, positive curl must flow south: {uv:?}"
-    );
+    for bearing in [0.0, 45.0, 90.0, 180.0, 270.0] {
+        let at = anchor.destination(Angle::new(bearing), 400_000.0);
+        let uv = sample_scene(&scene, at);
+        let (speed, azimuth) = ve_core::vector::speed_azimuth_from_uv(uv);
+        assert!(speed > 1.0, "the disc paints nothing at {bearing}");
 
-    let west = anchor.destination(Angle::new(270.0), 400_000.0);
-    let uv = sample_scene(&scene, west);
-    assert!(uv.v > 1.0, "west of the anchor it must flow north: {uv:?}");
+        // The outward bearing at this point, and the flow's angle to it.
+        let outward = anchor.initial_bearing(at).degrees();
+        let off = ((azimuth.degrees() - outward + 540.0) % 360.0) - 180.0;
+        assert!(
+            (off.abs() - 90.0).abs() < 1.0,
+            "at {bearing} the flow is {off} degrees off the outward bearing, \
+             not the 90 a pure rotation makes"
+        );
+    }
 }
 
+/// A bearing from the anchor is undefined *at* the anchor, and a circle's flow
+/// is taken from one. The centre of every circle is therefore the case that has
+/// to stay finite — it used to be guarded by an epsilon, which went with the
+/// divergence and curl terms it was written for.
 #[test]
-fn divergence_pushes_outward_from_the_anchor() {
+fn the_centre_of_a_circle_stays_finite() {
     let anchor = ll(0.0, 0.0);
-    let mut object = disc(anchor, 2000.0, 10.0);
-    set_num(&mut object, PropId::Divergence, 1.0);
-    let scene = scene_of(vec![object]);
-
-    let east = anchor.destination(Angle::new(90.0), 400_000.0);
-    assert!(
-        sample_scene(&scene, east).u > 1.0,
-        "must flow east of the anchor"
-    );
-
-    let west = anchor.destination(Angle::new(270.0), 400_000.0);
-    assert!(
-        sample_scene(&scene, west).u < -1.0,
-        "and west on the other side"
-    );
-}
-
-/// Divergence and curl are undefined exactly at the anchor; the result must be
-/// finite rather than a singularity at the centre of every circle.
-#[test]
-fn the_anchor_itself_stays_finite_under_divergence_and_curl() {
-    let anchor = ll(0.0, 0.0);
-    let mut object = disc(anchor, 2000.0, 10.0);
-    set_num(&mut object, PropId::Divergence, 1.0);
-    set_num(&mut object, PropId::Curl, -1.0);
-    let scene = scene_of(vec![object]);
+    let scene = scene_of(vec![disc(anchor, 2000.0, 10.0)]);
 
     let uv = sample_scene(&scene, anchor);
     assert!(uv.u.is_finite() && uv.v.is_finite(), "{uv:?}");
+
+    // ...and just off it, where the bearing is well defined again.
+    for metres in [0.5, 1.0, 2.0, 100.0] {
+        let near = anchor.destination(Angle::new(37.0), metres);
+        let uv = sample_scene(&scene, near);
+        assert!(
+            uv.u.is_finite() && uv.v.is_finite(),
+            "{metres} m out: {uv:?}"
+        );
+    }
 }
 
 // --- Transform --------------------------------------------------------------
@@ -494,7 +463,6 @@ fn a_circle_gradient_ramps_from_the_centre_outward() {
     set_num(&mut object, PropId::SpeedMin, 0.0);
     set_num(&mut object, PropId::SpeedMax, 40.0);
     set_num(&mut object, PropId::Feather, 0.0);
-    set_num(&mut object, PropId::Curl, 0.0);
     let scene = scene_of(vec![object]);
 
     let centre = speed_at(&scene, anchor);
@@ -570,7 +538,6 @@ fn a_circle_perimeter_leaves_its_hole_empty() {
     set_num(&mut object, PropId::RingWidthKm, 200.0);
     set_num(&mut object, PropId::Speed, 15.0);
     set_num(&mut object, PropId::Feather, 0.0);
-    set_num(&mut object, PropId::Curl, 0.0);
     let scene = scene_of(vec![object]);
 
     assert_eq!(speed_at(&scene, anchor), 0.0, "the hole must stay empty");

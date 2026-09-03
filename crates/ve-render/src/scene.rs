@@ -65,11 +65,11 @@ pub enum DirectionMode {
     },
     /// Flow around the anchor: the circle tool's rotation.
     ///
-    /// A separate mode rather than sugar over `curl`, because curl *adds* to
-    /// the base direction. With the circle having no direction property of its
-    /// own, that base defaulted to north and a "rotating" circle came out
-    /// drifting northward. Rotation is the primary flow here, and divergence
-    /// and curl remain available on top to make it spiral.
+    /// A direction mode of its own rather than a component added to a base
+    /// bearing: a circle has no bearing to add to, so "rotating" would have
+    /// meant "north, plus a turn", and came out drifting northward. This is the
+    /// whole of a circle's flow — no tool has a radial or tangential component
+    /// on top of its direction any more (spec.md 7.5).
     Tangential {
         /// True for clockwise, false for counter-clockwise.
         clockwise: bool,
@@ -113,10 +113,6 @@ pub struct FlatObject {
     pub direction: DirectionMode,
     /// Edge falloff, 0 to 1.
     pub feather: f64,
-    /// Radial component, -1 to 1.
-    pub divergence: f64,
-    /// Tangential component, -1 to 1.
-    pub curl: f64,
     /// How the edge combines with what is beneath.
     pub edge_mode: EdgeMode,
     /// Bearing the gradient ramps along, for the axis modes.
@@ -406,12 +402,6 @@ pub fn flatten_object(object: &Object, step: u32) -> Option<FlatObject> {
         feather: number(object, PropId::Feather, step)
             .unwrap_or(0.0)
             .clamp(0.0, 1.0),
-        divergence: number(object, PropId::Divergence, step)
-            .unwrap_or(0.0)
-            .clamp(-1.0, 1.0),
-        curl: number(object, PropId::Curl, step)
-            .unwrap_or(0.0)
-            .clamp(-1.0, 1.0),
         edge_mode: if choice(object, PropId::EdgeMode, step) == 1 {
             EdgeMode::Replace
         } else {

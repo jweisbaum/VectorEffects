@@ -118,10 +118,6 @@ pub enum PropId {
     // --- Field shaping ---
     /// Edge falloff, 0 to 1.
     Feather,
-    /// Radial component, -1 to 1.
-    Divergence,
-    /// Tangential component, -1 to 1.
-    Curl,
 
     // --- Brush ---
     /// Circular or square brush footprint.
@@ -493,10 +489,8 @@ const CIRCLE: &[PropSpec] = &[
     // thing across the catalogue (spec.md 3.5, 6.1).
     frozen(choice(PropId::StampSpace, "Stamp space", 0, STAMP_SPACES)),
     num(PropId::Feather, "Feather", 0.2, 0.0, 1.0, Unit::None),
-    // Neutral by default: the circle's rotation is its direction mode, not a
-    // curl term, so a non-zero default here would spiral every new circle.
-    num(PropId::Divergence, "Divergence", 0.0, -1.0, 1.0, Unit::None),
-    num(PropId::Curl, "Curl", 0.0, -1.0, 1.0, Unit::None),
+    // No `divergence` or `curl`: no tool has them (spec.md 6.2, 7.5). A circle
+    // turns about its centre and that is the whole of its flow.
 ];
 
 const SHAPE_FILL: &[PropSpec] = &[
@@ -533,8 +527,6 @@ const SHAPE_FILL: &[PropSpec] = &[
     dir(PropId::Direction, "Direction", 0.0),
     pos(PropId::Target, "Target"),
     num(PropId::Feather, "Feather", 0.1, 0.0, 1.0, Unit::None),
-    num(PropId::Divergence, "Divergence", 0.0, -1.0, 1.0, Unit::None),
-    num(PropId::Curl, "Curl", 0.0, -1.0, 1.0, Unit::None),
 ];
 
 // "Identical interaction to the brush" is binding (spec.md 6.2): the eraser
@@ -1143,7 +1135,24 @@ mod tests {
     #[test]
     fn an_unknown_property_for_a_tool_has_no_value() {
         let map = PropertyMap::for_tool(ToolKind::Eraser);
-        assert_eq!(map.value_at(ToolKind::Eraser, PropId::Curl, 0), None);
+        assert_eq!(map.value_at(ToolKind::Eraser, PropId::Speed, 0), None);
+    }
+
+    /// Spec 7.5: no tool has a radial or tangential component of its own. The
+    /// ids are gone as well as the table rows — a property no tool declares can
+    /// still be *held* by an object loaded from an older file, and `value_at`
+    /// returns whatever the map holds (D30).
+    #[test]
+    fn no_tool_shapes_its_flow_with_divergence_or_curl() {
+        for tool in ToolKind::ALL {
+            for spec in all_specs(tool) {
+                let name = format!("{:?}", spec.id);
+                assert!(
+                    name != "Divergence" && name != "Curl",
+                    "{tool:?} still declares {name}"
+                );
+            }
+        }
     }
 
     #[test]

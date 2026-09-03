@@ -14,11 +14,6 @@ use crate::error::Result;
 use crate::evaluator::{FieldEvaluator, SamplePoint};
 use crate::scene::{DirectionMode, EdgeMode, FlatObject, OffsetMode, Scene, SpeedMode};
 
-/// Below this distance from the anchor, radial and tangential directions are
-/// undefined, so divergence and curl are skipped rather than producing a
-/// singularity at the centre of every circle.
-const RADIAL_EPSILON_M: f64 = 1.0;
-
 /// How deep a clone stamp may read through other clone stamps.
 ///
 /// The z-order dependency graph is acyclic by construction — a stamp only ever
@@ -184,21 +179,7 @@ fn sample_object(object: &FlatObject, position: LonLat) -> Option<(Uv, f64)> {
     );
     let speed = speed_at(object, local).max(0.0);
     let bearing = direction_at(object, position, local);
-    let mut vector = uv_from_speed_azimuth(speed, bearing);
-
-    // Divergence pushes outward from the anchor, curl runs tangential to it.
-    // Both are defined against the true bearing from the anchor, so they stay
-    // correct at any distance.
-    if (object.divergence != 0.0 || object.curl != 0.0) && ground_distance > RADIAL_EPSILON_M {
-        let radial = object.frame.radial_bearing(position);
-        let tangential = Angle::new(radial.degrees() + 90.0);
-        let out = uv_from_speed_azimuth(object.divergence * speed, radial);
-        let round = uv_from_speed_azimuth(object.curl * speed, tangential);
-        vector = Uv {
-            u: vector.u + out.u + round.u,
-            v: vector.v + out.v + round.v,
-        };
-    }
+    let vector = uv_from_speed_azimuth(speed, bearing);
 
     Some((vector, weight))
 }

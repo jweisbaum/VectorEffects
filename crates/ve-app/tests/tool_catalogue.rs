@@ -1154,8 +1154,8 @@ fn every_tool_draws_across_the_antimeridian() {
 
 /// A polygon drawn around the pole is anchored near it, not at the mean of its
 /// longitudes — which for a ring of vertices spread round the pole is an
-/// arbitrary meridian, and would put the pivot and the divergence centre
-/// thousands of kilometres from the shape.
+/// arbitrary meridian, and would put the pivot thousands of kilometres from
+/// the shape.
 #[test]
 fn a_polygon_around_the_pole_is_anchored_near_it() {
     let (_root, state) = project("polar-polygon");

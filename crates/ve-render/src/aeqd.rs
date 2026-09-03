@@ -23,7 +23,7 @@
 //!
 //! So every direction the evaluator produces comes from a geographic bearing
 //! instead: a constant heading is a true azimuth already, "point at a target"
-//! is the bearing from the cell to the target, and divergence and curl are
+//! is the bearing from the cell to the target, and a circle's rotation is
 //! defined against the bearing from the anchor. All exact, everywhere.
 //!
 //! # The projected frame
@@ -170,9 +170,9 @@ impl Frame {
 
     /// True bearing from the anchor to `position`.
     ///
-    /// The radial direction for divergence, and the basis for curl. Exact at
-    /// any distance, which is why directions are taken from here rather than
-    /// from a local frame angle.
+    /// The outward bearing from the anchor, which a circle's tangential flow is
+    /// a quarter turn from. Exact at any distance, which is why directions are
+    /// taken from here rather than from a local frame angle.
     pub fn radial_bearing(&self, position: LonLat) -> Angle {
         self.anchor.initial_bearing(position)
     }
@@ -324,7 +324,7 @@ mod tests {
         let frame = Frame::new(anchor, 45.0, 250.0);
         for bearing in [0.0, 73.0, 180.0, 271.0] {
             let point = anchor.destination(Angle::new(bearing), 300_000.0);
-            // Rotation and scale must not disturb it: divergence and curl are
+            // Rotation and scale must not disturb it: a circle's rotation is
             // defined against the ground, not against the object's geometry.
             close(frame.radial_bearing(point).degrees(), bearing, 1e-6);
         }
@@ -450,7 +450,7 @@ mod tests {
         close(local[0], 2.0 * M_PER_DEGREE, 1e-6);
     }
 
-    /// Directions never come from the frame, so divergence and curl are
+    /// Directions never come from the frame, so a circle's rotation is
     /// unaffected by the space the geometry lives in.
     #[test]
     fn the_radial_bearing_is_a_true_azimuth_in_either_space() {

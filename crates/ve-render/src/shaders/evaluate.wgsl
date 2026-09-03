@@ -13,7 +13,6 @@
 const EARTH_RADIUS_M: f32 = 6371229.0;
 const PI: f32 = 3.14159265358979;
 const DEG: f32 = 0.01745329251994;
-const RADIAL_EPSILON_M: f32 = 1.0;
 // Metres per degree of latitude, for the projected frame. The same earth as
 // EARTH_RADIUS_M, written out because WGSL has no const arithmetic on PI here.
 const M_PER_DEGREE: f32 = 111198.9234485458;
@@ -43,8 +42,11 @@ struct Object {
 
     dir_b: f32,
     feather: f32,
-    divergence: f32,
-    curl: f32,
+    // Where `divergence` and `curl` were. Kept as padding rather than closing
+    // the gap: the struct has to stay a multiple of 16 bytes, and 26 words is
+    // not one. `OBJECT_WORDS` in gpu.rs counts these.
+    pad0: f32,
+    pad1: f32,
 
     edge_mode: u32,           // 0 blend, 1 replace
     gradient_axis: f32,
@@ -56,7 +58,7 @@ struct Object {
     path_offset: u32,         // the ordered path, for along-path direction
     path_count: u32,
     space: u32,               // 0 geodesic (ground metres), 1 projected (map metres)
-    pad0: f32,
+    pad2: f32,
 };
 
 @group(0) @binding(0) var<storage, read> objects: array<Object>;
@@ -376,14 +378,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
 
         let speed = max(speed_at(object, local), 0.0);
         let bearing = direction_at(object, position, local);
-        var vector = uv_from(speed, bearing);
-
-        if ((object.divergence != 0.0 || object.curl != 0.0) && ground > RADIAL_EPSILON_M) {
-            let radial = initial_bearing(object.anchor, position);
-            vector = vector
-                + uv_from(object.divergence * speed, radial)
-                + uv_from(object.curl * speed, radial + 90.0);
-        }
+        let vector = uv_from(speed, bearing);
 
         if (object.edge_mode == 1u) {
             accumulated = vector * weight;

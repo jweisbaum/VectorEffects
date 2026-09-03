@@ -54,8 +54,6 @@ fn scene_of(id: tile::TileId, count: u32, reach_m: f64, square: bool) -> Scene {
                 speed: SpeedMode::Constant(8.0 + f64::from(i) * 3.0),
                 direction: DirectionMode::Constant(Angle::new(f64::from(i) * 47.0)),
                 feather: 0.3,
-                divergence: 0.0,
-                curl: 0.0,
                 edge_mode: EdgeMode::Blend,
                 gradient_axis: Angle::new(90.0),
                 gradient_extent: reach_m,

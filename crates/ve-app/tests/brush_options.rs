@@ -742,8 +742,7 @@ fn the_edit_panel_offers_only_what_can_be_edited() {
     let id = ve_app::document::tree(&state, 0).expect("tree").layers[0].objects[0].id;
     let ids = listed(&state, id);
 
-    // Gone from the tool entirely: the brush has no centre to define them
-    // about (spec.md 7.5).
+    // Gone from every tool, not just this one (spec.md 7.5).
     for absent in ["Divergence", "Curl"] {
         assert!(
             !ids.contains(&absent.to_owned()),

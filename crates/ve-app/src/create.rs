@@ -127,8 +127,7 @@ pub enum Gesture {
     /// A drag from a centre outward: the shape fill's presets.
     ///
     /// Centre-out rather than corner-to-corner, so that all three presets have
-    /// the same anchor as the shape they produce — which is the point their
-    /// divergence and curl are measured from, and the pivot their handles turn
+    /// the same anchor as the shape they produce — the pivot their handles turn
     /// them about.
     Extent {
         /// Where the drag began, as `[lon, lat]`. The shape's centre.
@@ -332,8 +331,8 @@ fn points(raw: &[[f64; 2]], least: usize, what: &'static str) -> Result<Vec<LonL
 /// The gesture's anchor and geometry, in the object's own frame.
 ///
 /// The anchor is the point the object's frame is built at, so it is also the
-/// pivot its handles turn it about and the centre its divergence and curl are
-/// measured from (spec.md 7.5). Each tool's choice is the point the *user*
+/// pivot its handles turn it about, and the centre a circle's rotation and its
+/// radial speed ramp are measured from. Each tool's choice is the point the *user*
 /// would call the object's place: where a stroke began, where a stamp was
 /// clicked, the middle of a dragged shape, the middle of a placed polygon.
 fn geometry_of(
@@ -821,8 +820,8 @@ mod tests {
     }
 
     /// A polygon turns about its own middle. Anchoring it at the first vertex
-    /// instead would put the pivot on the rim, and put divergence and curl —
-    /// which are measured from the anchor — outside the shape entirely.
+    /// instead would put the pivot on the rim, so every rotation and scale
+    /// would swing the shape about one of its own corners.
     #[test]
     fn a_polygon_is_anchored_at_its_middle() {
         let mut props = PropertyMap::for_tool(ToolKind::ShapeFill);
