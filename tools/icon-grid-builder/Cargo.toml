@@ -1,0 +1,15 @@
+[package]
+name = "icon-grid-builder"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Build-time converter: DWD CLAT/CLON GRIB messages to the bundled unstructured-grid asset."
+publish = false
+
+[dependencies]
+ve-grib = { workspace = true }
+flate2 = { workspace = true }
+
+[lints]
+workspace = true

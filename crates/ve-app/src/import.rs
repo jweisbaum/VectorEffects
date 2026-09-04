@@ -51,21 +51,36 @@ pub fn import_grib(state: tauri::State<'_, AppState>, path: String) -> Result<Pr
 /// over a wind is not a wind (spec.md 4.8).
 pub fn grib_import(state: &AppState, path: String) -> Result<ProjectSummary> {
     let path = PathBuf::from(path);
-    let imported = import::read_file(&path)?;
-    for skipped in &imported.skipped {
-        tracing::warn!(
-            path = %path.display(),
-            message = skipped.index + 1,
-            reason = %skipped.reason,
-            "grib message skipped on import"
-        );
-    }
-
     with_session(state, |session| {
+        let open = session.require_open()?;
+        // An unstructured file is resampled onto *this* project's grid, so
+        // the read cannot happen before the project is in hand.
+        let imported = resample_into(&mut open.project, &path)?;
+        for skipped in &imported.skipped {
+            tracing::warn!(
+                path = %path.display(),
+                message = skipped.index + 1,
+                reason = %skipped.reason,
+                "grib message skipped on import"
+            );
+        }
         let open = session.require_open()?;
         add_layers(open, &path, imported.sequences)?;
         Ok(ProjectSummary::of(session.require_open()?))
     })
+}
+
+/// Reads a file for an open project, resampling onto that project's grid and
+/// keeping whatever neighbour sets the resample had to compute.
+fn resample_into(project: &mut Project, path: &Path) -> Result<import::Imported> {
+    let target = project.settings.resolution.target_grid();
+    let mut cache = std::mem::take(&mut project.regrid);
+    let result = {
+        let mut resampling = import::Resampling::new(target, &mut cache);
+        import::read_file(path, Some(&mut resampling))
+    };
+    project.regrid = cache;
+    Ok(result?)
 }
 
 /// Adds one layer per imported field above the open project's top, as one
@@ -109,6 +124,23 @@ fn add_layers(open: &mut OpenProject, path: &Path, sequences: Vec<RasterSequence
     Ok(())
 }
 
+/// The app resolution nearest a file's own spacing.
+///
+/// Shared with the unstructured path, which has to choose the grid *before*
+/// resampling onto it — so the choice cannot live inside the code that reads
+/// the resampled result (spec.md 4.8).
+pub fn nearest_resolution(spacing: f64) -> Resolution {
+    Resolution::ALL
+        .iter()
+        .copied()
+        .min_by(|a, b| {
+            let da = (a.degrees() - spacing).abs();
+            let db = (b.degrees() - spacing).abs();
+            da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .unwrap_or(Resolution::Deg1)
+}
+
 /// Project settings that fit an imported file (spec.md 4.8).
 ///
 /// The kind is wind when the file has wind, current otherwise; the grid is
@@ -123,16 +155,7 @@ pub fn settings_for(sequences: &[RasterSequence]) -> Option<ProjectSettings> {
         .or_else(|| sequences.first())?;
     let first = sequence.frames.first()?;
 
-    let spacing = first.grid.dlon.min(first.grid.dlat);
-    let resolution = Resolution::ALL
-        .iter()
-        .copied()
-        .min_by(|a, b| {
-            let da = (a.degrees() - spacing).abs();
-            let db = (b.degrees() - spacing).abs();
-            da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
-        })
-        .unwrap_or(Resolution::Deg1);
+    let resolution = nearest_resolution(first.grid.dlon.min(first.grid.dlat));
 
     // The largest offered step that every message lands on. A step is shown
     // from the file only where the file has a message for that exact time
@@ -195,7 +218,17 @@ pub fn grib_project(
     discard_unsaved: bool,
 ) -> Result<ProjectSummary> {
     let path = PathBuf::from(path);
-    let imported = import::read_file(&path)?;
+    // The grid comes first: an unstructured file states no spacing, so the
+    // resolution is derived from its mesh and the file is then resampled onto
+    // it. A lat/lon file reaches the same answer from its own increments.
+    let (messages, skipped) = import::read_messages(&path)?;
+    let resolution = nearest_resolution(import::nominal_spacing(&messages).unwrap_or(1.0));
+    let mut cache = std::collections::BTreeMap::new();
+    let sequences = {
+        let mut resampling = import::Resampling::new(resolution.target_grid(), &mut cache);
+        import::sequences(messages, Some(&mut resampling))?
+    };
+    let imported = import::Imported { sequences, skipped };
     let settings = settings_for(&imported.sequences).ok_or_else(|| {
         AppError::Grib(ve_grib::GribError::NoVectorField(
             "the file holds no time step to build a project from".to_owned(),
@@ -237,12 +270,22 @@ pub fn grib_project(
 /// and those are intact.
 pub fn attach_rasters(project: &mut Project) -> Vec<(String, AppError)> {
     let mut failures = Vec::new();
+    // The neighbour sets travel with the project, so a reopened ICON layer
+    // costs a decode and an interpolation rather than the search as well.
+    // Taken out for the loop's sake and put back after, sets and all.
+    let resolution = project.settings.resolution;
+    let mut cache = std::mem::take(&mut project.regrid);
     for layer in &mut project.layers {
         let LayerSource::Grib { path, field } = &layer.source else {
             continue;
         };
         let (path, field) = (path.clone(), *field);
-        match import::read_file(&path) {
+        let target = resolution.target_grid();
+        let result = {
+            let mut resampling = import::Resampling::new(target, &mut cache);
+            import::read_file(&path, Some(&mut resampling))
+        };
+        match result {
             Ok(imported) => {
                 layer.raster = imported
                     .sequences
@@ -266,6 +309,7 @@ pub fn attach_rasters(project: &mut Project) -> Vec<(String, AppError)> {
             }
         }
     }
+    project.regrid = cache;
     failures
 }
 

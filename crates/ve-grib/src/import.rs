@@ -12,8 +12,9 @@ use std::sync::Arc;
 
 use ve_core::project::FieldKind;
 use ve_core::raster::{MISSING, RasterFrame, RasterGrid, RasterSequence};
+use ve_core::regrid::{CellCentres, Neighbours, TargetGrid};
 
-use crate::decode::{self, Header, LatLonGrid, Message};
+use crate::decode::{self, Grid, Header, LatLonGrid, Message};
 use crate::error::{GribError, Result};
 
 /// Which component of a vector field a message carries.
@@ -145,6 +146,63 @@ pub fn canonical_order(grid: &LatLonGrid, values: &[f32]) -> Vec<f32> {
     out
 }
 
+/// What an unstructured file is resampled onto, and what that cost.
+///
+/// The neighbour search is the expensive half and does not depend on the
+/// values, so it is done once per (mesh, target) pair and kept here. A caller
+/// that persists the map hands it back on the next open and pays nothing;
+/// `produced` says which entries are new and therefore worth writing out.
+#[derive(Debug)]
+pub struct Resampling<'a> {
+    /// The lattice to resample onto: the project's own grid.
+    pub target: TargetGrid,
+    /// Neighbour sets by cache key, read and written.
+    pub neighbours: &'a mut BTreeMap<String, Arc<Neighbours>>,
+    /// Keys added during this run.
+    pub produced: Vec<String>,
+}
+
+impl<'a> Resampling<'a> {
+    /// Starts a resampling onto `target`, reusing whatever is already known.
+    pub fn new(target: TargetGrid, neighbours: &'a mut BTreeMap<String, Arc<Neighbours>>) -> Self {
+        Self {
+            target,
+            neighbours,
+            produced: Vec::new(),
+        }
+    }
+
+    /// The neighbour set for one mesh, computing it if this is the first ask.
+    fn for_mesh(&mut self, uuid: &[u8; 16], centres: &CellCentres) -> Arc<Neighbours> {
+        let key = Neighbours::cache_key(uuid, &self.target);
+        if let Some(found) = self.neighbours.get(&key) {
+            return Arc::clone(found);
+        }
+        let built = Arc::new(Neighbours::build(centres, &self.target));
+        self.neighbours.insert(key.clone(), Arc::clone(&built));
+        self.produced.push(key);
+        built
+    }
+}
+
+/// The mean spacing of a file's grid in degrees, for choosing a project
+/// resolution (spec §4.8).
+///
+/// A lat/lon file states it. An unstructured one does not state anything at
+/// all, so it comes from the cell count: a mesh of `n` roughly equal cells
+/// covering the sphere has cells about `sqrt(4π/n)` radians across, which for
+/// ICON global's 2,949,120 cells is 0.118° — near enough 13 km, which is what
+/// DWD publishes.
+pub fn nominal_spacing(messages: &[Message]) -> Option<f64> {
+    messages.iter().find_map(|m| match &m.header.grid {
+        Grid::LatLon(grid) => Some(grid.di.min(grid.dj)),
+        Grid::Unstructured(grid) => {
+            let cells = f64::from(grid.count);
+            (cells > 0.0).then(|| (4.0 * std::f64::consts::PI / cells).sqrt().to_degrees())
+        }
+    })
+}
+
 /// The best message for one component at one time.
 struct Candidate {
     rank: u8,
@@ -157,7 +215,10 @@ struct Candidate {
 /// import creates are in a predictable order. A time with only one
 /// component, or whose `u` and `v` grids disagree, is dropped: half a vector
 /// is not a field.
-pub fn sequences(messages: Vec<Message>) -> Result<Vec<RasterSequence>> {
+pub fn sequences(
+    messages: Vec<Message>,
+    mut resampling: Option<&mut Resampling<'_>>,
+) -> Result<Vec<RasterSequence>> {
     // Keyed by kind, then valid time, then component: a `BTreeMap` so the
     // frames come out in time order without a second sort, and so nothing
     // here iterates a `HashMap`.
@@ -195,37 +256,13 @@ pub fn sequences(messages: Vec<Message>) -> Result<Vec<RasterSequence>> {
                 dropped.push(format!("{kind:?} at {time}: only one component"));
                 continue;
             };
-            let (gu, gv) = (
-                Canonical::of(&u.message.header.grid),
-                Canonical::of(&v.message.header.grid),
-            );
-            if gu != gv {
-                dropped.push(format!(
-                    "{kind:?} at {time}: u and v are on different grids"
-                ));
-                continue;
-            }
-            let us = canonical_order(&u.message.header.grid, &u.message.values);
-            let vs = canonical_order(&v.message.header.grid, &v.message.values);
-            let uv: Vec<[f32; 2]> = us
-                .iter()
-                .zip(&vs)
-                .map(|(&a, &b)| {
-                    // A node missing in either component is missing in both:
-                    // there is no vector to draw from half of one.
-                    if ve_core::raster::is_missing(a)
-                        || ve_core::raster::is_missing(b)
-                        || !a.is_finite()
-                        || !b.is_finite()
-                    {
-                        [MISSING, MISSING]
-                    } else {
-                        [a, b]
-                    }
-                })
-                .collect();
-            let grid = RasterGrid::new(gu.ni, gu.nj, gu.lon0, gu.lat0, gu.dlon, gu.dlat, uv)
-                .map_err(GribError::Malformed)?;
+            let grid = match raster_of(&u.message, &v.message, resampling.as_deref_mut()) {
+                Ok(grid) => grid,
+                Err(why) => {
+                    dropped.push(format!("{kind:?} at {time}: {why}"));
+                    continue;
+                }
+            };
             let first = *first_time.get_or_insert(time);
             frames.push(RasterFrame {
                 offset_hours: (time - first) as f64 / 3600.0,
@@ -251,6 +288,99 @@ pub fn sequences(messages: Vec<Message>) -> Result<Vec<RasterSequence>> {
     Ok(out)
 }
 
+/// Builds one frame's raster from a `u`/`v` pair.
+///
+/// The two paths are the two kinds of grid: a lat/lon file is reordered into
+/// the canonical north-west-first layout it already implies, and an
+/// unstructured one is resampled onto the project's grid (spec §4.8). Either
+/// way what comes out is an ordinary [`RasterGrid`], which is what keeps the
+/// rest of the app — both kernels, the cache, the exporter — unaware that
+/// unstructured files exist at all.
+fn raster_of(
+    u: &Message,
+    v: &Message,
+    resampling: Option<&mut Resampling<'_>>,
+) -> std::result::Result<RasterGrid, String> {
+    match (&u.header.grid, &v.header.grid) {
+        (Grid::LatLon(gu_grid), Grid::LatLon(gv_grid)) => {
+            let (gu, gv) = (Canonical::of(gu_grid), Canonical::of(gv_grid));
+            if gu != gv {
+                return Err("u and v are on different grids".to_owned());
+            }
+            let us = canonical_order(gu_grid, &u.values);
+            let vs = canonical_order(gv_grid, &v.values);
+            RasterGrid::new(
+                gu.ni,
+                gu.nj,
+                gu.lon0,
+                gu.lat0,
+                gu.dlon,
+                gu.dlat,
+                paired(&us, &vs),
+            )
+        }
+        (Grid::Unstructured(mu), Grid::Unstructured(mv)) => {
+            if mu != mv {
+                return Err("u and v are on different unstructured grids".to_owned());
+            }
+            let Some(resampling) = resampling else {
+                return Err(
+                    "an unstructured grid needs a target resolution to resample onto".to_owned(),
+                );
+            };
+            let (_, centres) = crate::icon::bundled(&mu.uuid)
+                .map_err(|e| e.to_string())?
+                .ok_or_else(|| {
+                    format!(
+                        "no bundled definition for grid {}, so its {} cells cannot be placed",
+                        mu.uuid_hex(),
+                        mu.count
+                    )
+                })?;
+            if centres.len() != mu.count as usize {
+                return Err(format!(
+                    "grid {} has {} cells but its definition holds {}",
+                    mu.uuid_hex(),
+                    mu.count,
+                    centres.len()
+                ));
+            }
+            let neighbours = resampling.for_mesh(&mu.uuid, &centres);
+            let uv = neighbours.resample(&centres, &u.values, &v.values);
+            let target = resampling.target;
+            RasterGrid::new(
+                target.ni,
+                target.nj,
+                target.lon0,
+                target.lat0,
+                target.dlon,
+                target.dlat,
+                uv,
+            )
+        }
+        _ => Err("u and v are on different kinds of grid".to_owned()),
+    }
+}
+
+/// Pairs two components, missing in either making both missing: there is no
+/// vector to draw from half of one.
+fn paired(us: &[f32], vs: &[f32]) -> Vec<[f32; 2]> {
+    us.iter()
+        .zip(vs)
+        .map(|(&a, &b)| {
+            if ve_core::raster::is_missing(a)
+                || ve_core::raster::is_missing(b)
+                || !a.is_finite()
+                || !b.is_finite()
+            {
+                [MISSING, MISSING]
+            } else {
+                [a, b]
+            }
+        })
+        .collect()
+}
+
 /// What an import found in a file.
 #[derive(Debug, Clone)]
 pub struct Imported {
@@ -264,7 +394,21 @@ pub struct Imported {
 ///
 /// Only the vector components are unpacked; other parameters in the file
 /// cost a header parse each and nothing more.
-pub fn read_file(path: &Path) -> Result<Imported> {
+pub fn read_file(path: &Path, resampling: Option<&mut Resampling<'_>>) -> Result<Imported> {
+    let (messages, skipped) = read_messages(path)?;
+    Ok(Imported {
+        sequences: sequences(messages, resampling)?,
+        skipped,
+    })
+}
+
+/// Decodes a file's vector messages without assembling them.
+///
+/// The two steps are separate because choosing what to resample *onto* needs
+/// the messages first: an unstructured file states no spacing, so the grid a
+/// new project gets is derived from the mesh (see [`nominal_spacing`]) and
+/// only then can the file be turned into rasters.
+pub fn read_messages(path: &Path) -> Result<(Vec<Message>, Vec<decode::Skipped>)> {
     let bytes = std::fs::read(path)?;
     let decoded = decode::read(&bytes, is_vector_component)?;
     if decoded.messages.is_empty() {
@@ -280,10 +424,7 @@ pub fn read_file(path: &Path) -> Result<Imported> {
             reasons.join("; ")
         }));
     }
-    Ok(Imported {
-        sequences: sequences(decoded.messages)?,
-        skipped: decoded.skipped,
-    })
+    Ok((decoded.messages, decoded.skipped))
 }
 
 #[cfg(test)]
@@ -377,7 +518,7 @@ mod tests {
             forecast_hours: 0.0,
             surface_type: surface.0,
             surface_value: surface.1,
-            grid: grid(0, 2, 2),
+            grid: Grid::LatLon(grid(0, 2, 2)),
             packing_template: 0,
         }
     }
@@ -433,7 +574,7 @@ mod tests {
             message(u6, vec![6.0; 4]),
             message(v0, vec![-1.0; 4]),
         ];
-        let out = sequences(messages).unwrap();
+        let out = sequences(messages, None).unwrap();
         assert_eq!(out.len(), 1);
         let wind = &out[0];
         assert_eq!(wind.kind, FieldKind::Wind);
@@ -456,12 +597,15 @@ mod tests {
         let cu = header(10, 1, 2, (160, 0.0));
         let mut cv = cu.clone();
         cv.number = 3;
-        let out = sequences(vec![
-            message(cu, vec![0.5; 4]),
-            message(cv, vec![0.0; 4]),
-            message(wu, vec![10.0; 4]),
-            message(wv, vec![0.0; 4]),
-        ])
+        let out = sequences(
+            vec![
+                message(cu, vec![0.5; 4]),
+                message(cv, vec![0.0; 4]),
+                message(wu, vec![10.0; 4]),
+                message(wv, vec![0.0; 4]),
+            ],
+            None,
+        )
         .unwrap();
         assert_eq!(out.len(), 2);
         assert_eq!(out[0].kind, FieldKind::Wind);
@@ -473,10 +617,13 @@ mod tests {
         let u = header(0, 2, 2, (103, 10.0));
         let mut v = u.clone();
         v.number = 3;
-        let out = sequences(vec![
-            message(u, vec![1.0, MISSING, 1.0, 1.0]),
-            message(v, vec![1.0, 1.0, MISSING, f32::NAN]),
-        ])
+        let out = sequences(
+            vec![
+                message(u, vec![1.0, MISSING, 1.0, 1.0]),
+                message(v, vec![1.0, 1.0, MISSING, f32::NAN]),
+            ],
+            None,
+        )
         .unwrap();
         let uv = &out[0].frames[0].grid.uv;
         assert_eq!(uv[0], [1.0, 1.0]);
@@ -490,8 +637,11 @@ mod tests {
 
     #[test]
     fn a_file_of_only_temperature_is_refused_with_a_reason() {
-        let err =
-            sequences(vec![message(header(0, 0, 0, (103, 2.0)), vec![280.0; 4])]).unwrap_err();
+        let err = sequences(
+            vec![message(header(0, 0, 0, (103, 2.0)), vec![280.0; 4])],
+            None,
+        )
+        .unwrap_err();
         assert!(matches!(err, GribError::NoVectorField(_)), "{err}");
     }
 }

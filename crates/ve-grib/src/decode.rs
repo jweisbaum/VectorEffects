@@ -79,6 +79,70 @@ impl LatLonGrid {
     }
 }
 
+/// An unstructured grid (template 3.101), as ICON and other icosahedral
+/// models use.
+///
+/// The message says how many values it carries and *which* grid they belong
+/// to, and nothing whatever about where any of them is. The cell centres live
+/// in a separate file — DWD ships them as `CLAT`/`CLON` messages on this same
+/// grid — and the UUID is what ties the two together. Two files with the same
+/// UUID are on the same grid; a file whose UUID nothing knows cannot be
+/// placed on the earth at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UnstructuredGrid {
+    /// Number of cells, from the section's common part.
+    pub count: u32,
+    /// The grid's identity, octets 20-35.
+    pub uuid: [u8; 16],
+    /// Number of grid used, octets 16-18. ICON global R03B07 is 26.
+    pub number_used: u32,
+    /// Number of grid in reference, octet 19.
+    pub number_in_reference: u8,
+}
+
+impl UnstructuredGrid {
+    /// The UUID as the lower-case hex DWD and ecCodes print.
+    pub fn uuid_hex(&self) -> String {
+        self.uuid.iter().map(|b| format!("{b:02x}")).collect()
+    }
+}
+
+/// The grid a message's values sit on.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Grid {
+    /// A regular lat/lon lattice: the values carry their own geometry.
+    LatLon(LatLonGrid),
+    /// An unstructured grid: the values are a bare list, and where each one
+    /// sits has to come from the grid's own definition (§4.8).
+    Unstructured(UnstructuredGrid),
+}
+
+impl Grid {
+    /// Total nodes the message covers.
+    pub fn point_count(&self) -> usize {
+        match self {
+            Self::LatLon(grid) => grid.point_count(),
+            Self::Unstructured(grid) => grid.count as usize,
+        }
+    }
+
+    /// The lat/lon lattice, if this is one.
+    pub fn lat_lon(&self) -> Option<&LatLonGrid> {
+        match self {
+            Self::LatLon(grid) => Some(grid),
+            Self::Unstructured(_) => None,
+        }
+    }
+
+    /// The unstructured grid, if this is one.
+    pub fn unstructured(&self) -> Option<&UnstructuredGrid> {
+        match self {
+            Self::Unstructured(grid) => Some(grid),
+            Self::LatLon(_) => None,
+        }
+    }
+}
+
 /// What a message is, before its values are decoded.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Header {
@@ -103,7 +167,7 @@ pub struct Header {
     /// Value of the first fixed surface, scale applied.
     pub surface_value: f64,
     /// The grid.
-    pub grid: LatLonGrid,
+    pub grid: Grid,
     /// Data representation template number.
     pub packing_template: u16,
 }
@@ -337,8 +401,8 @@ fn sections(message: &[u8]) -> Result<Sections<'_>> {
     })
 }
 
-/// Section 3, template 3.0.
-fn grid_of(s3: &[u8]) -> Result<LatLonGrid> {
+/// Section 3, templates 3.0 and 3.101.
+fn grid_of(s3: &[u8]) -> Result<Grid> {
     // Octet 6: source of grid definition. Anything but 0 means the grid is not
     // described by a template at all.
     if byte(s3, 5)? != 0 {
@@ -350,6 +414,9 @@ fn grid_of(s3: &[u8]) -> Result<LatLonGrid> {
         return Err(unsupported("a thinned (quasi-regular) grid"));
     }
     let template = u16_at(s3, 12)?;
+    if template == 101 {
+        return unstructured_of(s3).map(Grid::Unstructured);
+    }
     if template != 0 {
         return Err(unsupported(match template {
             40 => "a Gaussian grid (template 3.40)".to_owned(),
@@ -414,7 +481,7 @@ fn grid_of(s3: &[u8]) -> Result<LatLonGrid> {
         return Err(malformed(format!("grid latitudes {la1} to {la2}")));
     }
 
-    Ok(LatLonGrid {
+    Ok(Grid::LatLon(LatLonGrid {
         ni,
         nj,
         la1,
@@ -424,6 +491,46 @@ fn grid_of(s3: &[u8]) -> Result<LatLonGrid> {
         di,
         dj,
         scan,
+    }))
+}
+
+/// Template 3.101, the general unstructured grid.
+///
+/// Thirty-five octets in total and only one of them is geometry: the shape of
+/// the earth. The rest names the grid. Where the cells are is not in the file
+/// and is not derivable from it — ICON's icosahedral mesh is relaxed by a
+/// spring solver, so no formula reproduces it — which is why the UUID matters
+/// more here than any field in template 3.0.
+fn unstructured_of(s3: &[u8]) -> Result<UnstructuredGrid> {
+    // Octets 7-10 of the common part: how many cells the message covers.
+    let count = u32_at(s3, 6)?;
+    if count == 0 {
+        return Err(malformed("an unstructured grid of no cells"));
+    }
+    // Octet 15. Code 6 is the sphere of radius 6 371 229 m, which is the one
+    // this app works on throughout (spec 3.1) and the one ICON uses.
+    let shape = byte(s3, 14)?;
+    if shape != 6 {
+        return Err(unsupported(format!(
+            "an unstructured grid on shape-of-earth {shape}"
+        )));
+    }
+    // Octets 16-18, then 19: which grid, and which of its references.
+    let number_used = (u32::from(byte(s3, 15)?) << 16)
+        | (u32::from(byte(s3, 16)?) << 8)
+        | u32::from(byte(s3, 17)?);
+    let number_in_reference = byte(s3, 18)?;
+    // Octets 20-35.
+    let uuid: [u8; 16] = s3
+        .get(19..35)
+        .and_then(|s| s.try_into().ok())
+        .ok_or_else(|| malformed("an unstructured grid without a UUID"))?;
+
+    Ok(UnstructuredGrid {
+        count,
+        uuid,
+        number_used,
+        number_in_reference,
     })
 }
 
@@ -1117,6 +1224,58 @@ mod tests {
         let data = [0x0A, 0x64, 0x80, 0x00, 0x00, 0x18];
         let values = unpack_complex(&s5, &data, 5, false).unwrap();
         assert_eq!(values, vec![10.0, 11.0, 12.0, 100.0, 100.0]);
+    }
+
+    /// A hand-built section 3 on template 3.101.
+    ///
+    /// Thirty-five octets: the common part, then the shape of the earth, the
+    /// grid number and its reference, then the UUID. Nothing in it says where
+    /// a single cell is, which is what the decoder has to represent honestly
+    /// rather than inventing a lattice for.
+    #[test]
+    fn an_unstructured_grid_carries_only_its_identity() {
+        let mut s3 = vec![0u8; 35];
+        s3[0..4].copy_from_slice(&35u32.to_be_bytes());
+        s3[4] = 3; // section number
+        s3[5] = 0; // grid defined by a template
+        s3[6..10].copy_from_slice(&2_949_120u32.to_be_bytes());
+        s3[10] = 0; // no list of numbers per row
+        s3[11] = 0;
+        s3[12..14].copy_from_slice(&101u16.to_be_bytes());
+        s3[14] = 6; // the 6 371 229 m sphere
+        s3[15..18].copy_from_slice(&[0x00, 0x00, 0x1a]); // grid 26
+        s3[18] = 1; // reference 1
+        let uuid: [u8; 16] = [
+            0xa2, 0x7b, 0x8d, 0xe6, 0x18, 0xc4, 0x11, 0xe4, 0x82, 0x0a, 0xb5, 0xb0, 0x98, 0xc6,
+            0xa5, 0xc0,
+        ];
+        s3[19..35].copy_from_slice(&uuid);
+
+        let Grid::Unstructured(grid) = grid_of(&s3).unwrap() else {
+            panic!("expected an unstructured grid");
+        };
+        assert_eq!(grid.count, 2_949_120);
+        assert_eq!(grid.number_used, 26);
+        assert_eq!(grid.number_in_reference, 1);
+        assert_eq!(grid.uuid, uuid);
+        assert_eq!(grid.uuid_hex(), "a27b8de618c411e4820ab5b098c6a5c0");
+        assert_eq!(grid_of(&s3).unwrap().point_count(), 2_949_120);
+    }
+
+    /// A mesh on some other earth is refused rather than placed on ours.
+    ///
+    /// Every position this app computes is on the 6 371 229 m sphere
+    /// (spec §3.1); a mesh defined on a different one would be off by
+    /// kilometres, which is far worse than not importing.
+    #[test]
+    fn an_unstructured_grid_on_another_earth_is_refused() {
+        let mut s3 = vec![0u8; 35];
+        s3[0..4].copy_from_slice(&35u32.to_be_bytes());
+        s3[4] = 3;
+        s3[6..10].copy_from_slice(&100u32.to_be_bytes());
+        s3[12..14].copy_from_slice(&101u16.to_be_bytes());
+        s3[14] = 1; // some other sphere
+        assert!(matches!(grid_of(&s3), Err(GribError::Unsupported(_))));
     }
 
     #[test]

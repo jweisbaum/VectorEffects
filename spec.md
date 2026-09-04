@@ -564,6 +564,45 @@ network — and the three-platform build needs nothing installed. Every one of
 them yields the same packed integers 5.0 stores in the clear, so one scaling
 formula serves all five.
 
+**Unstructured grids.** Not every model runs on a lat/lon grid. ICON's is
+icosahedral: 2,949,120 cells of roughly equal area, and a message
+(template 3.101) carries a bare run of values, the cell count, and a **UUID
+naming the grid** — nothing about where any cell is. The positions are a
+separate thing entirely, which DWD publishes as `CLAT`/`CLON` messages on
+that same grid.
+
+Those positions are **bundled**, converted at build time by
+`tools/icon-grid-builder` into `assets/icon_grids.bin` and matched by UUID, so
+an ICON import needs no files but the forecast and reaches no network. A file
+whose UUID nothing bundled matches is refused by name rather than placed on a
+guess. The asset holds ICON global R03B07 and the ICON-EPS global R02B06 mesh;
+it is grid *geometry*, time-invariant and shared by every file ever issued on
+that grid, which is the kind of thing §1.5 says a project may hold.
+
+**An unstructured field is resampled onto the project's own grid at import**
+and is an ordinary raster from then on — the render cache, both kernels and
+the exporter never learn that such files exist. The value at a target node is
+a **point sample**, interpolated inverse-distance from the three nearest
+cells, because that is the convention everything else already works in: the
+evaluator computes each cell's vector *at* the cell, and averaging here would
+make an imported field mean something different from a painted one at the same
+resolution. `u` and `v` are interpolated as components, never as speed and
+bearing, which would turn two opposing vectors into a fast one pointing
+nowhere. A missing cell is skipped rather than blended, and a node with
+nothing present is missing.
+
+The search that finds those three cells is the expensive half — half a second
+for a global 0.1° grid — and depends only on the mesh and the project's
+resolution, never on the values. It is therefore computed once and **kept in
+the project**, as its own binary archive entry keyed by mesh and grid. It is
+derived state: losing it costs a rebuild and nothing else, and a set that no
+longer matches the project's grid is dropped on open rather than trusted.
+
+For a file that states no spacing, the resolution a new project gets comes
+from the mesh itself: `n` roughly equal cells over the sphere are about
+`sqrt(4π/n)` radians across, which for ICON global is 0.118° and picks the
+0.1° grid.
+
 A message that cannot be read is skipped and logged rather than failing the
 file; a file with no usable `u`/`v` pair is refused with the reasons.
 

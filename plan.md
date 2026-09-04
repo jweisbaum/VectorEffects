@@ -62,6 +62,45 @@ quietly met**: "no `cc` in `cargo tree`". `blake3` has carried a `cc` build
 dependency for its SIMD assembly since M3, by way of `ve-core`. Neither new
 codec adds one, which is what the criterion was for.
 
+**M21 complete (2026-09-04): ICON's icosahedral grid imports.** Asked for
+after M12. ICON does not run on a lat/lon grid at all: a message
+(template 3.101) is a bare run of 2,949,120 values, a cell count and a UUID
+naming the mesh, and says nothing whatever about where any cell is. The
+positions are a separate pair of files DWD publishes, and they are now
+**bundled** — `tools/icon-grid-builder` converts them into
+`assets/icon_grids.bin` at build time, so an ICON import needs no files but
+the forecast and touches no network. The asset carries ICON global R03B07 and
+the ICON-EPS global R02B06 mesh in 3.5 MB.
+
+An unstructured field is **resampled onto the project's own grid at import**
+and is an ordinary raster after that, so the render cache, both kernels and
+the exporter never learn that such files exist. That was the design's whole
+economy: the alternative, teaching the WGSL kernel to search a point cloud,
+would have touched everything.
+
+**The measurement that set the design.** The neighbour search — the three
+nearest mesh cells to every target node — costs 494 ms for a global 0.1° grid
+and 7 ms for 1°, against the 155 MB it would take to store the weights. So
+nothing is stored but the three cell *indices*, delta-encoded, which the
+project keeps: 1.9 MB at 0.1° and 0.4 MB at 0.25°. Reopening then costs a
+decode and an interpolation rather than the search as well, measured at 48 ms
+against 477. The weights themselves are recomputed from the coordinates, which
+is cheaper than storing them.
+
+**Checked against an independent implementation**, because nothing here is
+checkable by eye: a mesh read in the wrong order still produces a plausible
+global field. Eight points — both poles, both sides of the antimeridian —
+were interpolated by brute force over all 2,949,120 cells in Python against
+ecCodes' own decode, and the Rust agrees to six decimals. The `#[ignore]`d
+suite that holds those numbers also proves a reopened neighbour set gives a
+field with the same content hash as a fresh search.
+
+The bug the unit tests caught along the way was in the bucket search: near a
+pole a latitude band holds fewer longitude buckets than the search ring is
+wide, so the ring wrapped onto the same bucket repeatedly and filled two of
+the three neighbour slots with one cell. Found by a brute-force comparison at
+89.5°N, which is exactly why that test aims there.
+
 **M20 is next.**
 
 **Unplanned, after M7: GRIB import** (spec §4.8, D44). A GRIB2 file becomes a
@@ -1623,6 +1662,47 @@ and invariant 2 forbid together.
 
 ---
 
+### M21 — ICON's icosahedral grid · **complete**
+
+**Goal:** an ICON global GRIB imports with no files but the forecast itself.
+
+Asked for after M12 and built the same day. Unplanned, and out of the M12–M20
+sequence.
+
+**What it turned out to be.** Three things, none of them the decoder:
+
+- **Template 3.101 in `ve-grib::decode`.** Thirty-five octets of which one is
+  geometry — the shape of the earth — and the rest names the grid. `Header`'s
+  grid becomes an enum, which was a four-line change at four call sites
+  because nothing outside `decode` and `import` had ever touched it.
+- **The bundled positions** (`ve-grib::icon`, `tools/icon-grid-builder`,
+  `assets/icon_grids.bin`). ICON lists its cells in a space-filling order, so
+  a delta between neighbours is small; stored on the lattice the source
+  messages were packed on and deflated, the global mesh is 2.4 MB against
+  11.8 MB of raw coordinates.
+- **The resampling** (`ve-core::regrid`). A bucket index whose longitude count
+  scales with `cos(lat)`, so a search ring covers the same ground at the pole
+  as at the equator, and a ring that widens until the third-best distance is
+  inside the ground it is *known* to cover — the answer does not depend on the
+  bucket size being lucky.
+
+**Acceptance**
+
+- Every value matches an independent brute-force interpolation to six
+  decimals, at eight points including both poles and both sides of the
+  antimeridian. **Met.**
+- A reopened project's neighbour set produces a field with the same content
+  hash as a fresh search. **Met**, and at 48 ms against 477.
+- No file but the forecast, and no network. **Met**: the positions are
+  bundled and matched by UUID; an unbundled mesh is refused by name rather
+  than placed on a guess.
+- The asset costs less than the basemap it sits beside. **Missed, knowingly**:
+  3.5 MB for two meshes against the basemap's 1.7. A proper LZMA encoder would
+  reach 0.4 MB, but the only pure-Rust one loses to deflate, and a C library
+  is out (D60's reasoning).
+
+---
+
 ## 3. Testing strategy
 
 | Layer | Approach |
@@ -1635,6 +1715,7 @@ and invariant 2 forbid together.
 | Frontend | Component tests for the timeline and layer panel; Playwright smoke over the packaged app. |
 | Captures (M14, M16) | Hand-computed fields through capture → container → insert; the container round-trips byte-identically; undefined and zero asserted distinct through both kernels and an export. |
 | Decoder (M12) | ecCodes-repacked fixtures with known values; the full sample set as an ignored test keyed on the directory. |
+| Resampling (M21) | A brute-force nearest-three interpolation over the whole mesh as the reference; both poles and the antimeridian among the sampled points; a reopened neighbour set held to the same content hash as a fresh search. |
 | GRIB frame overrides (M20) | Spot-cell equality of the pasted step with its source on both backends; round-trip with no sample data in the file; undo of a run. |
 | Performance | Criterion benchmarks in CI with regression thresholds on the spec §13 budgets. |
 
@@ -1662,6 +1743,7 @@ font or a map style from a CDN.
 | Captured rasters in the project (M14, M16) | Invariants 1 and 2 change; a project can grow large | Settled as D52; compressed entries shared by hash; a size shown at capture as the export shows one |
 | Capture-mode lockout leaks (M16) | A write during capture corrupts the document or the capture | One session flag checked by every backend write path, not disabled controls in the UI |
 | Rebound shortcuts collide with keys the webview or OS owns (M15) | A key silently does nothing | A reserved-key list; collisions refused on entry; reset to defaults |
+| A bundled mesh goes stale or a new ICON grid appears (M21) | An ICON file is refused although the app "supports ICON" | The refusal names the UUID rather than guessing; adding a mesh is one run of `icon-grid-builder` and no code |
 
 ---
 
@@ -1694,6 +1776,7 @@ relitigated by accident.
 | D58 | A cell a mask removed is *undefined* in a capture, not calm | The mask exists to let what is beneath show through; a capture that turned that into a real zero would overwrite whatever lies beneath the paste. Undefined writes nothing when composited, so the paste is transparent exactly where the source was (M14, M16). Settled with the user 2026-09-04 |
 | D59 | A GRIB frame copied to another step is a step number in the layer, never a copy of the lattice | The project keeps a file's path and nothing of its samples (D44); a pasted frame that copied the grid would be a raster in the document by another route. Mapping the step to the source step gives the same picture from the same file, and because the flat scene already carries the served frame's hash, the render cache, readiness and both kernels are right by construction. It is an instruction, so unlike a message it stays where it was put, one step at a time, and D48's rule against holding a measurement forward is not touched (M20) |
 | D60 | The two compressed GRIB2 packings are decoded by crates, not by us | 5.40 is a JPEG 2000 codestream and 5.42 a CCSDS entropy coder; hand-writing either would be thousands of lines of wavelet and adaptive-coding work to no product end, and the risk is not that they are hard but that they are subtly wrong on files nobody has. `hayro-jpeg2000` (default features off, which leaves it with *no* dependencies) and `rust-aec` were both shown bit-exact against ecCodes on every real file in the reference set before being chosen, and neither pulls a `-sys` crate: invariant 5 and the three-platform build both forbid a C library, which is what ruled out OpenJPEG and libaec (M12). The three integer packings stay hand-written, since they are a bit reader and a formula |
+| D61 | An unstructured grid is resampled onto the project's grid at import, its cell positions are bundled, and only the neighbour indices are kept | Three decisions that stand together. **Resampling** rather than sampling the mesh directly, because `RasterGrid` is what the render cache, both kernels and the exporter all speak — teaching the WGSL kernel to search a point cloud would have touched everything, where resampling touches the import alone. **Bundling** the positions, because an ICON message names its grid by UUID and carries no geometry, so without them the file cannot be placed on the earth at all; fetching them is out (invariant 5) and asking the user for two more files is a poor trade against 2.4 MB of assets. **Keeping the indices, not the weights**: the search is 494 ms at 0.1° and the weights recomputed from the coordinates are ~30, so storing the weights would triple the size for nothing — 1.9 MB against 155. The value at a node is a point sample, matching the convention the evaluator and exporter already use, and `u`/`v` interpolate as components because averaging bearings turns two opposing vectors into a fast one pointing nowhere (M21, spec §4.8) |
 | D49 | The modifiers are painted, and merge — except the two measured from their own anchor | They were click-placed discs, which made a swathe of intensification a row of stamps and gave them none of the merging the brush and the mask have. Painting them is the same gesture, geometry and merge rule the other swept tools already use, so it is subtraction rather than addition. The exception is the rule §6.1 already states: a merge re-expresses the new chain under the *target's* anchor, and a divergence radiates from its anchor while a twisting warp turns about it, so absorbing one would change what it paints. Intensify, rotate and a pushing warp refer to no anchor and merge freely. The edge highlight and the selection outline are the mask's, generalised: one `operator_outlines` command for every object that has no field of its own (spec §6.3, schema version 9) |
 | D48 | A step the file has no message for shows no imported field — reverses the hold half of D44 | Holding the last message forward draws a forecast for a time it was never made for, and does it most misleadingly past the end of a short file, where a six-hour file stood in for a ten-day timeline unchanged and looking like data. Found by hand. A keyframe holds because it is an instruction the user gave, and between two of them the document still means something; a message is a measurement, and between two of them the file means nothing. The consequence is that a step size that does not divide the message times hides most of the file, so "Open from GRIB" now derives the largest offered step that *divides* every message's offset rather than the largest no wider than the gap — a 4-hourly file takes hourly steps and blanks three in four, where before it took 3-hourly steps and showed one message in four (spec §4.8) |
 | D44 | A GRIB2 file imports as a layer that keeps the file's *path*, never its samples; one layer per field kind, the other kind hidden; ~~each step shows the last message at or before its forecast hour~~ — the hold rule is reversed by D48 | Invariants 1 and 2 forbid a raster in the project, and copying forecast data into every project that references it would have been the cost of relaxing them. The lattice lives in memory beside the layer and is read back on open; a missing file leaves an empty, marked layer rather than refusing the project. Hold-previous was chosen because it is the rule keyframes already follow (spec §4.5); D48 reverses it, a message not being a keyframe. Both kernels sample the lattice, so the preview and the export agree on it as they do on everything else (spec §4.8) |

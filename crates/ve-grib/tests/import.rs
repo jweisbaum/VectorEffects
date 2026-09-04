@@ -79,10 +79,11 @@ fn every_message_of_an_export_decodes_with_its_identity() {
     assert_eq!((first.discipline, first.category, first.number), (0, 2, 2));
     assert_eq!(first.forecast_hours, 0.0);
     assert_eq!((first.surface_type, first.surface_value), (103, 10.0));
-    assert_eq!((first.grid.ni, first.grid.nj), (360, 181));
-    assert_eq!((first.grid.la1, first.grid.lo1), (90.0, 0.0));
-    assert_eq!((first.grid.di, first.grid.dj), (1.0, 1.0));
-    assert_eq!(first.grid.scan, 0);
+    let lattice = first.grid.lat_lon().expect("the writer emits template 3.0");
+    assert_eq!((lattice.ni, lattice.nj), (360, 181));
+    assert_eq!((lattice.la1, lattice.lo1), (90.0, 0.0));
+    assert_eq!((lattice.di, lattice.dj), (1.0, 1.0));
+    assert_eq!(lattice.scan, 0);
     assert_eq!(decoded.messages[3].header.forecast_hours, 3.0);
     assert_eq!(decoded.messages[3].header.number, 3);
 
@@ -94,7 +95,7 @@ fn every_message_of_an_export_decodes_with_its_identity() {
 fn an_exported_field_imports_back_on_the_right_axes() {
     let bytes = file(FieldKind::Wind, &[0]);
     let decoded = decode::read_all(&bytes).unwrap();
-    let sequences = import::sequences(decoded.messages).unwrap();
+    let sequences = import::sequences(decoded.messages, None).unwrap();
     assert_eq!(sequences.len(), 1);
     let grid = &sequences[0].frames[0].grid;
     assert_eq!(sequences[0].kind, FieldKind::Wind);
@@ -121,7 +122,7 @@ fn an_exported_field_imports_back_on_the_right_axes() {
 fn time_steps_come_back_in_order_with_relative_offsets() {
     // Written out of order on purpose.
     let bytes = file(FieldKind::Current, &[6, 0, 3]);
-    let imported = import::sequences(decode::read_all(&bytes).unwrap().messages).unwrap();
+    let imported = import::sequences(decode::read_all(&bytes).unwrap().messages, None).unwrap();
     let sequence = &imported[0];
     assert_eq!(sequence.kind, FieldKind::Current);
     let offsets: Vec<f64> = sequence.frames.iter().map(|f| f.offset_hours).collect();
@@ -136,7 +137,7 @@ fn time_steps_come_back_in_order_with_relative_offsets() {
 fn a_file_with_wind_and_currents_imports_as_two_sequences() {
     let mut bytes = file(FieldKind::Current, &[0, 3]);
     bytes.extend(file(FieldKind::Wind, &[0, 3]));
-    let imported = import::sequences(decode::read_all(&bytes).unwrap().messages).unwrap();
+    let imported = import::sequences(decode::read_all(&bytes).unwrap().messages, None).unwrap();
     assert_eq!(imported.len(), 2);
     assert_eq!(
         imported[0].kind,
@@ -152,7 +153,7 @@ fn reading_a_file_from_disk_selects_only_vector_components() {
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("wind.grib2");
     std::fs::write(&path, file(FieldKind::Wind, &[0, 1, 2])).unwrap();
-    let imported = import::read_file(&path).unwrap();
+    let imported = import::read_file(&path, None).unwrap();
     assert_eq!(imported.sequences.len(), 1);
     assert_eq!(imported.sequences[0].frames.len(), 3);
     assert!(imported.skipped.is_empty());

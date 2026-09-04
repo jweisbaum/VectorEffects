@@ -422,7 +422,7 @@ pub fn save(project: &Project, path: &Path) -> Result<()> {
     let json = to_canonical_json(project)?;
 
     let temp = temp_path_for(path);
-    write_archive(&temp, &json)?;
+    write_archive(&temp, &json, project)?;
 
     // Rename is atomic within a filesystem; if it fails, the original file is
     // still intact and only the temporary is left behind.
@@ -439,7 +439,10 @@ fn temp_path_for(path: &Path) -> PathBuf {
     path.with_file_name(name)
 }
 
-fn write_archive(path: &Path, json: &str) -> Result<()> {
+/// Directory of neighbour-set entries inside the archive.
+const REGRID_PREFIX: &str = "regrid/";
+
+fn write_archive(path: &Path, json: &str, project: &Project) -> Result<()> {
     use zip::CompressionMethod;
     use zip::write::SimpleFileOptions;
 
@@ -459,7 +462,67 @@ fn write_archive(path: &Path, json: &str) -> Result<()> {
     zip.start_file(PROJECT_ENTRY, options).map_err(zip_err)?;
     zip.write_all(json.as_bytes())?;
 
+    write_regrid(&mut zip, project)?;
+
     zip.finish().map_err(zip_err)?;
+    Ok(())
+}
+
+/// Writes the derived neighbour sets as their own entries.
+///
+/// Binary, and far too large for the JSON: a global 0.1° set is 19 million
+/// indices. Each entry carries the mesh size it was built against so the
+/// reader can check it rather than trust the file name.
+fn write_regrid(zip: &mut zip::ZipWriter<std::fs::File>, project: &Project) -> Result<()> {
+    use zip::CompressionMethod;
+    use zip::write::SimpleFileOptions;
+
+    let options = SimpleFileOptions::default()
+        .compression_method(CompressionMethod::Deflated)
+        .last_modified_time(zip::DateTime::default());
+    for (key, set) in &project.regrid {
+        zip.start_file(format!("{REGRID_PREFIX}{key}.bin"), options)
+            .map_err(zip_err)?;
+        zip.write_all(&(set.cells() as u32).to_le_bytes())?;
+        zip.write_all(&set.encode())?;
+    }
+    Ok(())
+}
+
+/// Reads the neighbour sets back, dropping any that do not match the project.
+///
+/// A set is derived state and a stale one is only a wasted rebuild, so a bad
+/// entry is skipped rather than failing the open: the project still holds
+/// everything the user authored.
+fn read_regrid(archive: &mut zip::ZipArchive<std::fs::File>, project: &mut Project) -> Result<()> {
+    let target = project.settings.resolution.target_grid();
+    let names: Vec<String> = archive
+        .file_names()
+        .filter(|n| n.starts_with(REGRID_PREFIX) && n.ends_with(".bin"))
+        .map(str::to_owned)
+        .collect();
+    for name in names {
+        let mut bytes = Vec::new();
+        {
+            let mut entry = match archive.by_name(&name) {
+                Ok(entry) => entry,
+                Err(_) => continue,
+            };
+            entry.read_to_end(&mut bytes)?;
+        }
+        let Some((head, rest)) = bytes.split_at_checked(4) else {
+            continue;
+        };
+        let cells = u32::from_le_bytes([head[0], head[1], head[2], head[3]]) as usize;
+        let Ok(set) = crate::regrid::Neighbours::decode(rest, &target, cells) else {
+            continue;
+        };
+        let key = name
+            .trim_start_matches(REGRID_PREFIX)
+            .trim_end_matches(".bin")
+            .to_owned();
+        project.regrid.insert(key, std::sync::Arc::new(set));
+    }
     Ok(())
 }
 
@@ -474,7 +537,9 @@ pub fn load(path: &Path) -> Result<Project> {
         .map_err(|_| CoreError::Archive(format!("archive has no {PROJECT_ENTRY}")))?
         .read_to_string(&mut json)?;
 
-    from_json(&json)
+    let mut project = from_json(&json)?;
+    read_regrid(&mut archive, &mut project)?;
+    Ok(project)
 }
 
 /// Reads only the schema version, without parsing the document.
@@ -562,6 +627,55 @@ mod tests {
                 .keys()
                 .len(),
             2
+        );
+    }
+
+    /// A neighbour set survives a save and reopen, and a stale one is dropped.
+    ///
+    /// The set is derived state, not the user's work, so a project whose
+    /// resolution no longer matches must open cleanly and rebuild rather than
+    /// refuse — but it must not open with a set that maps onto some other
+    /// grid, which would put the imported field in the wrong places.
+    #[test]
+    fn a_neighbour_set_travels_with_the_project_unless_it_no_longer_fits() {
+        use crate::regrid::{CellCentres, Neighbours};
+
+        let dir = TempDir::new();
+        let path = dir.path("regrid.veproj");
+        let mut project = sample();
+        let target = project.settings.resolution.target_grid();
+
+        // A tiny mesh: three cells is enough to have three neighbours.
+        let centres = CellCentres::new(
+            vec![10.0, -10.0, 40.0, -40.0],
+            vec![0.0, 20.0, -60.0, 100.0],
+        )
+        .unwrap();
+        let set = Neighbours::build(&centres, &target);
+        let key = Neighbours::cache_key(b"a-mesh", &target);
+        project
+            .regrid
+            .insert(key.clone(), std::sync::Arc::new(set.clone()));
+
+        save(&project, &path).unwrap();
+        let loaded = load(&path).unwrap();
+        assert_eq!(loaded.regrid.len(), 1);
+        assert_eq!(**loaded.regrid.get(&key).unwrap(), set);
+
+        // The same archive opened as a project of a different resolution: the
+        // set is for the wrong lattice and is left behind.
+        let mut other = load(&path).unwrap();
+        other.settings.resolution = if other.settings.resolution == Resolution::Deg1 {
+            Resolution::Deg05
+        } else {
+            Resolution::Deg1
+        };
+        let moved = dir.path("moved.veproj");
+        save(&other, &moved).unwrap();
+        let reopened = load(&moved).unwrap();
+        assert!(
+            reopened.regrid.is_empty(),
+            "a set built for another grid must not be reused"
         );
     }
 

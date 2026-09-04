@@ -53,9 +53,11 @@ crates/
                FieldEvaluator trait, CpuEvaluator, GpuEvaluator (+ WGSL),
                tile pyramid, content-hashed render cache
   ve-grib/     GRIB2 writer: sections, templates, simple packing. And the
-               import decoder (`decode`, `import`): 3.0 grids, 5.0/5.2/5.3
-               packing hand-written, 5.40 and 5.42 through pure-Rust codec
-               crates, bitmaps. `reader` is the writer's test-only verifier.
+               import decoder (`decode`, `import`): 3.0 and 3.101 grids,
+               5.0/5.2/5.3 packing hand-written, 5.40 and 5.42 through
+               pure-Rust codec crates, bitmaps. `icon` holds the bundled
+               unstructured-grid definitions. `reader` is the writer's
+               test-only verifier.
   ve-polar/    Boat polars, polar inversion, route tree, route solving
   ve-app/      Tauri app: IPC commands, app state, background workers,
                custom URI scheme, autosave
@@ -132,7 +134,7 @@ They are specified in full in `spec.md` §3.
 | Z-order | Layer order, then object order within layer. Index 0 = bottom. |
 | Determinism | No `HashMap` iteration in any evaluation or export path. Use `Vec` or `IndexMap`. |
 | Project settings | The map takes its timeline length, direction convention, colour scale and glyph styles from `ProjectSummary`, never from constants. Nothing renders without an open project. |
-| Grid resolution | Governs the export only. It must never reach the preview path — a 0.1° project pans and zooms exactly as fast as a 1° one. |
+| Grid resolution | Governs the export only. It must never reach the preview path — a 0.1° project pans and zooms exactly as fast as a 1° one. **Exception**: an unstructured import is resampled onto it, since there is no other lattice to put the field on (spec §4.8). |
 | Document `f64` | Every `f64` that reaches a project file needs a `canonical::*_field` serde helper. `serde_json`'s parser is one ULP off on ~10% of values, so a raw `f64` does not round-trip. `f32` is unaffected. See `canonical.rs`. |
 
 ---
@@ -325,6 +327,37 @@ Both compressed packings are decoded by crates, not by us: `hayro-jpeg2000`
 (5.40) and `rust-aec` (5.42). Neither may gain a `-sys` dependency — invariant
 5 and the three-platform build both forbid a C library — so check `cargo tree`
 after any version bump.
+
+### Adding an unstructured grid
+
+A GRIB message on template 3.101 names its grid by a UUID and says nothing
+about where its cells are. The positions are bundled, so a new mesh means a
+new asset entry, not new code:
+
+```bash
+cargo run -p icon-grid-builder --release -- --out assets/icon_grids.bin \
+    --grid "ICON global R03B07"     clat.grib2     clon.grib2 \
+    --grid "ICON global EPS R02B06" eps_clat.grib2 eps_clon.grib2
+```
+
+**Every grid has to be passed in one run**: the tool writes the whole asset,
+so leaving one out drops it. `ve_grib::icon::EMBEDDED` is what gets shipped,
+and `icon.rs`'s tests assert the R03B07 mesh is in there and reaches both
+poles, so a truncated asset fails the suite rather than the user's import.
+
+The coordinates are stored on the lattice the source messages were packed on
+— detected, then checked against every value — which is what keeps the asset
+to 2.4 MB against 11.8 MB of raw f32. A proper LZMA encoder would reach
+0.4 MB, but `lzma-rs` is the only pure-Rust one and its match finder is weak
+enough to *lose* to deflate; nothing else is available without a C library.
+
+**Resampling is point sampling, not averaging** (spec §4.8): the evaluator
+computes each cell's vector at the cell, so an imported field has to mean the
+same thing as a painted one at the same resolution. `u` and `v` interpolate as
+components. The neighbour search is kept in the project because it costs half
+a second at 0.1° and depends only on the mesh and the grid — it is derived
+state, and `io::read_regrid` drops a set that no longer matches rather than
+trusting it.
 
 ### Touching the render cache
 

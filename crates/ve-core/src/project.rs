@@ -93,6 +93,23 @@ impl Resolution {
         u64::from(self.ni()) * u64::from(self.nj())
     }
 
+    /// This resolution as a lattice to resample an imported grid onto.
+    ///
+    /// The same geometry the exporter writes: north-west first, rows running
+    /// south, no duplicated column at 360°. An unstructured import is
+    /// resampled onto exactly this, so what a GRIB layer holds lines up with
+    /// what the project exports (spec §4.8).
+    pub fn target_grid(self) -> crate::regrid::TargetGrid {
+        crate::regrid::TargetGrid {
+            ni: self.ni(),
+            nj: self.nj(),
+            lon0: -180.0,
+            lat0: 90.0,
+            dlon: self.degrees(),
+            dlat: self.degrees(),
+        }
+    }
+
     /// Display label.
     pub fn label(self) -> &'static str {
         match self {
@@ -250,6 +267,17 @@ pub struct RouteData {}
 /// A complete project.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Project {
+    /// Neighbour sets for resampling an unstructured imported grid onto this
+    /// project's own (spec §4.8).
+    ///
+    /// Derived, not authored: the search that produces one takes half a
+    /// second at 0.1° and depends only on the mesh and this project's
+    /// resolution, so it is kept beside the project rather than recomputed on
+    /// every open. It is **not** JSON — a global 0.1° set is millions of
+    /// indices — but an entry of its own in the archive, keyed by mesh and
+    /// target. Losing it costs time and nothing else.
+    #[serde(skip)]
+    pub regrid: std::collections::BTreeMap<String, std::sync::Arc<crate::regrid::Neighbours>>,
     /// Document schema version. See [`SCHEMA_VERSION`].
     pub schema_version: u32,
     /// Stable identity.
@@ -283,6 +311,7 @@ impl Project {
             annotations: Annotations::default(),
             routes: RouteData::default(),
             view: ViewState::default(),
+            regrid: std::collections::BTreeMap::new(),
         }
     }
 

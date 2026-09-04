@@ -11,6 +11,7 @@
 
 pub mod decode;
 pub mod error;
+pub mod icon;
 pub mod import;
 pub mod packing;
 #[cfg(feature = "testing")]

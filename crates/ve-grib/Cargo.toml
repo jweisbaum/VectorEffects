@@ -14,6 +14,7 @@ thiserror = { workspace = true }
 # neither of which a single-component 16-bit codestream needs.
 hayro-jpeg2000 = { workspace = true }
 rust-aec = { workspace = true }
+flate2 = { workspace = true }
 
 [features]
 # A minimal reader for verifying what the writer produces. Never enabled for
