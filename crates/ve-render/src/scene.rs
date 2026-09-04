@@ -8,7 +8,7 @@
 use std::sync::Arc;
 
 use ve_core::angle::Angle;
-use ve_core::capture::Capture;
+use ve_core::capture::{Capture, FramePick, Resample};
 use ve_core::document::{Geometry, Object, PathNode, SpeedRange};
 use ve_core::project::Project;
 use ve_core::raster::RasterGrid;
@@ -238,8 +238,13 @@ fn east_north(position: LonLat) -> ([f64; 3], [f64; 3]) {
 pub struct FlatCapture {
     /// The whole capture, for its lattice geometry.
     pub capture: Arc<Capture>,
-    /// Which of its frames this step shows.
-    pub frame: usize,
+    /// Which of its frames this step shows, and how far between two of them
+    /// (spec.md 8.7). A patch has one frame and picks it; a macro's run of
+    /// them lands on the project's steps by its own rule.
+    pub pick: FramePick,
+    /// How far the capture's region had moved by this frame, in degrees of
+    /// the map — zero unless the capture recorded movement.
+    pub shift_deg: [f64; 2],
 }
 
 /// One object with every property resolved for a single time step.
@@ -896,18 +901,36 @@ fn capture_of(project: &Project, object: &Object, step: u32) -> Option<FlatCaptu
     if capture.frames.len() == 1 {
         return Some(FlatCapture {
             capture: Arc::clone(capture),
-            frame: 0,
+            pick: FramePick {
+                frame: 0,
+                next: 0,
+                blend: 0.0,
+            },
+            shift_deg: [0.0, 0.0],
         });
     }
+    // A run of frames lands on the project's steps by the object's own rule
+    // (spec.md 8.7): a macro is a thing the user *placed*, so it holds like a
+    // keyframe rather than vanishing like a message — §4.8's rule against
+    // holding a measurement forward is about a forecast, and this is not one.
     let hours_per_step = f64::from(project.settings.step_hours.hours());
     let elapsed = f64::from(step.saturating_sub(object.active_range.start)) * hours_per_step;
-    let frame = capture
-        .frames
-        .iter()
-        .position(|f| (f.offset_hours - elapsed).abs() < 1e-6)?;
+    let resample = if choice(object, PropId::Resample, step) == 1 {
+        Resample::Interpolate
+    } else {
+        Resample::Hold
+    };
+    let looping = object
+        .props
+        .value_at(object.tool, PropId::LoopMacro, step)
+        .and_then(PropValue::as_bool)
+        .unwrap_or(false);
+    let pick = capture.pick(elapsed, resample, looping)?;
+    let (dx, dy) = capture.displacement(pick);
     Some(FlatCapture {
         capture: Arc::clone(capture),
-        frame,
+        pick,
+        shift_deg: [dx, dy],
     })
 }
 
@@ -941,13 +964,32 @@ pub fn flatten(project: &Project, step: u32) -> Scene {
         scene
             .objects
             .extend(layer.objects.iter().filter_map(|object| {
-                let mut flat = flatten_object_at(object, step, links.at.of(object.id))?;
-                flat.motion = motion_of(object, step, hours, last, &links);
                 // A patch replays a captured field (spec.md 8.5). The samples
-                // live beside the project, keyed by hash, so a patch whose
-                // entry is missing simply has none — it draws nothing, exactly
-                // as a GRIB layer whose file has gone.
-                flat.capture = capture_of(project, object, step);
+                // live beside the project, keyed by hash, so one whose entry
+                // is missing simply has none — it draws nothing, exactly as a
+                // GRIB layer whose file has gone.
+                let patch = capture_of(project, object, step);
+                let mut derived = links.at.of(object.id);
+                // A macro that recorded a moving region moves the **whole
+                // object**: its anchor, and with it its footprint, its outline
+                // and what a click selects (spec.md 8.7). Shifting only the
+                // lattice lookup would leave the field trying to draw outside
+                // the shape that admits it, and nothing would appear.
+                if let Some(shift) = patch.as_ref().map(|p| p.shift_deg)
+                    && shift != [0.0, 0.0]
+                {
+                    let base = derived
+                        .position
+                        .or_else(|| position(object, PropId::Position, step))?;
+                    derived.position = LonLat::new(
+                        ve_core::geo::normalize_lon(base.lon + shift[0]),
+                        (base.lat + shift[1]).clamp(-90.0, 90.0),
+                    )
+                    .ok();
+                }
+                let mut flat = flatten_object_at(object, step, derived)?;
+                flat.motion = motion_of(object, step, hours, last, &links);
+                flat.capture = patch;
                 Some(flat)
             }));
     }

@@ -221,7 +221,11 @@ fn gesture_for(tool: ToolKind) -> GestureSelector {
         // A patch is pasted rather than drawn, so it has no gesture at all.
         // Named here rather than left to a wildcard: the compiler is what
         // makes a new tool declare how it is drawn.
-        ToolKind::Circle | ToolKind::Patch => GestureSelector::Always {
+        // The macro is placed by a click, like the circle; the patch is
+        // pasted and has no gesture at all. Named rather than left to a
+        // wildcard: the compiler is what makes a new tool declare how it is
+        // drawn.
+        ToolKind::Circle | ToolKind::Patch | ToolKind::Macro => GestureSelector::Always {
             gesture: "point".to_owned(),
         },
         ToolKind::Curve => GestureSelector::Always {
@@ -258,7 +262,8 @@ fn preview_for(tool: ToolKind) -> PreviewKind {
         | ToolKind::Circle
         | ToolKind::ShapeFill
         | ToolKind::Curve
-        | ToolKind::Patch => PreviewKind::Field,
+        | ToolKind::Patch
+        | ToolKind::Macro => PreviewKind::Field,
     }
 }
 
@@ -279,6 +284,9 @@ fn has_hover(tool: ToolKind) -> bool {
         // node by node, so a single click produces no footprint to show, and
         // a patch is never under the cursor before it exists.
         ToolKind::ShapeFill | ToolKind::Curve | ToolKind::Patch => false,
+        // A macro's footprint is the library entry's shape, which the bar
+        // knows and the backend does not until the click lands.
+        ToolKind::Macro => false,
     }
 }
 
@@ -306,6 +314,9 @@ fn shortcut_for(tool: ToolKind) -> &'static str {
         // wildcard, so a tool that *is* added to the palette cannot ship
         // without one.
         ToolKind::Patch => "",
+        // The insert tool's key (D54); the object itself is not in the
+        // palette, and this is what the insert tool is bound to.
+        ToolKind::Macro => "n",
     }
 }
 

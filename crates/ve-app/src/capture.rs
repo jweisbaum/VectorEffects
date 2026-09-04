@@ -69,7 +69,7 @@ pub enum RegionShape {
 
 impl RegionShape {
     /// The anchor a patch made from this region sits on.
-    fn anchor(&self) -> Option<LonLat> {
+    pub(crate) fn anchor(&self) -> Option<LonLat> {
         let (lon, lat) = match self {
             Self::Rect { centre, .. } | Self::Disc { centre, .. } => (centre[0], centre[1]),
             Self::Polygon { points } => {
@@ -97,7 +97,7 @@ impl RegionShape {
     }
 
     /// Half-extents of the region's bounding box, in degrees.
-    fn half_extents(&self) -> (f64, f64) {
+    pub(crate) fn half_extents(&self) -> (f64, f64) {
         match self {
             Self::Rect {
                 half_width_deg,
@@ -249,10 +249,7 @@ pub fn region_capture(state: &AppState, region: RegionShape, step: u32) -> Resul
             },
             0.0,
             region.geometry(anchor),
-            vec![CaptureFrame {
-                offset_hours: 0.0,
-                uv,
-            }],
+            vec![CaptureFrame::still(0.0, uv)],
         )
         .map_err(AppError::Core)?;
 
@@ -390,4 +387,19 @@ pub fn capture_held(state: &AppState) -> Result<CaptureState> {
             },
         })
     })
+}
+
+/// The anchor a region's object sits on, for the macro module.
+pub(crate) fn region_anchor(region: &RegionShape) -> Option<LonLat> {
+    region.anchor()
+}
+
+/// Its bounding half-extents, in degrees.
+pub(crate) fn region_half_extents(region: &RegionShape) -> (f64, f64) {
+    region.half_extents()
+}
+
+/// Its object geometry, in the local metres a projected frame measures in.
+pub(crate) fn region_geometry(region: &RegionShape, anchor: LonLat) -> Geometry {
+    region.geometry(anchor)
 }

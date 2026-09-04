@@ -73,6 +73,10 @@ pub enum CoreError {
         len: usize,
     },
 
+    /// A write was attempted while the document was locked (spec.md 8.7).
+    #[error("the document cannot be changed while a macro capture is running")]
+    Locked,
+
     /// A captured field, or its container, was not readable (spec.md 8.5).
     #[error("captured field is malformed: {0}")]
     Capture(String),

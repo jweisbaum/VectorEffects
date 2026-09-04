@@ -136,7 +136,12 @@ impl Geometry {
             // A patch is pasted with the shape it was captured over, which is
             // one of the region's three; an empty polygon is what it has
             // before that shape arrives (spec.md 8.5).
-            ToolKind::ShapeFill | ToolKind::Patch => Self::Polygon { points: Vec::new() },
+            // A patch is pasted and a macro placed, each with the shape it
+            // was captured over; an empty polygon is what they have before
+            // that shape arrives (spec.md 8.5, 8.7).
+            ToolKind::ShapeFill | ToolKind::Patch | ToolKind::Macro => {
+                Self::Polygon { points: Vec::new() }
+            }
             ToolKind::Curve => Self::Path { nodes: Vec::new() },
         }
     }

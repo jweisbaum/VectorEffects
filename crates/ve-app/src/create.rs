@@ -60,6 +60,8 @@ pub enum Tool {
     /// In the wire enum but not in the palette: a patch is pasted rather than
     /// drawn, and the panels still have to name it.
     Patch,
+    /// Replays a captured field from the macro library (spec.md 8.7, M16).
+    Macro,
 }
 
 impl Tool {
@@ -77,6 +79,7 @@ impl Tool {
             Self::Turn => ToolKind::Turn,
             Self::Warp => ToolKind::Warp,
             Self::Patch => ToolKind::Patch,
+            Self::Macro => ToolKind::Macro,
         }
     }
 
@@ -94,6 +97,7 @@ impl Tool {
             ToolKind::Turn => Self::Turn,
             ToolKind::Warp => Self::Warp,
             ToolKind::Patch => Self::Patch,
+            ToolKind::Macro => Self::Macro,
         }
     }
 
@@ -111,6 +115,7 @@ impl Tool {
             Self::Turn => "Rotation",
             Self::Warp => "Warp",
             Self::Patch => "Patch",
+            Self::Macro => "Macro",
         }
     }
 }

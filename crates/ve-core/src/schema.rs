@@ -43,6 +43,12 @@ pub enum ToolKind {
     Turn,
     /// Reads the field beneath it from a displaced position.
     Warp,
+    /// Replays a captured field from the macro library (spec.md 8.7, M16).
+    ///
+    /// A creation tool with a field: unlike a patch, it *is* placed by a
+    /// gesture — the insert tool's click — and it carries the resample
+    /// options a run of frames needs.
+    Macro,
     /// Replays a field captured from a region of the map (spec.md 8.5, M14).
     ///
     /// Not in the palette: a patch is not *drawn*, it is pasted. It is a tool
@@ -58,7 +64,7 @@ impl ToolKind {
     /// a fill and a path suggest; then the mask, which takes one away; then
     /// the modifiers, which change one — because there has to be a field
     /// before either of those does anything.
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::Brush,
         Self::Circle,
         Self::ShapeFill,
@@ -70,6 +76,7 @@ impl ToolKind {
         Self::Turn,
         Self::Warp,
         Self::Patch,
+        Self::Macro,
     ];
 
     /// Whether the palette offers this tool.
@@ -78,7 +85,9 @@ impl ToolKind {
     /// no gesture that makes one, so a palette entry would be a button that
     /// does nothing (spec.md 8.5).
     pub fn in_palette(self) -> bool {
-        self != Self::Patch
+        // The patch is pasted and the macro is placed by the insert tool,
+        // which carries the library rather than a schema bar.
+        !matches!(self, Self::Patch | Self::Macro)
     }
 
     /// Whether the tool modifies the field beneath it rather than adding one
@@ -111,6 +120,7 @@ impl ToolKind {
             Self::Turn => "Rotate flow",
             Self::Warp => "Warp / liquify",
             Self::Patch => "Patch",
+            Self::Macro => "Macro",
         }
     }
 }
@@ -122,6 +132,10 @@ impl ToolKind {
 #[non_exhaustive]
 pub enum PropId {
     // --- Common to every object (spec.md 4.4) ---
+    /// How a macro's frames land on the project's steps (spec.md 8.7).
+    Resample,
+    /// Whether a macro repeats past its last frame.
+    LoopMacro,
     /// The AEQD anchor: where the object sits.
     Position,
     /// Scales geometry radii, in percent.
@@ -488,6 +502,8 @@ pub const VECTOR_MODES: &[&str] = &["constant", "gradient"];
 /// Variants of [`PropId::ShapeSource`]. Index 0 is the freehand polygon, which
 /// is the only one with no size to drag out.
 pub const SHAPE_SOURCES: &[&str] = &["polygon", "square", "rectangle", "circle"];
+/// Variants of [`PropId::Resample`] (spec.md 8.7).
+pub const RESAMPLE_MODES: &[&str] = &["hold", "interpolate"];
 /// Variants of [`PropId::CurveKind`].
 pub const CURVE_KINDS: &[&str] = &["polyline", "bezier"];
 /// Variants of [`PropId::OffsetMode`].
@@ -734,6 +750,25 @@ const SHAPE_FILL: &[PropSpec] = &[
 /// Its shape came from the region it was captured over, so the stamp space is
 /// frozen at `projected` (D28, D55) and its size is the geometry rather than a
 /// number anyone typed.
+/// The macro (spec.md 8.7, M16).
+///
+/// A captured field with the two questions a *run* of frames raises that a
+/// single one does not: how its frames land on the project's steps, and what
+/// happens after the last of them. Both per object rather than per library
+/// entry, because the same macro dropped into a 1-hourly and a 6-hourly
+/// project wants different answers.
+const MACRO: &[PropSpec] = &[
+    frozen(choice(PropId::StampSpace, "Stamp space", 1, STAMP_SPACES)),
+    choice(PropId::Resample, "Between frames", 0, RESAMPLE_MODES),
+    flag(PropId::LoopMacro, "Loop", false),
+    num(PropId::Feather, "Feather", 0.0, 0.0, 1.0, Unit::None),
+];
+
+/// Nothing depends on anything: `loop` is asked whichever resample is chosen,
+/// because the two are different questions — one is what happens *between*
+/// frames and the other what happens *after* them.
+const MACRO_DEPENDENCIES: &[Dependency] = &[];
+
 const PATCH: &[PropSpec] = &[
     frozen(choice(PropId::StampSpace, "Stamp space", 1, STAMP_SPACES)),
     num(PropId::Feather, "Feather", 0.0, 0.0, 1.0, Unit::None),
@@ -893,6 +928,7 @@ pub fn dependencies(tool: ToolKind) -> &'static [Dependency] {
         | ToolKind::Divergence
         | ToolKind::Turn
         | ToolKind::Patch => &[],
+        ToolKind::Macro => MACRO_DEPENDENCIES,
     }
 }
 
@@ -972,6 +1008,7 @@ pub fn tool_specs(tool: ToolKind) -> &'static [PropSpec] {
         ToolKind::Turn => TURN,
         ToolKind::Warp => WARP,
         ToolKind::Patch => PATCH,
+        ToolKind::Macro => MACRO,
     }
 }
 
@@ -1323,6 +1360,9 @@ mod tests {
                 // which is map space and cannot be reconsidered afterwards
                 // (spec.md 8.5, D55).
                 (ToolKind::Patch, PropId::StampSpace),
+                // A macro's space came from the region it was captured over,
+                // exactly as a patch's did (spec.md 8.7, D55).
+                (ToolKind::Macro, PropId::StampSpace),
             ]
         );
     }

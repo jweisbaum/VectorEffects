@@ -36,9 +36,9 @@ function paths(tool: (typeof ICON_TOOLS)[number]): string[] {
 
 describe("the icon set", () => {
   /**
-   * Fourteen: the hand, the two region tools of 8.2, the six tools of spec
-   * 6.2, the four modifiers of 6.3, and the patch of 8.5 — which is pasted
-   * rather than drawn and so has a mark without a palette button.
+   * Fifteen: the hand, the two region tools of 8.2, the six tools of spec
+   * 6.2, the four modifiers of 6.3, and the patch of 8.5 and the macro of 8.7
+   * — neither drawn from the palette, and both needing a mark all the same.
    * Named rather than counted against the palette, because the palette arrives
    * over IPC and a test that compared the two would only be comparing the
    * frontend to itself.
@@ -59,9 +59,10 @@ describe("the icon set", () => {
         "warp",
         SELECT,
         FILL,
-        // Not in the palette, but every object is named by its tool and the
-        // panels draw a mark beside it (spec.md 8.5).
+        // Neither is in the palette, but every object is named by its tool
+        // and the panels draw a mark beside it (spec.md 8.5, 8.7).
         "patch",
+        "macro",
       ].sort(),
     );
   });

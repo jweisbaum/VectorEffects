@@ -11,9 +11,10 @@
  * itself.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import type { AppSettings } from "../generated/AppSettings";
+import type { MacroLibrary } from "../generated/MacroLibrary";
 import type { ProjectSummary } from "../generated/ProjectSummary";
 import type { Shortcut } from "../generated/Shortcut";
 import NumberField from "../NumberField";
@@ -62,6 +63,10 @@ export default function SettingsDialog({
   const [error, setError] = useState<string | null>(null);
   /** The row waiting for a key press, if any. */
   const [capturing, setCapturing] = useState<string | null>(null);
+  const [library, setLibrary] = useState<MacroLibrary | null>(null);
+  useEffect(() => {
+    void api.macroLibrary().then(setLibrary).catch(() => undefined);
+  }, []);
 
   const report = (err: unknown) => setError(String(err));
 
@@ -204,6 +209,29 @@ export default function SettingsDialog({
               }}
             />
           </label>
+          {/*
+            Safe to press: a project that used a macro carries its own copy of
+            the frames, so clearing the library breaks nothing already
+            inserted (spec.md 8.7, D52). The button says so rather than asking
+            the user to remember it.
+          */}
+          <div className="settings-field">
+            <span>
+              {library === null
+                ? "…"
+                : `${library.entries.length} macro${library.entries.length === 1 ? "" : "s"}, ${formatBytes(library.total_bytes)}`}
+            </span>
+            <button
+              disabled={library === null || library.entries.length === 0}
+              title="Projects that already use a macro keep their own copy of its frames, so this breaks nothing"
+              onClick={() => {
+                setError(null);
+                void api.deleteMacros(null).then(setLibrary).catch(report);
+              }}
+            >
+              Delete all macros
+            </button>
+          </div>
         </section>
 
         <div className="modal-actions">
@@ -212,4 +240,11 @@ export default function SettingsDialog({
       </div>
     </div>
   );
+}
+
+/** A byte count as the settings dialog shows it. */
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} kB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }

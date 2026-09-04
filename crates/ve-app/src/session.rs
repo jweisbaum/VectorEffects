@@ -213,6 +213,11 @@ pub struct Session {
     pub capture: crate::capture::CaptureClipboard,
     /// The application's own preferences (spec.md 8.6, M15).
     pub settings: crate::settings::AppSettings,
+    /// A macro capture in progress (spec.md 8.7, M16).
+    ///
+    /// While this holds one, **every document write is refused**: the frames
+    /// being baked are of a field that has to still be there at the end.
+    pub capturing: crate::macros::CaptureSession,
     /// The transform drag in progress, if any.
     pub transform: Option<TransformGesture>,
     /// Counter behind [`Session::next_gesture_id`].

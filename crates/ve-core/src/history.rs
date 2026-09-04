@@ -31,6 +31,8 @@ pub struct History {
     /// available to redo.
     cursor: usize,
     limit: usize,
+    /// Whether every write is refused (spec.md 8.7): the capture-mode lockout.
+    locked: bool,
 }
 
 impl Default for History {
@@ -46,6 +48,7 @@ impl History {
             entries: Vec::new(),
             cursor: 0,
             limit: limit.max(1),
+            locked: false,
         }
     }
 
@@ -54,6 +57,29 @@ impl History {
     /// Any redo entries are discarded: the user has taken a new branch.
     pub fn push(&mut self, project: &mut Project, command: Command) -> Result<()> {
         self.push_inner(project, command, None)
+    }
+
+    /// Refuses every write until [`Self::unlock`] (spec.md 8.7, M16).
+    ///
+    /// **This is the whole of the capture-mode lockout.** While a macro
+    /// capture is running the document must not change — the frames being
+    /// baked are of a field that has to still be there at the end — and one
+    /// flag here covers every write path there is, including the ones nobody
+    /// remembered. Disabling controls in the interface would leave whichever
+    /// one was missed writing during a capture, with nothing to say so until
+    /// the macro came out wrong.
+    pub fn lock(&mut self) {
+        self.locked = true;
+    }
+
+    /// Allows writes again.
+    pub fn unlock(&mut self) {
+        self.locked = false;
+    }
+
+    /// Whether writes are currently refused.
+    pub fn is_locked(&self) -> bool {
+        self.locked
     }
 
     /// Applies a command, merging it into the previous entry when they share a
@@ -78,6 +104,9 @@ impl History {
         mut command: Command,
         key: Option<String>,
     ) -> Result<()> {
+        if self.locked {
+            return Err(crate::error::CoreError::Locked);
+        }
         command.apply(project)?;
 
         // Applying succeeded, so the new state is real. Only now is it safe to
@@ -109,6 +138,9 @@ impl History {
 
     /// Reverses the most recent change, returning its label.
     pub fn undo(&mut self, project: &mut Project) -> Result<Option<String>> {
+        if self.locked {
+            return Err(crate::error::CoreError::Locked);
+        }
         let Some(index) = self.cursor.checked_sub(1) else {
             return Ok(None);
         };
@@ -122,6 +154,9 @@ impl History {
 
     /// Reapplies the next undone change, returning its label.
     pub fn redo(&mut self, project: &mut Project) -> Result<Option<String>> {
+        if self.locked {
+            return Err(crate::error::CoreError::Locked);
+        }
         let Some(entry) = self.entries.get_mut(self.cursor) else {
             return Ok(None);
         };

@@ -171,7 +171,18 @@ undoably, and holds separately the default a new project of each kind gets.
 A scale change costs no tile, which the acceptance test asserts by hashing the
 flattened scene before and after.
 
-**M16 is next.**
+**M16 complete (2026-09-04): macros.** A capture over a run of frames, kept in
+a library of `.vemacro` files and inserted into any project. The lockout turned
+out to want to be **one flag on the history** rather than a set of disabled
+controls: every write path in the application already goes through `push`, so
+one `lock()` covers the ones nobody remembered — which is precisely the failure
+the plan warned about. Static versus record-movement is the acceptance that
+matters, and a recorded macro moves the *whole object*, anchor and footprint
+together: shifting only the lattice left the field trying to draw outside the
+shape that admits it, which is how the first attempt failed. Six end-to-end
+tests and four hand-computed resample ones.
+
+**M11 is next.**
 
 **Unplanned, after M7: GRIB import** (spec §4.8, D44). A GRIB2 file becomes a
 layer — two, when it holds both wind and currents — whose lattice is sampled
@@ -556,7 +567,7 @@ M0 ─ M1 ─ M2 ─ M3 ─ M4 ══ walking skeleton complete
                     ├─ M13 ────── motion vectors, linked objects        ✓
                     ├─ M14 ────── region selection, fill, copy/paste      ✓
                     ├─ M15 ────── settings and shortcuts               ✓
-                    ├─ M16 ────── macros                                 (needs M14, M15)
+                    ├─ M16 ────── macros                                ✓
                     ├─ M17 ────── warp and liquify, two tools
                     ├─ M18 ────── image layers
                     ├─ M19 ────── export precision
@@ -1489,7 +1500,7 @@ a plain drag draws the region, and the hand tool keeps plain drag as pan
 
 ---
 
-### M16 — Macros
+### M16 — Macros · **complete**
 
 **Goal:** a region of the field, over a run of frames, can be captured under a
 name, kept across projects, and put back down anywhere.

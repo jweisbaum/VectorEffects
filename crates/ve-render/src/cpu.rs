@@ -396,11 +396,14 @@ fn sample_upto(scene: &Scene, position: LonLat, upto: usize, depth: u32) -> (Uv,
 /// `None` where the capture has nothing: outside its lattice, or at a cell its
 /// source never covered.
 fn patch_sample(object: &FlatObject, patch: &FlatCapture, position: LonLat) -> Option<Uv> {
-    let frame = patch.capture.frames.get(patch.frame)?;
     let local = object.frame.to_local(position);
-    let sample = patch
-        .capture
-        .sample(frame, local[0] / M_PER_DEGREE, local[1] / M_PER_DEGREE)?;
+    // The lattice is read in the object's own frame, and a capture that
+    // recorded a moving region has already moved the *frame* — anchor,
+    // footprint and all (spec.md 8.7) — so there is nothing to subtract here.
+    let sample =
+        patch
+            .capture
+            .sample_pick(patch.pick, local[0] / M_PER_DEGREE, local[1] / M_PER_DEGREE)?;
     Some(Uv {
         u: sample[0],
         v: sample[1],

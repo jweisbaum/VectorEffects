@@ -214,13 +214,19 @@ fn hash_object(hasher: &mut blake3::Hasher, object: &FlatObject) {
     // themselves are megabytes and hashing them here would repeat the work
     // the capture already did.
     match object.capture.as_ref() {
-        None => hasher.update(&[0]),
+        None => {
+            hasher.update(&[0]);
+        }
         Some(patch) => {
             hasher.update(&[1]);
             hasher.update(patch.capture.hash.as_bytes());
-            hasher.update(&(patch.frame as u32).to_le_bytes())
+            hasher.update(&(patch.pick.frame as u32).to_le_bytes());
+            hasher.update(&(patch.pick.next as u32).to_le_bytes());
+            hasher.update(&patch.pick.blend.to_le_bytes());
+            hash_f64(hasher, patch.shift_deg[0]);
+            hash_f64(hasher, patch.shift_deg[1]);
         }
-    };
+    }
 
     // The object's own movement, which is added to every vector it paints and
     // so changes the frame without moving the footprint (spec.md 9.3). Two

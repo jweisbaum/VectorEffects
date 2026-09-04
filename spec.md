@@ -1974,6 +1974,62 @@ all falls back to the defaults entirely. A hand-edited binding that is reserved
 or duplicated is dropped and its default comes back. Losing a preference is a
 far better outcome than not launching.
 
+### 8.7 Macros
+
+A **macro** is §8.5's capture over a *run* of frames, kept under a name in a
+library of `.vemacro` files rather than in any project, and dropped into a
+project that knows nothing about where it came from.
+
+**Nothing in the library is project data.** A project that uses a macro carries
+its own copy of the frames, as its own `captures/` entry (D52), so clearing the
+library breaks nothing already inserted — which is what makes *Delete all
+macros* a safe button rather than a destructive one. The library's directory is
+a setting (§8.6); a file in it that will not decode is skipped rather than
+emptying the list.
+
+**Capture.** Draw a region, press **Start capture**, and the timeline enters
+capture mode. At each step the region may be dragged, and **each frame holds
+its own position**, initialised to where the region was drawn: moving it at
+frame 3 moves frame 3 and no other. Those positions are capture state — not
+keyframes, not the document, not history. **Finish** asks for a name and bakes:
+for each frame, the visible composite inside *that frame's* region, evaluated
+with `CpuEvaluator` at the project's grid spacing, undefined kept distinct from
+calm. **Record movement** stores each frame's displacement from the first;
+**Static** stores none, so a region dragged to follow a moving system yields a
+macro of that system standing still. No object is created either way.
+
+**Capture mode is a lockout, and it is one flag.** While a capture runs the
+document must not change — the frames being baked are of a field that has to
+still be there at the end — so the *history* refuses every write, and every
+write path in the application already goes through it. Disabling controls in
+the interface would leave whichever one was missed writing during a capture,
+with nothing to say so until the macro came out wrong. Cancel writes nothing
+and restores everything.
+
+**Insert.** Pick a macro, click the map, and a macro object lands with its
+region centred on the click. It is an object like any other — keyable position,
+rotation and scale, feather, edge mode, §9.3's motion — whose field is the
+capture's frames, sampled through §8.5's patch sampler in the object's own
+frame. A macro that recorded movement moves the **whole object**, anchor and
+footprint together: shifting only the lattice would leave the field trying to
+draw outside the shape that admits it. Motion is relative, so it begins
+wherever the click put it.
+
+**Time.** Frame `f` is at macro time `f·Δt_m` and the object's step `s` at
+`(s − start)·Δt_p`. Equal steps map one to one; when they differ, the object's
+**resample** option decides. **Hold** shows the frame at or before the step's
+time — a macro is a thing the user *placed*, and it holds like a keyframe; §4.8's
+rule against holding a measurement forward is about a forecast, and this is not
+one. **Interpolate** blends the two nearest frames, `u` and `v` linearly and
+the displacement likewise, and is **undefined where either frame is**: half a
+field painted over what is beneath would be worse than none. Past the last
+frame there is nothing unless **loop** is set. Both are per object, because the
+same macro dropped into an hourly and a six-hourly project wants different
+answers.
+
+**Kinds.** A wind macro in a current project, or the reverse, is allowed, as
+showing a GRIB layer of the other kind is (§4.8); the list marks the kind.
+
 ---
 
 ## 9. Timeline and animation

@@ -25,7 +25,9 @@ import type { ToolSchema } from "./generated/ToolSchema";
 import type { DocumentTree } from "./generated/DocumentTree";
 import type { ClipboardState } from "./generated/ClipboardState";
 import type { AppSettings } from "./generated/AppSettings";
+import type { CaptureMode } from "./generated/CaptureMode";
 import type { CaptureState } from "./generated/CaptureState";
+import type { MacroLibrary } from "./generated/MacroLibrary";
 import type { Shortcut } from "./generated/Shortcut";
 import type { FrameClipboardState } from "./generated/FrameClipboardState";
 import type { RegionShape } from "./generated/RegionShape";
@@ -410,6 +412,27 @@ export const api = {
   /** The open project's colour scale: a document write, undoable. */
   setColourScale: (maxKnots: number) =>
     call<ProjectSummary>("set_colour_scale", { maxKnots }),
+
+  /** The macro library (spec.md 8.7, M16). */
+  macroLibrary: () => call<MacroLibrary>("macro_library", {}),
+  /** Deletes one macro, or every one. Inserted macros keep working (D52). */
+  deleteMacros: (id: string | null) => call<MacroLibrary>("delete_macros", { id }),
+  /** Begins a capture over a region. Every document write is then refused. */
+  startCapture: (region: RegionShape, step: number, recordMovement: boolean) =>
+    call<CaptureMode>("start_capture", { region, step, recordMovement }),
+  /** Moves the capture's region at one step. Each frame holds its own place. */
+  placeCapture: (step: number, lon: number, lat: number) =>
+    call<CaptureMode>("place_capture", { step, lon, lat }),
+  /** Abandons a capture, writing nothing. */
+  cancelCapture: () => call<CaptureMode>("cancel_capture", {}),
+  /** Whether a capture is running. */
+  captureMode: () => call<CaptureMode>("capture_mode", {}),
+  /** Bakes the capture under a name. Creates no object. */
+  finishCapture: (name: string, lastStep: number) =>
+    call<MacroLibrary>("finish_capture", { name, lastStep }),
+  /** Inserts a library macro as an object, centred on a position. */
+  insertMacro: (id: string, lon: number, lat: number) =>
+    call<ProjectSummary>("insert_macro", { id, lon, lat }),
 
   /** What the capture clipboard holds. */
   captureState: () => call<CaptureState>("capture_state", {}),

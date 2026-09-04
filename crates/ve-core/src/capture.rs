@@ -30,6 +30,8 @@
 
 use std::io::{Read, Write};
 
+use serde::{Deserialize, Serialize};
+
 use crate::document::Geometry;
 use crate::error::{CoreError, Result};
 use crate::project::FieldKind;
@@ -40,15 +42,39 @@ const MAGIC: &[u8; 6] = b"VECAP\0";
 /// Container version. Bumped when the header grows a field that an older
 /// reader would misread; a reader refuses a version it does not know rather
 /// than guessing at the bytes after it.
-const VERSION: u16 = 1;
+/// Version 2 added each frame's displacement, for a capture that recorded a
+/// moving region (spec.md 8.7). Version 1 is still read: its frames never
+/// moved.
+const VERSION: u16 = 2;
 
 /// One time slice of a captured field.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CaptureFrame {
     /// Hours after the capture's first frame.
     pub offset_hours: f64,
+    /// Where this frame's region sat relative to the first frame's, in
+    /// degrees of the map, eastward (spec.md 8.7).
+    ///
+    /// Zero for a still capture and for one taken **static**, where the whole
+    /// point is that a region dragged to follow a moving system yields a macro
+    /// of that system standing still.
+    pub dx_deg: f64,
+    /// And northward.
+    pub dy_deg: f64,
     /// `[u, v]` in m/s at `j * ni + i`, `NaN` where the source was undefined.
     pub uv: Vec<[f32; 2]>,
+}
+
+impl CaptureFrame {
+    /// A frame whose region did not move.
+    pub fn still(offset_hours: f64, uv: Vec<[f32; 2]>) -> Self {
+        Self {
+            offset_hours,
+            dx_deg: 0.0,
+            dy_deg: 0.0,
+            uv,
+        }
+    }
 }
 
 /// A field captured from a region of the map.
@@ -227,6 +253,8 @@ impl Capture {
         out.extend_from_slice(&shape);
         for frame in &self.frames {
             out.extend_from_slice(&frame.offset_hours.to_le_bytes());
+            out.extend_from_slice(&frame.dx_deg.to_le_bytes());
+            out.extend_from_slice(&frame.dy_deg.to_le_bytes());
         }
 
         let mut raw = Vec::with_capacity(self.frames.len() * self.node_count() * 8);
@@ -256,7 +284,7 @@ impl Capture {
             return Err(bad("is not a .vecap container"));
         }
         let version = u16::from_le_bytes(take(2)?.try_into().map_err(|_| bad("version"))?);
-        if version != VERSION {
+        if version == 0 || version > VERSION {
             return Err(CoreError::Capture(format!(
                 "written by a newer version ({version})"
             )));
@@ -289,7 +317,14 @@ impl Capture {
             .map_err(|e| CoreError::Capture(format!("its shape: {e}")))?;
         let mut offsets = Vec::with_capacity(frame_count);
         for _ in 0..frame_count {
-            offsets.push(f64_of(take(8)?)?);
+            let offset = f64_of(take(8)?)?;
+            // Version 1 knew no displacement; its frames never moved.
+            let (dx, dy) = if version >= 2 {
+                (f64_of(take(8)?)?, f64_of(take(8)?)?)
+            } else {
+                (0.0, 0.0)
+            };
+            offsets.push((offset, dx, dy));
         }
         let packed_len = u32_of(take(4)?)? as usize;
         let packed = take(packed_len)?;
@@ -306,7 +341,7 @@ impl Capture {
         }
         let mut frames = Vec::with_capacity(frame_count);
         let mut cursor = 0usize;
-        for offset_hours in offsets {
+        for (offset_hours, dx_deg, dy_deg) in offsets {
             let mut uv = Vec::with_capacity(nodes);
             for _ in 0..nodes {
                 let u = f32::from_le_bytes(
@@ -322,7 +357,12 @@ impl Capture {
                 uv.push([u, v]);
                 cursor += 8;
             }
-            frames.push(CaptureFrame { offset_hours, uv });
+            frames.push(CaptureFrame {
+                offset_hours,
+                dx_deg,
+                dy_deg,
+                uv,
+            });
         }
         Self::new(
             kind,
@@ -398,6 +438,129 @@ impl Capture {
     }
 }
 
+/// How a macro's frames map onto a project's steps (spec.md 8.7, M16).
+///
+/// A macro is a thing the user *placed*, so it holds like a keyframe rather
+/// than vanishing like a message: §4.8's rule against holding a measurement
+/// forward is about a forecast, and this is not one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Resample {
+    /// The frame at or before the step's time.
+    Hold,
+    /// The two nearest frames blended, `u` and `v` linearly, undefined where
+    /// either is.
+    Interpolate,
+}
+
+/// Which frame, or pair of frames, a macro shows at an elapsed time.
+///
+/// `None` past the last frame, unless the caller loops. Separated from the
+/// sampling so the arithmetic can be checked by hand rather than through a
+/// field (spec.md 8.7).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FramePick {
+    /// The frame to show, or the earlier of the pair.
+    pub frame: usize,
+    /// The later frame, when two are being blended.
+    pub next: usize,
+    /// How far between them, 0 at `frame` and 1 at `next`.
+    pub blend: f32,
+}
+
+impl Capture {
+    /// Which frame a macro shows `elapsed_hours` after it starts.
+    ///
+    /// `looping` wraps past the end by the capture's own duration, so a macro
+    /// set to loop repeats rather than stopping.
+    pub fn pick(&self, elapsed_hours: f64, resample: Resample, looping: bool) -> Option<FramePick> {
+        let last = self.frames.last()?;
+        let span = last.offset_hours;
+        let mut t = elapsed_hours;
+        if t < -1e-9 {
+            return None;
+        }
+        if t > span + 1e-9 {
+            if !looping || span <= 0.0 {
+                return None;
+            }
+            // One frame's worth past the last frame is where the first comes
+            // round again, so the loop's period is the span plus one step.
+            let step = span / (self.frames.len().saturating_sub(1).max(1)) as f64;
+            t = t.rem_euclid(span + step);
+            if t > span {
+                // Inside the wrap-around gap: blend the last frame back to the
+                // first, or hold the last.
+                return Some(match resample {
+                    Resample::Hold => FramePick {
+                        frame: self.frames.len() - 1,
+                        next: self.frames.len() - 1,
+                        blend: 0.0,
+                    },
+                    Resample::Interpolate => FramePick {
+                        frame: self.frames.len() - 1,
+                        next: 0,
+                        blend: (((t - span) / step) as f32).clamp(0.0, 1.0),
+                    },
+                });
+            }
+        }
+        // The last frame at or before `t`.
+        let at = self
+            .frames
+            .iter()
+            .rposition(|frame| frame.offset_hours <= t + 1e-9)
+            .unwrap_or(0);
+        Some(match resample {
+            Resample::Hold => FramePick {
+                frame: at,
+                next: at,
+                blend: 0.0,
+            },
+            Resample::Interpolate => {
+                let next = (at + 1).min(self.frames.len() - 1);
+                let (a, b) = (self.frames[at].offset_hours, self.frames[next].offset_hours);
+                let blend = if (b - a).abs() < 1e-9 {
+                    0.0
+                } else {
+                    (((t - a) / (b - a)) as f32).clamp(0.0, 1.0)
+                };
+                FramePick {
+                    frame: at,
+                    next,
+                    blend,
+                }
+            }
+        })
+    }
+
+    /// The displacement a pick implies, in degrees of the map.
+    pub fn displacement(&self, pick: FramePick) -> (f64, f64) {
+        let a = &self.frames[pick.frame];
+        let b = &self.frames[pick.next];
+        let t = f64::from(pick.blend);
+        (
+            a.dx_deg + (b.dx_deg - a.dx_deg) * t,
+            a.dy_deg + (b.dy_deg - a.dy_deg) * t,
+        )
+    }
+
+    /// A blended sample at a position, for a pick.
+    ///
+    /// Undefined where **either** frame is: a cell that one frame never
+    /// covered is a cell the blend has no honest value for, and inventing one
+    /// would paint half a field over whatever is beneath (D58).
+    pub fn sample_pick(&self, pick: FramePick, x_deg: f64, y_deg: f64) -> Option<[f32; 2]> {
+        let a = self.sample(self.frames.get(pick.frame)?, x_deg, y_deg)?;
+        if pick.frame == pick.next || pick.blend <= 0.0 {
+            return Some(a);
+        }
+        let b = self.sample(self.frames.get(pick.next)?, x_deg, y_deg)?;
+        let t = pick.blend;
+        Some([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t])
+    }
+}
+
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
@@ -412,6 +575,8 @@ mod tests {
         let frames = (0..frames)
             .map(|f| CaptureFrame {
                 offset_hours: f as f64 * 3.0,
+                dx_deg: f as f64 * 0.5,
+                dy_deg: 0.0,
                 uv: (0..ni * nj)
                     .map(|k| {
                         if k == 5 {
@@ -532,10 +697,7 @@ mod tests {
                     LocalPoint::new(0.0, 1000.0),
                 ],
             },
-            vec![CaptureFrame {
-                offset_hours: 0.0,
-                uv: vec![[1.0, 2.0]; 4],
-            }],
+            vec![CaptureFrame::still(0.0, vec![[1.0, 2.0]; 4])],
         )
         .expect("a capture");
         let back = Capture::decode(&capture.encode().expect("encode")).expect("decode");
@@ -561,10 +723,10 @@ mod tests {
                 half_width_m: 1.0,
                 half_height_m: 1.0,
             },
-            vec![CaptureFrame {
-                offset_hours: 0.0,
-                uv: vec![[10.0, 0.0], [10.0, 0.0], UNDEFINED, UNDEFINED],
-            }],
+            vec![CaptureFrame::still(
+                0.0,
+                vec![[10.0, 0.0], [10.0, 0.0], UNDEFINED, UNDEFINED],
+            )],
         )
         .expect("a capture");
         let frame = &capture.frames[0];
@@ -577,5 +739,124 @@ mod tests {
         assert_eq!(capture.sample(frame, 0.5, -1.0), None);
         // And outside the lattice there is nothing either.
         assert_eq!(capture.sample(frame, 5.0, 0.0), None);
+    }
+}
+
+#[cfg(test)]
+mod resample_tests {
+    use super::*;
+    use crate::document::Geometry;
+
+    /// A 6-hourly capture of three frames: 0, 6 and 12 hours.
+    fn capture() -> Capture {
+        Capture::new(
+            FieldKind::Wind,
+            CaptureLattice {
+                ni: 1,
+                nj: 1,
+                spacing_deg: 1.0,
+                x0_deg: 0.0,
+                y0_deg: 0.0,
+            },
+            21_600.0,
+            Geometry::Rect {
+                half_width_m: 1.0,
+                half_height_m: 1.0,
+            },
+            (0..3)
+                .map(|f| CaptureFrame {
+                    offset_hours: f as f64 * 6.0,
+                    dx_deg: f as f64 * 2.0,
+                    dy_deg: 0.0,
+                    uv: vec![[f as f32 * 10.0, 0.0]],
+                })
+                .collect(),
+        )
+        .expect("a capture")
+    }
+
+    /// A 6-hourly capture in a 3-hourly project: hold shows the frame at or
+    /// before the step, interpolate blends the two around it.
+    #[test]
+    fn a_coarse_capture_holds_or_interpolates() {
+        let capture = capture();
+        // Step 1 of a 3-hourly project is 3 hours in: half way between the
+        // 0 h and 6 h frames.
+        let held = capture.pick(3.0, Resample::Hold, false).expect("a frame");
+        assert_eq!((held.frame, held.next), (0, 0));
+        assert_eq!(
+            capture.sample_pick(held, 0.0, 0.0),
+            Some([0.0, 0.0]),
+            "hold shows the 0 h frame unchanged"
+        );
+
+        let blended = capture
+            .pick(3.0, Resample::Interpolate, false)
+            .expect("a frame");
+        assert_eq!((blended.frame, blended.next), (0, 1));
+        assert!((blended.blend - 0.5).abs() < 1e-6);
+        // Hand-computed: the 0 h frame is 0 and the 6 h frame is 10, so half
+        // way is 5, and the displacement half way between 0 and 2 is 1.
+        assert_eq!(capture.sample_pick(blended, 0.0, 0.0), Some([5.0, 0.0]));
+        let (dx, dy) = capture.displacement(blended);
+        assert!((dx - 1.0).abs() < 1e-9 && dy.abs() < 1e-9);
+    }
+
+    /// An hourly project reading a 6-hourly capture lands exactly on a frame
+    /// every sixth step, whichever mode it is in.
+    #[test]
+    fn every_sixth_hour_lands_on_a_frame() {
+        let capture = capture();
+        for (hours, frame) in [(0.0, 0usize), (6.0, 1), (12.0, 2)] {
+            for mode in [Resample::Hold, Resample::Interpolate] {
+                let pick = capture.pick(hours, mode, false).expect("a frame");
+                assert_eq!(pick.frame, frame, "{hours} h in {mode:?}");
+                assert!(pick.blend.abs() < 1e-6 || pick.frame == pick.next);
+            }
+        }
+    }
+
+    /// Past the last frame there is nothing, unless the macro loops.
+    #[test]
+    fn a_macro_stops_at_its_end_unless_it_loops() {
+        let capture = capture();
+        assert!(capture.pick(18.0, Resample::Hold, false).is_none());
+        let looped = capture.pick(18.0, Resample::Hold, true).expect("wrapped");
+        // 18 h into a capture whose loop period is 12 + 6 = 18 h is back at
+        // the start.
+        assert_eq!(looped.frame, 0);
+        assert!(capture.pick(-1.0, Resample::Hold, true).is_none());
+    }
+
+    /// A blend is undefined where either frame is: half a field painted over
+    /// what is beneath would be worse than none (D58).
+    #[test]
+    fn a_blend_is_undefined_where_either_frame_is() {
+        let mut frames = capture().frames;
+        frames[1].uv[0] = UNDEFINED;
+        let capture = Capture::new(
+            FieldKind::Wind,
+            CaptureLattice {
+                ni: 1,
+                nj: 1,
+                spacing_deg: 1.0,
+                x0_deg: 0.0,
+                y0_deg: 0.0,
+            },
+            21_600.0,
+            Geometry::Rect {
+                half_width_m: 1.0,
+                half_height_m: 1.0,
+            },
+            frames,
+        )
+        .expect("a capture");
+        let pick = capture
+            .pick(3.0, Resample::Interpolate, false)
+            .expect("a frame");
+        assert_eq!(capture.sample_pick(pick, 0.0, 0.0), None);
+        // Holding shows the frame that *is* defined.
+        let held = capture.pick(3.0, Resample::Hold, false).expect("a frame");
+        assert_eq!(capture.sample_pick(held, 0.0, 0.0), Some([0.0, 0.0]));
     }
 }

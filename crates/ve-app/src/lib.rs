@@ -14,6 +14,7 @@ pub mod export;
 pub mod frames;
 pub mod import;
 pub mod logging;
+pub mod macros;
 pub mod merge;
 pub mod palette;
 pub mod paths;
@@ -123,6 +124,14 @@ pub fn run() -> anyhow::Result<()> {
             settings::set_default_scales,
             settings::set_macro_directory,
             settings::set_colour_scale,
+            macros::macro_library,
+            macros::delete_macros,
+            macros::start_capture,
+            macros::place_capture,
+            macros::cancel_capture,
+            macros::capture_mode,
+            macros::finish_capture,
+            macros::insert_macro,
             capture::capture_region,
             capture::paste_capture,
             capture::capture_state,

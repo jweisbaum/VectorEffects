@@ -5,4 +5,4 @@
  *
  * A wire mirror of [`ToolKind`], which cannot derive `TS` from another crate.
  */
-export type Tool = "brush" | "circle" | "shape_fill" | "mask" | "clone_stamp" | "curve" | "intensity" | "divergence" | "turn" | "warp" | "patch";
+export type Tool = "brush" | "circle" | "shape_fill" | "mask" | "clone_stamp" | "curve" | "intensity" | "divergence" | "turn" | "warp" | "patch" | "macro";

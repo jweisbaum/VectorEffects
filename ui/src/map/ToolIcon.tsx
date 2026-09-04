@@ -68,6 +68,12 @@ const ICONS: Record<ActiveTool, Icon> = {
     line("M4 8h9v9H4z", "pasted"),
     line("M8 4h9v9h-2M11 4v2", "taken"),
   ],
+  // The macro: a stack of captured frames, the front one solid.
+  macro: [
+    line("M4 9h11v11H4z", "front"),
+    line("M7 6h11v11h-3", "middle"),
+    line("M10 3h11v11h-3", "back"),
+  ],
   // The fill tool: a bucket tipped over what it fills.
   [FILL]: [
     line("M11 4 4 11a2 2 0 0 0 0 3l5 5a2 2 0 0 0 3 0l7-7z", "bucket"),
