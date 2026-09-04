@@ -198,6 +198,28 @@ impl Animatable {
     }
 
     /// The value at `step`.
+    /// Whether the value is *held* anywhere across `from..=to`.
+    ///
+    /// A `Step` segment does not interpolate: the value jumps at the key
+    /// rather than travelling to it, so a difference taken across one is not a
+    /// speed. A 500 km jump in an hour is not a 140 m/s wind, and motion
+    /// vectors read this before they read the values (spec.md 9.3, M13).
+    ///
+    /// A property with no keys never moves, so it counts as held.
+    pub fn holds_across(&self, from: u32, to: u32) -> bool {
+        if self.keys().is_empty() {
+            return true;
+        }
+        let (lo, hi) = (from.min(to), from.max(to));
+        // The interpolation belongs to the key the segment *leaves*, so the
+        // segments overlapping the span are the ones whose key is at or below
+        // `hi` and whose successor is at or above `lo`.
+        self.keys().iter().enumerate().any(|(at, key)| {
+            let ends = self.keys().get(at + 1).map_or(u32::MAX, |next| next.step);
+            key.interp == Interpolation::Step && key.step <= hi && ends >= lo
+        })
+    }
+
     pub fn value_at(&self, step: u32) -> PropValue {
         let keys = &self.keys;
         let (Some(first), Some(last)) = (keys.first(), keys.last()) else {

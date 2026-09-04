@@ -35,4 +35,17 @@ keyed_here: boolean,
  * Whether the value at the step being viewed comes from interpolation
  * between keys rather than from a key or the base (spec.md 9.3).
  */
-interpolated_here: boolean, };
+interpolated_here: boolean, 
+/**
+ * Whether this track can put the object's own movement into the field
+ * (spec.md 9.3, M13).
+ *
+ * Only position, rotation and scale move an object, and only the tools
+ * that paint a vector have a field to add it to: a modifier writes what
+ * it read and a mask writes calm, so neither has anything to carry.
+ */
+motion_available: boolean, 
+/**
+ * Whether it is doing so.
+ */
+motion: boolean, };

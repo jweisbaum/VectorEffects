@@ -1011,6 +1011,28 @@ export default function Timeline({
                               <span className="tl-graph-toggle" />
                             )}
                             <span className="tl-track-name">{track.label}</span>
+                            {/*
+                              Motion: while this is on, the object's own
+                              movement along this track is added to the vector
+                              it paints (spec.md 9.3, M13). One per track and
+                              not one per object, so a system that spins and
+                              travels can put in the spin alone.
+                            */}
+                            {track.motion_available && (
+                              <button
+                                className={`tl-motion${track.motion ? " on" : ""}`}
+                                title={
+                                  track.motion
+                                    ? `Take this object's ${track.label.toLowerCase()} out of the field it paints`
+                                    : `Add this object's ${track.label.toLowerCase()} to the field it paints`
+                                }
+                                onClick={() =>
+                                  run(api.setMotion(object.id, track.property, !track.motion))
+                                }
+                              >
+                                ⇢
+                              </button>
+                            )}
                             {track.interpolated_here && (
                               <span className="muted" title="Interpolated between keys at this step">
                                 ~

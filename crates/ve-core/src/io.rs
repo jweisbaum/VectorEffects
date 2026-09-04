@@ -630,6 +630,54 @@ mod tests {
         );
     }
 
+    /// The motion flags are a document field like any other, and an object
+    /// that was never told to move must save nothing at all (spec.md 9.3).
+    #[test]
+    fn motion_flags_round_trip_and_a_still_object_writes_none() {
+        use crate::document::MotionFlags;
+
+        let dir = TempDir::new();
+        let path = dir.path("motion.veproj");
+        let mut project = sample();
+        project.layers[0].objects[0].motion = MotionFlags {
+            position: true,
+            scale: true,
+            ..Default::default()
+        };
+        save(&project, &path).unwrap();
+        let loaded = load(&path).unwrap();
+        assert_eq!(
+            loaded.layers[0].objects[0].motion,
+            MotionFlags {
+                position: true,
+                rotation: false,
+                scale: true,
+            }
+        );
+
+        // An object that never moves writes no `motion` key, so every project
+        // made before the field existed reads back byte-identically.
+        let still = dir.path("still.veproj");
+        let mut project = sample();
+        project.layers[0].objects[0].motion = MotionFlags::default();
+        save(&project, &still).unwrap();
+        let mut archive = zip::ZipArchive::new(std::fs::File::open(&still).unwrap()).unwrap();
+        let mut json = String::new();
+        {
+            use std::io::Read;
+            archive
+                .by_name(PROJECT_ENTRY)
+                .unwrap()
+                .read_to_string(&mut json)
+                .unwrap();
+        }
+        assert!(
+            !json.contains("\"motion\""),
+            "a still object wrote a motion field"
+        );
+        assert!(!load(&still).unwrap().layers[0].objects[0].motion.any());
+    }
+
     /// A neighbour set survives a save and reopen, and a stale one is dropped.
     ///
     /// The set is derived state, not the user's work, so a project whose

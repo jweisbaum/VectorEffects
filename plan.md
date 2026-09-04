@@ -126,7 +126,17 @@ wide, so the ring wrapped onto the same bucket repeatedly and filled two of
 the three neighbour slots with one cell. Found by a brute-force comparison at
 89.5°N, which is exactly why that test aims there.
 
-**M13 is next.**
+**M13, first half, complete (2026-09-04): motion in the field.** An object
+that moves can put its own movement into the wind — one switch per track, so a
+system that spins and travels can contribute the spin alone (D57). The
+velocity is one angular velocity per object, because a position segment is a
+great-circle slerp and a turn about the anchor is a rotation about it, and both
+are exact at the poles and across the seam where "the anchor's speed and
+bearing applied uniformly" is not. Five hand-computed acceptance tests, and the
+fidelity suite generates motion on a third of its objects: the real GPU agrees
+with the CPU to 0.005 m/s and 0.018° over 30,657 samples.
+
+**The linked objects half of M13 is next**, then M14.
 
 **Unplanned, after M7: GRIB import** (spec §4.8, D44). A GRIB2 file becomes a
 layer — two, when it holds both wind and currents — whose lattice is sampled

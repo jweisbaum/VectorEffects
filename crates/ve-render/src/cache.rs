@@ -208,6 +208,15 @@ fn hash_object(hasher: &mut blake3::Hasher, object: &FlatObject) {
         }
     };
 
+    // The object's own movement, which is added to every vector it paints and
+    // so changes the frame without moving the footprint (spec.md 9.3). Two
+    // steps of a travelling stroke have the same geometry and different
+    // fields; a key that ignored this would serve the first for the second.
+    for component in object.motion.omega {
+        hash_f64(hasher, component);
+    }
+    hash_f64(hasher, object.motion.scale_rate);
+
     // Which side of its footprint the object writes on. A mask and its
     // inverse cover disjoint halves of the globe from the same geometry, so
     // the flag has to reach the key (spec.md 7.10).
@@ -572,6 +581,7 @@ mod tests {
             clone_offset: OffsetMode::Aligned,
             modifier: None,
             invert: false,
+            motion: crate::scene::Motion::default(),
         }
     }
 

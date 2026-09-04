@@ -156,6 +156,16 @@ pub enum Command {
         /// Layer and index after the move.
         to: (crate::id::Id, usize),
     },
+    /// Turns one of an object's own movements into the field it paints
+    /// (spec.md 9.3, M13).
+    SetMotion {
+        /// Target object.
+        object: crate::id::Id,
+        /// Previous flags.
+        before: crate::document::MotionFlags,
+        /// New flags.
+        after: crate::document::MotionFlags,
+    },
     /// Changes an object's coarse lifetime.
     SetActiveRange {
         /// Target object.
@@ -277,6 +287,15 @@ impl Command {
             Self::RemoveObject { object, .. } => format!("Delete {}", object.name),
             Self::RenameObject { .. } => "Rename object".into(),
             Self::MoveObject { .. } => "Move object".into(),
+            Self::SetMotion { after, before, .. } => {
+                if after.any() && !before.any() {
+                    "Add motion to the field".into()
+                } else if !after.any() {
+                    "Take motion out of the field".into()
+                } else {
+                    "Change which motion reaches the field".into()
+                }
+            }
             Self::SetActiveRange { .. } => "Change active range".into(),
             Self::SetGeometry { .. } => "Edit shape".into(),
             Self::SetProperty { prop, .. } => format!("Change {prop:?}"),
@@ -377,6 +396,10 @@ impl Command {
             Self::MoveObject { object, to, .. } => move_object(project, *object, to.0, to.1),
             Self::SetActiveRange { object, after, .. } => {
                 object_mut(project, *object)?.active_range = *after;
+                Ok(())
+            }
+            Self::SetMotion { object, after, .. } => {
+                object_mut(project, *object)?.motion = *after;
                 Ok(())
             }
             Self::SetGeometry { object, after, .. } => {
@@ -504,6 +527,10 @@ impl Command {
             Self::MoveObject { object, from, .. } => move_object(project, *object, from.0, from.1),
             Self::SetActiveRange { object, before, .. } => {
                 object_mut(project, *object)?.active_range = *before;
+                Ok(())
+            }
+            Self::SetMotion { object, before, .. } => {
+                object_mut(project, *object)?.motion = *before;
                 Ok(())
             }
             Self::SetGeometry { object, before, .. } => {
@@ -767,6 +794,38 @@ mod tests {
             (speed_of(&project, a), speed_of(&project, b)),
             (10.0, 10.0),
             "one undo must put every member back"
+        );
+    }
+
+    /// Turning a movement into the field is undoable like anything else, and
+    /// undo restores the exact flags rather than clearing them (spec.md 9.3).
+    #[test]
+    fn setting_motion_inverts_exactly() {
+        use crate::document::MotionFlags;
+
+        let (mut project, a, _) = project_with_two();
+        let before = MotionFlags {
+            rotation: true,
+            ..Default::default()
+        };
+        project.object_mut(a).expect("object").motion = before;
+        let after = MotionFlags {
+            position: true,
+            rotation: true,
+            scale: false,
+        };
+        let mut command = Command::SetMotion {
+            object: a,
+            before,
+            after,
+        };
+        command.apply(&mut project).expect("apply");
+        assert_eq!(project.object(a).expect("object").motion, after);
+        command.undo(&mut project).expect("undo");
+        assert_eq!(
+            project.object(a).expect("object").motion,
+            before,
+            "undo must restore the flags that were there, not clear them"
         );
     }
 

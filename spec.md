@@ -1906,6 +1906,43 @@ which is why it is not a bar.
   position graphs as two series, longitude and latitude, on a shared degree
   axis.
 
+**Motion in the field.** The `position`, `rotation` and `scale` rows of a
+tool that paints a vector each carry a **motion** switch. While it is on, the
+object's own movement between steps is added to the vector it paints: a stroke
+travelling east at 15 m/s adds 15 m/s eastward, so a tailwind strengthens, a
+headwind weakens and a crosswind turns. One vector addition per cell, in the
+cell's own east/north frame, which is what makes all three the same rule and
+the sum right at every relative angle.
+
+One switch per **track**, not per object: a rotating system that also travels
+may want its spin in the wind and not its translation, and one switch cannot
+say which. A modifier and a mask have no switch at all — a modifier writes what
+it read and a mask writes calm, so neither has a field of its own for a
+velocity to be added to (§6.3).
+
+**The velocity comes from the track the field already uses.** At step `k` it is
+the central difference of the property's own sampled value at `k−1` and `k+1`,
+one-sided at the ends, over the elapsed time — never a second interpolation of
+the keys. A held segment contributes nothing: a value that jumps is a teleport,
+and a 500 km jump in an hour is not a 140 m/s wind. A property with no keys has
+no motion.
+
+**A translation and a rotation are each one angular velocity.** A position
+segment is a great-circle slerp — a rotation of the sphere — so the translation
+velocity at every cell of a footprint is exactly `Ω × p` for one 3-vector, and
+a turn about the anchor is `ω` about the anchor's own unit vector. The two add
+into one vector per object, and a cell's velocity is then a cross product and a
+projection onto east and north: exact everywhere, at the poles and across the
+seam alike, where "the anchor's speed and bearing applied uniformly" would be
+wrong by the frame's own drift a few thousand kilometres out (§7.2). Scale adds
+a radial velocity of `ṡ/s · r` along the frame's radial bearing.
+
+Both kernels add it to the object's own vector **before** the feather and the
+edge mode, so the edge fades the sum; a moving clone stamp adds it to what it
+copied. The velocity is part of the flat object, so the render cache keys on it
+by construction (§7.10). The gesture preview shows no motion — a fresh stroke
+has no keys — and the tiles do.
+
 ### 9.4 Playback
 
 - Play, pause, stop, and loop. Playback advances one **time step** per display

@@ -64,6 +64,13 @@ struct Object {
     path_count: u32,
     space: u32,               // 0 geodesic (ground metres), 1 projected (map metres)
     invert: u32,              // 1 = covers everything but its footprint
+
+    // The object's own movement, added to what it paints (spec.md 9.3, M13).
+    // An angular velocity in radians per second, in earth-centred cartesian
+    // coordinates: a translation and a turn are each one, and they add. The
+    // fourth word is the relative rate of change of scale, per second.
+    motion_omega: vec3<f32>,
+    motion_scale_rate: f32,
 };
 
 // An imported field's time slice: a regular lat/lon lattice in canonical
@@ -445,6 +452,31 @@ fn direction_at(object: Object, position: vec2<f32>, local: vec2<f32>) -> f32 {
     }
 }
 
+// The velocity an object's own movement adds at a position, in m/s eastward
+// and northward. The port of `Motion::velocity_at` in scene.rs, decision for
+// decision: `omega x p` is a rate on the unit sphere, the earth's radius makes
+// it metres, and the scale term is radial from the anchor.
+fn motion_uv(object: Object, position: vec2<f32>) -> vec2<f32> {
+    var uv = vec2<f32>(0.0, 0.0);
+    let w = object.motion_omega;
+    if (dot(w, w) > 0.0) {
+        let lat = position.y * DEG;
+        let lon = position.x * DEG;
+        let cos_lat = cos(lat);
+        let p = vec3<f32>(cos_lat * cos(lon), cos_lat * sin(lon), sin(lat));
+        let v = cross(w, p) * EARTH_RADIUS_M;
+        let east = vec3<f32>(-sin(lon), cos(lon), 0.0);
+        let north = vec3<f32>(-sin(lat) * cos(lon), -sin(lat) * sin(lon), cos_lat);
+        uv = vec2<f32>(dot(v, east), dot(v, north));
+    }
+    if (object.motion_scale_rate != 0.0) {
+        let radial = object.motion_scale_rate * distance_m(object.anchor, position);
+        let bearing = initial_bearing(object.anchor, position) * DEG;
+        uv = uv + vec2<f32>(radial * sin(bearing), radial * cos(bearing));
+    }
+    return uv;
+}
+
 fn uv_from(speed: f32, bearing_deg: f32) -> vec2<f32> {
     let theta = bearing_deg * DEG;
     return vec2<f32>(speed * sin(theta), speed * cos(theta));
@@ -534,7 +566,9 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
 
         let speed = max(speed_at(object, local), 0.0);
         let bearing = direction_at(object, position, local);
-        let vector = uv_from(speed, bearing);
+        // Added before the edge mode, so the feather fades the sum rather
+        // than the two separately (spec.md 9.3).
+        let vector = uv_from(speed, bearing) + motion_uv(object, position);
 
         if (object.edge_mode == 1u) {
             accumulated = vector * weight;

@@ -22,7 +22,7 @@ use ve_render::cpu::CpuEvaluator;
 use ve_render::evaluator::FieldEvaluator;
 use ve_render::gpu::GpuEvaluator;
 use ve_render::scene::{
-    DirectionMode, EdgeMode, FlatObject, FlatRaster, Modifier, Scene, SpeedMode,
+    DirectionMode, EdgeMode, FlatObject, FlatRaster, Modifier, Motion, Scene, SpeedMode,
 };
 use ve_render::sdf::Shape;
 
@@ -237,9 +237,38 @@ fn object(rng: &mut Rng) -> FlatObject {
         speed
     };
 
+    // The object's own movement (spec.md 9.3, M13), on about a third of the
+    // objects. The rates are what a real animation produces: a stroke crossing
+    // a few hundred kilometres a step, a turn of tens of degrees, a scale
+    // changing by half. An angular velocity is exact everywhere, so what this
+    // is really testing is that the f32 shader agrees with the f64 evaluator
+    // about it at the poles and the seam, which is where the two most easily
+    // part company.
+    let motion = if rng.next() < 0.33 {
+        // Random axis, uniform enough for a fidelity sweep.
+        let (a, b) = (rng.range(0.0, 360.0), rng.range(-90.0, 90.0));
+        let (lat, lon) = (b.to_radians(), a.to_radians());
+        let rate = rng.range(-6e-5, 6e-5);
+        Motion {
+            omega: [
+                lat.cos() * lon.cos() * rate,
+                lat.cos() * lon.sin() * rate,
+                lat.sin() * rate,
+            ],
+            scale_rate: if rng.next() < 0.5 {
+                rng.range(-5e-5, 5e-5)
+            } else {
+                0.0
+            },
+        }
+    } else {
+        Motion::default()
+    };
+
     FlatObject {
         modifier,
         invert,
+        motion,
         frame: Frame::in_space(anchor, rng.range(0.0, 360.0), rng.range(50.0, 250.0), space),
         cap_radius_m: shape.bounding_radius_m() * 3.0,
         shape,

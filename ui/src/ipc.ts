@@ -365,6 +365,14 @@ export const api = {
    */
   deleteGribFrames: (layer: number, steps: number[]) =>
     call<ProjectSummary>("delete_grib_frames", { layer, steps }),
+  /**
+   * Puts one of an object's own movements into the field it paints, or takes
+   * it out again (spec.md 9.3, M13). One track at a time: the checkbox is on
+   * the track row because the track is where the movement is.
+   */
+  setMotion: (object: number, property: string, on: boolean) =>
+    call<ProjectSummary>("set_motion", { object, property, on }),
+
   /** What the frame clipboard holds. */
   frameClipboardState: () => call<FrameClipboardState>("frame_clipboard_state", {}),
   clipboardState: () => call<ClipboardState>("clipboard_state"),

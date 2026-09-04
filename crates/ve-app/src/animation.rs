@@ -150,6 +150,15 @@ pub struct TrackView {
     /// Whether the value at the step being viewed comes from interpolation
     /// between keys rather than from a key or the base (spec.md 9.3).
     pub interpolated_here: bool,
+    /// Whether this track can put the object's own movement into the field
+    /// (spec.md 9.3, M13).
+    ///
+    /// Only position, rotation and scale move an object, and only the tools
+    /// that paint a vector have a field to add it to: a modifier writes what
+    /// it read and a mask writes calm, so neither has anything to carry.
+    pub motion_available: bool,
+    /// Whether it is doing so.
+    pub motion: bool,
 }
 
 /// An object's tracks, for the timeline's tree.
@@ -232,7 +241,13 @@ fn interpolations_for(kind: PropKind) -> Vec<InterpolationView> {
 }
 
 /// Reads one property's track at `step`.
-fn track_of(tool: ToolKind, id: PropId, anim: &Animatable, step: u32) -> Option<TrackView> {
+fn track_of(
+    tool: ToolKind,
+    id: PropId,
+    anim: &Animatable,
+    step: u32,
+    motion: ve_core::document::MotionFlags,
+) -> Option<TrackView> {
     let spec = schema::spec_for(tool, id)?;
     let keys = anim.keys();
     let keyed_here = keys.iter().any(|key| key.step == step);
@@ -256,7 +271,41 @@ fn track_of(tool: ToolKind, id: PropId, anim: &Animatable, step: u32) -> Option<
         interpolations: interpolations_for(anim.kind()),
         keyed_here,
         interpolated_here,
+        motion_available: motion_track(tool, id).is_some(),
+        motion: match motion_track(tool, id) {
+            Some(MotionTrack::Position) => motion.position,
+            Some(MotionTrack::Rotation) => motion.rotation,
+            Some(MotionTrack::Scale) => motion.scale,
+            None => false,
+        },
     })
+}
+
+/// Which of the three movements a track is, if it is one of them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MotionTrack {
+    /// The anchor's travel.
+    Position,
+    /// The frame's turn.
+    Rotation,
+    /// The geometry's growth.
+    Scale,
+}
+
+/// The movement a property carries, for the tools that paint a vector.
+///
+/// A modifier writes what it read and a mask writes calm, so neither has a
+/// field of its own for a velocity to be added to (spec.md 6.3, 9.3).
+pub fn motion_track(tool: ToolKind, id: PropId) -> Option<MotionTrack> {
+    if tool.is_modifier() || tool == ToolKind::Mask {
+        return None;
+    }
+    match id {
+        PropId::Position => Some(MotionTrack::Position),
+        PropId::RotationDeg => Some(MotionTrack::Rotation),
+        PropId::ScalePct => Some(MotionTrack::Scale),
+        _ => None,
+    }
 }
 
 /// An object's tracks, as the timeline draws them.
@@ -295,7 +344,7 @@ pub fn tracks_of(state: &AppState, object: u64, step: u32) -> Result<ObjectTrack
                 target
                     .props
                     .get(spec.id)
-                    .and_then(|anim| track_of(target.tool, spec.id, anim, step))
+                    .and_then(|anim| track_of(target.tool, spec.id, anim, step, target.motion))
             })
             .collect();
         Ok(ObjectTracks {
@@ -305,6 +354,65 @@ pub fn tracks_of(state: &AppState, object: u64, step: u32) -> Result<ObjectTrack
             end_step: target.active_range.end,
             tracks,
         })
+    })
+}
+
+/// Turns one of an object's own movements into the field it paints
+/// (spec.md 9.3, M13).
+///
+/// One track at a time, because the checkbox is on the track row: a spinning
+/// system that also travels may want its spin in the wind and not its
+/// translation, and one switch per object cannot say which (D57).
+#[tauri::command]
+pub fn set_motion(
+    state: tauri::State<'_, AppState>,
+    object: u64,
+    property: String,
+    on: bool,
+) -> Result<ProjectSummary> {
+    motion_set(&state, object, &property, on)
+}
+
+/// Implementation of [`set_motion`].
+pub fn motion_set(
+    state: &AppState,
+    object: u64,
+    property: &str,
+    on: bool,
+) -> Result<ProjectSummary> {
+    with_session(state, |session| {
+        let open = session.require_open()?;
+        let target = open
+            .project
+            .object(object_id(object))
+            .ok_or(AppError::Core(ve_core::CoreError::MissingObject(object)))?;
+        let bad = || AppError::BadOption {
+            field: "property",
+            value: property.to_owned(),
+        };
+        let id = schema::all_specs(target.tool)
+            .map(|spec| spec.id)
+            .find(|id| format!("{id:?}") == property)
+            .ok_or_else(bad)?;
+        let track = motion_track(target.tool, id).ok_or_else(bad)?;
+        let mut after = target.motion;
+        match track {
+            MotionTrack::Position => after.position = on,
+            MotionTrack::Rotation => after.rotation = on,
+            MotionTrack::Scale => after.scale = on,
+        }
+        if after == target.motion {
+            return Ok(ProjectSummary::of(open));
+        }
+        let command = Command::SetMotion {
+            object: target.id,
+            before: target.motion,
+            after,
+        };
+        let (project, history) = (&mut open.project, &mut open.history);
+        history.push(project, command)?;
+        open.touch();
+        Ok(ProjectSummary::of(session.require_open()?))
     })
 }
 

@@ -286,6 +286,10 @@ fn sample_upto(scene: &Scene, position: LonLat, upto: usize, depth: u32) -> Uv {
                 let sampled = clone_source_position(object, source, position);
                 sample_upto(scene, sampled, index, depth + 1)
             };
+            // A moving clone stamp carries its own motion into what it copies
+            // (spec.md 9.3), added before the edge so the feather fades the
+            // sum rather than the two separately.
+            let vector = with_motion(object, position, vector);
             let w = weight as f32;
             accumulated = match object.edge_mode {
                 EdgeMode::Blend => Uv {
@@ -303,6 +307,7 @@ fn sample_upto(scene: &Scene, position: LonLat, upto: usize, depth: u32) -> Uv {
         let Some((vector, weight)) = sample_object(object, position) else {
             continue;
         };
+        let vector = with_motion(object, position, vector);
         let w = weight as f32;
         accumulated = match object.edge_mode {
             // Fade into whatever is underneath. Identical to Replace where the
@@ -320,6 +325,26 @@ fn sample_upto(scene: &Scene, position: LonLat, upto: usize, depth: u32) -> Uv {
     }
     apply_rasters_below(upto, &mut accumulated);
     accumulated
+}
+
+/// Adds an object's own movement to the vector it paints (spec.md 9.3, M13).
+///
+/// One vector addition per cell, in the cell's own east/north frame, which is
+/// what makes a tailwind strengthen, a headwind weaken and a crosswind turn by
+/// the same rule — and what makes the sum right at every relative angle rather
+/// than only along the axis of travel.
+///
+/// Before the feather and the edge mode, so the edge fades the sum. A still
+/// object pays one comparison.
+fn with_motion(object: &FlatObject, position: LonLat, vector: Uv) -> Uv {
+    if object.motion.is_still() {
+        return vector;
+    }
+    let added = object.motion.velocity_at(&object.frame, position);
+    Uv {
+        u: vector.u + added.u,
+        v: vector.v + added.v,
+    }
 }
 
 /// What a modifier makes of the vector beneath it.

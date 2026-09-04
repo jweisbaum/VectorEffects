@@ -21,7 +21,7 @@ use crate::scene::{DirectionMode, EdgeMode, Modifier, Scene, SpeedMode};
 use crate::sdf::Shape;
 
 /// Words per packed object. Must match the WGSL `Object` struct.
-const OBJECT_WORDS: usize = 28;
+const OBJECT_WORDS: usize = 32;
 /// Words per packed raster header. Must match the WGSL `Raster` struct.
 const RASTER_WORDS: usize = 12;
 /// Threads per workgroup. Must match the `@workgroup_size` in the shader.
@@ -263,6 +263,13 @@ fn pack(scene: &Scene) -> Packed {
             },
         );
         push_u32(&mut objects, u32::from(object.invert));
+
+        // The object's own movement (spec.md 9.3). Four words, so the struct
+        // stays a whole number of 16-byte rows.
+        push_f32(&mut objects, object.motion.omega[0] as f32);
+        push_f32(&mut objects, object.motion.omega[1] as f32);
+        push_f32(&mut objects, object.motion.omega[2] as f32);
+        push_f32(&mut objects, object.motion.scale_rate as f32);
 
         debug_assert_eq!(objects.len() % (OBJECT_WORDS * 4), 0);
     }

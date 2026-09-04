@@ -835,6 +835,23 @@ body {
   border-color: var(--accent);
   box-shadow: 0 0 0 1px var(--accent);
 }
+/*
+  The motion switch on a track row (spec.md 9.3, M13). Off it is a hint that
+  the track can carry movement; on it is the accent, like the key button, so
+  a glance down the tracks says which of them reach the field.
+*/
+.tl-motion {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+  opacity: 0.5;
+  padding: 0 2px;
+}
+.tl-motion:hover { opacity: 1; }
+.tl-motion.on { color: var(--accent); opacity: 1; }
 .tl-layer-row .tl-labels { color: var(--muted); font-weight: 600; }
 .tl-object-row.selected .tl-labels { color: var(--accent); }
 .tl-disclose {

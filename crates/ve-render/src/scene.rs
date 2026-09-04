@@ -12,7 +12,8 @@ use ve_core::document::{Geometry, Object, PathNode, SpeedRange};
 use ve_core::project::Project;
 use ve_core::raster::RasterGrid;
 use ve_core::schema::{PropId, ToolKind};
-use ve_core::{LonLat, PropValue};
+use ve_core::vector::Uv;
+use ve_core::{EARTH_RADIUS_M, LonLat, PropValue};
 
 use crate::aeqd::{Frame, Local, Space};
 use crate::sdf::Shape;
@@ -146,6 +147,86 @@ pub enum EdgeMode {
     Replace,
 }
 
+/// An object's own movement, as the field sees it (spec.md 9.3, M13).
+///
+/// **A translation and a rotation are each one angular velocity.** A position
+/// segment is a great-circle slerp — a rotation of the sphere — so the
+/// translation velocity at every cell of a footprint is exactly `Ω × p` for
+/// one 3-vector, and a turn about the anchor is `ω` about the anchor's own
+/// unit vector. The two add, and one cross product then gives the velocity at
+/// any cell, exactly, at the poles and across the seam alike.
+///
+/// The obvious alternative — take the anchor's speed and bearing and apply it
+/// uniformly — is wrong by the frame's own drift a few thousand kilometres
+/// out, which is the mistake `aeqd.rs` exists to warn about.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Motion {
+    /// Angular velocity of the frame, radians per second, in earth-centred
+    /// cartesian coordinates.
+    pub omega: [f64; 3],
+    /// Relative rate of change of scale, per second: `ṡ / s`. A cell `r`
+    /// metres from the anchor moves outward at `scale_rate · r`.
+    pub scale_rate: f64,
+}
+
+impl Motion {
+    /// Whether the object is standing still, which most objects are.
+    pub fn is_still(&self) -> bool {
+        self.omega == [0.0; 3] && self.scale_rate == 0.0
+    }
+
+    /// The velocity this adds at a position, in m/s eastward and northward.
+    ///
+    /// `Ω × p` is a rate in radians per second on the unit sphere; the earth's
+    /// radius turns it into metres. The scale term is radial from the anchor,
+    /// along the frame's own radial bearing — the same one the divergence
+    /// modifier uses, so the two agree about which way "out" is.
+    pub fn velocity_at(&self, frame: &Frame, position: LonLat) -> Uv {
+        let mut uv = Uv::default();
+        if self.omega != [0.0; 3] {
+            let p = unit_vector(position);
+            let w = self.omega;
+            // Ω × p, then scaled to metres per second.
+            let v = [
+                (w[1] * p[2] - w[2] * p[1]) * EARTH_RADIUS_M,
+                (w[2] * p[0] - w[0] * p[2]) * EARTH_RADIUS_M,
+                (w[0] * p[1] - w[1] * p[0]) * EARTH_RADIUS_M,
+            ];
+            let (east, north) = east_north(position);
+            uv.u = (v[0] * east[0] + v[1] * east[1] + v[2] * east[2]) as f32;
+            uv.v = (v[0] * north[0] + v[1] * north[1] + v[2] * north[2]) as f32;
+        }
+        if self.scale_rate != 0.0 {
+            let radial = self.scale_rate * frame.distance_m(position);
+            let bearing = frame.radial_bearing(position).radians();
+            uv.u += (radial * bearing.sin()) as f32;
+            uv.v += (radial * bearing.cos()) as f32;
+        }
+        uv
+    }
+}
+
+/// A position as a unit vector in earth-centred cartesian coordinates.
+fn unit_vector(position: LonLat) -> [f64; 3] {
+    let (lat, lon) = (position.lat.to_radians(), position.lon.to_radians());
+    let c = lat.cos();
+    [c * lon.cos(), c * lon.sin(), lat.sin()]
+}
+
+/// The eastward and northward unit vectors at a position.
+///
+/// At a pole east is undefined; the returned pair is then the meridian of the
+/// stated longitude, which is the same choice every other bearing here makes.
+fn east_north(position: LonLat) -> ([f64; 3], [f64; 3]) {
+    let (lat, lon) = (position.lat.to_radians(), position.lon.to_radians());
+    let (sin_lon, cos_lon) = lon.sin_cos();
+    let (sin_lat, cos_lat) = lat.sin_cos();
+    (
+        [-sin_lon, cos_lon, 0.0],
+        [-sin_lat * cos_lon, -sin_lat * sin_lon, cos_lat],
+    )
+}
+
 /// One object with every property resolved for a single time step.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FlatObject {
@@ -195,6 +276,13 @@ pub struct FlatObject {
     /// anything: a modifier writes what it read, changed. The evaluator tests
     /// this before it tests anything else about the object.
     pub modifier: Option<Modifier>,
+    /// The object's own movement, added to what it paints (spec.md 9.3, M13).
+    ///
+    /// Still unless the user asked for it, and set by [`flatten`] rather than
+    /// by [`flatten_object`]: the velocity needs the step size and the
+    /// neighbouring steps, which only a whole-project flatten has. Every other
+    /// caller wants a footprint and gets a still one.
+    pub motion: Motion,
 }
 
 /// An imported field, resolved to the one time slice this step shows.
@@ -566,6 +654,7 @@ pub fn flatten_object(object: &Object, step: u32) -> Option<FlatObject> {
             OffsetMode::Aligned
         },
         modifier: modifier_of(object, step),
+        motion: Motion::default(),
         // Only the mask has the property; everything else reads `false` and
         // covers what it is drawn over, as it always did.
         invert: object
@@ -586,6 +675,106 @@ pub fn covers(object: &FlatObject, position: LonLat) -> bool {
         return false;
     }
     object.shape.distance(object.frame.to_local(position)) <= 0.0
+}
+
+/// The object's own movement at a step, for the tracks it was told to use
+/// (spec.md 9.3, M13).
+///
+/// **The velocity comes from the track the field already uses**: the central
+/// difference of the property's own sampled value at `step - 1` and
+/// `step + 1`, one-sided at the ends, never a second interpolation of the
+/// keys. A held segment contributes nothing — a value that jumps is a
+/// teleport — and so does a property with no keys.
+pub fn motion_of(object: &Object, step: u32, step_hours: u32, last_step: u32) -> Motion {
+    let flags = object.motion;
+    if !flags.any() || step_hours == 0 {
+        return Motion::default();
+    }
+    // The span the difference is taken over: two steps in the middle of the
+    // timeline, one at either end.
+    let before = step.saturating_sub(1);
+    let after = (step + 1).min(last_step);
+    if after == before {
+        return Motion::default();
+    }
+    let dt = f64::from(after - before) * f64::from(step_hours) * 3600.0;
+
+    let animated = |id: PropId| -> bool {
+        object
+            .props
+            .get(id)
+            .is_some_and(|a| !a.holds_across(before, after))
+    };
+
+    let mut omega = [0.0f64; 3];
+    if flags.position
+        && animated(PropId::Position)
+        && let (Some(from), Some(to)) = (
+            position(object, PropId::Position, before),
+            position(object, PropId::Position, after),
+        )
+    {
+        omega = add(omega, translation_omega(from, to, dt));
+    }
+    if flags.rotation
+        && animated(PropId::RotationDeg)
+        && let (Some(from), Some(to), Some(anchor)) = (
+            bearing(object, PropId::RotationDeg, before),
+            bearing(object, PropId::RotationDeg, after),
+            position(object, PropId::Position, step),
+        )
+    {
+        // A bearing increases clockwise, and a clockwise turn seen from
+        // outside the sphere is a *negative* rotation about the outward
+        // normal by the right-hand rule.
+        let rate = -shortest_arc(from.degrees(), to.degrees()).to_radians() / dt;
+        let axis = unit_vector(anchor);
+        omega = add(omega, [axis[0] * rate, axis[1] * rate, axis[2] * rate]);
+    }
+    let mut scale_rate = 0.0;
+    if flags.scale && animated(PropId::ScalePct) {
+        let at = |s: u32| number(object, PropId::ScalePct, s).unwrap_or(100.0);
+        let (from, to, now) = (at(before), at(after), at(step));
+        // The relative rate: a cell `r` from the anchor sits at local radius
+        // `r / s`, so its ground speed is `r · ṡ / s`.
+        if now.abs() > 1e-9 {
+            scale_rate = (to - from) / (now * dt);
+        }
+    }
+    Motion { omega, scale_rate }
+}
+
+fn add(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [a[0] + b[0], a[1] + b[1], a[2] + b[2]]
+}
+
+/// Degrees from `from` to `to` the short way round, in `(-180, 180]`.
+fn shortest_arc(from: f64, to: f64) -> f64 {
+    let d = (to - from + 180.0).rem_euclid(360.0) - 180.0;
+    if d <= -180.0 { d + 360.0 } else { d }
+}
+
+/// The angular velocity of the great-circle move from `from` to `to`.
+///
+/// A position segment interpolates along a great circle, which *is* a rotation
+/// of the sphere: the axis is the normal of the plane through both points and
+/// the rate is the angle between them over the time. Two coincident points
+/// have no axis and no motion, and two antipodal ones have no unique axis —
+/// which is a 20,000 km jump, and not a wind.
+fn translation_omega(from: LonLat, to: LonLat, dt: f64) -> [f64; 3] {
+    let (a, b) = (unit_vector(from), unit_vector(to));
+    let axis = [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ];
+    let sin = (axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]).sqrt();
+    if sin < 1e-15 {
+        return [0.0; 3];
+    }
+    let cos = a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    let rate = sin.atan2(cos) / dt / sin;
+    [axis[0] * rate, axis[1] * rate, axis[2] * rate]
 }
 
 /// Flattens a whole project for one time step, in z-order.
@@ -609,12 +798,15 @@ pub fn flatten(project: &Project, step: u32) -> Scene {
                 speed_range: layer.speed_range,
             });
         }
-        scene.objects.extend(
-            layer
-                .objects
-                .iter()
-                .filter_map(|object| flatten_object(object, step)),
-        );
+        let hours = project.settings.step_hours.hours();
+        let last = project.settings.last_step();
+        scene
+            .objects
+            .extend(layer.objects.iter().filter_map(|object| {
+                let mut flat = flatten_object(object, step)?;
+                flat.motion = motion_of(object, step, hours, last);
+                Some(flat)
+            }));
     }
     scene
 }

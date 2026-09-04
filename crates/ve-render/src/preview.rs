@@ -261,7 +261,7 @@ pub fn render_tile(
 mod tests {
     use super::*;
     use crate::cpu::CpuEvaluator;
-    use crate::scene::{DirectionMode, EdgeMode, FlatObject, OffsetMode, SpeedMode};
+    use crate::scene::{DirectionMode, EdgeMode, FlatObject, Motion, OffsetMode, SpeedMode};
     use crate::sdf::Shape;
     use ve_core::angle::Angle;
 
@@ -291,6 +291,7 @@ mod tests {
                 clone_offset: OffsetMode::Aligned,
                 modifier: None,
                 invert: false,
+                motion: Motion::default(),
             }],
         }
     }
@@ -383,6 +384,7 @@ mod tests {
                 clone_offset: OffsetMode::Aligned,
                 modifier: None,
                 invert: false,
+                motion: Motion::default(),
             }],
         };
 

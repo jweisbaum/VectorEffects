@@ -272,6 +272,19 @@ pub struct Object {
     pub active_range: StepRange,
     /// Every property, animatable.
     pub props: PropertyMap,
+    /// Which of the object's own movements reach the field it paints
+    /// (spec.md 9.3, M13).
+    ///
+    /// Off for every object that has not been told otherwise, which is what
+    /// every object was before the flags existed, so an old project opens
+    /// unchanged and needs no migration.
+    #[serde(default, skip_serializing_if = "is_still")]
+    pub motion: MotionFlags,
+}
+
+/// Whether an object contributes no motion, for skipping the field on save.
+fn is_still(motion: &MotionFlags) -> bool {
+    !motion.any()
 }
 
 impl Object {
@@ -284,6 +297,7 @@ impl Object {
             geometry: Geometry::default_for(tool),
             active_range: StepRange::full(step_count),
             props: PropertyMap::for_tool(tool),
+            motion: MotionFlags::default(),
         }
     }
 
@@ -430,6 +444,33 @@ impl LayerSource {
     /// Whether this is the default, unwritten source.
     pub fn is_painted(&self) -> bool {
         matches!(self, Self::Painted)
+    }
+}
+
+/// Which of an object's own movements reach the field it paints (spec.md 9.3,
+/// M13).
+///
+/// One flag per animated track rather than one per object: a rotating system
+/// that also travels may want its spin in the wind and not its translation,
+/// or the reverse, and a single switch cannot say which (D57). The checkbox
+/// sits on the track row for the same reason — the track is where the
+/// movement is.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MotionFlags {
+    /// The anchor's travel between steps.
+    pub position: bool,
+    /// The frame's turn about its anchor.
+    pub rotation: bool,
+    /// The geometry's growth or shrink.
+    pub scale: bool,
+}
+
+impl MotionFlags {
+    /// Whether any of the three is on, which is what makes an object worth
+    /// differentiating at all.
+    pub fn any(self) -> bool {
+        self.position || self.rotation || self.scale
     }
 }
 

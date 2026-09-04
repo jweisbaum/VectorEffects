@@ -18,7 +18,7 @@ use ve_render::aeqd::Frame;
 use ve_render::cpu::CpuEvaluator;
 use ve_render::gpu::GpuEvaluator;
 use ve_render::preview::{Quality, render_tile};
-use ve_render::scene::{DirectionMode, EdgeMode, FlatObject, Scene, SpeedMode};
+use ve_render::scene::{DirectionMode, EdgeMode, FlatObject, Motion, Scene, SpeedMode};
 use ve_render::sdf::Shape;
 use ve_render::tile;
 
@@ -66,6 +66,7 @@ fn scene_of(id: tile::TileId, count: u32, reach_m: f64, square: bool) -> Scene {
                 clone_offset: ve_render::scene::OffsetMode::Aligned,
                 modifier: None,
                 invert: false,
+                motion: Motion::default(),
             }
         })
         .collect();
