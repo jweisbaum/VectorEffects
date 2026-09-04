@@ -26,7 +26,7 @@ use crate::error::Result;
 /// which is the one thing it has that the backend does not. The *rule* stays
 /// here, so "which options does this mode make inert" has one answer for the
 /// inspector and the option bar both (spec.md 6.1).
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(export, export_to = "OptionDependency.ts")]
 pub struct OptionDependency {
     /// The choice property that decides.
@@ -93,25 +93,36 @@ pub enum GestureSelector {
 /// How a gesture with this tool previews itself (spec.md 6.1).
 ///
 /// Most tools carry a field of their own, so the preview draws it: the swept
-/// region in the speed colour with direction glyphs over it. Two do not. The
-/// eraser writes calm and the clone stamp reads the composite beneath it, so
-/// what either one *paints* is defined by what is already there — and a preview
-/// that drew a flat colour would be showing something the tool does not do.
+/// region in the speed colour with direction glyphs over it. The ones defined
+/// against what is already beneath them do not. The mask writes calm, the
+/// clone stamp reads the composite, and a modifier transforms it (spec.md
+/// 6.3) — for all three, what the gesture *paints* is decided by what is
+/// already there, and a preview that drew a flat colour would be showing
+/// something the tool does not do.
 ///
-/// Those two are previewed by operating on the map itself rather than by
-/// drawing over it, which is the only way to show a removal at all: the overlay
-/// is a canvas stacked above the field and can add pixels, never take them
-/// away.
+/// The two operators are previewed by operating on the map itself rather than
+/// by drawing over it, which is the only way to show a removal at all: the
+/// overlay is a canvas stacked above the field and can add pixels, never take
+/// them away. A modifier is placed by a click rather than dragged, so its
+/// preview is only the footprint a click would produce.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export, export_to = "PreviewKind.ts")]
 pub enum PreviewKind {
     /// Draw the field the gesture carries.
     Field,
-    /// Take the field away where the gesture covers.
-    Erase,
+    /// Take the field away where the gesture covers: the mask.
+    Mask,
     /// Show the field from the source, where the gesture covers.
     Clone,
+    /// Draw the footprint and nothing inside it.
+    ///
+    /// The modifiers (spec.md 6.3). What one of them produces is whatever was
+    /// beneath it, changed — there is no colour that stands for "the same wind,
+    /// half as fast", and the honest preview of a modifier is where it will
+    /// land. They are placed by a click rather than dragged, so what the map
+    /// shows a moment later is the answer itself.
+    Outline,
 }
 
 /// The km/px control a tool offers, and when it is live.
@@ -129,6 +140,22 @@ pub struct Sizing {
     ///
     /// The shape fill's freehand polygon is the case: its vertices are placed
     /// geographically one by one, so it has no size and no space to size it in.
+    pub depends_on: Vec<OptionDependency>,
+}
+
+/// The eyedropper a tool offers, on the wire (spec.md 6.1).
+///
+/// Two property names and the conditions that make them meaningful. The bar
+/// renders a button from this and nothing else, so a tool gains an eyedropper
+/// by declaring one in the schema.
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export, export_to = "EyedropperSpec.ts")]
+pub struct EyedropperSpec {
+    /// The speed option it writes, in m/s.
+    pub speed: String,
+    /// The direction option it writes, as an azimuth-toward.
+    pub direction: String,
+    /// What makes it inert, in the same terms an option's dependencies use.
     pub depends_on: Vec<OptionDependency>,
 }
 
@@ -159,6 +186,9 @@ pub struct ToolSchema {
     /// but a drag is still a measurement and is still made either on the ground
     /// or on the map.
     pub sizing: Option<Sizing>,
+    /// Sampling the field for a constant speed and direction, where the tool
+    /// paints one.
+    pub eyedropper: Option<EyedropperSpec>,
     /// Its options, in the order the bar should show them.
     pub options: Vec<ToolOptionSpec>,
 }
@@ -177,7 +207,15 @@ fn unit_name(unit: Unit) -> &'static str {
 /// The gesture, or gestures, a tool is drawn with.
 fn gesture_for(tool: ToolKind) -> GestureSelector {
     match tool {
-        ToolKind::Brush | ToolKind::Eraser | ToolKind::CloneStamp => GestureSelector::Always {
+        ToolKind::Brush
+        | ToolKind::Mask
+        | ToolKind::CloneStamp
+        // The modifiers are painted too, so that a swathe can be treated in one
+        // gesture and two strokes of one merge (spec.md 6.3).
+        | ToolKind::Intensity
+        | ToolKind::Divergence
+        | ToolKind::Turn
+        | ToolKind::Warp => GestureSelector::Always {
             gesture: "stroke".to_owned(),
         },
         ToolKind::Circle => GestureSelector::Always {
@@ -203,8 +241,12 @@ fn gesture_for(tool: ToolKind) -> GestureSelector {
 /// How a gesture with this tool previews itself (spec.md 6.1).
 fn preview_for(tool: ToolKind) -> PreviewKind {
     match tool {
-        ToolKind::Eraser => PreviewKind::Erase,
+        ToolKind::Mask => PreviewKind::Mask,
         ToolKind::CloneStamp => PreviewKind::Clone,
+        // A modifier has no field of its own to show (spec.md 6.3).
+        ToolKind::Intensity | ToolKind::Divergence | ToolKind::Turn | ToolKind::Warp => {
+            PreviewKind::Outline
+        }
         // Everything else paints a field of its own, which is what its gesture
         // shows.
         ToolKind::Brush | ToolKind::Circle | ToolKind::ShapeFill | ToolKind::Curve => {
@@ -216,7 +258,16 @@ fn preview_for(tool: ToolKind) -> PreviewKind {
 /// Whether a click with this tool has a footprint to preview (spec.md 6.2).
 fn has_hover(tool: ToolKind) -> bool {
     match tool {
-        ToolKind::Brush | ToolKind::Circle | ToolKind::Eraser | ToolKind::CloneStamp => true,
+        ToolKind::Brush
+        | ToolKind::Circle
+        | ToolKind::Mask
+        | ToolKind::CloneStamp
+        // A modifier sweeps a stamp like the brush, so a click has exactly one
+        // footprint and the cursor can show it.
+        | ToolKind::Intensity
+        | ToolKind::Divergence
+        | ToolKind::Turn
+        | ToolKind::Warp => true,
         // Stated, not omitted: a polygon is built vertex by vertex and a curve
         // node by node, so a single click produces no footprint to show.
         ToolKind::ShapeFill | ToolKind::Curve => false,
@@ -234,9 +285,15 @@ fn shortcut_for(tool: ToolKind) -> &'static str {
         ToolKind::Brush => "p",
         ToolKind::Circle => "c",
         ToolKind::ShapeFill => "f",
-        ToolKind::Eraser => "e",
+        ToolKind::Mask => "e",
         ToolKind::CloneStamp => "s",
         ToolKind::Curve => "b",
+        // The modifiers, by initial where the letter was free: intensify,
+        // diverge, rotate, warp.
+        ToolKind::Intensity => "i",
+        ToolKind::Divergence => "d",
+        ToolKind::Turn => "r",
+        ToolKind::Warp => "w",
     }
 }
 
@@ -262,12 +319,22 @@ fn describe(tool: ToolKind) -> ToolSchema {
         // would have two controls for one property, one of which does nothing.
         // The unit is the control; [`ToolSchema::sized`] says the tool has one.
         .filter(|spec| spec.id != PropId::StampSpace)
+        // A warp's push is measured from its own anchor, which does not exist
+        // until the gesture does — so there is nothing "push to" could mean on
+        // the bar, before there is anything to push. It is set by pulling the
+        // warp afterwards (spec.md 6.3) and edited in the inspector, like every
+        // other property of an object that exists.
+        .filter(|spec| spec.id != PropId::PushTo)
         .chain(
-            // The one common property a tool bar owns. The rest of `COMMON` is
-            // the object's placement and lifetime, which a gesture decides and
-            // the inspector edits; `edge_mode` is a choice about how the
-            // gesture paints, so it belongs beside the tool's own options.
-            schema::COMMON.iter().filter(|s| s.id == PropId::EdgeMode),
+            // The one common property a tool bar owns. The rest of the common
+            // set is the object's placement and lifetime, which a gesture
+            // decides and the inspector edits; `edge_mode` is a choice about
+            // how the gesture paints, so it belongs beside the tool's own
+            // options — and a modifier, which has no field to paint, does not
+            // have one to offer (spec.md 6.3).
+            schema::common_specs(tool)
+                .iter()
+                .filter(|s| s.id == PropId::EdgeMode),
         )
         .map(|spec| ToolOptionSpec {
             property: format!("{:?}", spec.id),
@@ -293,6 +360,26 @@ fn describe(tool: ToolKind) -> ToolSchema {
         // measured, whether the measurement is typed or dragged out.
         sizing: schema::spec_for(tool, PropId::StampSpace).map(|_| Sizing {
             depends_on: dependencies_of(tool, PropId::StampSpace),
+        }),
+        eyedropper: schema::eyedropper(tool).map(|dropper| EyedropperSpec {
+            speed: format!("{:?}", dropper.speed),
+            direction: format!("{:?}", dropper.direction),
+            // What already makes either property inert makes the eyedropper
+            // inert too — it writes both, so it is only meaningful where both
+            // are. Stated once here rather than re-derived in the bar.
+            depends_on: dependencies_of(tool, dropper.speed)
+                .into_iter()
+                .chain(dependencies_of(tool, dropper.direction))
+                .chain(dropper.only_when.iter().map(|rule| OptionDependency {
+                    on: format!("{:?}", rule.on),
+                    live_for: rule.live_for.to_vec(),
+                }))
+                .fold(Vec::new(), |mut kept: Vec<OptionDependency>, rule| {
+                    if !kept.contains(&rule) {
+                        kept.push(rule);
+                    }
+                    kept
+                }),
         }),
         options,
     }
@@ -333,6 +420,15 @@ mod tests {
                     );
                     continue;
                 }
+                // A warp's push is measured from an anchor the gesture has not
+                // placed yet, so it is the one property that cannot be set
+                // before the object exists (spec.md 6.3). Named here so that a
+                // second such property has to be a decision rather than an
+                // omission.
+                if spec.id == PropId::PushTo {
+                    assert_eq!(tool, ToolKind::Warp);
+                    continue;
+                }
                 assert!(
                     described
                         .options
@@ -361,7 +457,7 @@ mod tests {
     }
 
     /// The two tools with no field of their own are exactly the two that are
-    /// defined against what is beneath them — the eraser writes calm and the
+    /// defined against what is beneath them — the mask writes calm and the
     /// clone stamp reads the composite. A tool that carried a speed *and*
     /// previewed as an operator would be claiming both.
     #[test]
@@ -378,8 +474,63 @@ mod tests {
         }
     }
 
+    /// Spec 6.1: the eyedropper is offered by the tools that paint a single
+    /// vector, and it writes the two properties that vector is made of. Named
+    /// rather than counted: each is a claim about that tool.
+    #[test]
+    fn the_eyedropper_is_offered_where_a_single_vector_is_painted() {
+        let offered: Vec<(ToolKind, String, String)> = palette()
+            .into_iter()
+            .filter_map(|described| {
+                described
+                    .eyedropper
+                    .map(|dropper| (described.tool.kind(), dropper.speed, dropper.direction))
+            })
+            .collect();
+        assert_eq!(
+            offered,
+            vec![
+                (ToolKind::Brush, "Speed".to_owned(), "Direction".to_owned()),
+                (
+                    ToolKind::ShapeFill,
+                    "Speed".to_owned(),
+                    "Direction".to_owned()
+                ),
+                (ToolKind::Curve, "Speed".to_owned(), "Direction".to_owned()),
+            ],
+            "the circle's flow is tangential and has no bearing to take; the \
+             mask, the clone stamp and the modifiers have no field of their own"
+        );
+    }
+
+    /// ...and it is inert wherever either property it writes is. Otherwise a
+    /// click would set a number the tool does not read — the same trap an
+    /// option with no dependency rule is.
+    #[test]
+    fn the_eyedropper_is_inert_wherever_what_it_writes_is() {
+        for described in palette() {
+            let Some(dropper) = &described.eyedropper else {
+                continue;
+            };
+            let tool = described.tool.kind();
+            for prop in [&dropper.speed, &dropper.direction] {
+                let id = schema::all_specs(tool)
+                    .map(|spec| spec.id)
+                    .find(|id| format!("{id:?}") == *prop)
+                    .unwrap_or_else(|| panic!("{tool:?}: {prop} is not one of its options"));
+                for rule in dependencies_of(tool, id) {
+                    assert!(
+                        dropper.depends_on.contains(&rule),
+                        "{tool:?}: {prop} is inert on {}, but the eyedropper is not",
+                        rule.on
+                    );
+                }
+            }
+        }
+    }
+
     /// A clone stamp needs somewhere to read from for its preview to mean
-    /// anything, and the eraser needs nothing at all — which is the difference
+    /// anything, and the mask needs nothing at all — which is the difference
     /// between the two operators.
     #[test]
     fn only_the_clone_reads_from_somewhere() {
@@ -460,9 +611,13 @@ mod tests {
                 (ToolKind::Brush, "p".to_owned()),
                 (ToolKind::Circle, "c".to_owned()),
                 (ToolKind::ShapeFill, "f".to_owned()),
-                (ToolKind::Eraser, "e".to_owned()),
                 (ToolKind::CloneStamp, "s".to_owned()),
                 (ToolKind::Curve, "b".to_owned()),
+                (ToolKind::Mask, "e".to_owned()),
+                (ToolKind::Intensity, "i".to_owned()),
+                (ToolKind::Divergence, "d".to_owned()),
+                (ToolKind::Turn, "r".to_owned()),
+                (ToolKind::Warp, "w".to_owned()),
             ]
         );
     }

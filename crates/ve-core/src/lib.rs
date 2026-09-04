@@ -17,6 +17,7 @@ pub mod id;
 pub mod io;
 pub mod keyframe;
 pub mod project;
+pub mod raster;
 pub mod schema;
 pub mod units;
 pub mod value;

@@ -1,3 +1,7 @@
+#![allow(
+    clippy::expect_used,
+    reason = "test setup; clippy's allow-in-tests does not reach helpers in tests/"
+)]
 //! How long a preview tile takes to produce.
 //!
 //! The ceiling is asserted in release builds only, against the CPU-fallback
@@ -60,10 +64,36 @@ fn scene_of(id: tile::TileId, count: u32, reach_m: f64, square: bool) -> Scene {
                 path: Vec::new(),
                 clone_source: None,
                 clone_offset: ve_render::scene::OffsetMode::Aligned,
+                modifier: None,
+                invert: false,
             }
         })
         .collect();
-    Scene { objects }
+    Scene {
+        objects,
+        rasters: Vec::new(),
+    }
+}
+
+/// The dense scene with a global 0.25° imported field beneath it: what a
+/// project looks like once a real forecast has been imported and painted over.
+fn scene_with_raster(id: tile::TileId) -> Scene {
+    let mut scene = scene_with(id, 60, 2_500_000.0);
+    let (ni, nj) = (1440u32, 721u32);
+    let mut uv = Vec::with_capacity((ni * nj) as usize);
+    for j in 0..nj {
+        for i in 0..ni {
+            uv.push([(i % 37) as f32 * 0.5 - 9.0, (j % 23) as f32 * 0.5 - 5.0]);
+        }
+    }
+    let grid =
+        ve_core::raster::RasterGrid::new(ni, nj, 0.0, 90.0, 0.25, 0.25, uv).expect("valid grid");
+    scene.rasters.push(ve_render::scene::FlatRaster {
+        z: 0,
+        grid: std::sync::Arc::new(grid),
+        speed_range: None,
+    });
+    scene
 }
 
 fn time(label: &str, tiles: u32, mut render: impl FnMut()) -> f64 {
@@ -91,12 +121,21 @@ fn report_tile_render_cost() {
     // single distance check. A dense one is dominated by actual evaluation,
     // and is the case that is genuinely slow.
     let mut standard_dense: f64 = 0.0;
-    for (label, count, reach, square) in [
-        ("sparse, 6 objects", 6u32, 500_000.0, false),
-        ("dense, 60 objects", 60, 2_500_000.0, false),
-        ("dense, 60 squares", 60, 2_500_000.0, true),
+    for (label, count, reach, square, raster) in [
+        ("sparse, 6 objects", 6u32, 500_000.0, false, false),
+        ("dense, 60 objects", 60, 2_500_000.0, false, false),
+        ("dense, 60 squares", 60, 2_500_000.0, true, false),
+        (
+            "dense, 60 objects over a 0.25° grib",
+            60,
+            2_500_000.0,
+            false,
+            true,
+        ),
     ] {
-        let scene = if square {
+        let scene = if raster {
+            scene_with_raster(id)
+        } else if square {
             square_scene_with(id, count, reach)
         } else {
             scene_with(id, count, reach)

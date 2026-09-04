@@ -13,7 +13,7 @@ use crate::aeqd::Local;
 /// A shape in an object's local frame. Distances are metres.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Shape {
-    /// A swept disc along one or more polylines: brush, eraser, clone stamp,
+    /// A swept disc along one or more polylines: brush, mask, clone stamp,
     /// and the corridor along a curve. A single point is a plain disc.
     ///
     /// Several chains, because merged strokes share one object and must not be

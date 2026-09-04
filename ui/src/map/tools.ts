@@ -120,6 +120,46 @@ export function offersUnit(schema: ToolSchema, values: ToolValues): boolean {
 }
 
 /**
+ * Whether the tool's eyedropper is live, given the modes it is in.
+ *
+ * Same rule as every other dependency, against the same values: the eyedropper
+ * writes one speed and one bearing, so it is offered exactly where the tool
+ * paints one of each — not in a gradient mode, which has two, and not where a
+ * curve's bearing is an offset from its own path rather than a direction
+ * (spec.md 6.1).
+ */
+export function offersEyedropper(schema: ToolSchema, values: ToolValues): boolean {
+  const eyedropper = schema.eyedropper;
+  if (!eyedropper) return false;
+  return eyedropper.depends_on.every((rule) => rule.live_for.includes(choiceOf(values, rule.on)));
+}
+
+/**
+ * The tool values an eyedropper's sample writes.
+ *
+ * Stored units, not shown ones: a speed in m/s and an azimuth-toward, exactly
+ * as the backend reported them and as the object will hold them. The option bar
+ * converts for display like it does for every other value, so the sample takes
+ * the same path a typed number does (spec.md 3.3).
+ */
+export function sampled(
+  state: ToolState,
+  schema: ToolSchema,
+  sample: { speed_mps: number; azimuth_toward_deg: number },
+): ToolState {
+  const eyedropper = schema.eyedropper;
+  if (!eyedropper) return state;
+  return {
+    ...state,
+    values: {
+      ...state.values,
+      [eyedropper.speed]: { kind: "number", value: sample.speed_mps },
+      [eyedropper.direction]: { kind: "angle", degrees: sample.azimuth_toward_deg },
+    },
+  };
+}
+
+/**
  * The stamp space a unit selects.
  *
  * px asks for a shape on the map and km for one on the ground; the unit is not
@@ -473,9 +513,9 @@ export interface PreviewField {
 
 /** The speed in metres per second the preview should paint. */
 function previewSpeedMps(tool: Tool, values: ToolValues): number {
-  // The eraser writes calm, and calm is what its preview should show — the
+  // The mask writes calm, and calm is what its preview should show — the
   // floor under the preview's opacity is what keeps it visible (spec.md 6.1).
-  if (tool === "eraser") return 0;
+  if (tool === "mask") return 0;
 
   // A gradient has no single speed. Its mean is the honest one number, and the
   // preview is explicitly a proxy rather than the composited answer.

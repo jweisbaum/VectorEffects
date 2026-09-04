@@ -198,7 +198,7 @@ pub fn new_project(
 /// who says "don't save" and then cancels the file dialog still has their
 /// project. The check belongs here rather than only in the dialog because the
 /// result of forgetting to ask is silent, unrecoverable data loss.
-fn refuse_to_discard(session: &Session, discard_unsaved: bool) -> Result<()> {
+pub(crate) fn refuse_to_discard(session: &Session, discard_unsaved: bool) -> Result<()> {
     match &session.open {
         Some(open) if open.dirty && !discard_unsaved => Err(AppError::UnsavedChanges {
             name: open.project.name.clone(),
@@ -248,8 +248,12 @@ pub fn open_project(
 /// Implementation of [`open_project`], callable without a Tauri handle.
 pub fn open(state: &AppState, path: String, discard_unsaved: bool) -> Result<ProjectSummary> {
     let path = PathBuf::from(path);
-    let project = io::load(&path)?;
+    let mut project = io::load(&path)?;
     tracing::info!(path = %path.display(), objects = project.object_count(), "opened project");
+    // Imported fields are read back from their files, never from the project
+    // (invariant 2). A file that has gone leaves its layer empty rather than
+    // refusing the project; the layer panel says so.
+    crate::import::attach_rasters(&mut project);
 
     let settings_file = state.paths.settings_file();
     with_session(state, |session| {

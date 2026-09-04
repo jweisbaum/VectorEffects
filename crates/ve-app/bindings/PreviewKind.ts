@@ -4,14 +4,17 @@
  * How a gesture with this tool previews itself (spec.md 6.1).
  *
  * Most tools carry a field of their own, so the preview draws it: the swept
- * region in the speed colour with direction glyphs over it. Two do not. The
- * eraser writes calm and the clone stamp reads the composite beneath it, so
- * what either one *paints* is defined by what is already there — and a preview
- * that drew a flat colour would be showing something the tool does not do.
+ * region in the speed colour with direction glyphs over it. The ones defined
+ * against what is already beneath them do not. The mask writes calm, the
+ * clone stamp reads the composite, and a modifier transforms it (spec.md
+ * 6.3) — for all three, what the gesture *paints* is decided by what is
+ * already there, and a preview that drew a flat colour would be showing
+ * something the tool does not do.
  *
- * Those two are previewed by operating on the map itself rather than by
- * drawing over it, which is the only way to show a removal at all: the overlay
- * is a canvas stacked above the field and can add pixels, never take them
- * away.
+ * The two operators are previewed by operating on the map itself rather than
+ * by drawing over it, which is the only way to show a removal at all: the
+ * overlay is a canvas stacked above the field and can add pixels, never take
+ * them away. A modifier is placed by a click rather than dragged, so its
+ * preview is only the footprint a click would produce.
  */
-export type PreviewKind = "field" | "erase" | "clone";
+export type PreviewKind = "field" | "mask" | "clone" | "outline";

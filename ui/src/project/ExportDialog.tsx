@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 
+import NumberField from "../NumberField";
 import { api, IpcError } from "../ipc";
 import type { ExportEstimate } from "../generated/ExportEstimate";
 import type { ExportProgress } from "../generated/ExportProgress";
@@ -98,30 +99,25 @@ export default function ExportDialog({
           <div className="modal-row">
             <label>
               Year
-              <input type="number" min={1900} max={2999} value={year}
-                onChange={(e) => setYear(Number(e.target.value) || start.year)} />
+              <NumberField min={1900} max={2999} value={year} onCommit={setYear} />
             </label>
             <label>
               Month
-              <input type="number" min={1} max={12} value={month}
-                onChange={(e) => setMonth(Number(e.target.value) || 1)} />
+              <NumberField min={1} max={12} value={month} onCommit={setMonth} />
             </label>
             <label>
               Day
-              <input type="number" min={1} max={31} value={day}
-                onChange={(e) => setDay(Number(e.target.value) || 1)} />
+              <NumberField min={1} max={31} value={day} onCommit={setDay} />
             </label>
             <label>
               Hour
-              <input type="number" min={0} max={23} value={hour}
-                onChange={(e) => setHour(Number(e.target.value) || 0)} />
+              <NumberField min={0} max={23} value={hour} onCommit={setHour} />
             </label>
           </div>
 
           <label className="modal-centre">
             Originating centre
-            <input type="number" min={0} max={65535} value={centre}
-              onChange={(e) => setCentre(Number(e.target.value) || 0)} />
+            <NumberField min={0} max={65535} value={centre} onCommit={setCentre} />
             <span className="muted">
               {centre === 255
                 ? "255 = missing, the honest default"

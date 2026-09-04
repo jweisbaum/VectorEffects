@@ -3,8 +3,8 @@
  *
  * Inline SVG, drawn here rather than pulled from an icon set: invariant 5 for-
  * bids any runtime network access, so a webfont or a CDN sprite is out, and a
- * bundled icon package would be a dependency carried for seven glyphs. These
- * are seven paths.
+ * bundled icon package would be a dependency carried for eleven glyphs. These
+ * are eleven sets of paths.
  *
  * Everything is stroked in `currentColor` on a 24-unit grid, so a button's
  * colour — including the active state's — reaches the icon without the icon
@@ -26,7 +26,7 @@ type Icon = readonly ReactElement[];
 /**
  * A rounded stroke, which is every line in the set.
  *
- * Given as a component rather than repeated per path so the seven icons cannot
+ * Given as a component rather than repeated per path so the icons cannot
  * drift into different weights.
  */
 function line(d: string, key: string, filled = false): ReactElement {
@@ -84,10 +84,12 @@ const ICONS: Record<ActiveTool, Icon> = {
     line("M7.2 12.2h9.6M8.4 15.4h7.2", "fill"),
   ],
 
-  // An eraser block on its edge, with the line it has cleared beneath it.
-  eraser: [
-    line("M8.6 17.4 4.9 13.7a1.7 1.7 0 0 1 0-2.4l7.4-7.4a1.7 1.7 0 0 1 2.4 0l4.8 4.8a1.7 1.7 0 0 1 0 2.4l-6 6z", "block"),
-    line("M4 20.4h16", "swept"),
+  // A frame with a hole in it: what a mask is. The hole is drawn as a second
+  // ring rather than as a cut-out, since these icons are stroked and a
+  // fill-rule hole would vanish.
+  mask: [
+    line("M3.6 5.2h16.8v13.6H3.6z", "frame"),
+    line("M9 12a3 3 0 1 1 6 0 3 3 0 0 1-6 0z", "hole"),
   ],
 
   // A rubber stamp: the pad, the shaft and the handle above it.
@@ -105,6 +107,43 @@ const ICONS: Record<ActiveTool, Icon> = {
     line("M4.8 17.2C4.8 9.2 19.2 14.8 19.2 6.8", "curve"),
     line("M3.4 15.8h2.8v2.8H3.4z", "start", true),
     line("M17.8 5.4h2.8v2.8h-2.8z", "end", true),
+  ],
+
+  // --- The modifiers (spec.md 6.3) ---
+  //
+  // Each says what it does to a flow rather than what it looks like as an
+  // object: they are all the same disc, so a disc would tell the user nothing.
+
+  // Two vectors, one short and one long: the same flow, more of it or less.
+  intensity: [
+    line("M4.6 8.6h5.6m-2 -2 2 2-2 2", "short"),
+    line("M4.6 15.4h13.2m-2.4-2.4 2.4 2.4-2.4 2.4", "long"),
+  ],
+
+  // Vectors leaving a centre. Divergence is the outward sign, and the tool
+  // reaches convergence with a negative amount, as its label says.
+  divergence: [
+    line("M12 9.4V4.8m-1.8 1.8L12 4.8l1.8 1.8", "north"),
+    line("M12 14.6v4.6m-1.8-1.8L12 19.2l1.8-1.8", "south"),
+    line("M9.4 12H4.8m1.8-1.8L4.8 12l1.8 1.8", "west"),
+    line("M14.6 12h4.6m-1.8-1.8L19.2 12l-1.8 1.8", "east"),
+    line("M12 11.2a0.8 0.8 0 1 1 0 1.6 0.8 0.8 0 0 1 0-1.6z", "centre", true),
+  ],
+
+  // A flow inside a turn: the straight vector is what is beneath, the arc is
+  // what the tool does to it. Not a bare ring, which reads as "reload".
+  turn: [
+    line("M17.4 6.6a7.6 7.6 0 1 0 2.4 6.2", "arc"),
+    line("M14.1 6.9l3.3-0.3 0.3 3.3", "head"),
+    line("M8.6 12h6.2m-1.8-1.8 1.8 1.8-1.8 1.8", "flow"),
+  ],
+
+  // Parallel flows pushed out of true, deepest in the middle: what a warp does
+  // to the field it reads.
+  warp: [
+    line("M4 7.6c4-3.6 12 3.6 16 0", "upper"),
+    line("M4 12c4-5.6 12 5.6 16 0", "middle"),
+    line("M4 16.4c4-3.6 12 3.6 16 0", "lower"),
   ],
 };
 

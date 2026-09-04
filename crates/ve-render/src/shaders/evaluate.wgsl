@@ -8,6 +8,9 @@
 // Not handled here, deliberately:
 //   - the clone stamp, which reads the composite beneath itself and so needs
 //     recursion; scenes containing one fall back to the CPU.
+//   - the warp modifier, for the same reason: it reads the composite at a
+//     displaced position (spec.md 6.3). The other three modifiers transform
+//     the vector where it already is and are handled below.
 // Everything else follows the same order of operations as the CPU path.
 
 const EARTH_RADIUS_M: f32 = 6371229.0;
@@ -42,11 +45,13 @@ struct Object {
 
     dir_b: f32,
     feather: f32,
-    // Where `divergence` and `curl` were. Kept as padding rather than closing
-    // the gap: the struct has to stay a multiple of 16 bytes, and 26 words is
-    // not one. `OBJECT_WORDS` in gpu.rs counts these.
-    pad0: f32,
-    pad1: f32,
+    // What a modifier does to the field beneath it: 0 none, 1 gain, 2 radial,
+    // 3 turn. In the two words where `divergence` and `curl` used to sit
+    // (spec.md 7.5). A warp is the fourth kind and never arrives here — it
+    // reads the composite at another position, which needs recursion, so
+    // `supports` in gpu.rs sends a scene containing one to the CPU.
+    mod_kind: u32,
+    mod_a: f32,
 
     edge_mode: u32,           // 0 blend, 1 replace
     gradient_axis: f32,
@@ -58,13 +63,107 @@ struct Object {
     path_offset: u32,         // the ordered path, for along-path direction
     path_count: u32,
     space: u32,               // 0 geodesic (ground metres), 1 projected (map metres)
-    pad2: f32,
+    invert: u32,              // 1 = covers everything but its footprint
+};
+
+// An imported field's time slice: a regular lat/lon lattice in canonical
+// orientation, columns eastward from lon0 and rows southward from lat0.
+// Mirrors `ve_core::raster::RasterGrid`; RASTER_WORDS in gpu.rs counts these.
+struct Raster {
+    ni: u32,
+    nj: u32,
+    offset: u32,              // first sample in raster_data
+    z: u32,                   // objects beneath it
+
+    lon0: f32,
+    lat0: f32,
+    dlon: f32,
+    dlat: f32,
+
+    wraps: u32,               // 1 when the column after the last is column 0
+    speed_min: f32,           // the layer's speed band; 0..inf when it has none
+    speed_max: f32,
+    pad0: u32,
 };
 
 @group(0) @binding(0) var<storage, read> objects: array<Object>;
 @group(0) @binding(1) var<storage, read> points: array<vec2<f32>>;
 @group(0) @binding(2) var<storage, read> samples: array<vec2<f32>>;   // lon, lat
 @group(0) @binding(3) var<storage, read_write> output: array<vec2<f32>>; // u, v
+@group(0) @binding(4) var<storage, read> rasters: array<Raster>;
+@group(0) @binding(5) var<storage, read> raster_data: array<vec2<f32>>; // u, v
+
+// A raster sample at or below this marks a missing node: the sentinel
+// `ve_core::raster::MISSING`, compared rather than NaN-tested because NaN
+// checks are what a shader compiler is allowed to optimise away.
+const RASTER_MISSING: f32 = -1.0e29;
+// Slack, in cells, for a sample that lands just past the last node. Wider
+// than the CPU's 1e-6 because index arithmetic here is in f32; a difference
+// only that close to the edge of a regional grid is beneath the preview
+// tolerance.
+const RASTER_EDGE_SLACK: f32 = 1e-3;
+
+fn rem_euclid_360(x: f32) -> f32 {
+    return x - floor(x / 360.0) * 360.0;
+}
+
+// One node, or a missing marker.
+fn raster_node(raster: Raster, i: u32, j: u32) -> vec2<f32> {
+    return raster_data[raster.offset + j * raster.ni + i];
+}
+
+fn raster_node_present(node: vec2<f32>) -> bool {
+    return node.x > RASTER_MISSING && node.y > RASTER_MISSING;
+}
+
+// A port of `RasterGrid::sample`, decision for decision. Returns (u, v, 1)
+// where the grid has a value and (0, 0, 0) where it has none.
+fn sample_raster(raster: Raster, position: vec2<f32>) -> vec3<f32> {
+    let none = vec3<f32>(0.0, 0.0, 0.0);
+    if (raster.ni == 0u || raster.nj == 0u) { return none; }
+    let last_i = f32(raster.ni - 1u);
+    let last_j = f32(raster.nj - 1u);
+
+    let fj_raw = (raster.lat0 - position.y) / raster.dlat;
+    if (fj_raw < -RASTER_EDGE_SLACK || fj_raw > last_j + RASTER_EDGE_SLACK) { return none; }
+    let fi_raw = rem_euclid_360(position.x - raster.lon0) / raster.dlon;
+    let wraps = raster.wraps != 0u;
+    if (!wraps && fi_raw > last_i + RASTER_EDGE_SLACK) { return none; }
+
+    var fi_max = last_i;
+    if (wraps) { fi_max = f32(raster.ni); }
+    let fi = clamp(fi_raw, 0.0, fi_max);
+    let fj = clamp(fj_raw, 0.0, last_j);
+
+    let i0 = min(u32(floor(fi)), raster.ni - 1u);
+    let j0 = min(u32(floor(fj)), raster.nj - 1u);
+    let tx = fi - f32(i0);
+    let ty = fj - f32(j0);
+    var i1 = i0;
+    if (i0 + 1u < raster.ni) { i1 = i0 + 1u; } else if (wraps) { i1 = 0u; }
+    let j1 = min(j0 + 1u, raster.nj - 1u);
+
+    var total = 0.0;
+    var sum = vec2<f32>(0.0, 0.0);
+    let c00 = raster_node(raster, i0, j0);
+    if (raster_node_present(c00)) { let w = (1.0 - tx) * (1.0 - ty); total += w; sum += c00 * w; }
+    let c10 = raster_node(raster, i1, j0);
+    if (raster_node_present(c10)) { let w = tx * (1.0 - ty); total += w; sum += c10 * w; }
+    let c01 = raster_node(raster, i0, j1);
+    if (raster_node_present(c01)) { let w = (1.0 - tx) * ty; total += w; sum += c01 * w; }
+    let c11 = raster_node(raster, i1, j1);
+    if (raster_node_present(c11)) { let w = tx * ty; total += w; sum += c11 * w; }
+    if (total <= 1e-6) { return none; }
+    return vec3<f32>(sum / total, 1.0);
+}
+
+// Whether a sample is inside the layer's speed band (spec.md 4.8). A sample
+// outside it is treated as a missing one, so the field beneath shows through:
+// the port of the same test in `sample_upto`.
+fn kept(raster: Raster, uv: vec2<f32>) -> bool {
+    let speed = length(uv);
+    return speed >= raster.speed_min && speed <= raster.speed_max;
+}
 
 fn normalize_lon(lon: f32) -> f32 {
     return ((lon + 180.0) - floor((lon + 180.0) / 360.0) * 360.0) - 180.0;
@@ -351,6 +450,32 @@ fn uv_from(speed: f32, bearing_deg: f32) -> vec2<f32> {
     return vec2<f32>(speed * sin(theta), speed * cos(theta));
 }
 
+// What a modifier makes of the vector beneath it (spec.md 6.3).
+//
+// The port of `modified_vector` in cpu.rs, decision for decision: the gain
+// scales, the radial component is a fraction of the local speed along the
+// frame's own outward bearing, and a turn rotates (u, v) by the same expansion
+// of sin(az + d) and cos(az + d) the CPU uses. A calm cell stays calm in all
+// three, which is why the turn is written out rather than routed through a
+// speed and an azimuth.
+fn modified_vector(object: Object, position: vec2<f32>, beneath: vec2<f32>) -> vec2<f32> {
+    if (object.mod_kind == 1u) {
+        return beneath * (1.0 + object.mod_a);
+    }
+    if (object.mod_kind == 2u) {
+        let speed = length(beneath);
+        let radial = initial_bearing(object.anchor, position);
+        return beneath + uv_from(speed * object.mod_a, radial);
+    }
+    if (object.mod_kind == 3u) {
+        let theta = object.mod_a * DEG;
+        let s = sin(theta);
+        let c = cos(theta);
+        return vec2<f32>(beneath.x * c + beneath.y * s, beneath.y * c - beneath.x * s);
+    }
+    return beneath;
+}
+
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     let index = id.x;
@@ -359,21 +484,52 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     let position = samples[index];
     var accumulated = vec2<f32>(0.0, 0.0);
 
+    // Imported fields are interleaved with the objects by z, as in
+    // `sample_upto`: a raster at z is applied just before object z. Where the
+    // grid has a value it overwrites outright.
+    let raster_count = arrayLength(&rasters);
+    var next_raster = 0u;
+
     let count = arrayLength(&objects);
     for (var o = 0u; o < count; o = o + 1u) {
+        while (next_raster < raster_count && rasters[next_raster].z <= o) {
+            let raster = rasters[next_raster];
+            let sampled = sample_raster(raster, position);
+            if (sampled.z > 0.5 && kept(raster, sampled.xy)) { accumulated = sampled.xy; }
+            next_raster = next_raster + 1u;
+        }
         let object = objects[o];
 
+        // Coverage, the port of `coverage` in cpu.rs: the cap cull, the signed
+        // distance, the feather ramp, and the inversion that turns all three
+        // inside out. An inverted object covers everything outside its
+        // footprint, so a cell past the cap is inside it at full weight.
+        let inverted = object.invert != 0u;
         let ground = distance_m(object.anchor, position);
-        if (ground > object.cap_radius_m) { continue; }
+        var weight = 1.0;
+        if (ground > object.cap_radius_m) {
+            if (!inverted) { continue; }
+        } else {
+            let local_cover = to_local(object, position);
+            let cover_distance = shape_distance(object, local_cover);
+            if (cover_distance > 0.0 && !inverted) { continue; }
+            let band = object.feather * object.feather_reference;
+            var inside = 1.0;
+            if (band > 0.0) {
+                inside = smooth_step(0.0, band, -cover_distance);
+            }
+            if (inverted) { weight = 1.0 - inside; } else { weight = inside; }
+        }
 
         let local = to_local(object, position);
-        let signed_distance = shape_distance(object, local);
-        if (signed_distance > 0.0) { continue; }
 
-        let band = object.feather * object.feather_reference;
-        var weight = 1.0;
-        if (band > 0.0) {
-            weight = smooth_step(0.0, band, -signed_distance);
+        // A modifier rewrites what is already in the buffer — everything below
+        // it in z-order — and fades from the old to the new by the same weight
+        // (spec.md 6.3, 7.6).
+        if (object.mod_kind != 0u) {
+            let modified = modified_vector(object, position, accumulated);
+            accumulated = accumulated + (modified - accumulated) * weight;
+            continue;
         }
 
         let speed = max(speed_at(object, local), 0.0);
@@ -385,6 +541,12 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
         } else {
             accumulated = accumulated + (vector - accumulated) * weight;
         }
+    }
+    while (next_raster < raster_count && rasters[next_raster].z <= count) {
+        let raster = rasters[next_raster];
+        let sampled = sample_raster(raster, position);
+        if (sampled.z > 0.5 && kept(raster, sampled.xy)) { accumulated = sampled.xy; }
+        next_raster = next_raster + 1u;
     }
 
     output[index] = accumulated;

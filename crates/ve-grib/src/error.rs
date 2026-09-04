@@ -16,6 +16,18 @@ pub enum GribError {
     /// The requested grid does not correspond to a supported template.
     #[error("unsupported grid: {0}")]
     UnsupportedGrid(String),
+
+    /// An input file is not well-formed GRIB2.
+    #[error("not a readable GRIB2 file: {0}")]
+    Malformed(String),
+
+    /// An input file uses a feature the decoder does not implement.
+    #[error("unsupported GRIB2 feature: {0}")]
+    Unsupported(String),
+
+    /// An input file holds no wind or current field that could be imported.
+    #[error("no wind or current field could be imported: {0}")]
+    NoVectorField(String),
 }
 
 /// Convenience alias for results in this crate.

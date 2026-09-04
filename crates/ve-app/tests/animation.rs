@@ -1148,3 +1148,159 @@ fn editing_an_animated_property_without_auto_key_keys_the_current_step() {
     assert_eq!(at(2), 10.0);
     assert_eq!(at(10), 10.0);
 }
+
+// --- The value graph (spec.md 9.3) ---------------------------------------------
+
+/// Spec 9.3: the graph under a track is drawn from the model's own samples, so
+/// it shows the numbers the evaluator will use rather than a second
+/// interpolation of the same keys.
+///
+/// Checked against the hand-computed line: 10 to 30 over four steps is 5 a
+/// step. And outside the keys the *nearest key* holds, not the base (spec 4.5)
+/// — a graph that fell back to the base would draw a step at each end that the
+/// field does not have.
+#[test]
+fn a_track_samples_every_step_for_its_graph() {
+    let (_root, state) = project("samples");
+    let id = circle(&state, 0.0, 0.0);
+    key(
+        &state,
+        id,
+        "Speed",
+        2,
+        PropertyValue::Number { value: 10.0 },
+    );
+    key(
+        &state,
+        id,
+        "Speed",
+        6,
+        PropertyValue::Number { value: 30.0 },
+    );
+
+    let samples = animation::samples_of(&state, id, "Speed").expect("samples");
+    assert_eq!(samples.series.len(), 1, "a scalar has one series");
+    let series = &samples.series[0];
+    assert_eq!(
+        series.unit, "speed",
+        "sampled in m/s; the frontend converts"
+    );
+    assert_eq!(series.values.len(), 12, "one value per step of the project");
+
+    let expected = [
+        10.0, 10.0, 10.0, 15.0, 20.0, 25.0, 30.0, 30.0, 30.0, 30.0, 30.0, 30.0,
+    ];
+    for (step, want) in expected.iter().enumerate() {
+        assert!(
+            (series.values[step] - want).abs() < 1e-6,
+            "step {step}: graphed {}, expected {want}",
+            series.values[step]
+        );
+    }
+}
+
+/// A holding key keeps its value until the next one, and the graph says so:
+/// the segment leaving a `Step` key is flat, and the one after it is not.
+#[test]
+fn a_held_segment_graphs_flat() {
+    let (_root, state) = project("held");
+    let id = circle(&state, 0.0, 0.0);
+    key(
+        &state,
+        id,
+        "Speed",
+        2,
+        PropertyValue::Number { value: 10.0 },
+    );
+    key(
+        &state,
+        id,
+        "Speed",
+        6,
+        PropertyValue::Number { value: 30.0 },
+    );
+    key(
+        &state,
+        id,
+        "Speed",
+        10,
+        PropertyValue::Number { value: 50.0 },
+    );
+    animation::ease_from(&state, id, "Speed", 2, InterpolationView::Step).expect("hold");
+
+    let series = &animation::samples_of(&state, id, "Speed")
+        .expect("samples")
+        .series[0];
+    for step in 2..6 {
+        assert!(
+            (series.values[step] - 10.0).abs() < 1e-6,
+            "step {step} should hold at 10: {}",
+            series.values[step]
+        );
+    }
+    assert!(
+        (series.values[8] - 40.0).abs() < 1e-6,
+        "the next segment blends"
+    );
+}
+
+/// A position graphs as two degree series. The reference is spherical: a great
+/// circle between two points on the same parallel bows poleward, so the
+/// latitude series rises above the parallel between its keys even though both
+/// keys sit on it.
+#[test]
+fn a_position_graphs_as_two_degree_series() {
+    let (_root, state) = project("position-graph");
+    let id = stamp(&state, 0.0, 0.0);
+    key(
+        &state,
+        id,
+        "Position",
+        2,
+        PropertyValue::Position {
+            lon: -60.0,
+            lat: 50.0,
+        },
+    );
+    key(
+        &state,
+        id,
+        "Position",
+        10,
+        PropertyValue::Position {
+            lon: 60.0,
+            lat: 50.0,
+        },
+    );
+
+    let samples = animation::samples_of(&state, id, "Position").expect("samples");
+    let labels: Vec<&str> = samples.series.iter().map(|s| s.label.as_str()).collect();
+    assert_eq!(labels, vec!["Lon", "Lat"]);
+    assert!(samples.series.iter().all(|s| s.unit == "degrees"));
+
+    let lon = &samples.series[0].values;
+    let lat = &samples.series[1].values;
+    assert_eq!(lat.len(), 12);
+    assert!(
+        (lon[6] - 0.0).abs() < 1e-6,
+        "the midpoint of a symmetric pair is on the prime meridian: {}",
+        lon[6]
+    );
+    assert!(lat[6] > 55.0, "the path did not bow north: {}", lat[6]);
+    assert!(
+        (lat[0] - 50.0).abs() < 1e-6,
+        "before the first key the nearest key holds"
+    );
+}
+
+/// Spec 4.5: a choice holds rather than blends, so there is nothing to graph.
+/// The timeline is told so by an empty series list rather than left to draw a
+/// line through discriminants.
+#[test]
+fn a_choice_offers_no_graph() {
+    let (_root, state) = project("choice-graph");
+    let id = circle(&state, 0.0, 0.0);
+    let samples = animation::samples_of(&state, id, "FillMode").expect("samples");
+    assert!(samples.series.is_empty());
+    assert_eq!(samples.label, "Fill");
+}

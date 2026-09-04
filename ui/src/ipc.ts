@@ -15,9 +15,12 @@ import type { BrushStroke } from "./generated/BrushStroke";
 import type { NewObject } from "./generated/NewObject";
 import type { ObjectTracks } from "./generated/ObjectTracks";
 import type { InterpolationView } from "./generated/InterpolationView";
+import type { OperatorOutline } from "./generated/OperatorOutline";
 import type { ShrinkImpact } from "./generated/ShrinkImpact";
+import type { TrackSamples } from "./generated/TrackSamples";
 import type { TileAddress } from "./generated/TileAddress";
 import type { TimelineReadiness } from "./generated/TimelineReadiness";
+import type { Tool } from "./generated/Tool";
 import type { ToolSchema } from "./generated/ToolSchema";
 import type { DocumentTree } from "./generated/DocumentTree";
 import type { ClipboardState } from "./generated/ClipboardState";
@@ -104,6 +107,10 @@ export const api = {
   /** Opens a project from disk. */
   openProject: (path: string, discardUnsaved = false) =>
     call<ProjectSummary>("open_project", { path, discardUnsaved }),
+
+  /** Creates a project shaped by a GRIB2 file and imports the file into it (spec 4.8). */
+  newProjectFromGrib: (path: string, discardUnsaved = false) =>
+    call<ProjectSummary>("new_project_from_grib", { path, discardUnsaved }),
 
   /** Saves the open project to its existing path. */
   saveProject: () => call<ProjectSummary>("save_project"),
@@ -193,6 +200,16 @@ export const api = {
   objectTracks: (object: number, step: number) =>
     call<ObjectTracks>("object_tracks", { object, step }),
 
+  /**
+   * One property's value at every step, for the track's value graph.
+   *
+   * Sampled by the model, not interpolated here: the easings, the shortest-arc
+   * angle and the great-circle position are the domain's (spec.md 9.3). Does
+   * not depend on the current step, only on the revision.
+   */
+  trackSamples: (object: number, property: string) =>
+    call<TrackSamples>("track_samples", { object, property }),
+
   /** Adds or replaces a key; without a value, pins what the step shows. */
   setKeyframe: (object: number, property: string, step: number, value?: PropertyValue) =>
     call<ProjectSummary>("set_keyframe", { object, property, step, value: value ?? null }),
@@ -235,6 +252,18 @@ export const api = {
   /** Where a selection's handles go. One object or many; the pivot is theirs. */
   selectionTransform: (objects: number[], step: number) =>
     call<SelectionTransform | null>("selection_transform", { objects, step }),
+
+  /**
+   * The footprints the map may need to draw at a step.
+   *
+   * Objects drawn with `tool`, for the edge highlighted under the pointer, and
+   * the objects in `objects`, for the selection outline (spec.md 6.1, 6.2,
+   * 6.3). Bounded by the tool in hand rather than by the size of the project.
+   * Fetched per revision, step, tool and selection, never per frame: the hit
+   * test that finds the edge under the pointer is the map's own.
+   */
+  objectOutlines: (step: number, tool: Tool | null, objects: number[]) =>
+    call<OperatorOutline[]>("object_outlines", { step, tool, objects }),
   /**
    * Captures the drag baseline. `lon`/`lat` is where the pointer went down, so
    * rotation and scale are measured from there rather than snapping.
@@ -278,9 +307,20 @@ export const api = {
   ) => call<number[]>("objects_in_region", { west, south, east, north, step, layer }),
 
   addLayer: (name: string) => call<ProjectSummary>("add_layer", { name }),
+  /** Imports a GRIB2 file as one layer per field kind it holds (spec 4.8). */
+  importGrib: (path: string) => call<ProjectSummary>("import_grib", { path }),
   removeLayer: (layer: number) => call<ProjectSummary>("remove_layer", { layer }),
   renameLayer: (layer: number, name: string) =>
     call<ProjectSummary>("rename_layer", { layer, name }),
+  /**
+   * Which speeds an imported field keeps, in m/s. `null` clears the filter.
+   *
+   * m/s below the boundary and knots above it, like every other speed
+   * (spec.md 3.4).
+   */
+  setLayerSpeedRange: (layer: number, minMps: number | null, maxMps: number | null) =>
+    call<ProjectSummary>("set_layer_speed_range", { layer, minMps, maxMps }),
+
   setLayerVisible: (layer: number, visible: boolean) =>
     call<ProjectSummary>("set_layer_visible", { layer, visible }),
   setLayerLocked: (layer: number, locked: boolean) =>

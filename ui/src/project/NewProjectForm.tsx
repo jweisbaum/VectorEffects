@@ -1,5 +1,6 @@
 import { useState } from "react";
 
+import NumberField from "../NumberField";
 import type { NewProjectRequest } from "../generated/NewProjectRequest";
 import {
   MAX_STEPS,
@@ -90,15 +91,7 @@ export default function NewProjectForm({
 
       <label>
         Steps
-        <input
-          type="number"
-          min={1}
-          max={MAX_STEPS}
-          value={stepCount}
-          onChange={(e) =>
-            setStepCount(Math.min(MAX_STEPS, Math.max(1, Number(e.target.value) || 1)))
-          }
-        />
+        <NumberField min={1} max={MAX_STEPS} value={stepCount} onCommit={setStepCount} />
       </label>
 
       <p className="start-implications muted">

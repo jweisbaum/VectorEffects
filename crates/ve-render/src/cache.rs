@@ -17,7 +17,9 @@ use std::sync::{Condvar, Mutex};
 use crate::aeqd::Space;
 use crate::error::{RenderError, Result};
 use crate::preview::Quality;
-use crate::scene::{DirectionMode, EdgeMode, FlatObject, OffsetMode, Scene, SpeedMode};
+use crate::scene::{
+    DirectionMode, EdgeMode, FlatObject, Modifier, OffsetMode, Scene, SpeedMode, Warp,
+};
 use crate::sdf::Shape;
 use crate::tile::TileId;
 
@@ -37,6 +39,26 @@ pub fn scene_hash(scene: &Scene) -> SceneHash {
     hasher.update(&(scene.objects.len() as u64).to_le_bytes());
     for object in &scene.objects {
         hash_object(&mut hasher, object);
+    }
+    // An imported field is identified by its own content hash — the lattice
+    // and every sample — and by where it sits in the stack. A different time
+    // slice is a different grid, so scrubbing through a file's messages
+    // changes the key exactly when the slice changes and not otherwise.
+    hasher.update(&(scene.rasters.len() as u64).to_le_bytes());
+    for raster in &scene.rasters {
+        hasher.update(&(raster.z as u64).to_le_bytes());
+        hasher.update(&raster.grid.hash);
+        // The speed band decides which of the lattice's samples are drawn at
+        // all, so a tile keyed without it would be served from before the
+        // filter was set (spec.md 7.10).
+        match raster.speed_range {
+            None => hasher.update(&[0]),
+            Some(band) => {
+                hasher.update(&[1]);
+                hasher.update(&band.min_mps.to_le_bytes());
+                hasher.update(&band.max_mps.to_le_bytes())
+            }
+        };
     }
     *hasher.finalize().as_bytes()
 }
@@ -183,6 +205,45 @@ fn hash_object(hasher: &mut blake3::Hasher, object: &FlatObject) {
                 OffsetMode::Aligned => 0,
                 OffsetMode::Fixed => 1,
             }])
+        }
+    };
+
+    // Which side of its footprint the object writes on. A mask and its
+    // inverse cover disjoint halves of the globe from the same geometry, so
+    // the flag has to reach the key (spec.md 7.10).
+    hasher.update(&[u8::from(object.invert)]);
+
+    // What a modifier does to the field beneath it. Same reasoning as the
+    // clone stamp's source: every one of these changes what the object writes
+    // without moving its footprint, so a key that ignored them would serve a
+    // tile painted by the previous amount (spec.md 7.10).
+    match object.modifier {
+        None => hasher.update(&[0]),
+        Some(Modifier::Gain(gain)) => {
+            hasher.update(&[1]);
+            hash_f64(hasher, gain);
+            hasher
+        }
+        Some(Modifier::Radial(fraction)) => {
+            hasher.update(&[2]);
+            hash_f64(hasher, fraction);
+            hasher
+        }
+        Some(Modifier::Turn(degrees)) => {
+            hasher.update(&[3]);
+            hash_f64(hasher, degrees);
+            hasher
+        }
+        Some(Modifier::Warp(Warp::Push { x, y })) => {
+            hasher.update(&[4]);
+            hash_f64(hasher, x);
+            hash_f64(hasher, y);
+            hasher
+        }
+        Some(Modifier::Warp(Warp::Twist { degrees })) => {
+            hasher.update(&[5]);
+            hash_f64(hasher, degrees);
+            hasher
         }
     };
 }
@@ -509,6 +570,8 @@ mod tests {
             path: Vec::new(),
             clone_source: None,
             clone_offset: OffsetMode::Aligned,
+            modifier: None,
+            invert: false,
         }
     }
 
@@ -523,12 +586,68 @@ mod tests {
     #[test]
     fn an_identical_scene_hashes_identically() {
         let a = Scene {
+            rasters: Vec::new(),
             objects: vec![object(10.0)],
         };
         let b = Scene {
+            rasters: Vec::new(),
             objects: vec![object(10.0)],
         };
         assert_eq!(scene_hash(&a), scene_hash(&b));
+    }
+
+    fn raster(z: usize, value: f32) -> crate::scene::FlatRaster {
+        let grid =
+            ve_core::raster::RasterGrid::new(4, 3, 0.0, 10.0, 1.0, 1.0, vec![[value, 0.0]; 12])
+                .expect("valid grid");
+        crate::scene::FlatRaster {
+            z,
+            grid: std::sync::Arc::new(grid),
+            speed_range: None,
+        }
+    }
+
+    /// An imported field is part of what a frame looks like: its samples, and
+    /// where it sits in the stack, both key the tile.
+    #[test]
+    fn an_imported_field_keys_the_frame() {
+        let base = Scene {
+            rasters: vec![raster(0, 5.0)],
+            objects: vec![object(10.0)],
+        };
+        let original = scene_hash(&base);
+        assert_ne!(
+            original,
+            scene_hash(&Scene {
+                rasters: Vec::new(),
+                objects: vec![object(10.0)],
+            }),
+            "a raster present at all"
+        );
+        assert_eq!(
+            original,
+            scene_hash(&Scene {
+                rasters: vec![raster(0, 5.0)],
+                objects: vec![object(10.0)],
+            }),
+            "the same samples again"
+        );
+        assert_ne!(
+            original,
+            scene_hash(&Scene {
+                rasters: vec![raster(0, 6.0)],
+                objects: vec![object(10.0)],
+            }),
+            "a different time slice"
+        );
+        assert_ne!(
+            original,
+            scene_hash(&Scene {
+                rasters: vec![raster(1, 5.0)],
+                objects: vec![object(10.0)],
+            }),
+            "the same slice above the object instead of below it"
+        );
     }
 
     /// The property the whole design rests on: a change to what a frame looks
@@ -536,6 +655,7 @@ mod tests {
     #[test]
     fn any_visible_change_changes_the_hash() {
         let base = Scene {
+            rasters: Vec::new(),
             objects: vec![object(10.0)],
         };
         let original = scene_hash(&base);
@@ -600,6 +720,7 @@ mod tests {
     #[test]
     fn the_offset_mode_alone_does_not_change_a_hash() {
         let base = Scene {
+            rasters: Vec::new(),
             objects: vec![object(10.0)],
         };
         let mut fixed = base.clone();
@@ -611,9 +732,11 @@ mod tests {
     #[test]
     fn reordering_objects_changes_the_hash() {
         let a = Scene {
+            rasters: Vec::new(),
             objects: vec![object(10.0), object(20.0)],
         };
         let b = Scene {
+            rasters: Vec::new(),
             objects: vec![object(20.0), object(10.0)],
         };
         assert_ne!(scene_hash(&a), scene_hash(&b));
@@ -622,6 +745,7 @@ mod tests {
     #[test]
     fn different_tiles_and_qualities_are_different_entries() {
         let scene = Scene {
+            rasters: Vec::new(),
             objects: vec![object(10.0)],
         };
         let base = key(&scene);
@@ -646,6 +770,7 @@ mod tests {
         let temp = TempCache::new("contains", 1 << 20);
         let cache = &temp.cache;
         let key = key(&Scene {
+            rasters: Vec::new(),
             objects: vec![object(10.0)],
         });
         assert!(!cache.contains(&key));
@@ -662,6 +787,7 @@ mod tests {
     fn a_stored_tile_comes_back() {
         let temp = TempCache::new("roundtrip", DEFAULT_CAPACITY_BYTES);
         let scene = Scene {
+            rasters: Vec::new(),
             objects: vec![object(10.0)],
         };
         let k = key(&scene);
@@ -677,11 +803,13 @@ mod tests {
     fn an_edited_scene_misses() {
         let temp = TempCache::new("miss", DEFAULT_CAPACITY_BYTES);
         let scene = Scene {
+            rasters: Vec::new(),
             objects: vec![object(10.0)],
         };
         temp.cache.put(&key(&scene), &[9; 16]).expect("stores");
 
         let edited = Scene {
+            rasters: Vec::new(),
             objects: vec![object(12.0)],
         };
         assert!(temp.cache.get(&key(&edited)).is_none(), "an edit must miss");
@@ -722,6 +850,7 @@ mod tests {
     fn a_restart_adopts_what_is_already_there() {
         let temp = TempCache::new("restart", DEFAULT_CAPACITY_BYTES);
         let scene = Scene {
+            rasters: Vec::new(),
             objects: vec![object(10.0)],
         };
         temp.cache.put(&key(&scene), &[7; 64]).expect("stores");
@@ -736,6 +865,7 @@ mod tests {
     fn clearing_leaves_nothing_behind() {
         let temp = TempCache::new("clear", DEFAULT_CAPACITY_BYTES);
         let scene = Scene {
+            rasters: Vec::new(),
             objects: vec![object(10.0)],
         };
         temp.cache.put(&key(&scene), &[1; 32]).expect("stores");
@@ -751,6 +881,7 @@ mod tests {
     fn a_vanished_file_is_forgotten() {
         let temp = TempCache::new("vanish", DEFAULT_CAPACITY_BYTES);
         let scene = Scene {
+            rasters: Vec::new(),
             objects: vec![object(10.0)],
         };
         let k = key(&scene);
@@ -771,6 +902,7 @@ mod tests {
         assert_ne!(
             scene_hash(&Scene::default()),
             scene_hash(&Scene {
+                rasters: Vec::new(),
                 objects: vec![object(1.0)]
             })
         );

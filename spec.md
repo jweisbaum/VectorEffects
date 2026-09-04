@@ -38,7 +38,9 @@ steps, and exports GRIB2.
 
 - Regional/sub-global grids, rotated or non-lat/lon grids.
 - GRIB1, NetCDF, or any other output format.
-- Importing real forecast data as a starting point.
+- Importing real forecast data *as objects*. A GRIB2 file can be imported as
+  a layer (§4.8), but its samples are a lattice, not geometry: nothing traces
+  it into strokes.
 - Vertical levels beyond the single surface level per field kind.
 - Multi-user, cloud sync, or collaborative editing.
 - Scalar fields (pressure, temperature, wave height).
@@ -309,6 +311,8 @@ Layer {
     visible: bool,
     locked: bool,
     objects: Vec<Object>,        // index 0 = bottom-most within the layer
+    source: LayerSource,         // Painted, or Grib { path, field } (§4.8)
+    raster: Option<Arc<RasterSequence>>,  // in memory only, NEVER serialised
 }
 
 Object {
@@ -351,6 +355,10 @@ tool-specific ones:
 | `scale_pct` | `f32` | 100.0 | Scales geometry radii in metres. |
 | `rotation_deg` | `Angle` | 0.0 | True bearing rotation about the anchor. |
 | `enabled` | `bool` | true | Step interpolation only. |
+
+`edge_mode` (§7.4) is carried alongside these by every tool that paints a
+field. A **modifier** (§6.3) does not carry it: its output is whatever was
+beneath it, changed, so there is nothing for "replace" to name.
 
 ### 4.5 Interpolation
 
@@ -422,7 +430,8 @@ META-INF/version      schema_version, for fast pre-parse rejection
   backfills to.
 
 **Import** means opening a `.veproj` produced elsewhere — the same path as open,
-with migration. There is no import of foreign formats in v1.
+with migration. The one foreign format that can be imported is GRIB2, as a
+layer rather than as a project (§4.8).
 
 **Autosave** writes a recovery copy to the app data directory every 60 s and on
 every 50 history entries, whichever comes first. On launch, an unclean shutdown
@@ -451,6 +460,105 @@ The prompt is the frontend's, but the refusal is not: both commands return
 discard, so no caller can drop a user's work by forgetting to ask.
 `close_project` is the one command whose purpose is to discard, and it does so
 without complaint.
+
+### 4.8 Imported GRIB layers
+
+A GRIB2 file can be imported as a layer, from the **Import GRIB** button
+beside the layer panel's `+`. The layer carries the file's `u`/`v` field as a
+lattice — a *raster*, in the sense of invariant 1 — beneath any objects
+painted on it, and composites like any other layer: where the lattice has a
+value it overwrites what is beneath; where it has none (outside a regional
+grid, under a bitmap's gaps) it leaves the field beneath alone. It has no
+feather, since a lattice has no edge.
+
+**What the project keeps is the path.** Invariants 1 and 2 stand: the
+`.veproj` stores `LayerSource::Grib { path, field }` and nothing else, the
+decoded lattice lives in memory beside the layer, and the file is read again
+when the project opens. A file that has gone leaves its layer in place,
+empty and marked in the panel; the user's own objects are unaffected. The
+project is therefore portable only with its GRIB, which is the price of not
+copying forecast data into every project that references it.
+
+**Open from GRIB.** The start screen can also build a project *from* a
+file: the kind is wind when the file has wind and current otherwise; the
+grid is the app resolution nearest the file's spacing; the time step is the
+largest the app offers that **divides** every message's offset, so every
+message lands on a step and none of them is invisible; the count covers the
+file's span; step 0 takes the first message's valid time as the project's start
+time; and the name is the file's.
+The file then imports as it would into any project, and the history starts
+empty — the import is what the project is, not an edit to it.
+
+**One layer per field kind.** A file holding both wind and currents imports
+as two layers, wind above currents. The layer whose kind matches the project's
+is shown; the other is imported *hidden*, because the map composites every
+visible layer into one field and a current drawn over a wind is not a wind.
+It can be shown, and it is then treated as a field of the project's kind —
+which is what the user asked for by showing it.
+
+**Time alignment.** The file's earliest valid time is aligned with the
+project's step 0, whatever the file's reference time. Each step then shows the
+message valid **at** that step's forecast hour, and **a step the file has no
+message for shows no imported field at all** — the layer is simply not there,
+and whatever the user painted on it stands alone.
+
+So a 3-hourly file in an hourly project shows its 0 h message at hour 0 and
+nothing at hours 1 and 2; an hourly file in a 3-hourly project is read at 0, 3,
+6 and its other messages are never shown; and past the file's last message
+there is nothing, for the rest of the timeline however long it is.
+
+This is deliberately *not* the hold rule a keyframe follows (§4.5), and the
+difference is what the two kinds of value are. A keyframe is an instruction the
+user gave: between two of them the document still means something, and holding
+the earlier one is the meaning. A message is a measurement, made for one time;
+holding it forward draws a forecast for a time it was never made for. Past the
+end of a short file that is at its worst — a six-hour file standing in for a
+ten-day timeline, unchanging and looking like data.
+
+A time with only one of `u` and `v`, or whose two components sit on different
+grids, is dropped from the sequence, and is therefore a time with no message
+like any other.
+
+**Speed filter.** A GRIB layer can be limited to a band of speeds: a low end
+and a high end, in knots on screen and m/s in the document, set by a slider or
+typed. A sample outside the band is dropped exactly as a missing one is, so
+whatever is beneath shows through — including the layer's own painted objects,
+which is what makes this a filter on the *import* rather than on the layer. A
+forecast is far easier to read one band at a time: the calms, the gale, the
+jet.
+
+It is a property of the layer and not of the lattice — a choice about what to
+show, not a fact about the file — so it costs two numbers in the project file,
+survives the file being re-read on open, and is undoable like any other edit.
+Both kernels apply it, in the same place: after the lattice is sampled and
+before it is written into the buffer. The scale the slider runs to is the file's
+own fastest sample, since a filter is set by looking at the field.
+
+**Levels.** A file often carries wind at several heights. The 10 m wind
+(surface type 103 at 10 m) is taken when present, other heights only when it
+is not; currents prefer the surface (type 160 at 0 m). Speed is m/s on the
+wire and, as everywhere, knots on the screen (§3.4). Wind barbs and arrows
+come from the same tiles as the painted field, so the imported field gets
+them for free.
+
+**Both kernels sample it.** The lattice is sampled bilinearly, missing corners
+left out of the blend, on the CPU and in the WGSL kernel alike, so the
+preview and the export agree on it to the tolerances of §7.9 — the fidelity
+suite generates raster scenes. On the GPU a scene's rasters share one storage
+binding, so a scene with more than 128 MB of lattice (two global 0.1° grids)
+falls back to the CPU like a clone-stamp scene does. The render cache keys on
+the lattice's content hash and its place in the stack (§7.10).
+
+**Decoder.** Hand-written, pure Rust, in `ve-grib`: regular lat/lon grids
+(template 3.0) in any scanning mode, the common product templates, simple
+packing (5.0), complex packing with and without spatial differencing (5.2,
+5.3), and bitmaps. JPEG 2000 and PNG packing (5.40, 5.41), Gaussian, thinned
+and rotated grids, and GRIB edition 1 are refused by name. NOAA's GFS as
+distributed is JPEG 2000 and has to be repacked first (`wgrib2 in.grib2
+-set_grib_type simple -grib_out out.grib2`). A message that cannot be read
+is skipped and logged rather than failing the file; a file with no usable
+`u`/`v` pair is refused with the reasons. Invariant 5 holds: no external
+decoder, no network.
 
 ---
 
@@ -640,7 +748,7 @@ All tools produce **objects**. Common rules:
   what the tool shows while aiming is that wind, in the terms the map already
   displays it in.
 
-  **The two operators are previewed on the map itself.** The eraser writes calm
+  **The two operators are previewed on the map itself.** The mask writes calm
   and the clone stamp reads the composite beneath it, so what either one paints
   is defined by what is already there — and a coloured wash would be showing
   something neither tool does. Nor could an overlay show a removal at all: it is
@@ -648,13 +756,21 @@ All tools produce **objects**. Common rules:
 
   So a gesture with either one is applied to the field *while the pointer is
   down*: the swept footprint becomes a screen-space mask, and the map is drawn
-  through it. The eraser's covered region loses its field, leaving the basemap —
+  through it. The mask's covered region loses its field, leaving the basemap —
   which is never masked, since something has to be left to see. The clone's
   loses it and gains the field from the source instead, drawn through a camera
   shifted so the source lands under the brush; a shift is enough because the
   projection is equirectangular, where a constant offset in degrees is a
-  constant offset in pixels at every latitude (§5.1). The overlay draws the
-  footprint's outline and nothing else.
+  constant offset in pixels at every latitude (§5.1).
+
+  **An operator's overlay draws nothing but its nib**: the outline of the stamp
+  under the pointer, held through the drag. Not the swept region — a footprint
+  is a union of stamps and a stroked path is not a union, so outlining a sweep
+  traces every stamp's own circle and leaves a chain of rings trailing the
+  pointer, which is neither what either tool does nor what it looks like. The
+  mask is the preview; the nib only says where the tool is, which is what
+  matters where there is nothing beneath to operate on and so nothing else
+  changes.
 
   The mask is the same footprint the overlay would have drawn, so a tool
   declares how it previews and inherits the rest. It is rasterised at half the
@@ -706,12 +822,21 @@ built differently. A new tool gets them all, and the checklist below is what
 | Hover indicator | Where a tool has one, it is the exact footprint a click would produce, in the same colour and with the same glyph as the gesture preview. | §6.1 |
 | Chrome | Handles, markers and previews are drawn in the same frame as the map, and never overlap each other. | §5.5 |
 | Position options | Every `LonLat` option is placeable by pointing: on the tool while setting it up, and on an existing object through the inspector. Typing coordinates is the alternative, never the only way. | §6.1 |
+| Eyedropper | A tool that paints a *single* vector can take that vector from the map: arm it, click, and the speed and direction come from the field at that point. Offered exactly where the two properties it writes are both live — never in a gradient mode, which has two of each, and never where a bearing is an offset rather than a direction. | §6.1 |
 | Direction modes | `Constant`, `TowardPoint` and `AwayFromPoint` mean the same thing for every tool that has a `target`, and are the same property with the same variant indices. | §6.2 |
 | Direction display | Flow directions are shown in the project's convention wherever they appear, the inspector included; geometric bearings are not converted. | §3.3 |
 | Inert options | An option the object's own mode never reads is not shown. | §6.1 |
 | Creation-only options | An option that defines *what the object is* — the stamp's shape, the space it is defined in — is fixed once the object exists, refused at the write path and not merely hidden. An option that can be neither set at creation nor edited afterwards does not belong on the tool. | §6.1 |
 | Transform | Move, rotate, scale and re-anchor behave identically for every geometry, because they act on the object's frame rather than on its shape. A drag previews and writes once, on release. | §8.2 |
 | Merging | Two gestures of the same tool with identical properties and overlapping footprints merge into one object, subject to §6.1's conditions. Two that differ in *any* property — including the stamp's shape or space — never do. | §6.1 |
+
+**The eyedropper samples what is visible.** The value it takes is the composite
+the evaluator produces at that point (§7.6) — every visible layer beneath the
+pointer, and no hidden one, which is exactly what the map is drawing. It is
+sampled through the evaluator and not read back from the tile under the cursor:
+a tile carries the 16-bit quantisation the map draws with (§7.7), and this
+number goes into the document. It is written in stored units, m/s and an
+azimuth-toward, and converted for display like any other value (§3.3).
 
 The one rule that is genuinely per tool is **whether a hover indicator exists**;
 §6.2 states it for each, and "none" is a decision to be made deliberately rather
@@ -724,7 +849,7 @@ behaviour is shared code and a tool supplies only what is genuinely its own:
 - **One creation command** for the whole catalogue. A tool sends a *gesture* —
   the geometry the pointer drew — and its *options*, which are property values
   keyed by the same ids the inspector uses. The aim-mode check, the anchor, the
-  frame, the layer choice and the merge test are written once. The eraser and
+  frame, the layer choice and the merge test are written once. The mask and
   the clone stamp are brush-like because all three send the same gesture, not
   because three code paths were written to resemble each other.
 - **Five gestures, not one per tool**: a stroke, a click, a centre-out drag, a
@@ -834,11 +959,13 @@ Hover: **none**, deliberately. A polygon is built vertex by vertex and a preset
 is dragged out, so there is nothing a *click* would produce to preview; the
 in-progress gesture previews itself instead, like every other tool (§6.1).
 
-#### Eraser
+#### Mask
 
 Identical interaction to the brush; writes covered cells with speed 0. It is a
 first-class object, not a deletion — it can be moved, animated, and disabled,
-restoring what was underneath.
+restoring what was underneath. **Called the mask** and not the eraser, because
+that is what it is: an object that decides where the field beneath it shows,
+which `invert` makes plain.
 
 | Option | Type |
 |---|---|
@@ -846,9 +973,59 @@ restoring what was underneath.
 | `size_km` | f32 (px or km input) |
 | `stamp_space` | enum `Geodesic` \| `Projected` — **fixed at creation**; set by the size's unit, px selecting `projected`, as on the brush (§3.5) |
 | `feather` | f32 0–1 — ramps *toward* 0 speed, i.e. blends back toward the underlying field's speed at the edge |
+| `invert` | bool — cover everything **except** the footprint |
+
+**`invert` turns the coverage inside out, cull included.** An inverted mask
+covers the whole globe but its own footprint, which is how a field is confined
+to a region rather than cut out of one: paint a global flow, draw a mask over
+the basin you want, invert it, and nothing outside the basin remains. The two
+sides are exact complements — at every cell the two weights sum to one, feather
+included, so a mask and its inverse leave no seam along their shared edge.
+
+The spherical-cap cull (§7.3) is what makes every other object cheap by
+rejecting a distant cell before any SDF work; for an inverted object that same
+test *accepts* the cell, at full weight and still without touching the SDF.
+`invert` is therefore the mask's alone: it is safe on a tool that writes calm,
+where there is no direction to compute, and it would not be on one whose
+direction is measured from an anchor — a bearing to a point on the far side of
+the globe is ill-conditioned, and near the antipode two backends cannot agree
+on it (§7.9).
+
+Overlapping mask strokes with identical options merge into one object, exactly
+as brush strokes do (§6.1) — `invert` is one of the options that must match, so
+a mask and its inverse never merge.
 
 Hover: yes — the same footprint outline the brush shows, since it sweeps the
-same stamp along the same kind of polyline.
+same stamp along the same kind of polyline. Like the clone stamp, and unlike
+every tool that paints a field, it keeps that outline *through* the drag and
+draws nothing else while masking (§6.1).
+
+**A mask's edge is drawn on the map**, because a mask paints calm and is
+otherwise invisible: there is nothing to say where one is, which side of it is
+covered, or that a click landed on it.
+
+- A **selected** mask has its footprint outlined.
+- With a tool in hand that draws swept strokes — the brush, the mask, or a
+  modifier (§6.3) — the edge of the object under the pointer is highlighted in
+  **pink**, a colour used for nothing else on the map, so it cannot be read as a
+  selection or a preview. The brush's strokes are visible already; what the
+  highlight adds there is *which* stroke, and where it ends. Only the objects of
+  the tool in hand are offered, so the work is bounded by what that tool has
+  drawn rather than by the size of the project.
+
+- **An edge is the outline of the whole footprint**, not of the stamps it is
+  swept from, and it sits **on** the perimeter. A footprint is a *union*, and a
+  stroked path is not a union: it traces every stamp's own circle and leaves a
+  chain of rings along the stroke. The band is drawn by filling the footprint
+  grown by half the band's width and knocking out a copy shrunk by the same,
+  which is the union's boundary exactly — for a swept chain, a square stamp or
+  a ring alike — and centred on it, where a stroke of that width would be.
+- An **inverted** mask is drawn with a wide, faint band on top of its edge, since
+  an outline alone cannot say which side is covered.
+
+The outlines come from the same footprint the evaluator paints, so what is
+highlighted is what is covered. Only what is visible is listed: a hidden layer's
+masks are not on the map and are not offered to the pointer either.
 
 **"Identical interaction to the brush" is binding.** Anything true of a brush
 stroke's gesture, stamp, sizing, preview or transform is true here: the two
@@ -890,13 +1067,107 @@ A polyline or cubic-Bézier path with a vector field along it.
 | `curve_kind` | enum `Polyline` \| `Bezier` | **Fixed at creation.** A node's handles are what make a segment a Bézier, so the kind is implied by the geometry — but it is also what the *tool* was set to when the path was drawn, which is what the option bar has to remember. |
 | `stamp_space` | enum `Geodesic` \| `Projected` | **Fixed at creation**; set by the width's unit. The corridor has a width, so it asks the same question every sized tool asks (§3.5). |
 | `speed` | f32 | |
-| `direction_mode` | enum `Absolute` \| `RelativeToPath` | **Its own property**, not the shared `direction_mode`: a curve aims along its path, where the shared modes aim at a point. A tool may add modes of its own; it may not redefine a shared one. |
-| `direction` | Angle | `Absolute`: fixed bearing, a flow direction shown in the project's convention (§3.3). `RelativeToPath`: an *offset* added to the path's local tangent, so 0 = along the path and 90 = across it — an offset is not an azimuth and must not be converted. The two readings of one property are why it is displayed by mode, not by unit. |
+| `direction_mode` | enum `Constant` \| `RelativeToPath` | **Its own property**, not the shared `direction_mode`: a curve aims along its path, where the shared modes aim at a point. A tool may add modes of its own; it may not redefine a shared one. `Constant` is named for the fixed bearing every other tool calls by that name — it was `Absolute`, which meant the same thing in different words and made two option bars read as though they described different things. The variant is renamed in place, not reordered: the stored value is the index. |
+| `direction` | Angle | `Constant`: fixed bearing, a flow direction shown in the project's convention (§3.3). `RelativeToPath`: an *offset* added to the path's local tangent, so 0 = along the path and 90 = across it — an offset is not an azimuth and must not be converted. The two readings of one property are why it is displayed by mode, not by unit, and why the eyedropper (§6.1) is offered in `Constant` mode only. |
 | `width_km` | f32 | Corridor half-width; px or km input, so `stamp_space` applies (§3.5). |
 | `feather` | f32 0–1 | Across the corridor width. |
 
 Hover: **none**, deliberately: a curve is built node by node, so a single click
 produces no footprint to preview.
+
+### 6.3 Field modifiers
+
+Four tools that do not paint a field. Each reads the composite **beneath it in
+z-order**, transforms it, and writes the result back inside its own footprint —
+so what a modifier produces is always a function of what was already there.
+Over calm water every one of them leaves calm water. That is the line between a
+modifier and a creation tool, and it is what makes them safe to stack: a
+modifier cannot invent a wind, only change one.
+
+| Tool | Key | What it does |
+|---|---|---|
+| **Intensify / reduce** | `I` | Scales the speed by `1 + amount`, leaving the direction alone. `+100%` doubles it, `-100%` takes it to calm. |
+| **Diverge / converge** | `D` | Adds a radial component of `amount × local speed`, outward from the anchor when positive and inward when negative. |
+| **Rotate flow** | `R` | Turns every vector by a fixed angle, clockwise for a positive amount. The speed is untouched. |
+| **Warp / liquify** | `W` | Reads the field from a displaced position: `push` drags it along a bearing, `twist` rotates it about the anchor. Nothing about the vectors changes, only where they are read from. |
+
+All four are **painted**, like the brush and the mask: a stamp swept along a
+polyline, sized in px or km (§3.5), with the common `position`, `scale_pct`,
+`rotation_deg` and `enabled` (§4.4). A swathe of field is therefore intensified
+or turned in one gesture, and **two strokes of one modifier with identical
+settings and overlapping footprints merge into a single object**, exactly as two
+brush strokes do (§6.1) — with the exception below. All four animate like
+everything else: keyframe the amount and the field ramps; keyframe the position
+and the modifier sweeps across the map. None carries `edge_mode`.
+
+**A modifier measured from its own anchor never absorbs another.** A merge
+re-expresses the new chain in the target's frame, and therefore under the
+target's anchor; a tool whose field is measured from that anchor would paint
+something different afterwards, which is the one thing a merge may never do
+(§6.1). That is the diverge/converge tool, which radiates from its anchor, and
+the warp, which both twists about it and pushes from it — the same rule that
+keeps two clone strokes apart. Intensify and rotate refer to no anchor at all
+and merge freely.
+
+| Option | Type | Tool |
+|---|---|---|
+| `size_km` | f32 | all four; the swept stamp's diameter, px or km, so `stamp_space` applies as everywhere else |
+| `feather` | f32 0–1 | all four |
+| `gain` | f32 % (−100…400) | intensify / reduce |
+| `radial` | f32 % (−400…400) | diverge / converge |
+| `turn_deg` | f32 ° (−180…180) | rotate flow. A signed *amount*, not a bearing: it is not converted into the project's direction convention (§3.3), and animating it from −170 to 170 unwinds through zero rather than taking the short way round as a bearing would. |
+| `warp_mode` | enum `Push` \| `Twist` | warp |
+| `push_to` | LonLat | warp, `Push`: where the field under the anchor is dragged to |
+| `twist_deg` | f32 ° (−360…360) | warp, `Twist` |
+
+**The feather is the whole of the edge.** A modifier fades from what was there
+to what it makes of it, by the same coverage weight every tool uses (§7.4), so
+at the rim of its footprint the field is exactly what it was and a modifier has
+no visible outline of its own. A warp's *displacement* is faded by the same
+weight, which is what makes it a warp rather than a translation that tears the
+field along its own edge.
+
+**Direction is measured from the anchor**, for the one tool that needs a
+direction at all: "outward" at a cell is the frame's radial bearing, the same
+one the circle's rotation is a quarter turn off (§7.5). At the anchor itself
+that bearing is undefined, exactly as a circle's tangent is; the value stays
+finite and the cell is one cell.
+
+**A warp is pulled, not typed.** Hold `Shift` with the warp tool and the
+pointer stops painting: it grabs the warp under it and drags the field where it
+should go. With no warp under it, `Shift` does nothing at all — it does not
+paint. The modifier says "act on the warp that is there", and one that drew a
+new object when it missed would be a way to paint one by accident in the middle
+of aiming another. A warp therefore starts pushing *nowhere* — `push_to` is its own
+anchor until it is pulled — and the option bar does not offer it at all, since
+a push is measured from an anchor no gesture has placed yet. It is the one
+property of any tool that cannot be set before the object exists. The object's own `position` is where the field comes from and
+`push_to` is where it lands — two positions, so **both ends are keyframable**
+like any other property (§9.3), and a warp that travels or grows over time is
+two animated points and nothing else. A distance and a bearing said the same
+thing in numbers nobody could aim; this is the gesture the tool is named for.
+The pull previews as a line from the anchor to the pointer and writes once on
+release, like every other drag (§8.2).
+
+It follows that **a warp never merges**, in either mode: a merge re-expresses a
+stroke under the target's anchor, and both a twist and a push are measured from
+that anchor, so absorbing one would move what it turns about or push it
+somewhere else.
+
+**A cyclone is two modifiers over a stroke.** Converge bends the flow inward
+and rotate turns it; the pair is the spiral §7.5 gave up, built from objects
+that say what they do rather than from properties hidden inside every tool.
+
+Hover: yes — the footprint outline at the cursor, and nothing inside it (§6.1).
+There is no colour that stands for "the same wind, half as fast", so the honest
+preview of a modifier is where it will land, and the field itself answers when
+the stroke lands.
+
+**A modifier's edge is drawn on the map**, on exactly the terms a mask's is
+(§6.2): a selected one is outlined, and with any operator tool in hand the edge
+under the pointer is highlighted in pink. A modifier is invisible for the same
+reason a mask is — what it produces is what was already there, changed — so the
+same affordance answers the same question.
 
 ---
 
@@ -988,7 +1259,7 @@ returning metres (negative inside):
 
 | Geometry | SDF |
 |---|---|
-| Capsule chains (round brush, eraser, clone) | min distance to any segment of any chain, minus radius |
+| Capsule chains (round brush, mask, clone) | min distance to any segment of any chain, minus radius |
 | Swept square (square brush) | min **Chebyshev** distance to any segment of any chain, minus half the side |
 | Disc / annulus (circle) | \|p\| − r, or \|\|p\| − r\| − w/2 |
 | Polygon (shape fill) | winding-number sign × min edge distance |
@@ -1069,7 +1340,7 @@ flows. Its one consequence is that where two roughly opposing flows meet, the
 blend passes through low speed — which is a correct depiction of a convergence
 zone, not an artefact.
 
-The eraser is a natural consequence of this model rather than a special case: it
+The mask is a natural consequence of this model rather than a special case: it
 is an object whose speed is 0, so its feathered edge blends the underlying field
 back toward calm.
 
@@ -1078,6 +1349,18 @@ back toward calm.
 Earlier versions gave the tools that place a centre a radial and a tangential
 component, added to the base direction as multiples of the speed. Nothing has
 them now. **An object's direction mode is the whole of its direction.**
+
+This still holds with the modifiers of §6.3 in the catalogue, and it is worth
+saying why they are not the same thing coming back. What was removed was a
+*property* on every tool that changed a vector after that object's own
+direction mode had produced it, measured from that object's anchor — invisible
+in the panel unless you knew to look, and impossible to reason about across a
+stack. A modifier is an object: it has its own place, size, feather and z, it
+says in its name what it does, and it acts on the composite rather than on one
+object's own output. What it costs is that an anchor-relative term is back in
+the evaluator, and with it some of the `f32` disagreement between the kernels
+that removing the properties bought — bounded now to the modifier's own
+footprint, and measured in the fidelity suite like everything else.
 
 What this costs is the spiral. A radial component is what makes a low converge
 rather than merely turn, so a cyclone painted with the circle tool is a pure
@@ -1116,7 +1399,24 @@ for obj in scene:                     // bottom → top
 
 Cells never touched by any object are calm — `(0, 0)`.
 
-**Clone stamp** is the one operator that reads the buffer:
+**A modifier reads the buffer and writes it back** (§6.3):
+
+```
+for obj in scene:                     // bottom → top
+    if obj.is_modifier:
+        for cell in obj.cap_cells:
+            if obj.sdf(cell) <= 0:
+                w = coverage_and_feather(obj, cell)
+                buffer[cell] = lerp(buffer[cell], obj.transform(buffer[cell]), w)
+```
+
+Because objects are processed in z-order, the buffer at that moment holds
+exactly "everything below this object" — the same guarantee the clone stamp
+relies on, and the reason a modifier needs no sub-scene of its own. The one
+exception is the **warp**, whose read is at another position and which
+therefore takes the clone stamp's path below, sharing its depth cap.
+
+**Clone stamp** is the one creation tool that reads the buffer:
 
 - It samples the buffer at the offset source location. Because objects are
   processed in z-order, the buffer at that moment contains exactly "everything
@@ -1125,7 +1425,7 @@ Cells never touched by any object are calm — `(0, 0)`.
   evaluator handles this by running a **nested evaluation of the sub-scene**
   (objects strictly below the clone stamp) at the required source points.
 - **Recursion is capped at depth 4.** A clone stamp sampling a region containing
-  other clone stamps beyond that depth reads calm. This is a performance guard,
+  other clone stamps — or warps — beyond that depth reads calm. This is a performance guard,
   not a correctness one — the z-order dependency graph is acyclic by
   construction.
 - Nested evaluation is the main performance hazard in the engine. It is
@@ -1198,6 +1498,14 @@ are shown in About and written to the log. wgpu covers Metal (Intel and Apple
 Silicon Macs), DX12 and Vulkan (Windows), and Vulkan (Linux); the fallback
 covers machines with none of those, plus CI and headless runs.
 
+**A scene may also be declined for what is in it**, and falls back the same
+way. Two things need recursion a compute shader has not got: the clone stamp,
+and the warp modifier (§6.3), both of which read the composite at a position
+other than the cell being written. The other three modifiers transform the
+vector where it already is and stay on the GPU. Declining is per scene and not
+per object: a preview that quietly dropped the one object it could not render
+would be a proxy for a scene the user does not have.
+
 ### 7.9 Preview fidelity
 
 The preview and the export are produced by the same object model but not by the
@@ -1250,15 +1558,26 @@ Left-hand vertical palette, keyboard-shortcut per tool:
 | 🖌 | Brush | `P` |
 | ⭕ | Circle stamp | `C` |
 | ⬟ | Shape fill | `F` |
-| ⌫ | Eraser | `E` |
 | ⧉ | Clone stamp | `S` |
 | 〰 | Curve | `B` |
+| ⌫ | Mask | `E` |
+| ⊕ | Intensify / reduce | `I` |
+| ✳ | Diverge / converge | `D` |
+| ↻ | Rotate flow | `R` |
+| ≈ | Warp / liquify | `W` |
 | 📏 | Measure (dividers / great circle / range rings) | `M` |
 
 `P` for the brush and `B` for the curve follow the conventions of other paint
 applications — the brush is the *pen* tool and the curve the *Bézier* — rather
 than the tools' initials, so hands that already know those keys need not
-relearn them.
+relearn them. The four modifiers (§6.3) take their initials, which were free.
+The mask keeps `E`, the eraser's key: `M` belongs to the measure tool, and a
+rename is not a reason to move a key out from under the hands that know it.
+
+The palette is in three groups: the tools that lay a field down, then the
+mask, which takes one away, then the modifiers, which change one. The order
+is not decoration — neither the mask nor a modifier does anything until there
+is something under it.
 
 Each button carries **a mark rather than a word**: seven names across the top of
 the map is a row of text where a row of shapes is quicker to find, and the
@@ -1398,6 +1717,13 @@ Each object row shows a bar spanning its `active_range`, draggable at either end
 to change start and end. Layers have **no** bars — the range is an object-level
 concept per the requirements.
 
+**A GRIB layer's row marks the steps its file has a message for** (§4.8). A step
+the file says nothing about shows no imported field at all, so without this the
+user is left to infer which times a file covers from a field that appears and
+disappears. It is drawn on the layer's own row because it is a property of the
+layer and not of any object in it — and it is the one thing a layer row shows,
+which is why it is not a bar.
+
 ### 9.3 Keyframe editing
 
 - Add a key at the current step by changing a property while auto-key is on, or
@@ -1416,6 +1742,27 @@ concept per the requirements.
 - Properties with no keys show `base` and no diamonds.
 - A property row indicates when the current step's value is interpolated rather
   than keyed.
+- **The steps a segment animates through are dotted.** Between two keys, every
+  step whose value is interpolated carries a small dot on the track, so a
+  segment that moves is distinguishable at a glance from one that does not. A
+  holding key blends nothing until the next one and its segment has no dots;
+  neither do the held steps outside the first and last key (§4.5).
+- **A track opens into a value graph.** A property with a magnitude — a scalar,
+  an angle, a position — has a disclosure beside its name that opens a graph of
+  its value at every step, drawn under the track and sharing the ruler's
+  horizontal scale, with its keys marked and the current step read out. A
+  boolean or a choice has no graph: it holds rather than blends, and a line
+  through discriminants would say nothing the diamonds do not.
+
+  The samples are the **model's**, taken through the same evaluation the field
+  uses (`track_samples`), never a second interpolation of the same keys in the
+  frontend: the easing curves, the shortest-arc angle and the great-circle
+  position live in one place. What the frontend does is convert — a speed is
+  sampled in m/s and graphed in knots, a flow direction is graphed in the
+  project's convention (§3.3) — and unwrap a degree series so a turn through
+  the 360° seam draws as the short arc it is rather than a full-height fall. A
+  position graphs as two series, longitude and latitude, on a shared degree
+  axis.
 
 ### 9.4 Playback
 
@@ -1438,7 +1785,10 @@ concept per the requirements.
 - A stall of several intervals — a slow render, a suspended window — resumes
   at the *next* step. Advancing as many steps as the clock says would turn a
   long render into a skip.
-- `Space` plays and pauses.
+- `Space` plays and pauses; `←` and `→` step one time step back and forward,
+  stopping playback first. The arrows **clamp** at the ends where playback
+  loops: an arrow is for reaching a particular time, and wrapping round to the
+  other end of the timeline is a jump nobody asked for.
 
 ### 9.5 Background rendering and readiness
 
@@ -1765,7 +2115,10 @@ Recorded so they are not accidentally designed out:
 - Duplicate a project at a different grid resolution.
 - Additional GRIB parameters (pressure, temperature, wave fields).
 - Region-limited grids.
-- Importing a real forecast as a background layer to trace over.
+- Tracing an imported forecast into objects, and interpolating between an
+  imported file's time steps rather than holding (§4.8).
+- JPEG 2000 packing on import, which needs a decoder the project does not
+  carry (§4.8).
 - Scriptable/batch export.
 - Additional interpolation curve editing (full graph editor).
 - Presets and object libraries shareable between projects.

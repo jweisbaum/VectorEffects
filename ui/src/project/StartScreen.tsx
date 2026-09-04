@@ -5,7 +5,7 @@ import type { NewProjectRequest } from "../generated/NewProjectRequest";
 import type { ProjectSummary } from "../generated/ProjectSummary";
 import type { RecentProject } from "../generated/RecentProject";
 import NewProjectForm from "./NewProjectForm";
-import { pickProjectToOpen } from "./dialogs";
+import { pickGribToImport, pickProjectToOpen } from "./dialogs";
 
 /**
  * Shown when no project is open.
@@ -48,6 +48,12 @@ export default function StartScreen({
     if (path !== null) await openFrom(path);
   };
 
+  /** A project shaped by a GRIB2 file: its kind, grid, step and span (spec 4.8). */
+  const openFromGrib = async () => {
+    const path = await pickGribToImport();
+    if (path !== null) await run(() => api.newProjectFromGrib(path));
+  };
+
   return (
     <div className="start">
       <div className="start-panel">
@@ -67,6 +73,9 @@ export default function StartScreen({
           <h2>Open</h2>
           <button onClick={browse} disabled={busy}>
             Browse…
+          </button>
+          <button onClick={() => void openFromGrib()} disabled={busy} title="Create a project from a GRIB2 file: the field kind, grid, time step and span come from the file">
+            Open from GRIB…
           </button>
 
           {recent.length > 0 && (

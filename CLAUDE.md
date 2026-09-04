@@ -52,8 +52,9 @@ crates/
   ve-render/   Scene flattening, SDF rasterisation, compositing,
                FieldEvaluator trait, CpuEvaluator, GpuEvaluator (+ WGSL),
                tile pyramid, content-hashed render cache
-  ve-grib/     GRIB2 writer. Sections, templates, simple packing.
-               (The reader lives in this crate's tests only.)
+  ve-grib/     GRIB2 writer: sections, templates, simple packing. And the
+               import decoder (`decode`, `import`): 3.0 grids, 5.0/5.2/5.3
+               packing, bitmaps. `reader` is the writer's test-only verifier.
   ve-polar/    Boat polars, polar inversion, route tree, route solving
   ve-app/      Tauri app: IPC commands, app state, background workers,
                custom URI scheme, autosave
@@ -159,8 +160,39 @@ invariant 3; skipping the migration breaks old projects.
 
 Everything above, plus: a `ToolKind` variant, a `Geometry` variant and its SDF,
 the map interaction handler, a hover indicator (or an explicit decision that the
-tool has none — see spec §6.2), a palette entry with a shortcut, and
-copy/paste plus keyframe coverage in tests.
+tool has none — see spec §6.2), a palette entry with a shortcut, an icon in
+`ToolIcon.tsx` (the `Record` makes this a compile error, not a blank button),
+an entry in `tool_catalogue.rs`'s `catalogue()` — which is what puts the new
+tool into the seven shared-rule tests — and copy/paste plus keyframe coverage
+in tests.
+
+**Renaming a tool** is a migration, not a table edit: `ToolKind` is stored on
+every object it drew, so an old file fails to deserialise rather than loading as
+something else. Bump `SCHEMA_VERSION`, add the step to `io::MIGRATIONS`, and
+leave object *names* alone — those were typed by whoever drew them.
+
+**An outline is a band, never a stroke.** A footprint is a union of stamps and
+`Path2D` has no union: stroking one traces every stamp's own circle. Grow it by
+half the band, knock out a copy shrunk by half (`drawEdgeBand`, and `insetPx` in
+`buildFootprintPath`), and draw it before anything else on the frame —
+`destination-out` erases what is already there. `ObjectOutline::radius_km` is a
+**radius**: convert it with `footprintOfOutline` and never halve it again.
+
+**An operator** — a mask or a modifier — is invisible on the map, so it needs
+an edge: `transform::operator_outlines` lists them, and the frontend both
+outlines a selected one and highlights the one under the pointer. Anything with
+`PreviewKind` other than `Field` is expected to be in that list.
+
+**A modifier** (spec §6.3) instead of a creation tool: `ToolKind::is_modifier`,
+a `Modifier` variant in `ve-render`, the branch in `sample_upto` *and* in
+`evaluate.wgsl`'s composite loop, the packing in `gpu.rs`, the content hash in
+`cache.rs`, and a case in `fidelity.rs`'s object generator. It carries no
+`edge_mode` (`common_specs`), no speed and no direction. If anything it does is
+measured from the object's *anchor*, exclude it from merging in
+`create::merge_into` — a merge re-expresses the chain under the target's anchor
+and would move what the field is measured from. If it reads the field
+anywhere but the cell it is writing, it needs the clone stamp's recursion and
+must be declined in `gpu::supports` — one line, and a test that says so.
 
 **Then work spec §6.1's "what a tool inherits" checklist.** Every entry in it
 came from a bug in the brush, and the brush is only the tool that exists first.
@@ -185,6 +217,14 @@ The ones that are actual code in a new tool, rather than free:
   preview needs the new geometry too, but `BaselineOutline::of` matches `Shape`
   exhaustively on purpose, so the compiler asks for it rather than the object
   silently vanishing mid-drag. Keep it that way: no wildcard arm.
+
+### Adding a numeric input
+
+Use `NumberField` (`ui/src/NumberField.tsx`). A plain controlled
+`<input type="number">` with `Number(raw) || fallback` **cannot be cleared** —
+the empty string parses as `NaN`, the fallback commits, and the box refills
+under the cursor (D51). `commitWhileTyping={false}` for a field whose commit is
+a document write or gated behind a confirmation.
 
 ### Adding a field to the document
 
@@ -223,6 +263,25 @@ which is what collapses a drag into a single history entry — but only when
 successive batches have the same length and address the same objects and
 properties in the same order. Build the batch deterministically or coalescing
 silently stops working.
+
+### Touching the raster sampler
+
+An imported GRIB layer is a lattice sampled by both kernels (spec §4.8).
+`RasterGrid::sample` in `ve-core/src/raster.rs` is the authority and
+`sample_raster` in `evaluate.wgsl` is its port, decision for decision:
+extent check, wrap at the seam, missing corners left out of the blend.
+Change one and change the other in the same commit; the fidelity suite
+generates raster scenes and is what catches drift. The lattice's content hash
+(`RasterGrid::hash`) and its `z` are what the render cache keys on, so a
+change to what a grid *means* without a change to its hash is a stale-tile
+bug. The project file holds the GRIB's path and never its samples
+(invariants 1 and 2): `Layer::raster` is `#[serde(skip)]` and
+`import::attach_rasters` reads the file back on open.
+
+**A step the file has no message for has no raster**, not the previous one:
+`RasterSequence::frame_at` returns an `Option` and `flatten` pushes nothing
+when it is `None` (spec §4.8, D48). A message is a measurement and does not
+hold the way a keyframe does.
 
 ### Changing GRIB output
 

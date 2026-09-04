@@ -80,7 +80,7 @@ describe("every shader source", () => {
 
 describe("the live-gesture mask", () => {
   /**
-   * The mask is what makes an eraser erase and a clone clone while the pointer
+   * The screen mask is what makes a mask cover and a clone clone while the pointer
    * is down (spec.md 6.1). It is applied in the two programs that draw the
    * field — the raster and the glyphs — and a program that calls `maskFactor`
    * without including the block would not compile.
@@ -100,7 +100,7 @@ describe("the live-gesture mask", () => {
   });
 
   /**
-   * Both halves of the field respect it. A glyph left standing over an erased
+   * Both halves of the field respect it. A glyph left standing over a masked
    * patch would point at a wind that is no longer there, which reads as the
    * erasure having half worked.
    */
@@ -110,7 +110,7 @@ describe("the live-gesture mask", () => {
   });
 
   /**
-   * The basemap is never masked. An eraser takes the field away, not the
+   * The basemap is never masked. A mask takes the field away, not the
    * coastline underneath it — that is the whole reason the field can be removed
    * at all, since something has to be left to see.
    */

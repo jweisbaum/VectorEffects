@@ -289,6 +289,7 @@ describe("hoverGesture", () => {
       preview: "field",
       gesture: { kind: "always", gesture },
       sizing: null,
+      eyedropper: null,
       options: [],
     }) as ToolSchema;
   const state: ToolState = { values: {}, unit: "km" };

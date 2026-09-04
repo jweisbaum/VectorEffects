@@ -168,6 +168,42 @@ pub struct ObjectTracks {
     pub tracks: Vec<TrackView>,
 }
 
+/// One numeric component of a property, sampled at every step.
+///
+/// A scalar or an angle has one; a position has two, longitude and latitude,
+/// which share an axis because they share a unit.
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export, export_to = "TrackSeries.ts")]
+pub struct TrackSeries {
+    /// Empty for a property with a single component; otherwise which one.
+    pub label: String,
+    /// Display unit, in [`crate::document::PropertyView`]'s vocabulary. The
+    /// frontend converts — a speed is sampled in m/s and graphed in knots.
+    pub unit: String,
+    /// The value at every step of the project, in step order.
+    pub values: Vec<f64>,
+}
+
+/// A property's value at every step, for the timeline's value graph (spec.md 9.3).
+///
+/// Sampled here rather than interpolated in the frontend: easing curves, the
+/// shortest-arc angle and the great-circle position are the model's, and a
+/// graph drawn from a second implementation of them would eventually disagree
+/// with the field it claims to describe.
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export, export_to = "TrackSamples.ts")]
+pub struct TrackSamples {
+    /// Which object.
+    pub object: u64,
+    /// The property id, as the inspector spells it.
+    pub property: String,
+    /// Its label.
+    pub label: String,
+    /// One series per numeric component, empty for a kind that has no
+    /// magnitude — a boolean or a choice graphs nothing.
+    pub series: Vec<TrackSeries>,
+}
+
 /// What reducing the timeline would delete (spec.md 4.1).
 #[derive(Debug, Clone, Serialize, TS)]
 #[ts(export, export_to = "ShrinkImpact.ts")]
@@ -268,6 +304,69 @@ pub fn tracks_of(state: &AppState, object: u64, step: u32) -> Result<ObjectTrack
             start_step: target.active_range.start,
             end_step: target.active_range.end,
             tracks,
+        })
+    })
+}
+
+/// One property's value at every step, for the timeline's value graph.
+#[tauri::command]
+pub fn track_samples(
+    state: tauri::State<'_, AppState>,
+    object: u64,
+    property: String,
+) -> Result<TrackSamples> {
+    samples_of(&state, object, &property)
+}
+
+/// Implementation of [`track_samples`], callable without a Tauri handle.
+///
+/// Every step is asked of the model, keys and gaps alike, so the graph shows
+/// the same numbers the evaluator will use — including the held value outside
+/// the keyed range, which is the nearest key's and not the base (spec.md 4.5).
+pub fn samples_of(state: &AppState, object: u64, property: &str) -> Result<TrackSamples> {
+    with_session(state, |session| {
+        let project = &session.require_open()?.project;
+        let target = project
+            .object(object_id(object))
+            .ok_or(AppError::Core(ve_core::CoreError::MissingObject(object)))?;
+        let spec = schema::all_specs(target.tool)
+            .find(|spec| format!("{:?}", spec.id) == property)
+            .ok_or_else(|| AppError::BadOption {
+                field: "property",
+                value: property.to_owned(),
+            })?;
+        let anim = target
+            .props
+            .get(spec.id)
+            .ok_or_else(|| AppError::BadOption {
+                field: "property",
+                value: property.to_owned(),
+            })?;
+        let unit = crate::document::unit_name(spec.unit).to_owned();
+        let values: Vec<PropValue> = (0..project.settings.step_count)
+            .map(|step| anim.value_at(step))
+            .collect();
+        let component = |label: &str, unit: &str, of: fn(PropValue) -> Option<f64>| TrackSeries {
+            label: label.to_owned(),
+            unit: unit.to_owned(),
+            values: values.iter().copied().filter_map(of).collect(),
+        };
+        let series = match anim.kind() {
+            PropKind::F32 => vec![component("", &unit, |v| v.as_f32().map(f64::from))],
+            PropKind::Angle => vec![component("", &unit, |v| v.as_angle().map(|a| a.degrees()))],
+            // Both halves of a position are degrees whatever the property's
+            // own unit says, and they share the axis.
+            PropKind::LonLat => vec![
+                component("Lon", "degrees", |v| v.as_lonlat().map(|p| p.lon)),
+                component("Lat", "degrees", |v| v.as_lonlat().map(|p| p.lat)),
+            ],
+            PropKind::Bool | PropKind::Enum => Vec::new(),
+        };
+        Ok(TrackSamples {
+            object,
+            property: property.to_owned(),
+            label: spec.label.to_owned(),
+            series,
         })
     })
 }

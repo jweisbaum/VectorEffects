@@ -273,6 +273,7 @@ mod tests {
     fn disc_scene(speed: f64) -> Scene {
         let centre = tile().pixel_position(128, 128);
         Scene {
+            rasters: Vec::new(),
             objects: vec![FlatObject {
                 frame: crate::aeqd::Frame::new(centre, 0.0, 100.0),
                 shape: Shape::Disc {
@@ -288,6 +289,8 @@ mod tests {
                 path: Vec::new(),
                 clone_source: None,
                 clone_offset: OffsetMode::Aligned,
+                modifier: None,
+                invert: false,
             }],
         }
     }
@@ -358,6 +361,7 @@ mod tests {
     fn a_smooth_gradient_interpolates_cleanly() {
         let centre = tile().pixel_position(128, 128);
         let scene = Scene {
+            rasters: Vec::new(),
             objects: vec![FlatObject {
                 frame: crate::aeqd::Frame::new(centre, 0.0, 100.0),
                 shape: Shape::Disc {
@@ -377,6 +381,8 @@ mod tests {
                 path: Vec::new(),
                 clone_source: None,
                 clone_offset: OffsetMode::Aligned,
+                modifier: None,
+                invert: false,
             }],
         };
 

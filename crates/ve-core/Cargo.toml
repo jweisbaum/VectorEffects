@@ -11,6 +11,8 @@ serde = { workspace = true }
 serde_json.workspace = true
 thiserror = { workspace = true }
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
+# Content hashes for imported rasters: the render cache keys off them.
+blake3 = { version = "1.8.7", default-features = false, features = ["std"] }
 
 [lints]
 workspace = true

@@ -12,6 +12,7 @@ import { api } from "../ipc";
 import type { Gesture } from "../generated/Gesture";
 import type { PathPoint } from "../generated/PathPoint";
 import type { ProjectSummary } from "../generated/ProjectSummary";
+import type { OperatorOutline } from "../generated/OperatorOutline";
 import type { ObjectOutline } from "../generated/ObjectOutline";
 import type { TileAddress } from "../generated/TileAddress";
 import type { Tool } from "../generated/Tool";
@@ -34,6 +35,7 @@ import {
 } from "./camera";
 import {
   buildFootprintPath,
+  footprintOfOutline,
   extendStrokePath,
   footprintHead,
   footprintRadii,
@@ -53,6 +55,7 @@ import { RAMP_STOPS, rampCss } from "./ramp";
 import { parseBasemap } from "./format";
 import { marqueeBounds } from "./marquee";
 import {
+  overlayPlan,
   previewHasLanded,
   SETTLE_TIMEOUT_MS,
   type HeldPreview,
@@ -82,6 +85,7 @@ import {
   newObject,
   positionOf,
   previewField,
+  sampled,
   type ToolState,
 } from "./tools";
 import { MapRenderer, type OperatorPreview, type RenderState } from "./renderer";
@@ -184,6 +188,27 @@ function formatDegrees(value: number, positive: string, negative: string): strin
   return `${Math.abs(value).toFixed(2)}° ${suffix}`;
 }
 
+/**
+ * How near an object's edge the pointer counts as being on it, in CSS pixels.
+ */
+const EDGE_GRAB_CSS = 6;
+
+/**
+ * The tools that highlight the edge under the pointer (spec.md 6.1).
+ *
+ * The operators, which are invisible on the map and need an edge to be found
+ * at all, and the brush, whose strokes are many and whose edges say which one
+ * the pointer is over. Not the tools that place a single shape: a circle or a
+ * polygon shows its own outline in the field it paints.
+ */
+const HOVER_TOOLS: ReadonlySet<string> = new Set([
+  "brush",
+  "mask",
+  "intensity",
+  "divergence",
+  "turn",
+  "warp",
+]);
 /** Hit radius of a transform handle, in CSS pixels. */
 const HANDLE_RADIUS_CSS = 6;
 
@@ -211,7 +236,7 @@ const PREVIEW_MIN_ALPHA = 0.28;
  * middle of the interaction the frame budget exists to protect (spec.md 13).
  * Halving each axis quarters it.
  *
- * What it costs is a slightly soft edge on the erased region, sampled back with
+ * What it costs is a slightly soft edge on the masked region, sampled back with
  * linear filtering. The preview is a proxy and is allowed to approximate
  * (spec.md 7.9); the field that lands when the gesture commits is exact.
  */
@@ -220,7 +245,7 @@ const MASK_SCALE = 0.5;
 /**
  * The operation a committed gesture is still waiting to see landed.
  *
- * The most recent, because two erases in flight at once both apply and the
+ * The most recent, because two masks in flight at once both apply and the
  * later one is what the map has not caught up with. There is never more than
  * one in practice: a gesture is a pointer drag, and there is one pointer.
  */
@@ -352,7 +377,7 @@ export default function MapView({
   const cursorRef = useRef<{ x: number; y: number } | null>(null);
   /**
    * The gesture in progress, when it operates on the field rather than adding
-   * one — the eraser and the clone stamp (spec.md 6.2).
+   * one — the mask and the clone stamp (spec.md 6.2).
    *
    * Held in a ref and read by `draw`, because the map itself has to change: the
    * overlay sits above the field and can add pixels, never take them away, so
@@ -434,6 +459,11 @@ export default function MapView({
    * object holds yet, and a property of one that does.
    */
   const [toolPick, setToolPick] = useState<ToolPick | null>(null);
+  /**
+   * Whether the eyedropper is armed: the next map click takes the speed and
+   * direction from the field rather than painting (spec.md 6.1).
+   */
+  const [eyedropper, setEyedropper] = useState(false);
   const [busy, setBusy] = useState(false);
   /**
    * Where the selection's handles go.
@@ -498,6 +528,19 @@ export default function MapView({
    */
   const markerDrag = useRef<string | null>(null);
   /**
+   * A warp being pulled: which object, and where the pointer is now.
+   *
+   * Shift with the warp tool grabs the warp under the pointer instead of
+   * painting a new one, and dragging says where its field goes (spec.md 6.3).
+   * Previewed locally and written once on release, like every other drag: a
+   * write per pointer report re-renders the map (D29).
+   */
+  const pushDrag = useRef<{
+    object: number;
+    from: { lon: number; lat: number };
+    to: { lon: number; lat: number };
+  } | null>(null);
+  /**
    * Set while a path node's handles are being pulled out.
    *
    * The pen places a node on the press and shapes it while the button is held,
@@ -531,6 +574,22 @@ export default function MapView({
     },
     [schema],
   );
+  /**
+   * The tool's own state, for a write that lands after an await.
+   *
+   * The eyedropper's sample is a round trip, and the values it merges into
+   * must be the ones the bar holds when the answer arrives — not the ones it
+   * held when the click happened.
+   */
+  const toolStateRef = useRef(toolState);
+  toolStateRef.current = toolState;
+
+  // An armed mode belongs to the tool that armed it. Switching tools — by key
+  // or by button — drops both, so a click with the new tool is an ordinary one.
+  useEffect(() => {
+    setEyedropper(false);
+    setToolPick(null);
+  }, [tool]);
 
   const rampMaxKnots = rampMaxKnotsFor(project.field_kind);
   // The renderer works in stored units; the ramp is chosen in displayed ones.
@@ -988,6 +1047,57 @@ export default function MapView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project.revision, selectionKey, step]);
 
+  /**
+   * Every visible operator's edge: the masks and the modifiers (spec.md 6.2,
+   * 6.3).
+   *
+   * None of them paints a field of its own, so there is nothing on the map to
+   * say where one is, which side of its edge it covers, or that a click landed
+   * on one. The map draws the edge — for a selected one, and for the one under
+   * the pointer while such a tool is in hand.
+   *
+   * Fetched only when one of those two could be drawn, and only per revision
+   * and per step. The pointer hit test below runs on the outline this already
+   * holds; asking the backend per pointer report would be a round trip per
+   * frame for an answer that does not change between them.
+   */
+  const [outlineList, setOutlineList] = useState<OperatorOutline[]>([]);
+  // The tool in hand, for the edge under the pointer — the brush included, so
+  // hovering a stroke says which one it is and where it ends (spec.md 6.1).
+  // Plus the selection, so a selected operator is outlined whatever tool is in
+  // hand. Nothing else: the answer is bounded by one tool's objects rather than
+  // by the size of the project.
+  const hoverTool = tool !== HAND && HOVER_TOOLS.has(tool) ? tool : null;
+  useEffect(() => {
+    if (hoverTool === null && selection.length === 0) {
+      setOutlineList([]);
+      return;
+    }
+    let cancelled = false;
+    api
+      .objectOutlines(step, hoverTool, selection)
+      .then((outlines) => {
+        if (!cancelled) setOutlineList(outlines);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+    // `selectionKey` stands in for the array, which is new every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project.revision, step, hoverTool, selectionKey]);
+
+  /**
+   * The operator whose edge the pointer is on, if any.
+   *
+   * A ref and not state: it changes with every pointer report, and this
+   * component is two thousand lines of hooks (see `createReadoutStore`). The
+   * overlay is asked to redraw when the answer actually changes.
+   */
+  const hoveredOperator = useRef<number | null>(null);
+  const operatorOutlinesRef = useRef<OperatorOutline[]>([]);
+  operatorOutlinesRef.current = outlineList;
+
   useEffect(() => {
     drawOverlay();
   }, [committedTransform]);
@@ -1167,6 +1277,63 @@ export default function MapView({
   );
 
   /**
+   * One mask's edge as a screen path.
+   *
+   * The same builder the drag outline and the footprint preview use, so what
+   * is drawn, what is hit-tested and what the object actually covers are one
+   * shape rather than three that resemble each other.
+   */
+  const maskPath = useCallback((outline: ObjectOutline, insetPx = 0): Path2D => {
+    const path = new Path2D();
+    for (const footprint of footprintOfOutline(outline)) {
+      buildFootprintPath(path, cameraRef.current, viewRef.current, footprint, insetPx);
+    }
+    return path;
+  }, []);
+
+  /**
+   * Draws a band along the *outline of a footprint's union*, `widthCss` wide.
+   *
+   * A footprint is a union of stamps and `Path2D` has no union operator, so
+   * stroking one traces every stamp's own circle and leaves a chain of rings
+   * where a single edge belongs. Filling it and then knocking out a copy inset
+   * by the band's width leaves exactly the union's boundary: the outer fill
+   * covers the shape, the inset fill removes everything but the rim.
+   *
+   * `destination-out` erases what is under it, so this must run before anything
+   * else is drawn on the frame. A ring outline is a single closed polygon with
+   * no union to take, and is stroked.
+   */
+  const drawEdgeBand = useCallback(
+    (
+      context: CanvasRenderingContext2D,
+      outline: ObjectOutline,
+      colour: string,
+      widthCss: number,
+      dpr: number,
+    ) => {
+      const width = Math.max(1, widthCss * dpr);
+      context.save();
+      if (outline.kind === "ring") {
+        context.strokeStyle = colour;
+        context.lineWidth = width;
+        context.stroke(maskPath(outline));
+        context.restore();
+        return;
+      }
+      // Centred on the edge, half out and half in, which is where a stroke of
+      // the same width would put it — a band that sat entirely inside read as
+      // an outline shrunk away from the paint it belongs to.
+      context.fillStyle = colour;
+      context.fill(maskPath(outline, -width / 2));
+      context.globalCompositeOperation = "destination-out";
+      context.fill(maskPath(outline, width / 2));
+      context.restore();
+    },
+    [maskPath],
+  );
+
+  /**
    * The selection's footprints where a drag would leave them.
    *
    * Drawn as a selection affordance rather than as a field: it says where the
@@ -1180,26 +1347,8 @@ export default function MapView({
 
       const silhouette = new Path2D();
       for (const outline of outlines) {
-        if (outline.kind === "swept") {
-          for (const chain of outline.chains) {
-            buildFootprintPath(silhouette, camera, view, {
-              kind: "swept",
-              points: chain,
-              radiusKm: outline.radius_km / 2,
-              shape: outline.square ? "square" : "circle",
-              space: outline.space,
-            });
-          }
-        } else {
-          const [first, ...rest] = outline.points;
-          if (first === undefined) continue;
-          const start = toScreen(camera, view, { lon: first[0], lat: first[1] });
-          silhouette.moveTo(start.x, start.y);
-          for (const [lon, lat] of rest) {
-            const point = toScreen(camera, view, { lon, lat });
-            silhouette.lineTo(point.x, point.y);
-          }
-          silhouette.closePath();
+        for (const footprint of footprintOfOutline(outline)) {
+          buildFootprintPath(silhouette, camera, view, footprint);
         }
       }
 
@@ -1245,6 +1394,61 @@ export default function MapView({
     context.clearRect(0, 0, view.width, view.height);
 
     const camera = cameraRef.current;
+    const dpr = window.devicePixelRatio || 1;
+
+    // Object edges (spec.md 6.1, 6.2, 6.3): the one under the pointer, and any
+    // selected object with no field of its own to show where it is.
+    //
+    // **Drawn first, on the cleared canvas, deliberately.** An edge band is
+    // made by knocking an inset copy out of a filled footprint, and
+    // `destination-out` erases whatever is already on the canvas — first is the
+    // one place where that is only ever the band's own interior.
+    for (const outlined of outlineList) {
+      const hovered = hoveredOperator.current === outlined.object;
+      const selected =
+        selection.includes(outlined.object) && outlined.tool !== "brush";
+      if (!hovered && !selected) continue;
+      // Pink for the edge under the pointer: a colour used for nothing else on
+      // this map, so "the tool has found an edge" cannot be mistaken for a
+      // selection or a preview.
+      drawEdgeBand(
+        context,
+        outlined.outline,
+        hovered ? "rgba(255, 110, 190, 0.95)" : "rgba(255, 214, 102, 0.85)",
+        hovered ? 2.5 : 1.5,
+        dpr,
+      );
+      // An inverted mask covers everything *but* this, so a wide faint band
+      // goes with it: an edge alone cannot say which side is covered.
+      if (outlined.inverted) {
+        drawEdgeBand(context, outlined.outline, "rgba(255, 110, 190, 0.16)", 9, dpr);
+      }
+    }
+
+    // A warp being pulled: from its anchor to the pointer, which is the push
+    // the release will write (spec.md 6.3).
+    const pull = pushDrag.current;
+    if (pull) {
+      const from = toScreen(camera, view, pull.from);
+      const to = toScreen(camera, view, pull.to);
+      context.save();
+      context.strokeStyle = "rgba(255, 110, 190, 0.95)";
+      context.lineWidth = Math.max(1, dpr) * 2;
+      context.beginPath();
+      context.moveTo(from.x, from.y);
+      context.lineTo(to.x, to.y);
+      context.stroke();
+      // A head at the destination and a ring at the origin: which end is which
+      // is the whole meaning of the gesture.
+      context.beginPath();
+      context.arc(from.x, from.y, 4 * dpr, 0, Math.PI * 2);
+      context.stroke();
+      context.beginPath();
+      context.arc(to.x, to.y, 5 * dpr, 0, Math.PI * 2);
+      context.fillStyle = "rgba(255, 110, 190, 0.95)";
+      context.fill();
+      context.restore();
+    }
 
     // While a drag is in flight the handles follow it rather than the document,
     // which is deliberately not being written until the pointer comes up.
@@ -1346,7 +1550,6 @@ export default function MapView({
       context.setLineDash([]);
     }
 
-    const dpr = window.devicePixelRatio || 1;
     const cursor = cursorRef.current;
 
     // A position property waiting for a click: where it points now, and where
@@ -1441,16 +1644,18 @@ export default function MapView({
     const field = previewField(tool, toolState, inProgress);
     const paint = rampCss(mpsFromKnots(field.knots), rampMax, PREVIEW_MIN_ALPHA);
 
-    // A tool that operates on the field is previewed by the map itself, so the
-    // overlay draws only its outline: a coloured wash over an erased patch
-    // would be showing a wind the eraser is in the middle of removing.
-    if (inProgress && schema.preview !== "field") {
+    // What the overlay draws is the tool's preview kind, decided in one place
+    // (`overlayPlan`): the field for a tool that paints one, an outline for the
+    // clone stamp, and — for the mask — nothing but the nib below, since the
+    // map is already drawing the erasure through a mask.
+    const plan = overlayPlan(schema.preview, drawing !== null);
+    if (inProgress && plan.sweep === "outline") {
       const region = new Path2D();
       buildFootprintPath(region, camera, view, inProgress);
       context.strokeStyle = "rgba(160, 232, 255, 0.95)";
       context.lineWidth = Math.max(1, dpr);
       context.stroke(region);
-    } else if (inProgress) {
+    } else if (inProgress && plan.sweep === "field") {
       drawFieldPreview(context, { footprint: inProgress, paint, ...field }, dpr);
     }
 
@@ -1464,7 +1669,7 @@ export default function MapView({
     // same colour and with the same glyph as the gesture preview (spec.md 6.1).
     // Only where the tool has one — a polygon and a curve are built up point by
     // point, so a single click produces nothing to show (spec.md 6.2).
-    if (cursor && schema.hover && !toolPick && !drawing) {
+    if (cursor && schema.hover && !toolPick && plan.nib) {
       const geo = unproject(camera, view, cursor);
       const hovered = footprintOf(tool, toolState, hoverGesture(schema, toolState, geo), camera);
       if (hovered) {
@@ -1499,6 +1704,9 @@ export default function MapView({
     toolState,
     picking,
     shownTransform,
+    outlineList,
+    drawEdgeBand,
+    selection,
   ]);
 
   useEffect(() => {
@@ -1509,10 +1717,10 @@ export default function MapView({
   /**
    * Refreshes the live operator preview, and says whether the map must redraw.
    *
-   * The eraser and the clone stamp paint what is *already there*, so a preview
+   * The mask and the clone stamp paint what is *already there*, so a preview
    * drawn on the overlay could only ever be a coloured guess at it (spec.md
    * 6.1). Instead the gesture's coverage is rasterised into a mask and the map
-   * is drawn through it: the field is taken away where the eraser covers, and
+   * is drawn through it: the field is taken away where the mask covers, and
    * replaced from the source where the clone does.
    *
    * Nothing here is per tool. The footprint comes from the same builder the
@@ -1523,7 +1731,7 @@ export default function MapView({
     (drawing: InProgress | null): boolean => {
       const had = operatorRef.current !== null;
       const kind = schema?.preview;
-      const operates = kind === "erase" || kind === "clone";
+      const operates = kind === "mask" || kind === "clone";
       const footprint =
         drawing && operates && tool !== HAND
           ? footprintOf(tool, toolState, finished(drawing), cameraRef.current)
@@ -1703,6 +1911,28 @@ export default function MapView({
     };
   };
 
+  /**
+   * The warp whose footprint the pointer is inside, topmost first.
+   *
+   * `isPointInPath` against the outline the overlay is already drawing, so what
+   * can be grabbed is exactly what is shown — and its anchor comes back with
+   * it, since that is the end of the push the drag does not move.
+   */
+  const warpUnder = (point: {
+    x: number;
+    y: number;
+  }): { object: number; anchor: { lon: number; lat: number } } | null => {
+    const context = overlayRef.current?.getContext("2d");
+    if (!context) return null;
+    for (let i = operatorOutlinesRef.current.length - 1; i >= 0; i -= 1) {
+      const entry = operatorOutlinesRef.current[i];
+      if (entry === undefined || entry.tool !== "warp") continue;
+      if (!context.isPointInPath(maskPath(entry.outline), point.x, point.y)) continue;
+      return { object: entry.object, anchor: { lon: entry.anchor[0], lat: entry.anchor[1] } };
+    }
+    return null;
+  };
+
   const onPointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
     event.currentTarget.setPointerCapture(event.pointerId);
     const point = toDevice(event);
@@ -1743,6 +1973,42 @@ export default function MapView({
           },
         });
         setToolPick(null);
+        return;
+      }
+
+      // ...and while the eyedropper is armed, the click takes the field's own
+      // speed and direction instead of painting. Sampled through the backend
+      // rather than decoded from the tile under the pointer: the tile carries
+      // the quantised value the map draws with, and this is the number the
+      // object will hold. Only visible layers contribute, because that is what
+      // the evaluator composites (spec.md 7.1) — pointing at what you can see
+      // is the whole of the gesture.
+      if (eyedropper && schema) {
+        setEyedropper(false);
+        void api
+          .sampleField(geo.lon, geo.lat, stepRef.current)
+          .then((sample) => setToolState(sampled(toolStateRef.current, schema, sample)))
+          .catch(() => undefined);
+        return;
+      }
+
+      // Shift with the warp tool grabs the warp under the pointer rather than
+      // painting another one, and the drag says where its field goes: the
+      // object's anchor is where the field comes from and the release point is
+      // where it lands, both of them animatable positions (spec.md 6.3).
+      // Aiming a liquify by typing a distance and a bearing is guesswork; this
+      // is the gesture the tool is named for.
+      //
+      // With no warp under the pointer it does *nothing* — it does not fall
+      // through to painting. Shift says "act on the warp that is there", and a
+      // modifier key that paints a new object when it misses is a way to draw
+      // one by accident, in the middle of aiming another.
+      if (tool === "warp" && event.shiftKey) {
+        const grabbed = warpUnder(point);
+        if (grabbed === null) return;
+        onSelect([grabbed.object]);
+        pushDrag.current = { object: grabbed.object, from: grabbed.anchor, to: geo };
+        requestOverlay();
         return;
       }
 
@@ -1827,9 +2093,62 @@ export default function MapView({
     }
   };
 
+  /**
+   * Which operator's edge the pointer is on, in screen pixels.
+   *
+   * `isPointInStroke` against the same path the overlay draws, with a wide pen:
+   * "near the edge" is a screen distance, and canvas will answer it exactly for
+   * whatever shape the outline is — a swept chain, a ring, a rectangle — where
+   * a hand-written distance test would need a case per shape and would drift
+   * from what is drawn.
+   */
+  const operatorEdgeUnder = (point: { x: number; y: number }): number | null => {
+    const canvas = overlayRef.current;
+    const context = canvas?.getContext("2d");
+    if (!context) return null;
+    const dpr = window.devicePixelRatio || 1;
+    context.save();
+    context.lineWidth = EDGE_GRAB_CSS * 2 * dpr;
+    let found: number | null = null;
+    // Topmost first: the outlines arrive in z-order, and the edge a click would
+    // reach is the one drawn last.
+    for (let i = operatorOutlinesRef.current.length - 1; i >= 0; i -= 1) {
+      const mask = operatorOutlinesRef.current[i];
+      if (mask === undefined) continue;
+      if (context.isPointInStroke(maskPath(mask.outline), point.x, point.y)) {
+        found = mask.object;
+        break;
+      }
+    }
+    context.restore();
+    return found;
+  };
+
   const onPointerMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
     const point = toDevice(event);
     cursorRef.current = point;
+
+    // A warp being pulled follows the pointer; nothing else does while it is.
+    if (pushDrag.current) {
+      pushDrag.current.to = unproject(cameraRef.current, viewRef.current, point);
+      requestOverlay();
+      return;
+    }
+
+    // An operator tool highlights the edge it is over (spec.md 6.2, 6.3). Kept
+    // in a ref and redrawn only when the answer changes: this runs on every
+    // pointer report, and a state change here would re-render the whole
+    // toolbar.
+    if (hoverTool !== null && !gestureRef.current) {
+      const over = operatorEdgeUnder(point);
+      if (over !== hoveredOperator.current) {
+        hoveredOperator.current = over;
+        requestOverlay();
+      }
+    } else if (hoveredOperator.current !== null) {
+      hoveredOperator.current = null;
+      requestOverlay();
+    }
 
     // Dragging a placed marker. The state change redraws the overlay: every
     // glyph aimed at this point swings round as it moves.
@@ -2075,14 +2394,14 @@ export default function MapView({
    * Begins, extends or completes a gesture at a pointer press.
    *
    * Which of the three depends only on the gesture's kind, so a tool that draws
-   * the way another one does behaves the way it does — the eraser is brush-like
+   * the way another one does behaves the way it does — the mask is brush-like
    * because both send a `stroke`, not because two branches were written alike.
    */
   /**
    * Begins, extends or completes a gesture at a pointer press.
    *
    * Which of the three depends only on the gesture's kind, so a tool that draws
-   * the way another one does behaves the way it does — the eraser is brush-like
+   * the way another one does behaves the way it does — the mask is brush-like
    * because both send a `stroke`, not because two branches were written alike.
    */
   const startGesture = useCallback(
@@ -2126,6 +2445,29 @@ export default function MapView({
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
+    // Finish a warp's pull: one write, at the step being viewed and through the
+    // same path every other property edit takes — so it keys the current step
+    // when the property is animated or auto-key is on, and both ends of the
+    // push are keyframable (spec.md 6.3, 9.3).
+    const pull = pushDrag.current;
+    if (pull) {
+      pushDrag.current = null;
+      void api
+        .setObjectProperty(
+          pull.object,
+          "PushTo",
+          { kind: "position", lon: pull.to.lon, lat: pull.to.lat },
+          step,
+          autoKey,
+        )
+        .then(onProjectChanged)
+        .catch((err: unknown) =>
+          void api.frontendLog("error", `pulling the warp failed: ${String(err)}`),
+        );
+      requestOverlay();
+      return;
+    }
+
     // Finish a marker drag. Nothing to commit: a tool's placed position is an
     // option, not document state, until a gesture freezes it (spec.md 6.1).
     if (markerDrag.current !== null) {
@@ -2527,7 +2869,15 @@ export default function MapView({
             convention={project.direction_convention}
             camera={cameraRef.current}
             picking={toolPick}
-            onPick={setToolPick}
+            onPick={(pick) => {
+              setToolPick(pick);
+              if (pick) setEyedropper(false);
+            }}
+            sampling={eyedropper}
+            onSample={(on) => {
+              setEyedropper(on);
+              if (on) setToolPick(null);
+            }}
           />
         )}
 

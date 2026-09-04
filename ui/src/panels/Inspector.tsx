@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 
+import NumberField from "../NumberField";
+
 import { api } from "../ipc";
 import type { ProjectSummary } from "../generated/ProjectSummary";
 import type { PropertyValue } from "../generated/PropertyValue";
@@ -158,25 +160,20 @@ export default function Inspector({
 
               {property.value.kind === "number" && (
                 <span className="property-editor">
-                  <input
-                    type="number"
+                  <NumberField
                     step="any"
-                    min={
-                      property.min !== null
-                        ? toDisplay(property.unit, property.min)
-                        : undefined
-                    }
-                    max={
-                      property.max !== null
-                        ? toDisplay(property.unit, property.max)
-                        : undefined
-                    }
-                    defaultValue={tidy(toDisplay(property.unit, property.value.value))}
-                    key={`${property.id}-${project.revision}`}
-                    onBlur={(e) =>
+                    min={property.min !== null ? toDisplay(property.unit, property.min) : null}
+                    max={property.max !== null ? toDisplay(property.unit, property.max) : null}
+                    value={toDisplay(property.unit, property.value.value)}
+                    format={tidy}
+                    // On blur, not on every keystroke: an inspector write is a
+                    // document edit, an undo entry and a re-render of the field
+                    // (spec.md 8.4).
+                    commitWhileTyping={false}
+                    onCommit={(shown) =>
                       write(property.id, {
                         kind: "number",
-                        value: toStored(property.unit, Number(e.target.value) || 0),
+                        value: toStored(property.unit, shown),
                       })
                     }
                   />
@@ -186,18 +183,16 @@ export default function Inspector({
 
               {property.value.kind === "angle" && (
                 <span className="property-editor">
-                  <input
-                    type="number"
+                  <NumberField
                     step="any"
-                    key={`${property.id}-${project.revision}`}
-                    defaultValue={tidy(
-                      toShownAngle(
-                        property.unit,
-                        project.direction_convention,
-                        property.value.degrees,
-                      ),
+                    value={toShownAngle(
+                      property.unit,
+                      project.direction_convention,
+                      property.value.degrees,
                     )}
-                    onBlur={(e) =>
+                    format={tidy}
+                    commitWhileTyping={false}
+                    onCommit={(shown) =>
                       write(property.id, {
                         kind: "angle",
                         // The conversion is its own inverse, so one function
@@ -205,7 +200,7 @@ export default function Inspector({
                         degrees: toShownAngle(
                           property.unit,
                           project.direction_convention,
-                          Number(e.target.value) || 0,
+                          shown,
                         ),
                       })
                     }
@@ -250,34 +245,28 @@ export default function Inspector({
 
               {property.value.kind === "position" && (
                 <span className="property-editor position">
-                  <input
-                    type="number"
+                  <NumberField
                     step="any"
-                    key={`${property.id}-lon-${project.revision}`}
-                    defaultValue={property.value.lon.toFixed(3)}
+                    value={property.value.lon}
+                    format={(v) => v.toFixed(3)}
                     title="Longitude"
-                    onBlur={(e) => {
+                    commitWhileTyping={false}
+                    onCommit={(lon) => {
                       if (property.value.kind !== "position") return;
-                      write(property.id, {
-                        kind: "position",
-                        lon: Number(e.target.value) || 0,
-                        lat: property.value.lat,
-                      });
+                      write(property.id, { kind: "position", lon, lat: property.value.lat });
                     }}
                   />
-                  <input
-                    type="number"
+                  <NumberField
                     step="any"
-                    key={`${property.id}-lat-${project.revision}`}
-                    defaultValue={property.value.lat.toFixed(3)}
+                    min={-90}
+                    max={90}
+                    value={property.value.lat}
+                    format={(v) => v.toFixed(3)}
                     title="Latitude"
-                    onBlur={(e) => {
+                    commitWhileTyping={false}
+                    onCommit={(lat) => {
                       if (property.value.kind !== "position") return;
-                      write(property.id, {
-                        kind: "position",
-                        lon: property.value.lon,
-                        lat: Number(e.target.value) || 0,
-                      });
+                      write(property.id, { kind: "position", lon: property.value.lon, lat });
                     }}
                   />
                   {/*

@@ -17,6 +17,16 @@ export async function pickProjectToOpen(): Promise<string | null> {
   return typeof chosen === "string" ? chosen : null;
 }
 
+/** Asks for a GRIB2 file to import as a layer. Returns null if cancelled. */
+export async function pickGribToImport(): Promise<string | null> {
+  const chosen = await open({
+    multiple: false,
+    directory: false,
+    filters: [{ name: "GRIB2", extensions: ["grib2", "grb2", "grib", "grb"] }],
+  });
+  return typeof chosen === "string" ? chosen : null;
+}
+
 /** Asks where to write a GRIB2 file. Returns null if the user cancelled. */
 export async function pickGribDestination(projectName: string): Promise<string | null> {
   const chosen = await save({

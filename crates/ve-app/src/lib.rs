@@ -10,6 +10,7 @@ pub mod document;
 pub mod edit;
 pub mod error;
 pub mod export;
+pub mod import;
 pub mod logging;
 pub mod merge;
 pub mod palette;
@@ -84,6 +85,8 @@ pub fn run() -> anyhow::Result<()> {
             export::export_grib,
             export::export_estimate,
             export::cancel_export,
+            import::import_grib,
+            import::new_project_from_grib,
             document::document_tree,
             document::object_properties,
             document::set_object_property,
@@ -91,6 +94,8 @@ pub fn run() -> anyhow::Result<()> {
             document::remove_layer,
             document::rename_layer,
             document::set_layer_visible,
+            document::set_layer_speed_range,
+            document::set_layer_speed_range,
             document::set_layer_locked,
             document::move_layer,
             document::rename_object,
@@ -111,7 +116,9 @@ pub fn run() -> anyhow::Result<()> {
             document::clipboard_state,
             document::history_view,
             document::jump_to_history,
+            transform::object_outlines,
             animation::object_tracks,
+            animation::track_samples,
             animation::set_keyframe,
             animation::remove_keyframe,
             animation::move_keyframe,

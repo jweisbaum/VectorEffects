@@ -44,7 +44,7 @@ const GLYPH_VERTICES = 54;
 /**
  * A gesture in progress that operates on the field rather than adding one.
  *
- * The eraser and the clone stamp are defined against what is already there
+ * The mask and the clone stamp are defined against what is already there
  * (spec.md 6.2), so previewing them means changing what the map draws — the 2D
  * overlay sits above the field and can add pixels, never take them away. This
  * is how the two get a live preview at all, and it is why they are the only two
@@ -60,7 +60,7 @@ export interface OperatorPreview {
    */
   mask: TexImageSource;
   /** Whether the covered field is taken away, or replaced from elsewhere. */
-  kind: "erase" | "clone";
+  kind: "mask" | "clone";
   /**
    * For a clone, the camera the source is read through.
    *
@@ -278,7 +278,7 @@ export class MapRenderer {
    * Points a program's mask uniforms at the gesture in progress.
    *
    * Mode 0 leaves the field alone. Mode 1 takes it away where the gesture
-   * covers — an eraser, and a clone before its source is drawn in. Mode 2 keeps
+   * covers — a mask, and a clone before its source is drawn in. Mode 2 keeps
    * only what the gesture covers, which is how that source arrives.
    */
   private setMask(u: Uniforms, view: Viewport, mode: 0 | 1 | 2): void {
@@ -484,7 +484,7 @@ export class MapRenderer {
     gl.clear(gl.COLOR_BUFFER_BIT);
 
     // The gesture in progress, if it operates on the field rather than adding
-    // one of its own (spec.md 6.1). Uploading it is what makes an eraser erase
+    // one of its own (spec.md 6.1). Uploading it is what makes a mask cover
     // and a clone clone *while the pointer is down*, rather than at the commit
     // a round trip later.
     const operating = this.uploadMask(state.operator?.mask ?? null);
@@ -516,7 +516,7 @@ export class MapRenderer {
     }
 
     // --- Speed raster ---
-    // The basemap is never masked: an eraser takes away the field, not the
+    // The basemap is never masked: a mask takes away the field, not the
     // coastline underneath it.
     this.drawRaster(state, state.camera, tiles, mode);
     if (source) this.drawRaster(state, source, sourceTiles, 2);

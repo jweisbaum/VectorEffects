@@ -13,7 +13,9 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
+use crate::angle::Angle;
 use crate::error::{CoreError, Result};
+use crate::geo::LonLat;
 use crate::project::{Project, SCHEMA_VERSION};
 
 /// The project document inside the archive.
@@ -34,6 +36,9 @@ const MIGRATIONS: &[(u32, Migration)] = &[
     (4, circle_space_becomes_stamp_space),
     (5, disc_carries_an_optional_radius),
     (6, no_tool_has_divergence_or_curl),
+    (7, the_eraser_is_the_mask),
+    (8, modifiers_are_painted_rather_than_stamped),
+    (9, a_warp_pushes_to_a_place),
 ];
 
 /// Version 1 stored a stroke as one polyline: `{"stroke": {"points": [...]}}`.
@@ -116,6 +121,127 @@ pub fn from_json(json: &str) -> Result<Project> {
     project.normalize();
     project.validate()?;
     Ok(project)
+}
+
+/// A warp pushes the field *to a place* rather than along a bearing
+/// (spec.md 6.3).
+///
+/// `distance_km` and `push_bearing` become a `target` position, so that a warp
+/// can be set by dragging the field where it should go and so that both ends of
+/// the push are animatable positions. The place is where the old pair pointed:
+/// the object's own anchor, moved along the bearing by the distance.
+fn a_warp_pushes_to_a_place(value: &mut Value) -> Result<()> {
+    let Some(layers) = value.get_mut("layers").and_then(Value::as_array_mut) else {
+        return Ok(());
+    };
+    for layer in layers {
+        let Some(objects) = layer.get_mut("objects").and_then(Value::as_array_mut) else {
+            continue;
+        };
+        for object in objects {
+            if object.get("tool").and_then(Value::as_str) != Some("warp") {
+                continue;
+            }
+            let anchor = object
+                .pointer("/props/position/base/lon_lat")
+                .and_then(|at| {
+                    Some(LonLat::new(
+                        at.get("lon")?.as_f64()?,
+                        at.get("lat")?.as_f64()?,
+                    ))
+                })
+                .and_then(std::result::Result::ok)
+                .unwrap_or(LonLat { lon: 0.0, lat: 0.0 });
+            let km = object
+                .pointer("/props/distance_km/base/f32")
+                .and_then(Value::as_f64)
+                .unwrap_or(0.0);
+            let degrees = object
+                .pointer("/props/push_bearing/base/angle")
+                .and_then(Value::as_f64)
+                .unwrap_or(0.0);
+            let target = anchor.destination(Angle::new(degrees), km * 1000.0);
+
+            if let Some(Value::Object(props)) = object.get_mut("props") {
+                props.remove("distance_km");
+                props.remove("push_bearing");
+                props.insert(
+                    "push_to".to_owned(),
+                    serde_json::json!({
+                        "base": { "lon_lat": { "lon": target.lon, "lat": target.lat } }
+                    }),
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The modifiers are painted along a polyline rather than placed by a click
+/// (spec.md 6.3).
+///
+/// They were disc stamps with a typed `diameter_km`; they are now swept stamps
+/// with a `size_km`, like the brush and the mask, so that a swathe can be
+/// treated in one gesture and two strokes of the same settings merge into one
+/// object. A stamped one becomes the stroke it would have been: a chain of a
+/// single point at the object's own anchor, which sweeps to exactly the disc it
+/// already was.
+fn modifiers_are_painted_rather_than_stamped(value: &mut Value) -> Result<()> {
+    const MODIFIERS: [&str; 4] = ["intensity", "divergence", "turn", "warp"];
+    let Some(layers) = value.get_mut("layers").and_then(Value::as_array_mut) else {
+        return Ok(());
+    };
+    for layer in layers {
+        let Some(objects) = layer.get_mut("objects").and_then(Value::as_array_mut) else {
+            continue;
+        };
+        for object in objects {
+            let is_modifier = object
+                .get("tool")
+                .and_then(Value::as_str)
+                .is_some_and(|tool| MODIFIERS.contains(&tool));
+            if !is_modifier {
+                continue;
+            }
+            object["geometry"] = serde_json::json!({
+                "stroke": { "chains": [[{ "x": 0.0, "y": 0.0 }]] }
+            });
+            if let Some(Value::Object(props)) = object.get_mut("props")
+                && let Some(diameter) = props.remove("diameter_km")
+            {
+                props.insert("size_km".to_owned(), diameter);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The eraser is called the mask (spec.md 6.2).
+///
+/// A rename of the tool itself, which is stored on every object it drew, so it
+/// is a migration and not a table change: `ToolKind` deserialises from the
+/// string, and an object still saying `eraser` would fail to load rather than
+/// load as something else. The name is the only thing that changes — the
+/// object's properties, geometry and keyframes are the mask's already.
+///
+/// Object *names* are left alone. "Erase 3" was typed, or accepted, by whoever
+/// drew it; renaming a user's own labels is a bigger surprise than an old name
+/// in a list.
+fn the_eraser_is_the_mask(value: &mut Value) -> Result<()> {
+    let Some(layers) = value.get_mut("layers").and_then(Value::as_array_mut) else {
+        return Ok(());
+    };
+    for layer in layers {
+        let Some(objects) = layer.get_mut("objects").and_then(Value::as_array_mut) else {
+            continue;
+        };
+        for object in objects {
+            if object.get("tool").and_then(Value::as_str) == Some("eraser") {
+                object["tool"] = Value::String("mask".to_owned());
+            }
+        }
+    }
+    Ok(())
 }
 
 /// The brush no longer has `divergence` or `curl` (spec.md 6.2).
@@ -375,7 +501,7 @@ fn zip_err(err: zip::result::ZipError) -> CoreError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::document::Object;
+    use crate::document::{Layer, Object};
     use crate::keyframe::Animatable;
     use crate::project::{FieldKind, ProjectSettings, Resolution, StepHours};
     use crate::schema::{PropId, ToolKind};
@@ -463,6 +589,60 @@ mod tests {
             std::fs::read(&b).unwrap(),
             "archive bytes drifted; the container is not reproducible"
         );
+    }
+
+    /// A GRIB layer is saved as a reference to its file and nothing else.
+    /// The decoded field must not reach the archive (invariants 1 and 2), and
+    /// the reference must survive so the app can read the file again on open.
+    #[test]
+    fn a_grib_layer_keeps_its_reference_and_drops_its_samples() {
+        use crate::document::LayerSource;
+        use crate::raster::{RasterFrame, RasterGrid, RasterSequence};
+        use std::sync::Arc;
+
+        let grid = RasterGrid::new(2, 2, 0.0, 1.0, 1.0, 1.0, vec![[1.0, 2.0]; 4]).unwrap();
+        let sequence = RasterSequence::new(
+            FieldKind::Current,
+            vec![RasterFrame {
+                offset_hours: 0.0,
+                valid_unix_s: 0,
+                grid: Arc::new(grid),
+            }],
+        )
+        .unwrap();
+        let mut project = sample();
+        project.layers.push(Layer::from_grib(
+            "Currents",
+            PathBuf::from("/data/rtofs.grib2"),
+            Arc::new(sequence),
+            false,
+        ));
+
+        let json = to_canonical_json(&project).unwrap();
+        assert!(json.contains("rtofs.grib2"), "the path is the reference");
+        assert!(
+            !json.contains("raster"),
+            "no samples in the document: {json}"
+        );
+
+        let dir = TempDir::new();
+        let path = dir.path("grib.veproj");
+        save(&project, &path).unwrap();
+        let loaded = load(&path).unwrap();
+        let layer = &loaded.layers[1];
+        assert_eq!(
+            layer.source,
+            LayerSource::Grib {
+                path: PathBuf::from("/data/rtofs.grib2"),
+                field: FieldKind::Current,
+            }
+        );
+        assert!(
+            layer.raster.is_none(),
+            "the field is re-read by the app, never stored"
+        );
+        assert!(!layer.visible);
+        assert!(loaded.layers[0].source.is_painted());
     }
 
     #[test]
@@ -565,6 +745,89 @@ mod tests {
         assert_eq!(chains.len(), 1, "one polyline becomes one chain");
         assert_eq!(chains[0].len(), 2);
         assert_eq!(chains[0][1].x, 3000.0);
+    }
+
+    /// A version-7 eraser opens as a mask, with everything it drew intact. The
+    /// tool's name is stored on every object, so without the migration the file
+    /// would not deserialise at all.
+    #[test]
+    fn a_version_7_eraser_opens_as_a_mask() {
+        let mut value: Value = serde_json::to_value(sample()).unwrap();
+        value["schema_version"] = Value::from(7);
+        let object = &mut value["layers"][0]["objects"][0];
+        object["tool"] = Value::String("eraser".to_owned());
+        object["name"] = Value::String("Erase 1".to_owned());
+
+        let project = from_json(&serde_json::to_string(&value).unwrap()).expect("migrates");
+        let object = &project.layers[0].objects[0];
+        assert_eq!(object.tool, ToolKind::Mask);
+        assert_eq!(
+            object.name, "Erase 1",
+            "a typed name is the user's, not ours"
+        );
+        assert_eq!(
+            object.props.get(PropId::Invert).map(Animatable::base),
+            Some(PropValue::Bool(false)),
+            "an old mask covers what it was drawn over, as it always did"
+        );
+    }
+
+    /// A version-9 warp keeps pushing where it pushed: the distance and the
+    /// bearing become the place they pointed at.
+    #[test]
+    fn a_version_9_warp_pushes_to_where_it_used_to_point() {
+        let mut value: Value = serde_json::to_value(sample()).unwrap();
+        value["schema_version"] = Value::from(9);
+        let object = &mut value["layers"][0]["objects"][0];
+        object["tool"] = Value::String("warp".to_owned());
+        object["geometry"] =
+            serde_json::json!({ "stroke": { "chains": [[{ "x": 0.0, "y": 0.0 }]] } });
+        object["props"]["position"] = serde_json::json!({
+            "base": { "lon_lat": { "lon": 0.0, "lat": 0.0 } }
+        });
+        object["props"]["distance_km"] = serde_json::json!({ "base": { "f32": 111.19492 } });
+        object["props"]["push_bearing"] = serde_json::json!({ "base": { "angle": 90.0 } });
+
+        let project = from_json(&serde_json::to_string(&value).unwrap()).expect("migrates");
+        let props = &project.layers[0].objects[0].props;
+        let PropValue::LonLat(target) = props
+            .get(PropId::PushTo)
+            .map(Animatable::base)
+            .expect("a target")
+        else {
+            panic!("a target is a position");
+        };
+        // A degree of longitude at the equator, due east of the anchor.
+        assert!(
+            (target.lon - 1.0).abs() < 1e-3 && target.lat.abs() < 1e-6,
+            "pushed to {target:?}"
+        );
+    }
+
+    /// A version-8 modifier stamp becomes the stroke it would have been: one
+    /// point, at its own anchor, swept to the same disc — and its typed
+    /// diameter becomes the size that sweeps it, keeping the object the size it
+    /// was drawn.
+    #[test]
+    fn a_version_8_modifier_stamp_opens_as_a_one_point_stroke() {
+        let mut value: Value = serde_json::to_value(sample()).unwrap();
+        value["schema_version"] = Value::from(8);
+        let object = &mut value["layers"][0]["objects"][0];
+        object["tool"] = Value::String("intensity".to_owned());
+        object["geometry"] = serde_json::json!({ "disc": {} });
+        object["props"]["diameter_km"] = serde_json::json!({ "base": { "f32": 1500.0 } });
+
+        let project = from_json(&serde_json::to_string(&value).unwrap()).expect("migrates");
+        let object = &project.layers[0].objects[0];
+        let chains = object.geometry.stroke_chains();
+        assert_eq!(chains.len(), 1, "one stamp is one chain");
+        assert_eq!(chains[0].len(), 1, "of one point");
+        assert_eq!(
+            object.props.get(PropId::SizeKm).map(Animatable::base),
+            Some(PropValue::F32(1500.0)),
+            "the diameter it was drawn at is the size that sweeps it"
+        );
+        assert!(object.props.get(PropId::DiameterKm).is_none());
     }
 
     /// A version-2 brush must lose its orphaned `fill_mode` and gain

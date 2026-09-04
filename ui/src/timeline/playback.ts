@@ -181,6 +181,17 @@ export function stepAt(x: number, pxPerStep: number, last: number): number {
 }
 
 /**
+ * Where an arrow key moves the playhead (spec.md 9.4).
+ *
+ * Clamped, not wrapped — unlike playback, which loops when the user asks it
+ * to. An arrow is for looking at a particular time, and stepping off the end
+ * of the timeline back to the start is a jump nobody asked for.
+ */
+export function steppedBy(step: number, delta: number, last: number): number {
+  return Math.min(last, Math.max(0, step + delta));
+}
+
+/**
  * A dragged key's destination, from where it was grabbed and how far the
  * pointer has moved. Constrained to whole steps (spec.md 9.3) and to the
  * timeline.
@@ -205,6 +216,32 @@ export function uniqueTiles(
     if (seen.has(key)) continue;
     seen.add(key);
     out.push({ z: tile.z, x: tile.x, y: tile.y });
+  }
+  return out;
+}
+
+/**
+ * The steps between keys whose value is interpolated (spec.md 9.3).
+ *
+ * Strictly between two consecutive keys, and only where the earlier one blends:
+ * the interpolation belongs to the key the segment *leaves*, so a holding key
+ * keeps its own value until the next one and nothing in that gap is
+ * interpolated. Outside the first and last key the nearest key holds (§4.5),
+ * which is not interpolation either.
+ *
+ * Takes the steps as *drawn* rather than as stored, so a keyframe drag moves
+ * its dots with it.
+ */
+export function interpolatedSteps(
+  keys: ReadonlyArray<{ step: number; hold: boolean }>,
+): number[] {
+  const sorted = [...keys].sort((a, b) => a.step - b.step);
+  const out: number[] = [];
+  for (let i = 0; i + 1 < sorted.length; i += 1) {
+    const from = sorted[i]!;
+    const to = sorted[i + 1]!;
+    if (from.hold) continue;
+    for (let step = from.step + 1; step < to.step; step += 1) out.push(step);
   }
   return out;
 }

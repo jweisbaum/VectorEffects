@@ -15,12 +15,15 @@
 
 use ve_core::LonLat;
 use ve_core::angle::Angle;
+use ve_core::raster::RasterGrid;
 use ve_core::vector::speed_azimuth_from_uv;
 use ve_render::aeqd::{Frame, Space};
 use ve_render::cpu::CpuEvaluator;
 use ve_render::evaluator::FieldEvaluator;
 use ve_render::gpu::GpuEvaluator;
-use ve_render::scene::{DirectionMode, EdgeMode, FlatObject, Scene, SpeedMode};
+use ve_render::scene::{
+    DirectionMode, EdgeMode, FlatObject, FlatRaster, Modifier, Scene, SpeedMode,
+};
 use ve_render::sdf::Shape;
 
 /// Absolute speed tolerance, m/s.
@@ -205,7 +208,38 @@ fn object(rng: &mut Rng) -> FlatObject {
         Space::Geodesic
     };
 
+    // A quarter of the objects modify what is beneath them instead of painting
+    // a field of their own (spec.md 6.3). Only the three that transform the
+    // vector where it is: a warp reads at a displaced position, which the GPU
+    // declines outright, and `a_warp_is_declined_by_the_gpu` covers that.
+    let modifier = match rng.next() {
+        r if r < 0.083 => Some(Modifier::Gain(rng.range(-1.0, 3.0))),
+        r if r < 0.167 => Some(Modifier::Radial(rng.range(-3.0, 3.0))),
+        r if r < 0.25 => Some(Modifier::Turn(rng.range(-180.0, 180.0))),
+        _ => None,
+    };
+
+    // One object in twelve covers everything *but* its footprint. Rare
+    // deliberately: an inverted object writes over the whole globe, so a scene
+    // full of them is a scene with nothing else left to compare.
+    //
+    // And calm, because only the mask can be inverted (spec.md 6.2) and a mask
+    // writes calm. The combination matters: an inverted object is evaluated at
+    // every cell on the globe including its own antipode, where the bearing
+    // from its anchor is ill-conditioned — an `f32` and an `f64` great circle
+    // through nearly opposite points do not agree on a direction, and neither
+    // does anything else. A mask has no direction to disagree about, which is
+    // why the document only offers the flag on the one tool that has none.
+    let invert = rng.next() < 0.083;
+    let speed = if invert {
+        SpeedMode::Constant(0.0)
+    } else {
+        speed
+    };
+
     FlatObject {
+        modifier,
+        invert,
         frame: Frame::in_space(anchor, rng.range(0.0, 360.0), rng.range(50.0, 250.0), space),
         cap_radius_m: shape.bounding_radius_m() * 3.0,
         shape,
@@ -225,18 +259,86 @@ fn object(rng: &mut Rng) -> FlatObject {
     }
 }
 
-fn scene(rng: &mut Rng, count: usize) -> Scene {
-    Scene {
-        objects: (0..count).map(|_| object(rng)).collect(),
+/// An imported field: a random lattice, global or regional, with gaps.
+///
+/// Values vary node to node so a backend that picked the wrong neighbour,
+/// or blended in the wrong direction, shows up; gaps exercise the missing
+/// node rule, and a global grid the seam at the last column.
+fn raster(rng: &mut Rng, z: usize) -> FlatRaster {
+    let global = rng.next() < 0.5;
+    let (ni, nj, lon0, lat0, d) = if global {
+        (72u32, 37u32, 0.0, 90.0, 5.0)
+    } else {
+        let d = rng.range(0.25, 2.0);
+        let ni = 8 + rng.index(40) as u32;
+        let nj = 8 + rng.index(30) as u32;
+        let lat0 = rng.range(-60.0, 85.0).min(90.0);
+        (ni, nj, rng.range(-180.0, 180.0), lat0, d)
+    };
+    let mut uv = Vec::with_capacity((ni * nj) as usize);
+    for _ in 0..ni * nj {
+        if rng.next() < 0.05 {
+            uv.push([ve_core::raster::MISSING, ve_core::raster::MISSING]);
+        } else {
+            uv.push([rng.range(-25.0, 25.0) as f32, rng.range(-25.0, 25.0) as f32]);
+        }
     }
+    // Keep the lattice on the earth: a regional grid that would run past the
+    // south pole is shortened instead.
+    let nj = if global {
+        nj
+    } else {
+        nj.min(((lat0 + 90.0) / d).floor() as u32 + 1).max(2)
+    };
+    uv.truncate((ni * nj) as usize);
+    let grid = RasterGrid::new(ni, nj, lon0, lat0, d, d, uv).expect("valid grid");
+    FlatRaster {
+        z,
+        grid: std::sync::Arc::new(grid),
+        // A third of imported fields are filtered to a band of speeds
+        // (spec.md 4.8). The band is placed inside the range the generator's
+        // values span, so it keeps some samples and drops others — a band that
+        // kept everything would compare nothing.
+        speed_range: if rng.next() < 0.33 {
+            let low = rng.range(0.0, 12.0);
+            Some(ve_core::document::SpeedRange {
+                min_mps: low as f32,
+                max_mps: (low + rng.range(1.0, 20.0)) as f32,
+            })
+        } else {
+            None
+        },
+    }
+}
+
+fn scene(rng: &mut Rng, count: usize) -> Scene {
+    let objects: Vec<FlatObject> = (0..count).map(|_| object(rng)).collect();
+    // About a third of scenes carry an imported field, somewhere in the
+    // stack: beneath everything, between two objects, or on top.
+    let rasters = if rng.next() < 0.35 {
+        let z = rng.index(objects.len() + 1);
+        vec![raster(rng, z)]
+    } else {
+        Vec::new()
+    };
+    Scene { objects, rasters }
 }
 
 fn samples(rng: &mut Rng, scene: &Scene, count: usize) -> Vec<LonLat> {
     let mut out = Vec::with_capacity(count);
     for i in 0..count {
         // Bias toward the objects, so most samples land where it matters
-        // rather than on empty ocean that trivially agrees.
-        if !scene.objects.is_empty() && i % 2 == 0 {
+        // rather than on empty ocean that trivially agrees. Every fourth
+        // sample lands inside the imported field instead, when there is one.
+        if let Some(raster) = scene.rasters.first().filter(|_| i % 4 == 1) {
+            let grid = &raster.grid;
+            let lon = grid.lon0 + rng.range(-0.5, f64::from(grid.ni) + 0.5) * grid.dlon;
+            let lat = grid.lat0 - rng.range(-0.5, f64::from(grid.nj) + 0.5) * grid.dlat;
+            out.push(LonLat {
+                lon: ((lon + 180.0).rem_euclid(360.0)) - 180.0,
+                lat: lat.clamp(-90.0, 90.0),
+            });
+        } else if !scene.objects.is_empty() && i % 2 == 0 {
             let object = &scene.objects[rng.index(scene.objects.len())];
             let bearing = Angle::new(rng.range(0.0, 360.0));
             let distance = rng.range(0.0, object.cap_radius_m * 1.1);
@@ -324,6 +426,61 @@ fn at_a_tangent_tie(scene: &Scene, position: LonLat) -> bool {
     })
 }
 
+/// How close to an object's own edge the two backends may legitimately
+/// disagree about which side of it a sample is on, in metres.
+///
+/// The signed distance is computed from local coordinates that run to a
+/// thousand kilometres and more, where an `f32` step is a metre or two. A few
+/// metres is therefore *below the resolution of the shader's arithmetic*, and
+/// which side of the edge it reports there is not a fact about the shape.
+///
+/// It matters at all only where crossing an edge is a discontinuity — a hard
+/// edge, whose weight jumps from nothing to everything, or a `Replace` object,
+/// which writes calm just inside its rim and leaves the field beneath
+/// untouched just outside it. Everywhere else the two sides agree to within
+/// the weight, which at an edge is nearly zero, so exempting them costs
+/// nothing. Four metres is a ten-thousandth of the finest export cell.
+const EDGE_TIE_M: f64 = 4.0;
+
+/// Whether a sample sits within `EDGE_TIE_M` of any object's boundary.
+fn at_an_edge_tie(scene: &Scene, position: LonLat) -> bool {
+    scene.objects.iter().any(|object| {
+        object.frame.distance_m(position) <= object.cap_radius_m + EDGE_TIE_M
+            && object.shape.distance(object.frame.to_local(position)).abs() <= EDGE_TIE_M
+    })
+}
+
+/// The GPU's slack at a regional grid's edge, in cells. Mirrors
+/// `RASTER_EDGE_SLACK` in `evaluate.wgsl`.
+const RASTER_SLACK_CELLS: f64 = 1e-3;
+
+/// Whether a sample sits in the band where the two backends legitimately
+/// disagree about whether an imported grid covers it.
+///
+/// Whether a point is inside a regional grid is index arithmetic:
+/// `(lat0 - lat) / dlat` against the last row. The CPU does it in f64 and
+/// allows a millionth of a cell for a point sitting exactly on the edge; the
+/// shader does it in f32, where the index of a large grid carries an error of a
+/// couple of ten-thousandths of a cell, and so allows a thousandth. Between the
+/// two slacks one backend samples the edge row and the other reports no
+/// coverage — a full-magnitude difference, across a sliver a few hundred metres
+/// wide at the edge of a 2° grid. Comparing there compares the two slacks,
+/// which is not what this suite is for; the sample generator aims half a cell
+/// outside the grid deliberately, so it lands in that sliver eventually.
+fn at_a_raster_edge(scene: &Scene, position: LonLat) -> bool {
+    scene.rasters.iter().any(|raster| {
+        let grid = &raster.grid;
+        // Just past either end: inside the slack, but outside the grid.
+        let past = |value: f64, last: f64| {
+            (last..=last + RASTER_SLACK_CELLS).contains(&value) && value > last
+                || (-RASTER_SLACK_CELLS..0.0).contains(&value)
+        };
+        let fj = (grid.lat0 - position.lat) / grid.dlat;
+        let fi = (position.lon - grid.lon0).rem_euclid(360.0) / grid.dlon;
+        past(fj, f64::from(grid.nj - 1)) || (!grid.wraps && past(fi, f64::from(grid.ni - 1)))
+    })
+}
+
 #[test]
 fn gpu_and_cpu_agree_within_the_preview_tolerance() {
     let gpu = match GpuEvaluator::new() {
@@ -358,7 +515,10 @@ fn gpu_and_cpu_agree_within_the_preview_tolerance() {
 
             // A finite answer is still required of the GPU here; only the
             // comparison is skipped.
-            if at_a_tangent_tie(&scene, points[index]) {
+            if at_a_tangent_tie(&scene, points[index])
+                || at_a_raster_edge(&scene, points[index])
+                || at_an_edge_tie(&scene, points[index])
+            {
                 skipped_ties += 1;
                 continue;
             }
@@ -395,7 +555,7 @@ fn gpu_and_cpu_agree_within_the_preview_tolerance() {
         "compared {compared} samples: worst speed error {worst_speed:.4} m/s \
          (tolerance {SPEED_ABS}), worst direction error {worst_direction:.3} deg \
          (tolerance {DIRECTION_DEG}); {skipped_ties} samples not compared at a \
-         path tangent tie"
+         tie — a path tangent, a raster edge, or an object's own edge"
     );
 
     // The exemption must stay an exemption. If it ever covers a large share of
@@ -403,8 +563,51 @@ fn gpu_and_cpu_agree_within_the_preview_tolerance() {
     // discontinuity, and the number above stops being worth reading.
     assert!(
         skipped_ties * 20 < compared,
-        "{skipped_ties} of {compared} samples were exempted as tangent ties, \
+        "{skipped_ties} of {compared} samples were exempted as ties, \
          which is too many for the exemption to be trustworthy"
+    );
+}
+
+/// Spec 6.3 and 7.8: a warp reads the composite at a displaced position, which
+/// needs the recursion a compute shader has not got. It must be declined
+/// outright, like the clone stamp, rather than rendered without its warp — a
+/// preview that quietly dropped one object would be a proxy for a scene the
+/// user does not have.
+#[test]
+fn a_warp_scene_is_reported_unsupported() {
+    let mut rng = Rng(11);
+    let mut scene = scene(&mut rng, 2);
+    scene.objects[1].modifier = Some(Modifier::Warp(ve_render::scene::Warp::Twist {
+        degrees: 45.0,
+    }));
+    assert!(!ve_render::gpu::supports(&scene));
+
+    // ...and the three that transform the vector where it already is are not
+    // declined: they are the reason the distinction is worth drawing.
+    for modifier in [
+        Modifier::Gain(0.5),
+        Modifier::Radial(0.5),
+        Modifier::Turn(30.0),
+    ] {
+        scene.objects[1].modifier = Some(modifier);
+        assert!(
+            ve_render::gpu::supports(&scene),
+            "{modifier:?} needs nothing the shader lacks"
+        );
+    }
+
+    let Ok(gpu) = GpuEvaluator::new() else {
+        println!("no GPU available; skipping the evaluation half");
+        return;
+    };
+    scene.objects[1].modifier = Some(Modifier::Warp(ve_render::scene::Warp::Push {
+        x: 100_000.0,
+        y: 0.0,
+    }));
+    assert!(
+        gpu.evaluate(&scene, &[LonLat { lon: 0.0, lat: 0.0 }])
+            .is_err(),
+        "must decline rather than render it wrong"
     );
 }
 

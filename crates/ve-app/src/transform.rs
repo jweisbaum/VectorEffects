@@ -23,6 +23,8 @@ use ve_core::command::Command;
 use ve_core::document::{Geometry, LocalPoint};
 use ve_core::keyframe::Animatable;
 use ve_core::schema::PropId;
+
+use crate::create::Tool;
 use ve_core::{LonLat, PropValue};
 use ve_render::aeqd::{Frame, Local, Space};
 use ve_render::scene::flatten_object;
@@ -351,6 +353,85 @@ pub fn peek_transform(state: &AppState, lon: f64, lat: f64) -> Result<Option<Tra
             handles: handles_for(&placed, gesture.items.len()),
             outlines,
         }))
+    })
+}
+
+/// One object's footprint, for the map to draw (spec.md 6.1, 6.2, 6.3).
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export, export_to = "OperatorOutline.ts")]
+pub struct OperatorOutline {
+    /// Which object.
+    pub object: u64,
+    /// Which tool drew it, so the map can say what it has found.
+    pub tool: Tool,
+    /// Whether it covers everything *but* its footprint. Masks only.
+    pub inverted: bool,
+    /// Its anchor, as `[lon, lat]`.
+    ///
+    /// The end of a warp's push that a pull does not move (spec.md 6.3), and
+    /// the frame every one of these outlines was lifted through.
+    pub anchor: [f64; 2],
+    /// Where its edge is.
+    pub outline: ObjectOutline,
+}
+
+/// The footprints the map may need to draw at `step`.
+///
+/// Two audiences, one round trip. The **edge under the pointer**, which is
+/// highlighted while a tool is in hand that draws objects like the one beneath
+/// it — so `tool` selects them, and the answer is bounded by how many objects
+/// that tool has drawn rather than by how many the project holds. And the
+/// **selection**, whose operators are outlined because they have no field to
+/// show where they are (spec.md 6.1, 6.2, 6.3).
+///
+/// Sent once per revision, step, tool and selection rather than per frame; the
+/// hit test that decides which edge the pointer is near is the map's own, on
+/// the outline it is already drawing.
+///
+/// Only what is visible: a hidden layer's objects are not drawn and an object
+/// outside its active range at this step is not there to draw.
+#[tauri::command]
+pub fn object_outlines(
+    state: tauri::State<'_, AppState>,
+    step: u32,
+    tool: Option<Tool>,
+    objects: Vec<u64>,
+) -> Result<Vec<OperatorOutline>> {
+    outlines_at(&state, step, tool, &objects)
+}
+
+/// Implementation of [`object_outlines`], callable without a Tauri handle.
+pub fn outlines_at(
+    state: &AppState,
+    step: u32,
+    tool: Option<Tool>,
+    objects: &[u64],
+) -> Result<Vec<OperatorOutline>> {
+    let wanted = tool.map(Tool::kind);
+    with_session(state, |session| {
+        let project = &session.require_open()?.project;
+        let mut out = Vec::new();
+        for layer in &project.layers {
+            if !layer.visible {
+                continue;
+            }
+            for object in &layer.objects {
+                if Some(object.tool) != wanted && !objects.contains(&object.id.raw()) {
+                    continue;
+                }
+                let Some(flat) = flatten_object(object, step) else {
+                    continue;
+                };
+                out.push(OperatorOutline {
+                    object: object.id.raw(),
+                    tool: Tool::of(object.tool),
+                    inverted: flat.invert,
+                    anchor: [flat.frame.anchor.lon, flat.frame.anchor.lat],
+                    outline: outline_of(&BaselineOutline::of(&flat.shape), &flat.frame),
+                });
+            }
+        }
+        Ok(out)
     })
 }
 

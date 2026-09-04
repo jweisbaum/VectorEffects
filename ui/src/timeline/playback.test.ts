@@ -12,10 +12,12 @@ import {
   draggedStep,
   forecastLabel,
   freshMemory,
+  interpolatedSteps,
   labelEvery,
   mayAdvanceInto,
   nextStep,
   stepAt,
+  steppedBy,
   type StepState,
   tick,
   uniqueTiles,
@@ -213,5 +215,74 @@ describe("uniqueTiles", () => {
       { z: 1, x: 0, y: 0 },
       { z: 1, x: 3, y: 0 },
     ]);
+  });
+});
+
+describe("interpolatedSteps", () => {
+  /**
+   * Spec 9.3/4.5: the value is interpolated strictly between two keys. Before
+   * the first and after the last the nearest key holds, which is not a blend
+   * and gets no dots.
+   */
+  it("marks the steps inside a blended segment and no others", () => {
+    const keys = [
+      { step: 2, hold: false },
+      { step: 6, hold: false },
+    ];
+    expect(interpolatedSteps(keys)).toEqual([3, 4, 5]);
+  });
+
+  /**
+   * The interpolation belongs to the key the segment leaves, so a holding key
+   * blends nothing until the next one — even though the segment after that
+   * next key may blend.
+   */
+  it("leaves a holding segment empty and blends the one after it", () => {
+    const keys = [
+      { step: 0, hold: true },
+      { step: 4, hold: false },
+      { step: 7, hold: false },
+    ];
+    expect(interpolatedSteps(keys)).toEqual([5, 6]);
+  });
+
+  it("has nothing to mark for one key, no keys, or adjacent keys", () => {
+    expect(interpolatedSteps([])).toEqual([]);
+    expect(interpolatedSteps([{ step: 3, hold: false }])).toEqual([]);
+    expect(
+      interpolatedSteps([
+        { step: 3, hold: false },
+        { step: 4, hold: false },
+      ]),
+    ).toEqual([]);
+  });
+
+  /** A drag reorders the keys it moves; the dots follow the drawn order. */
+  it("sorts before pairing, so a dragged key still bounds its segment", () => {
+    const keys = [
+      { step: 8, hold: false },
+      { step: 5, hold: false },
+    ];
+    expect(interpolatedSteps(keys)).toEqual([6, 7]);
+  });
+});
+
+describe("steppedBy", () => {
+  /**
+   * Spec 9.4: the arrows walk the ruler one step at a time. They clamp where
+   * playback loops — an arrow is for reaching a particular time, and wrapping
+   * to the other end of the timeline is a jump nobody asked for.
+   */
+  it("moves one step and stops at each end", () => {
+    expect(steppedBy(4, 1, 9)).toBe(5);
+    expect(steppedBy(4, -1, 9)).toBe(3);
+    expect(steppedBy(9, 1, 9)).toBe(9);
+    expect(steppedBy(0, -1, 9)).toBe(0);
+  });
+
+  /** Where `nextStep` would wrap with looping on, this never does. */
+  it("differs from playback's advance at the end", () => {
+    expect(nextStep(9, 9, true)).toBe(0);
+    expect(steppedBy(9, 1, 9)).toBe(9);
   });
 });

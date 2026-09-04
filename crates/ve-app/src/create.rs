@@ -42,11 +42,19 @@ pub enum Tool {
     /// A polygon or a dragged-out preset, filled with a vector field.
     ShapeFill,
     /// Writes calm over what is beneath it.
-    Eraser,
+    Mask,
     /// Samples the composite below it in z-order.
     CloneStamp,
     /// A vector field along a path.
     Curve,
+    /// Scales the speed of the field beneath it.
+    Intensity,
+    /// Bends the field beneath it toward or away from its anchor.
+    Divergence,
+    /// Turns the field beneath it by a fixed angle.
+    Turn,
+    /// Displaces the field beneath it.
+    Warp,
 }
 
 impl Tool {
@@ -56,9 +64,13 @@ impl Tool {
             Self::Brush => ToolKind::Brush,
             Self::Circle => ToolKind::Circle,
             Self::ShapeFill => ToolKind::ShapeFill,
-            Self::Eraser => ToolKind::Eraser,
+            Self::Mask => ToolKind::Mask,
             Self::CloneStamp => ToolKind::CloneStamp,
             Self::Curve => ToolKind::Curve,
+            Self::Intensity => ToolKind::Intensity,
+            Self::Divergence => ToolKind::Divergence,
+            Self::Turn => ToolKind::Turn,
+            Self::Warp => ToolKind::Warp,
         }
     }
 
@@ -68,9 +80,13 @@ impl Tool {
             ToolKind::Brush => Self::Brush,
             ToolKind::Circle => Self::Circle,
             ToolKind::ShapeFill => Self::ShapeFill,
-            ToolKind::Eraser => Self::Eraser,
+            ToolKind::Mask => Self::Mask,
             ToolKind::CloneStamp => Self::CloneStamp,
             ToolKind::Curve => Self::Curve,
+            ToolKind::Intensity => Self::Intensity,
+            ToolKind::Divergence => Self::Divergence,
+            ToolKind::Turn => Self::Turn,
+            ToolKind::Warp => Self::Warp,
         }
     }
 
@@ -80,9 +96,13 @@ impl Tool {
             Self::Brush => "Stroke",
             Self::Circle => "Circle",
             Self::ShapeFill => "Shape",
-            Self::Eraser => "Erase",
+            Self::Mask => "Mask",
             Self::CloneStamp => "Clone",
             Self::Curve => "Curve",
+            Self::Intensity => "Intensity",
+            Self::Divergence => "Divergence",
+            Self::Turn => "Rotation",
+            Self::Warp => "Warp",
         }
     }
 }
@@ -107,14 +127,14 @@ pub struct PathPoint {
 ///
 /// Deliberately a small closed set rather than one variant per tool: two tools
 /// that draw the same way should share the same gesture, so that anything true
-/// of one gesture is true for every tool that uses it. The eraser and the clone
+/// of one gesture is true for every tool that uses it. The mask and the clone
 /// stamp are brush-like *because* all three send a [`Self::Stroke`], not
 /// because three separate code paths were written to match.
 #[derive(Debug, Clone, Deserialize, TS)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[ts(export, export_to = "Gesture.ts")]
 pub enum Gesture {
-    /// A freehand polyline: the brush, the eraser and the clone stamp.
+    /// A freehand polyline: the brush, the mask and the clone stamp.
     Stroke {
         /// Pointer positions as `[lon, lat]`, in the order they were drawn.
         points: Vec<[f64; 2]>,
@@ -346,10 +366,17 @@ fn geometry_of(
     };
 
     match (tool, gesture) {
-        // The three brush-like tools, sharing one gesture and therefore one
-        // geometry. Their anchor is where the gesture began.
+        // Every painted tool, sharing one gesture and therefore one geometry:
+        // the brush, the mask, the clone stamp and the four modifiers. Their
+        // anchor is where the gesture began.
         (
-            ToolKind::Brush | ToolKind::Eraser | ToolKind::CloneStamp,
+            ToolKind::Brush
+            | ToolKind::Mask
+            | ToolKind::CloneStamp
+            | ToolKind::Intensity
+            | ToolKind::Divergence
+            | ToolKind::Turn
+            | ToolKind::Warp,
             Gesture::Stroke { points: raw },
         ) => {
             let positions = points(raw, 1, "points")?;
@@ -565,6 +592,23 @@ pub fn create(state: &AppState, new: NewObject) -> Result<ProjectSummary> {
         if let Some(prop) = object.props.get_mut(PropId::Position) {
             prop.set_base(PropValue::LonLat(anchor));
         }
+        // A warp starts pushing nowhere unless the caller said otherwise: its
+        // push is measured *from* the anchor, which does not exist until the
+        // gesture does, so there is nothing a push could have meant before this
+        // point. It is set afterwards by pulling the warp where it should go
+        // (spec.md 6.3), which is why the option bar does not offer it — but an
+        // option that names it explicitly is still honoured, since by then the
+        // caller knows where the gesture went.
+        let pushed = new
+            .options
+            .iter()
+            .any(|option| option.property == format!("{:?}", PropId::PushTo));
+        if tool == ToolKind::Warp
+            && !pushed
+            && let Some(prop) = object.props.get_mut(PropId::PushTo)
+        {
+            prop.set_base(PropValue::LonLat(anchor));
+        }
 
         let command = match merge_into(layer, &object, &positions)? {
             Some((target, merged)) => Command::SetGeometry {
@@ -605,12 +649,25 @@ fn merge_into(
     object: &Object,
     positions: &[LonLat],
 ) -> Result<Option<(ve_core::id::Id, Geometry)>> {
-    // A clone stamp reads from a fixed displacement off its own anchor, and a
-    // merge re-expresses the new chain in the *target's* frame — which is a
-    // different anchor, and therefore a different patch of the field. Absorbing
-    // one would change what it paints, which is the one thing a merge may never
-    // do (spec.md 6.1). Two clone strokes stay two objects.
-    if object.tool == ToolKind::CloneStamp {
+    // A merge re-expresses the new chain in the *target's* frame, and therefore
+    // under the target's anchor. A tool whose field is measured from that
+    // anchor would paint something different afterwards, which is the one thing
+    // a merge may never do (spec.md 6.1): the clone stamp reads from a
+    // displacement off it, a divergence radiates from it, and a warp both
+    // twists about it and pushes from it. Two strokes of any of those stay two
+    // objects.
+    //
+    // The rest are safe because nothing they do refers to the anchor: an
+    // intensity scales and a turn rotates, wherever the frame is centred.
+    // A warp is anchored in both of its modes now: a twist turns about the
+    // anchor, and a push carries the field from the anchor to a place, so the
+    // displacement is the offset between the two and moving the anchor changes
+    // it (spec.md 6.3).
+    let anchored = matches!(
+        object.tool,
+        ToolKind::CloneStamp | ToolKind::Divergence | ToolKind::Warp
+    );
+    if anchored {
         return Ok(None);
     }
     Ok(merge_target(layer, object, positions))
@@ -682,15 +739,15 @@ mod tests {
 
     #[test]
     fn a_property_another_tool_owns_is_refused() {
-        // The eraser has no speed: writing calm is the whole of what it does.
+        // The mask has no speed: writing calm is the whole of what it does.
         let err = resolve_options(
-            ToolKind::Eraser,
+            ToolKind::Mask,
             &[ToolOption {
                 property: "Speed".to_owned(),
                 value: PropertyValue::Number { value: 12.0 },
             }],
         )
-        .expect_err("the eraser has no speed");
+        .expect_err("the mask has no speed");
         assert!(matches!(err, AppError::BadOption { .. }));
     }
 

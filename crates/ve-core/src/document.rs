@@ -6,9 +6,14 @@
 //! object is created and never revisited (spec.md 3.5). That is what keeps
 //! objects pinned to the earth under pan and zoom.
 
+use std::path::PathBuf;
+use std::sync::Arc;
+
 use serde::{Deserialize, Serialize};
 
 use crate::id::Id;
+use crate::project::FieldKind;
+use crate::raster::RasterSequence;
 use crate::schema::{PropertyMap, ToolKind};
 
 /// A point in an object's local AEQD frame, in metres from the anchor.
@@ -117,9 +122,16 @@ impl Geometry {
     /// The default geometry for a tool, used when creating an empty object.
     pub fn default_for(tool: ToolKind) -> Self {
         match tool {
-            ToolKind::Brush | ToolKind::Eraser | ToolKind::CloneStamp => {
-                Self::Stroke { chains: Vec::new() }
-            }
+            // Everything painted along a polyline: the brush, the mask, the
+            // clone stamp, and the modifiers, which are swept the same way so
+            // that two strokes of one merge like two of a brush (spec.md 6.3).
+            ToolKind::Brush
+            | ToolKind::Mask
+            | ToolKind::CloneStamp
+            | ToolKind::Intensity
+            | ToolKind::Divergence
+            | ToolKind::Turn
+            | ToolKind::Warp => Self::Stroke { chains: Vec::new() },
             ToolKind::Circle => Self::Disc { radius_m: None },
             ToolKind::ShapeFill => Self::Polygon { points: Vec::new() },
             ToolKind::Curve => Self::Path { nodes: Vec::new() },
@@ -305,6 +317,88 @@ pub struct Layer {
     pub locked: bool,
     /// Objects in z-order; index 0 is the bottom.
     pub objects: Vec<Object>,
+    /// Where the layer's field comes from besides its objects.
+    ///
+    /// Absent from the file for an ordinary painted layer, so older projects
+    /// open unchanged.
+    #[serde(default, skip_serializing_if = "LayerSource::is_painted")]
+    pub source: LayerSource,
+    /// The decoded field of a [`LayerSource::Grib`] layer.
+    ///
+    /// **Never serialised** (invariants 1 and 2): the file keeps the path in
+    /// `source` and the app re-reads the GRIB when the project opens. `None`
+    /// on a GRIB layer means the file could not be read, and the layer then
+    /// contributes nothing until it can be. Shared rather than owned because
+    /// the document is cloned freely — into history, into render snapshots —
+    /// and a decoded field can run to hundreds of megabytes.
+    #[serde(skip)]
+    pub raster: Option<Arc<RasterSequence>>,
+    /// Which speeds of an imported field to keep (spec.md 4.8).
+    ///
+    /// `None` keeps every sample, which is what a layer has until the user
+    /// says otherwise. A range drops the samples outside it — the field beneath
+    /// then shows through, exactly as it does where the file has no value at
+    /// all — which is how one band of a forecast is isolated: the calms, the
+    /// gale, the jet.
+    ///
+    /// A property of the *layer* rather than of the lattice, because it is a
+    /// choice about what to show and not a fact about the file. It therefore
+    /// costs nothing on disk beyond two numbers and survives the file being
+    /// re-read on open.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speed_range: Option<SpeedRange>,
+}
+
+/// A band of speeds to keep from an imported field, in metres per second.
+///
+/// `f32` and not `f64`: it is a threshold on a field stored in `f32`, and a
+/// `f32` needs no canonical serde helper to survive a round trip
+/// (`crate::canonical`).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct SpeedRange {
+    /// Slowest speed kept.
+    pub min_mps: f32,
+    /// Fastest speed kept.
+    pub max_mps: f32,
+}
+
+impl SpeedRange {
+    /// Whether a speed is inside the band.
+    ///
+    /// Inclusive at both ends: a range set to exactly the speeds on screen
+    /// should keep them.
+    pub fn keeps(self, speed_mps: f32) -> bool {
+        speed_mps >= self.min_mps && speed_mps <= self.max_mps
+    }
+}
+
+/// What a layer's field is built from besides the objects painted on it.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum LayerSource {
+    /// Only what the user paints. The ordinary case.
+    #[default]
+    Painted,
+    /// A field imported from a GRIB2 file, drawn beneath the layer's objects.
+    ///
+    /// The file's first message is aligned with the project's first step, and
+    /// each later step shows the message valid at its own forecast hour — or
+    /// no imported field at all, where the file has none for that time
+    /// (spec.md 4.8).
+    Grib {
+        /// The file, as the user chose it. Not copied into the project.
+        path: PathBuf,
+        /// Which of the file's fields this layer carries: a file holding both
+        /// wind and currents imports as two layers.
+        field: FieldKind,
+    },
+}
+
+impl LayerSource {
+    /// Whether this is the default, unwritten source.
+    pub fn is_painted(&self) -> bool {
+        matches!(self, Self::Painted)
+    }
 }
 
 impl Layer {
@@ -316,7 +410,37 @@ impl Layer {
             visible: true,
             locked: false,
             objects: Vec::new(),
+            source: LayerSource::Painted,
+            raster: None,
+            speed_range: None,
         }
+    }
+
+    /// A layer carrying an imported GRIB field, hidden or shown as asked.
+    pub fn from_grib(
+        name: impl Into<String>,
+        path: PathBuf,
+        raster: Arc<RasterSequence>,
+        visible: bool,
+    ) -> Self {
+        Self {
+            id: Id::new(),
+            name: name.into(),
+            visible,
+            locked: false,
+            objects: Vec::new(),
+            source: LayerSource::Grib {
+                path,
+                field: raster.kind,
+            },
+            raster: Some(raster),
+            speed_range: None,
+        }
+    }
+
+    /// Whether the layer carries an imported field.
+    pub fn is_grib(&self) -> bool {
+        !self.source.is_painted()
     }
 
     /// Finds an object's index within this layer.

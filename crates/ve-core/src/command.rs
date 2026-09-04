@@ -68,6 +68,15 @@ pub enum Command {
         /// New state.
         after: bool,
     },
+    /// Sets which speeds an imported field keeps (spec.md 4.8).
+    SetLayerSpeedRange {
+        /// Target layer.
+        layer: crate::id::Id,
+        /// Previous band.
+        before: Option<crate::document::SpeedRange>,
+        /// New band; `None` keeps every speed.
+        after: Option<crate::document::SpeedRange>,
+    },
     /// Locks or unlocks a layer.
     SetLayerLocked {
         /// Target layer.
@@ -215,6 +224,13 @@ impl Command {
             Self::AddLayer { .. } => "Add layer".into(),
             Self::RemoveLayer { .. } => "Delete layer".into(),
             Self::RenameLayer { .. } => "Rename layer".into(),
+            Self::SetLayerSpeedRange { after, .. } => {
+                if after.is_some() {
+                    "Filter layer speeds".into()
+                } else {
+                    "Clear the speed filter".into()
+                }
+            }
             Self::SetLayerVisible { after, .. } => {
                 if *after {
                     "Show layer".into()
@@ -280,6 +296,10 @@ impl Command {
             }
             Self::SetLayerVisible { layer, after, .. } => {
                 layer_mut(project, *layer)?.visible = *after;
+                Ok(())
+            }
+            Self::SetLayerSpeedRange { layer, after, .. } => {
+                layer_mut(project, *layer)?.speed_range = *after;
                 Ok(())
             }
             Self::SetLayerLocked { layer, after, .. } => {
@@ -409,6 +429,10 @@ impl Command {
             }
             Self::SetLayerVisible { layer, before, .. } => {
                 layer_mut(project, *layer)?.visible = *before;
+                Ok(())
+            }
+            Self::SetLayerSpeedRange { layer, before, .. } => {
+                layer_mut(project, *layer)?.speed_range = *before;
                 Ok(())
             }
             Self::SetLayerLocked { layer, before, .. } => {

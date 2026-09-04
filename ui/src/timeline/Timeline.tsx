@@ -14,24 +14,39 @@
  */
 
 import { listen } from "@tauri-apps/api/event";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { DocumentTree } from "../generated/DocumentTree";
 import type { InterpolationView } from "../generated/InterpolationView";
 import type { ObjectTracks } from "../generated/ObjectTracks";
 import type { ProjectSummary } from "../generated/ProjectSummary";
+import type { PropertyValue } from "../generated/PropertyValue";
 import type { RenderProgress } from "../generated/RenderProgress";
 import type { ShrinkImpact } from "../generated/ShrinkImpact";
 import type { TileAddress } from "../generated/TileAddress";
+import type { TrackSamples } from "../generated/TrackSamples";
+import NumberField from "../NumberField";
 import { api } from "../ipc";
+import { MAX_STEPS } from "../project/format";
+import {
+  type Extent,
+  extentOf,
+  formatValue,
+  type PlotSeries,
+  plotSeries,
+  pointsOf,
+  polyline,
+} from "./graph";
 import {
   classify,
   draggedStep,
   forecastLabel,
   freshMemory,
+  interpolatedSteps,
   labelEvery,
   type ReadinessMemory,
   stepAt,
+  steppedBy,
   type StepState,
   nextStep,
   tick,
@@ -46,6 +61,8 @@ const MIN_STEP_PX = 6;
 const MAX_STEP_PX = 48;
 /** Default playback rate (spec.md 9.4). */
 const DEFAULT_RATE = 8;
+/** Height of an expanded value graph, in CSS pixels. */
+const GRAPH_PX = 46;
 
 /** A selected keyframe's identity. */
 function keyId(object: number, property: string, step: number): string {
@@ -62,6 +79,21 @@ interface KeyRef {
 function parseKey(id: string): KeyRef {
   const [object, property, step] = id.split("|");
   return { object: Number(object), property: property ?? "", step: Number(step) };
+}
+
+/** A track's identity, for the graphs that are open and the samples fetched. */
+function trackId(object: number, property: string): string {
+  return `${object}|${property}`;
+}
+
+/**
+ * Whether a property has a magnitude to graph.
+ *
+ * A boolean and a choice do not: they hold rather than blend (spec.md 4.5), so
+ * a line through them would say nothing the diamonds do not.
+ */
+function graphable(base: PropertyValue): boolean {
+  return base.kind === "number" || base.kind === "angle" || base.kind === "position";
 }
 
 /** Names for the easings, in the order the backend offers them. */
@@ -244,6 +276,9 @@ export default function Timeline({
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [tracks, setTracks] = useState<Map<number, ObjectTracks>>(new Map());
   const [error, setError] = useState<string | null>(null);
+  /** Tracks whose value graph is expanded, by `trackId`. */
+  const [graphs, setGraphs] = useState<Set<string>>(new Set());
+  const [samples, setSamples] = useState<Map<string, TrackSamples>>(new Map());
 
   useEffect(() => {
     api
@@ -275,6 +310,78 @@ export default function Timeline({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [expandedKey, project.revision, step]);
+
+  // Samples for the open graphs. They describe the whole timeline, so they
+  // depend on the revision and not on the step being viewed — scrubbing must
+  // not re-fetch a hundred values per open graph.
+  const graphKey = [...graphs].sort().join(",");
+  useEffect(() => {
+    const ids = [...graphs];
+    if (ids.length === 0) {
+      setSamples(new Map());
+      return;
+    }
+    let live = true;
+    void Promise.all(
+      ids.map((id) => {
+        const [object, property] = id.split("|");
+        return api.trackSamples(Number(object), property ?? "").catch(() => null);
+      }),
+    ).then((found) => {
+      if (!live) return;
+      const next = new Map<string, TrackSamples>();
+      found.forEach((entry, index) => {
+        if (entry) next.set(ids[index]!, entry);
+      });
+      setSamples(next);
+    });
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [graphKey, project.revision]);
+
+  // Converted and scaled once per fetch rather than once per frame: a scrub
+  // re-renders this panel at frame rate and the numbers do not change with the
+  // playhead.
+  const plots = useMemo(() => {
+    const out = new Map<string, { series: PlotSeries[]; extent: Extent }>();
+    for (const [id, entry] of samples) {
+      if (entry.series.length === 0) continue;
+      const series = entry.series.map((one) => plotSeries(one, project.direction_convention));
+      out.set(id, { series, extent: extentOf(series) });
+    }
+    return out;
+  }, [samples, project.direction_convention]);
+
+  /**
+   * Shows or hides an object's property tracks.
+   *
+   * Collapsing closes the graphs under it too: an open graph is re-sampled on
+   * every revision, and one nobody can see should not be.
+   */
+  const toggleObject = (id: number) => {
+    const closing = expanded.has(id);
+    setExpanded((current) => {
+      const next = new Set(current);
+      if (closing) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+    if (closing) {
+      setGraphs((open) => new Set([...open].filter((graph) => !graph.startsWith(`${id}|`))));
+    }
+  };
+
+  const toggleGraph = (object: number, property: string) => {
+    setGraphs((current) => {
+      const next = new Set(current);
+      const id = trackId(object, property);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   const run = (action: Promise<ProjectSummary>) => {
     setError(null);
@@ -327,7 +434,8 @@ export default function Timeline({
       .catch((err: unknown) => setError(String(err)));
   }, [onChanged, project, selectedKeys]);
 
-  // Keys: space plays, delete removes, escape clears. Never from a field.
+  // Keys: space plays and stops, the arrows step, delete removes, escape
+  // clears. Never from a field.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
@@ -336,6 +444,14 @@ export default function Timeline({
       if (event.key === " ") {
         event.preventDefault();
         setPlaying((on) => !on);
+      } else if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+        // One step per press, along the ruler. Playback stops: the arrows are
+        // for looking at a particular time, and a playhead that carried on
+        // moving would take the step away again.
+        event.preventDefault();
+        setPlaying(false);
+        const to = steppedBy(stepRef.current, event.key === "ArrowRight" ? 1 : -1, last);
+        if (to !== stepRef.current) onStepChange(to);
       } else if ((event.key === "Delete" || event.key === "Backspace") && selectedKeys.size > 0) {
         event.preventDefault();
         deleteSelected();
@@ -346,7 +462,7 @@ export default function Timeline({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [deleteSelected, menu, selectedKeys.size]);
+  }, [deleteSelected, last, menu, onStepChange, selectedKeys.size]);
 
   // --- Pointer handling over the grid ---
   const onGridPointerMove = (event: React.PointerEvent) => {
@@ -496,7 +612,7 @@ export default function Timeline({
   // --- Timeline-wide settings ---
   const [shrink, setShrink] = useState<{ to: number; impact: ShrinkImpact } | null>(null);
   const changeStepCount = (to: number) => {
-    if (!Number.isFinite(to) || to < 1 || to > 240 || to === project.step_count) return;
+    if (!Number.isFinite(to) || to < 1 || to > MAX_STEPS || to === project.step_count) return;
     if (to > project.step_count) {
       run(api.setStepCount(to));
       return;
@@ -534,13 +650,12 @@ export default function Timeline({
           ⟳
         </button>
         <label title="Steps per second (spec.md 9.4)">
-          <input
-            type="number"
+          <NumberField
             min={0.5}
             max={60}
             step={0.5}
             value={rate}
-            onChange={(e) => setRate(Math.max(0.5, Number(e.target.value) || DEFAULT_RATE))}
+            onCommit={setRate}
           />
           steps/s
         </label>
@@ -578,12 +693,15 @@ export default function Timeline({
         </label>
         <label title="Number of time steps. Reducing it deletes keyframes past the end, after a confirmation (spec.md 4.1)">
           Steps
-          <input
-            type="number"
+          <NumberField
             min={1}
-            max={240}
+            max={MAX_STEPS}
             value={project.step_count}
-            onChange={(e) => changeStepCount(Number(e.target.value))}
+            // On blur, not on every keystroke: shrinking asks for a
+            // confirmation that names what it will delete (spec.md 4.1), and
+            // typing 12 must not ask it on the way past 1.
+            commitWhileTyping={false}
+            onCommit={changeStepCount}
           />
         </label>
       </div>
@@ -638,7 +756,24 @@ export default function Timeline({
           <div key={layer.id} className="tl-layer">
             <div className="tl-row tl-layer-row">
               <div className="tl-labels">{layer.name}</div>
-              <div className="tl-grid" style={{ width: gridWidth }} />
+              <div className="tl-grid" style={{ width: gridWidth }}>
+                {/*
+                  Which steps an imported field has a message for (spec.md 4.8).
+                  A step it says nothing about shows no field at all, and
+                  without this the user is left to work out from a field that
+                  comes and goes which times the file actually covers.
+                */}
+                {layer.grib?.covered_steps.map((covered, s) =>
+                  covered ? (
+                    <span
+                      key={s}
+                      className="tl-grib"
+                      style={{ left: s * pxPerStep, width: Math.max(2, pxPerStep - 1) }}
+                      title={`${layer.name}: a message at ${tickLabel(s)}`}
+                    />
+                  ) : null,
+                )}
+              </div>
             </div>
             {layer.objects.map((object) => {
               const open = expanded.has(object.id);
@@ -656,14 +791,7 @@ export default function Timeline({
                     <div className="tl-labels">
                       <button
                         className="tl-disclose"
-                        onClick={() =>
-                          setExpanded((current) => {
-                            const next = new Set(current);
-                            if (next.has(object.id)) next.delete(object.id);
-                            else next.add(object.id);
-                            return next;
-                          })
-                        }
+                        onClick={() => toggleObject(object.id)}
                         title={open ? "Hide properties" : "Show properties"}
                       >
                         {open ? "▾" : "▸"}
@@ -731,76 +859,204 @@ export default function Timeline({
 
                   {/* Property tracks (spec.md 9.3). */}
                   {open &&
-                    entry?.tracks.map((track, row) => (
-                      <div
-                        key={track.property}
-                        className={`tl-row tl-track${track.interpolated_here ? " interpolated" : ""}`}
-                        data-track={`${object.id}:${row}`}
-                      >
-                        <div className="tl-labels tl-track-label">
-                          <span>{track.label}</span>
-                          {track.interpolated_here && (
-                            <span className="muted" title="Interpolated between keys at this step">
-                              ~
-                            </span>
-                          )}
-                          <button
-                            className={`tl-key-here${track.keyed_here ? " on" : ""}`}
-                            title={
-                              track.keyed_here
-                                ? "Remove the key at this step"
-                                : "Key this property at this step"
-                            }
-                            onClick={() =>
-                              run(
-                                track.keyed_here
-                                  ? api.removeKeyframe(object.id, track.property, step)
-                                  : api.setKeyframe(object.id, track.property, step),
-                              )
-                            }
-                          >
-                            ◆
-                          </button>
-                        </div>
+                    entry?.tracks.map((track, row) => {
+                      const graphId = trackId(object.id, track.property);
+                      const graphOpen = graphs.has(graphId);
+                      const plot = plots.get(graphId) ?? null;
+                      // The keys as drawn: a drag moves the selected ones, and
+                      // the dots between them have to move with them.
+                      const drawn = track.keys.map((key) => ({
+                        step:
+                          keyDrag && selectedKeys.has(keyId(object.id, track.property, key.step))
+                            ? draggedStep(key.step, keyDrag.delta * pxPerStep, pxPerStep, last)
+                            : key.step,
+                        hold: key.interp.kind === "step",
+                      }));
+                      return (
+                        <Fragment key={track.property}>
                         <div
-                          className="tl-grid"
-                          style={{ width: gridWidth }}
-                          onPointerDown={(event) => {
-                            const el = scrollRef.current;
-                            const rect = el?.getBoundingClientRect();
-                            const y = rect ? event.clientY - rect.top + (el?.scrollTop ?? 0) : 0;
-                            boxRef.current = { x0: gridX(event), y0: y };
-                            setBox({ x0: gridX(event), y0: y, x1: gridX(event), y1: y });
-                            (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
-                          }}
+                          className={`tl-row tl-track${track.interpolated_here ? " interpolated" : ""}`}
+                          data-track={`${object.id}:${row}`}
                         >
-                          {track.keys.map((key) => {
-                            const id = keyId(object.id, track.property, key.step);
-                            const selected = selectedKeys.has(id);
-                            const shown =
-                              keyDrag && selected
-                                ? draggedStep(key.step, keyDrag.delta * pxPerStep, pxPerStep, last)
-                                : key.step;
-                            return (
-                              <span
-                                key={key.step}
-                                className={`tl-key${selected ? " selected" : ""}${key.interp.kind === "step" ? " hold" : ""}`}
-                                style={{ left: (shown + 0.5) * pxPerStep }}
-                                title={`${track.label} at step ${key.step} · ${easingName(key.interp)}`}
-                                onPointerDown={(event) => beginKeyDrag(event, id)}
-                                onContextMenu={(event) =>
-                                  openMenu(
-                                    event,
-                                    { object: object.id, property: track.property, step: key.step },
-                                    track.interpolations,
-                                  )
+                          <div className="tl-labels tl-track-label">
+                            {graphable(track.base) ? (
+                              <button
+                                className="tl-disclose tl-graph-toggle"
+                                onClick={() => toggleGraph(object.id, track.property)}
+                                title={
+                                  graphOpen
+                                    ? "Hide the value graph"
+                                    : "Show this property's value at every step"
                                 }
+                              >
+                                {graphOpen ? "▾" : "▸"}
+                              </button>
+                            ) : (
+                              <span className="tl-graph-toggle" />
+                            )}
+                            <span className="tl-track-name">{track.label}</span>
+                            {track.interpolated_here && (
+                              <span className="muted" title="Interpolated between keys at this step">
+                                ~
+                              </span>
+                            )}
+                            <button
+                              className={`tl-key-here${track.keyed_here ? " on" : ""}`}
+                              title={
+                                track.keyed_here
+                                  ? "Remove the key at this step"
+                                  : "Key this property at this step"
+                              }
+                              onClick={() =>
+                                run(
+                                  track.keyed_here
+                                    ? api.removeKeyframe(object.id, track.property, step)
+                                    : api.setKeyframe(object.id, track.property, step),
+                                )
+                              }
+                            >
+                              ◆
+                            </button>
+                          </div>
+                          <div
+                            className="tl-grid"
+                            style={{ width: gridWidth }}
+                            onPointerDown={(event) => {
+                              const el = scrollRef.current;
+                              const rect = el?.getBoundingClientRect();
+                              const y = rect ? event.clientY - rect.top + (el?.scrollTop ?? 0) : 0;
+                              boxRef.current = { x0: gridX(event), y0: y };
+                              setBox({ x0: gridX(event), y0: y, x1: gridX(event), y1: y });
+                              (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
+                            }}
+                          >
+                            {/* One dot per interpolated step, so a blended
+                                segment reads as animated and a held one does
+                                not (spec.md 9.3). */}
+                            {interpolatedSteps(drawn).map((tween) => (
+                              <span
+                                key={`tween-${tween}`}
+                                className="tl-tween"
+                                style={{ left: (tween + 0.5) * pxPerStep }}
                               />
-                            );
-                          })}
+                            ))}
+                            {track.keys.map((key) => {
+                              const id = keyId(object.id, track.property, key.step);
+                              const selected = selectedKeys.has(id);
+                              const shown =
+                                keyDrag && selected
+                                  ? draggedStep(key.step, keyDrag.delta * pxPerStep, pxPerStep, last)
+                                  : key.step;
+                              return (
+                                <span
+                                  key={key.step}
+                                  className={`tl-key${selected ? " selected" : ""}${key.interp.kind === "step" ? " hold" : ""}`}
+                                  style={{ left: (shown + 0.5) * pxPerStep }}
+                                  title={`${track.label} at step ${key.step} · ${easingName(key.interp)}`}
+                                  onPointerDown={(event) => beginKeyDrag(event, id)}
+                                  onContextMenu={(event) =>
+                                    openMenu(
+                                      event,
+                                      { object: object.id, property: track.property, step: key.step },
+                                      track.interpolations,
+                                    )
+                                  }
+                                />
+                              );
+                            })}
+                          </div>
                         </div>
-                      </div>
-                    ))}
+
+                        {/* The value graph, below its track (spec.md 9.3). */}
+                        {graphOpen && (
+                          <div className="tl-row tl-graph-row">
+                            <div className="tl-labels tl-graph-label">
+                              {plot ? (
+                                <>
+                                  <span className="tl-graph-now-value">
+                                    {plot.series.map((one, index) => (
+                                      <span
+                                        key={one.label || "value"}
+                                        className={`tl-graph-series s${index}`}
+                                      >
+                                        {one.label && `${one.label} `}
+                                        {one.values[step] === undefined
+                                          ? "—"
+                                          : formatValue(one.unit, one.values[step])}
+                                      </span>
+                                    ))}
+                                  </span>
+                                  <span className="muted">
+                                    {formatValue(plot.series[0]?.unit ?? "none", plot.extent.min)}
+                                    {" – "}
+                                    {formatValue(plot.series[0]?.unit ?? "none", plot.extent.max)}
+                                  </span>
+                                </>
+                              ) : (
+                                <span className="muted">Sampling…</span>
+                              )}
+                            </div>
+                            <div className="tl-grid" style={{ width: gridWidth }}>
+                              {plot && (
+                                <svg
+                                  className="tl-graph"
+                                  width={gridWidth}
+                                  height={GRAPH_PX}
+                                  viewBox={`0 0 ${gridWidth} ${GRAPH_PX}`}
+                                  preserveAspectRatio="none"
+                                >
+                                  <line
+                                    className="tl-graph-playhead"
+                                    x1={(step + 0.5) * pxPerStep}
+                                    x2={(step + 0.5) * pxPerStep}
+                                    y1={0}
+                                    y2={GRAPH_PX}
+                                  />
+                                  {plot.series.map((one, index) => {
+                                    const points = pointsOf(
+                                      one.values,
+                                      pxPerStep,
+                                      GRAPH_PX,
+                                      plot.extent,
+                                    );
+                                    const here = points[step];
+                                    return (
+                                      <g key={one.label || "value"} className={`s${index}`}>
+                                        <polyline
+                                          className="tl-graph-line"
+                                          points={polyline(points)}
+                                        />
+                                        {track.keys.map((key) => {
+                                          const at = points[key.step];
+                                          return at ? (
+                                            <circle
+                                              key={key.step}
+                                              className="tl-graph-key"
+                                              cx={at.x}
+                                              cy={at.y}
+                                              r={2.5}
+                                            />
+                                          ) : null;
+                                        })}
+                                        {here && (
+                                          <circle
+                                            className="tl-graph-at"
+                                            cx={here.x}
+                                            cy={here.y}
+                                            r={3}
+                                          />
+                                        )}
+                                      </g>
+                                    );
+                                  })}
+                                </svg>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                        </Fragment>
+                      );
+                    })}
                 </div>
               );
             })}

@@ -527,6 +527,29 @@ body {
 }
 .layer-panel button:disabled { opacity: 0.3; cursor: default; }
 .layer-panel .eye.on, .layer-panel .lock.on { color: var(--accent); }
+.layer-panel header .import-grib {
+  border-color: var(--border);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+/* The visibility toggle is an eye, shown rather than said. */
+.layer-panel .eye {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 4px;
+}
+.layer-panel .eye:not(.on) { opacity: 0.55; }
+
+/* A GRIB layer whose file has gone says so, since it draws nothing until the
+   file is back. A layer whose file is present needs no label: its name
+   already says what it is. */
+.layer-header .grib-missing {
+  font-size: 10px;
+  color: #e0955a;
+  white-space: nowrap;
+  cursor: help;
+}
 
 .layers, .objects { list-style: none; margin: 0; padding: 0; }
 
@@ -761,7 +784,41 @@ body {
   z-index: 1;
 }
 
+/* The imported field's speed band (spec.md 4.8), under its layer's header. */
+.grib-filter {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 3px 8px 5px 26px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.grib-filter label { display: flex; align-items: center; gap: 5px; }
+.grib-filter-band { display: flex; flex-direction: column; gap: 2px; }
+.grib-filter-row { display: flex; align-items: center; gap: 6px; }
+.grib-filter-row input[type="range"] { flex: 1; min-width: 60px; }
+.grib-filter-row input[type="number"] {
+  width: 3.2rem;
+  background: #0f1a2c;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 4px;
+  font: inherit;
+}
+
 .tl-layer-row { background: rgba(255, 255, 255, 0.025); }
+/* Which steps an imported field has a message for (spec.md 4.8). On the layer's
+   own row, because it is a property of the layer and not of any object in it. */
+.tl-grib {
+  position: absolute;
+  top: 6px;
+  height: 10px;
+  border-radius: 2px;
+  background: rgba(111, 217, 255, 0.45);
+  border: 1px solid rgba(111, 217, 255, 0.75);
+  pointer-events: none;
+}
 .tl-layer-row .tl-labels { color: var(--muted); font-weight: 600; }
 .tl-object-row.selected .tl-labels { color: var(--accent); }
 .tl-disclose {
@@ -796,8 +853,11 @@ body {
 
 .tl-track { height: 20px; }
 .tl-track.interpolated .tl-track-label { color: var(--muted); }
-.tl-track-label { padding-left: 28px; font-size: 12px; }
-.tl-track-label span:first-child { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.tl-track-label { padding-left: 14px; font-size: 12px; gap: 4px; }
+.tl-track-name { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+/* The value graph's disclosure. A property with no magnitude keeps the space,
+   so every track's name starts in the same column. */
+.tl-graph-toggle { flex: 0 0 12px; width: 12px; text-align: center; font-size: 10px; }
 .tl-key-here {
   background: none;
   border: none;
@@ -823,6 +883,40 @@ body {
 .tl-key.hold { background: transparent; border-color: var(--accent); }
 .tl-key.selected { background: #ffd678; border-color: #ffd678; }
 .tl-key.hold.selected { background: transparent; }
+/* One dot per interpolated step: the steps a blended segment animates through
+   (spec.md 9.3). Not interactive — the diamonds are what a pointer grabs. */
+.tl-tween {
+  position: absolute;
+  top: 50%;
+  width: 3px;
+  height: 3px;
+  margin: -1.5px 0 0 -1.5px;
+  border-radius: 50%;
+  background: rgba(111, 217, 255, 0.55);
+  pointer-events: none;
+}
+
+/* The value graph under a track (spec.md 9.3). */
+.tl-graph-row { height: 46px; background: rgba(255, 255, 255, 0.02); }
+.tl-graph-label {
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2px;
+  padding-left: 30px;
+  font-size: 11px;
+}
+.tl-graph-now-value { display: flex; gap: 8px; }
+.tl-graph-series.s0 { color: var(--accent); }
+.tl-graph-series.s1 { color: #ffd678; }
+.tl-graph { display: block; overflow: visible; }
+.tl-graph .tl-graph-line { fill: none; stroke-width: 1.5; }
+.tl-graph .s0 .tl-graph-line, .tl-graph .s0 .tl-graph-key { stroke: var(--accent); }
+.tl-graph .s1 .tl-graph-line, .tl-graph .s1 .tl-graph-key { stroke: #ffd678; }
+.tl-graph .s0 .tl-graph-at { fill: var(--accent); }
+.tl-graph .s1 .tl-graph-at { fill: #ffd678; }
+.tl-graph .tl-graph-key { fill: #0d1526; stroke-width: 1.5; }
+.tl-graph .tl-graph-playhead { stroke: #ffd678; stroke-width: 1; opacity: 0.5; }
 
 .tl-box {
   position: absolute;

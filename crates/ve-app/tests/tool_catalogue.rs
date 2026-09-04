@@ -152,7 +152,7 @@ fn catalogue() -> Vec<(Tool, Gesture, Vec<ToolOption>)> {
             vec![number(PropId::Speed, 12.0)],
         ),
         (
-            Tool::Eraser,
+            Tool::Mask,
             Gesture::Stroke {
                 points: vec![[0.0, 0.0], [2.0, 0.0]],
             },
@@ -186,7 +186,64 @@ fn catalogue() -> Vec<(Tool, Gesture, Vec<ToolOption>)> {
             },
             vec![number(PropId::WidthKm, 300.0), number(PropId::Speed, 12.0)],
         ),
+        // The modifiers (spec.md 6.3). Painted like the brush and the mask,
+        // and each given an amount large enough that its effect is
+        // unmistakable in the field beneath it.
+        (
+            Tool::Intensity,
+            Gesture::Stroke {
+                points: vec![[1.0, 0.0]],
+            },
+            vec![number(PropId::SizeKm, 800.0), number(PropId::Gain, 100.0)],
+        ),
+        (
+            Tool::Divergence,
+            Gesture::Stroke {
+                points: vec![[1.0, 0.0]],
+            },
+            vec![number(PropId::SizeKm, 800.0), number(PropId::Radial, 100.0)],
+        ),
+        (
+            Tool::Turn,
+            Gesture::Stroke {
+                points: vec![[1.0, 0.0]],
+            },
+            vec![number(PropId::SizeKm, 800.0), number(PropId::TurnDeg, 90.0)],
+        ),
+        (
+            Tool::Warp,
+            Gesture::Stroke {
+                points: vec![[1.0, 0.0]],
+            },
+            vec![number(PropId::SizeKm, 800.0), at(PropId::PushTo, 3.0, 0.0)],
+        ),
     ]
+}
+
+/// Whether a tool has nothing to show without a field beneath it.
+///
+/// The mask writes calm over what is there, the clone stamp copies it, and a
+/// modifier transforms it. All three produce nothing at all on empty ocean,
+/// which is the property that distinguishes them from the tools that paint.
+fn needs_a_field_beneath(tool: Tool) -> bool {
+    tool.kind().is_modifier() || matches!(tool, Tool::Mask | Tool::CloneStamp)
+}
+
+/// The catalogue is the whole catalogue.
+///
+/// Every shared-rule test below walks it, so a tool missing from it is a tool
+/// that none of them cover — which is exactly the kind of gap that looks like
+/// passing tests.
+#[test]
+fn the_catalogue_covers_every_tool_the_palette_offers() {
+    let covered: Vec<ToolKind> = catalogue()
+        .into_iter()
+        .map(|(tool, ..)| tool.kind())
+        .collect();
+    for tool in ToolKind::ALL {
+        assert!(covered.contains(&tool), "{tool:?} is not in the catalogue");
+    }
+    assert_eq!(covered.len(), ToolKind::ALL.len(), "a tool is in it twice");
 }
 
 // --- Each tool draws something ----------------------------------------------
@@ -199,9 +256,10 @@ fn every_tool_paints_a_field() {
     for (tool, gesture, options) in catalogue() {
         let (_root, state) = project("paints");
 
-        // The eraser writes calm, so it needs something under it to erase; and
-        // the clone stamp copies what is below, so it needs something to copy.
-        if matches!(tool, Tool::Eraser | Tool::CloneStamp) {
+        // The mask writes calm, so it needs something under it to cover; the
+        // clone stamp copies what is below; and a modifier changes what is
+        // below. None of the three paints a field from nothing.
+        if needs_a_field_beneath(tool) {
             draw(
                 &state,
                 Tool::Brush,
@@ -221,19 +279,151 @@ fn every_tool_paints_a_field() {
 
         let (speed, _) = sample(&state, ll(1.0, 0.0));
         match tool {
-            // Calm is what the eraser paints; the assertion is that it changed
+            // Calm is what the mask paints; the assertion is that it changed
             // the 20 m/s underneath it, not that it produced a speed.
-            Tool::Eraser => assert!(speed < 1.0, "the eraser left {speed} m/s standing"),
+            Tool::Mask => assert!(speed < 1.0, "the mask left {speed} m/s standing"),
             _ => assert!(speed > 1.0, "{tool:?} painted nothing: {speed} m/s"),
         }
     }
 }
 
-/// Spec 6.2: the eraser is a first-class object, not a deletion. Disabling it
+/// Spec 6.3: a modifier changes the field beneath it, and each of them changes
+/// it in its own way. `every_tool_paints_a_field` only asks that something is
+/// there; this asks that the option the tool was given actually reached the
+/// evaluator, which is the part the wiring can get wrong.
+#[test]
+fn every_modifier_changes_the_field_beneath_it() {
+    // A 20 m/s easterly along the equator, and a modifier over the middle of
+    // it. The pair to beat is what that easterly reads as on its own.
+    let background = || {
+        (
+            Gesture::Stroke {
+                points: vec![[-10.0, 0.0], [50.0, 0.0]],
+            },
+            vec![
+                number(PropId::SizeKm, 900.0),
+                number(PropId::Speed, 20.0),
+                number(PropId::Feather, 0.0),
+                option(PropId::Direction, PropertyValue::Angle { degrees: 90.0 }),
+            ],
+        )
+    };
+
+    for (tool, options, expected) in [
+        (
+            Tool::Intensity,
+            vec![number(PropId::Gain, 100.0)],
+            // Twice the speed, the same way.
+            (40.0, 90.0),
+        ),
+        (
+            Tool::Turn,
+            vec![number(PropId::TurnDeg, 90.0)],
+            // The same speed, a quarter turn clockwise.
+            (20.0, 180.0),
+        ),
+        (
+            Tool::Divergence,
+            vec![number(PropId::Radial, 100.0)],
+            // Sampled due north of the anchor, where "outward" is 0°: 20 m/s
+            // east plus 20 m/s north is 28.28 m/s on 45°.
+            (800.0f64.sqrt(), 45.0),
+        ),
+    ] {
+        let (_root, state) = project("modifies");
+        let (gesture, brush_options) = background();
+        draw(&state, Tool::Brush, gesture, brush_options);
+
+        let mut options = options;
+        options.push(number(PropId::SizeKm, 1_500.0));
+        options.push(number(PropId::Feather, 0.0));
+        draw(
+            &state,
+            tool,
+            Gesture::Stroke {
+                points: vec![[1.0, 0.0]],
+            },
+            options,
+        );
+
+        // North of the anchor for the divergence, whose direction is radial and
+        // therefore undefined at the centre; the other two are uniform inside.
+        let at = if tool == Tool::Divergence {
+            ll(1.0, 3.0)
+        } else {
+            ll(1.0, 0.0)
+        };
+        let (speed, azimuth) = sample(&state, at);
+        assert!(
+            (speed - expected.0).abs() < 0.3,
+            "{tool:?}: {speed} m/s, expected {}",
+            expected.0
+        );
+        assert!(
+            (azimuth - expected.1).abs() < 1.0,
+            "{tool:?}: azimuth {azimuth}, expected {}",
+            expected.1
+        );
+    }
+}
+
+/// Spec 6.3: a warp reads the field from somewhere else, so the patch beneath
+/// it moves. Through the IPC path, because the mode, the distance and the
+/// bearing are three options that have to arrive together to mean anything.
+#[test]
+fn a_warp_carries_the_patch_beneath_it_along_its_bearing() {
+    let (_root, state) = project("warps");
+    // A disc of wind 800 km across at the origin: 400 km of reach, so a point
+    // 600 km east of it is calm.
+    draw(
+        &state,
+        Tool::Circle,
+        Gesture::Point { at: [0.0, 0.0] },
+        vec![
+            number(PropId::DiameterKm, 800.0),
+            number(PropId::Speed, 12.0),
+            number(PropId::Feather, 0.0),
+        ],
+    );
+    let east = LonLat::new(0.0, 0.0)
+        .expect("origin")
+        .destination(ve_core::angle::Angle::new(90.0), 600_000.0);
+    assert!(
+        sample(&state, east).0 < 0.5,
+        "the patch reaches further than the test assumes"
+    );
+
+    draw(
+        &state,
+        Tool::Warp,
+        Gesture::Stroke {
+            points: vec![[0.0, 0.0]],
+        },
+        vec![
+            number(PropId::SizeKm, 6_000.0),
+            number(PropId::Feather, 0.0),
+            pick(PropId::WarpMode, 0),
+            at(PropId::PushTo, east.lon, east.lat),
+        ],
+    );
+
+    assert!(
+        (sample(&state, east).0 - 12.0).abs() < 0.5,
+        "the warp did not carry the patch east: {} m/s",
+        sample(&state, east).0
+    );
+    assert!(
+        sample(&state, ll(0.0, 0.0)).0 < 0.5,
+        "and it left a copy behind: {} m/s",
+        sample(&state, ll(0.0, 0.0)).0
+    );
+}
+
+/// Spec 6.2: the mask is a first-class object, not a deletion. Disabling it
 /// must bring back exactly what was underneath.
 #[test]
-fn erasing_is_reversible_because_it_is_an_object() {
-    let (_root, state) = project("eraser");
+fn masking_is_reversible_because_it_is_an_object() {
+    let (_root, state) = project("mask");
     draw(
         &state,
         Tool::Brush,
@@ -251,20 +441,20 @@ fn erasing_is_reversible_because_it_is_an_object() {
 
     draw(
         &state,
-        Tool::Eraser,
+        Tool::Mask,
         Gesture::Stroke {
             points: vec![[0.0, 0.0]],
         },
         vec![number(PropId::SizeKm, 400.0), number(PropId::Feather, 0.0)],
     );
-    let (erased, _) = sample(&state, ll(0.0, 0.0));
-    assert!(erased < 0.5, "the eraser left {erased} m/s");
+    let (masked, _) = sample(&state, ll(0.0, 0.0));
+    assert!(masked < 0.5, "the mask left {masked} m/s");
 
     // Disable it: the object is still there, contributing nothing.
-    let eraser = document(&state).layers[0].objects[1].id.raw();
+    let mask = document(&state).layers[0].objects[1].id.raw();
     ve_app::document::set_property(
         &state,
-        eraser,
+        mask,
         "Enabled",
         PropertyValue::Bool { value: false },
     )
@@ -273,7 +463,145 @@ fn erasing_is_reversible_because_it_is_an_object() {
     let (restored, restored_azimuth) = sample(&state, ll(0.0, 0.0));
     assert!(
         (restored - before).abs() < 1e-6 && (restored_azimuth - azimuth).abs() < 1e-6,
-        "disabling the eraser gave back {restored} m/s at {restored_azimuth}, not {before} at {azimuth}"
+        "disabling the mask gave back {restored} m/s at {restored_azimuth}, not {before} at {azimuth}"
+    );
+}
+
+/// Spec 6.2: an inverted mask covers everything *except* its footprint, which
+/// is how a field is confined to a region rather than cut out of one. The
+/// complement of the same mask uninverted, through the option the bar sends.
+#[test]
+fn an_inverted_mask_keeps_only_what_is_inside_it() {
+    let (_root, state) = project("invert");
+    draw(
+        &state,
+        Tool::Brush,
+        Gesture::Stroke {
+            points: vec![[-20.0, 0.0], [20.0, 0.0]],
+        },
+        vec![
+            number(PropId::SizeKm, 900.0),
+            number(PropId::Speed, 20.0),
+            number(PropId::Feather, 0.0),
+            option(PropId::Direction, PropertyValue::Angle { degrees: 90.0 }),
+        ],
+    );
+    draw(
+        &state,
+        Tool::Mask,
+        Gesture::Stroke {
+            points: vec![[0.0, 0.0]],
+        },
+        vec![
+            number(PropId::SizeKm, 400.0),
+            number(PropId::Feather, 0.0),
+            option(PropId::Invert, PropertyValue::Bool { value: true }),
+        ],
+    );
+
+    assert!(
+        (sample(&state, ll(0.0, 0.0)).0 - 20.0).abs() < 0.5,
+        "inside an inverted mask the field stands: {} m/s",
+        sample(&state, ll(0.0, 0.0)).0
+    );
+    for lon in [-15.0, -5.0, 5.0, 15.0] {
+        assert!(
+            sample(&state, ll(lon, 0.0)).0 < 0.5,
+            "outside it nothing is left, but {} m/s stands at {lon}",
+            sample(&state, ll(lon, 0.0)).0
+        );
+    }
+}
+
+/// Spec 6.1: the map asks for the outlines it may need to draw — the objects of
+/// the tool in hand, whose edge is highlighted under the pointer, and the
+/// selection, whose operators are outlined because they have no field to show
+/// where they are. Nothing else, so the answer is bounded by one tool's objects
+/// rather than by the size of the project. Only what is visible: a hidden
+/// layer's objects are not on the map, so they are not in the list either.
+#[test]
+fn the_outlines_are_the_tools_own_objects_and_the_selection() {
+    let (_root, state) = project("outlines");
+    draw(
+        &state,
+        Tool::Brush,
+        Gesture::Stroke {
+            points: vec![[0.0, 0.0], [4.0, 0.0]],
+        },
+        vec![number(PropId::SizeKm, 400.0), number(PropId::Speed, 12.0)],
+    );
+    draw(
+        &state,
+        Tool::Mask,
+        Gesture::Stroke {
+            points: vec![[1.0, 0.0], [2.0, 0.0]],
+        },
+        vec![number(PropId::SizeKm, 400.0)],
+    );
+
+    // ...and a modifier, which is invisible for the same reason.
+    draw(
+        &state,
+        Tool::Intensity,
+        Gesture::Stroke {
+            points: vec![[3.0, 0.0]],
+        },
+        vec![number(PropId::SizeKm, 500.0), number(PropId::Gain, 50.0)],
+    );
+
+    let outlines_for = |tool: Option<Tool>, objects: &[u64]| {
+        ve_app::transform::outlines_at(&state, 0, tool, objects).expect("outlines")
+    };
+
+    let masks = outlines_for(Some(Tool::Mask), &[]);
+    assert_eq!(
+        masks.iter().map(|o| o.tool).collect::<Vec<_>>(),
+        vec![Tool::Mask],
+        "the mask tool asks for masks, not for the brush stroke beneath it"
+    );
+    assert!(!masks[0].inverted);
+
+    // The brush asks for brush strokes, which is what makes its own hover
+    // highlight possible (spec.md 6.1).
+    assert_eq!(
+        outlines_for(Some(Tool::Brush), &[])
+            .iter()
+            .map(|o| o.tool)
+            .collect::<Vec<_>>(),
+        vec![Tool::Brush]
+    );
+
+    // A selected object is outlined whatever tool is in hand, and is not
+    // listed twice when the tool would have listed it anyway.
+    let intensity = document(&state).layers[0].objects[2].id.raw();
+    assert_eq!(
+        outlines_for(Some(Tool::Mask), &[intensity])
+            .iter()
+            .map(|o| o.tool)
+            .collect::<Vec<_>>(),
+        vec![Tool::Mask, Tool::Intensity]
+    );
+    assert_eq!(outlines_for(Some(Tool::Intensity), &[intensity]).len(), 1);
+
+    // And a tool that has drawn nothing asks for nothing.
+    assert!(outlines_for(Some(Tool::Circle), &[]).is_empty());
+
+    let outlines = masks;
+    let ve_app::transform::ObjectOutline::Swept {
+        chains, radius_km, ..
+    } = &outlines[0].outline
+    else {
+        panic!("a mask stroke sweeps a stamp");
+    };
+    assert!((radius_km - 200.0).abs() < 1.0, "half of a 400 km stamp");
+    assert!(!chains.is_empty() && !chains[0].is_empty());
+
+    // Hide the layer: nothing on the map, nothing to outline.
+    let layer = document(&state).layers[0].id.raw();
+    ve_app::document::layer_visibility(&state, layer, false).expect("hide");
+    assert!(
+        outlines_for(Some(Tool::Mask), &[intensity]).is_empty(),
+        "a hidden layer's objects are not on the map"
     );
 }
 
@@ -678,7 +1006,7 @@ fn a_projected_shape_is_round_on_the_map_and_a_geodesic_one_on_the_ground() {
     const SIZED: [(Tool, PropId); 4] = [
         (Tool::Brush, PropId::SizeKm),
         (Tool::Circle, PropId::DiameterKm),
-        (Tool::Eraser, PropId::SizeKm),
+        (Tool::Mask, PropId::SizeKm),
         (Tool::CloneStamp, PropId::SizeKm),
     ];
 
@@ -942,11 +1270,13 @@ fn every_geometry_moves_when_its_frame_does() {
 // --- Merging, which is a property of the gesture -----------------------------
 
 /// Spec 6.1: two gestures of the same tool with identical properties and
-/// overlapping footprints merge into one object. The eraser draws the same
-/// stroke the brush does, so it inherits this rather than being given it.
+/// overlapping footprints merge into one object. The mask draws the same
+/// stroke the brush does, so it inherits this rather than being given it —
+/// including the rule that *identical* means every property, so a mask and an
+/// inverted one never merge however much they overlap.
 #[test]
-fn a_second_eraser_stroke_is_absorbed_by_the_first() {
-    let (_root, state) = project("merge-eraser");
+fn a_second_mask_stroke_is_absorbed_by_the_first() {
+    let (_root, state) = project("merge-mask");
     let stroke = |points: Vec<[f64; 2]>| {
         (
             Gesture::Stroke { points },
@@ -955,20 +1285,27 @@ fn a_second_eraser_stroke_is_absorbed_by_the_first() {
     };
 
     let (first, options) = stroke(vec![[0.0, 0.0], [2.0, 0.0]]);
-    draw(&state, Tool::Eraser, first, options);
+    draw(&state, Tool::Mask, first, options);
     let (second, options) = stroke(vec![[2.0, 0.0], [4.0, 0.0]]);
-    draw(&state, Tool::Eraser, second, options);
+    draw(&state, Tool::Mask, second, options);
 
     let objects = &document(&state).layers[0].objects;
-    assert_eq!(
-        objects.len(),
-        1,
-        "two overlapping erases stayed two objects"
-    );
+    assert_eq!(objects.len(), 1, "two overlapping masks stayed two objects");
     assert_eq!(
         objects[0].geometry.stroke_chains().len(),
         2,
         "the second stroke is a second chain"
+    );
+
+    // ...and an inverted stroke over the same ground is a different object,
+    // because it covers the complement of what these two cover.
+    let (third, mut options) = stroke(vec![[1.0, 0.0], [3.0, 0.0]]);
+    options.push(option(PropId::Invert, PropertyValue::Bool { value: true }));
+    draw(&state, Tool::Mask, third, options);
+    assert_eq!(
+        document(&state).layers[0].objects.len(),
+        2,
+        "an inverted mask was absorbed by an uninverted one"
     );
 }
 
@@ -1006,7 +1343,7 @@ fn gestures_that_differ_in_a_frozen_option_never_merge() {
         let (_root, state) = project("no-merge");
         draw(
             &state,
-            Tool::Eraser,
+            Tool::Mask,
             Gesture::Stroke {
                 points: vec![[0.0, 0.0], [2.0, 0.0]],
             },
@@ -1014,7 +1351,7 @@ fn gestures_that_differ_in_a_frozen_option_never_merge() {
         );
         draw(
             &state,
-            Tool::Eraser,
+            Tool::Mask,
             Gesture::Stroke {
                 points: vec![[2.0, 0.0], [4.0, 0.0]],
             },
@@ -1029,13 +1366,95 @@ fn gestures_that_differ_in_a_frozen_option_never_merge() {
     }
 }
 
+/// Spec 6.3: a modifier is painted like the brush, so two strokes of one with
+/// the same settings and overlapping footprints become one object — and two
+/// with *different* settings never do, because the merged object could only
+/// carry one amount.
+#[test]
+fn two_modifier_strokes_merge_when_their_settings_match() {
+    let (_root, state) = project("merge-modifier");
+    let stroke = |points: Vec<[f64; 2]>, gain: f64| {
+        (
+            Gesture::Stroke { points },
+            vec![number(PropId::SizeKm, 800.0), number(PropId::Gain, gain)],
+        )
+    };
+
+    let (first, options) = stroke(vec![[0.0, 0.0], [2.0, 0.0]], 50.0);
+    draw(&state, Tool::Intensity, first, options);
+    let (second, options) = stroke(vec![[2.0, 0.0], [4.0, 0.0]], 50.0);
+    draw(&state, Tool::Intensity, second, options);
+    let objects = &document(&state).layers[0].objects;
+    assert_eq!(
+        objects.len(),
+        1,
+        "two overlapping strokes stayed two objects"
+    );
+    assert_eq!(objects[0].geometry.stroke_chains().len(), 2);
+
+    // A different amount is a different object, over the same ground.
+    let (third, options) = stroke(vec![[1.0, 0.0], [3.0, 0.0]], 200.0);
+    draw(&state, Tool::Intensity, third, options);
+    assert_eq!(document(&state).layers[0].objects.len(), 2);
+}
+
+/// ...but not a modifier whose field is measured from its own anchor. A merge
+/// re-expresses the new chain under the *target's* anchor, so absorbing one of
+/// these would move the centre its field radiates from or turns about — which
+/// changes what it paints, and a merge may never do that (spec.md 6.1). The
+/// same rule keeps two clone strokes apart.
+#[test]
+fn a_modifier_measured_from_its_anchor_never_absorbs_another() {
+    let (_root, state) = project("merge-anchored");
+    let two = |tool: Tool, options: Vec<ToolOption>| {
+        for points in [vec![[0.0, 0.0], [2.0, 0.0]], vec![[2.0, 0.0], [4.0, 0.0]]] {
+            draw(&state, tool, Gesture::Stroke { points }, options.clone());
+        }
+    };
+
+    two(
+        Tool::Divergence,
+        vec![number(PropId::SizeKm, 800.0), number(PropId::Radial, 50.0)],
+    );
+    two(
+        Tool::Warp,
+        vec![
+            number(PropId::SizeKm, 800.0),
+            pick(PropId::WarpMode, 1),
+            number(PropId::TwistDeg, 45.0),
+        ],
+    );
+    assert_eq!(
+        document(&state).layers[0].objects.len(),
+        4,
+        "a divergence or a twist absorbed another"
+    );
+
+    // ...and a warp that pushes is measured from its anchor too: the
+    // displacement is the offset from the anchor to the place it pushes to, so
+    // moving the anchor changes it.
+    two(
+        Tool::Warp,
+        vec![
+            number(PropId::SizeKm, 800.0),
+            pick(PropId::WarpMode, 0),
+            at(PropId::PushTo, 6.0, 0.0),
+        ],
+    );
+    assert_eq!(
+        document(&state).layers[0].objects.len(),
+        6,
+        "a divergence or a warp absorbed another"
+    );
+}
+
 /// Different tools never merge, however alike their gestures. The eraser and
 /// the clone stamp draw exactly the strokes the brush does, which is what makes
 /// this worth asserting rather than assuming.
 #[test]
 fn the_brush_like_tools_do_not_merge_into_each_other() {
     let (_root, state) = project("cross-tool");
-    for tool in [Tool::Brush, Tool::Eraser] {
+    for tool in [Tool::Brush, Tool::Mask] {
         let mut options = vec![number(PropId::SizeKm, 800.0)];
         if tool == Tool::CloneStamp {
             options.push(at(PropId::SourcePoint, 40.0, 0.0));
@@ -1053,7 +1472,7 @@ fn the_brush_like_tools_do_not_merge_into_each_other() {
     let objects = &document(&state).layers[0].objects;
     assert_eq!(objects.len(), 2);
     assert_eq!(objects[0].tool, ToolKind::Brush);
-    assert_eq!(objects[1].tool, ToolKind::Eraser);
+    assert_eq!(objects[1].tool, ToolKind::Mask);
 }
 
 /// Spec 6.1 and 8.5: every object supports copy and paste, whatever tool made

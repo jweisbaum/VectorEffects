@@ -5,9 +5,12 @@
 //! shape, and its resolved parameters (spec.md 7.1). Nothing downstream of
 //! this sees a keyframe, a layer, or a property id.
 
+use std::sync::Arc;
+
 use ve_core::angle::Angle;
-use ve_core::document::{Geometry, Object, PathNode};
+use ve_core::document::{Geometry, Object, PathNode, SpeedRange};
 use ve_core::project::Project;
+use ve_core::raster::RasterGrid;
 use ve_core::schema::{PropId, ToolKind};
 use ve_core::{LonLat, PropValue};
 
@@ -89,6 +92,51 @@ pub enum OffsetMode {
     Fixed,
 }
 
+/// How a warp displaces the position it reads from (spec.md 6.3).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Warp {
+    /// A constant displacement in the object's local frame, in geometry units.
+    ///
+    /// Local rather than a bearing and a distance, so the object's own rotation
+    /// and scale turn and size the push with it, exactly as they do its
+    /// footprint — a transform acts on the frame (spec.md 7.2).
+    Push {
+        /// Local x, positive toward the frame's east.
+        x: f64,
+        /// Local y, positive toward the frame's north.
+        y: f64,
+    },
+    /// A rotation of the read position about the anchor, degrees clockwise.
+    Twist {
+        /// Degrees.
+        degrees: f64,
+    },
+}
+
+/// What a modifier does to the field beneath it (spec.md 6.3).
+///
+/// A modifier has no field of its own: it reads the composite below it in
+/// z-order and writes back a transformed version of it, inside its footprint
+/// and faded by its feather. Every variant is therefore a function of what was
+/// already there — which is what makes them safe to stack in any order the
+/// z-order allows.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Modifier {
+    /// Scales the speed by `1 + gain`, leaving the direction alone.
+    ///
+    /// A fraction, not a percentage: the option is in percent and is divided
+    /// once, here, so nothing downstream has to remember which it holds.
+    Gain(f64),
+    /// Adds a radial component of `fraction` times the local speed, outward
+    /// from the anchor when positive and inward when negative.
+    Radial(f64),
+    /// Turns every vector clockwise by this many degrees.
+    Turn(f64),
+    /// Reads the field from a displaced position, which is what makes a warp a
+    /// warp: nothing about the vectors changes, only where they are read.
+    Warp(Warp),
+}
+
 /// Whether a feathered edge blends with what is beneath it (decision D12).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EdgeMode {
@@ -133,6 +181,43 @@ pub struct FlatObject {
     /// than inside it so the evaluator's "is this a clone stamp" test stays one
     /// `Option` check on the hot path.
     pub clone_offset: OffsetMode,
+    /// Whether the object writes everywhere *except* its footprint.
+    ///
+    /// The mask's invert (spec.md 6.2). It turns the coverage test inside out
+    /// — including the spherical-cap cull, which is why it is a field on the
+    /// object rather than a property the evaluator has to look up: a cell a
+    /// thousand kilometres away is *inside* an inverted mask, and the cull that
+    /// makes every other object cheap would otherwise skip it.
+    pub invert: bool,
+    /// What this object does to the field beneath it, if it is a modifier.
+    ///
+    /// `Some` excludes [`Self::speed`] and [`Self::direction`] from meaning
+    /// anything: a modifier writes what it read, changed. The evaluator tests
+    /// this before it tests anything else about the object.
+    pub modifier: Option<Modifier>,
+}
+
+/// An imported field, resolved to the one time slice this step shows.
+///
+/// A raster sits in the z-order like anything else: it is drawn beneath the
+/// objects of its own layer and over everything in the layers below. Where
+/// the grid has a value it overwrites; where it has none — outside a regional
+/// grid, or under a bitmap's gaps — it leaves the field beneath alone. No
+/// feather: a lattice has no edge to soften.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FlatRaster {
+    /// How many objects lie beneath it. The raster is applied before object
+    /// `z`, or after the last object when `z` equals the object count.
+    pub z: usize,
+    /// The lattice, shared with the layer that owns it.
+    pub grid: Arc<RasterGrid>,
+    /// Which speeds the layer keeps, if it filters (spec.md 4.8).
+    ///
+    /// A sample outside the band is treated exactly as a missing one: the
+    /// field beneath shows through. Carried per raster rather than applied to
+    /// the lattice, because the lattice is shared, content-hashed and re-read
+    /// from the file — the band is a choice about what to show.
+    pub speed_range: Option<SpeedRange>,
 }
 
 /// A whole time step, ready to evaluate. Objects are in z-order, bottom first.
@@ -140,6 +225,8 @@ pub struct FlatObject {
 pub struct Scene {
     /// Objects, bottom of the stack first.
     pub objects: Vec<FlatObject>,
+    /// Imported fields, in increasing `z`.
+    pub rasters: Vec<FlatRaster>,
 }
 
 /// Maximum error when turning a Bézier segment into a polyline, in metres.
@@ -247,7 +334,7 @@ fn shape_of(object: &Object, step: u32) -> Option<(Shape, Vec<Local>)> {
             // A brush has no path direction mode, so the first chain suffices
             // for anything that asks for one.
             let path = chains.first().cloned().unwrap_or_default();
-            // Shape 1 is the square stamp. The eraser and the clone stamp share
+            // Shape 1 is the square stamp. The mask and the clone stamp share
             // this geometry but declare no `BrushShape`, so they read 0 and
             // stay round.
             let shape = if choice(object, PropId::BrushShape, step) == 1 {
@@ -314,8 +401,8 @@ fn speed_of(object: &Object, step: u32, extent: f64) -> SpeedMode {
     let get = |id: PropId| number(object, id, step).unwrap_or(0.0);
 
     match object.tool {
-        // The eraser writes calm; that is the whole of its behaviour.
-        ToolKind::Eraser => SpeedMode::Constant(0.0),
+        // The mask writes calm; that is the whole of its behaviour.
+        ToolKind::Mask => SpeedMode::Constant(0.0),
         ToolKind::Circle if choice(object, PropId::FillMode, step) == 2 => SpeedMode::Radial {
             centre: get(PropId::SpeedMin),
             edge: get(PropId::SpeedMax),
@@ -367,6 +454,58 @@ fn direction_of(object: &Object, step: u32, rotation: f64) -> DirectionMode {
             None => DirectionMode::Constant(constant(PropId::Direction)),
         },
         _ => DirectionMode::Constant(constant(PropId::Direction)),
+    }
+}
+
+/// What a modifier object does, or `None` for a tool that paints a field.
+///
+/// The percentages become fractions here, and the warp's bearing and distance
+/// become a local displacement, so the evaluator receives numbers it can use
+/// rather than options it has to interpret. A push is turned into the local
+/// frame by construction: local angles are measured from the frame's own north,
+/// which is already the object's rotation (spec.md 7.2), so an object rotated
+/// 30° pushes 30° further round without the bearing being touched here.
+fn modifier_of(object: &Object, step: u32) -> Option<Modifier> {
+    // The frame a warp's target is expressed in. Built the same way
+    // `flatten_object` builds it, and only where it is needed.
+    fn frame_for(object: &Object, step: u32) -> Option<Frame> {
+        let anchor = position(object, PropId::Position, step)?;
+        let rotation = bearing(object, PropId::RotationDeg, step).map_or(0.0, |a| a.degrees());
+        let scale_pct = number(object, PropId::ScalePct, step).unwrap_or(100.0);
+        let space = if choice(object, PropId::StampSpace, step) == 1 {
+            Space::Projected
+        } else {
+            Space::Geodesic
+        };
+        Some(Frame::in_space(anchor, rotation, scale_pct, space))
+    }
+
+    let get = |id: PropId| number(object, id, step).unwrap_or(0.0);
+    match object.tool {
+        ToolKind::Intensity => Some(Modifier::Gain(get(PropId::Gain) / 100.0)),
+        ToolKind::Divergence => Some(Modifier::Radial(get(PropId::Radial) / 100.0)),
+        ToolKind::Turn => Some(Modifier::Turn(get(PropId::TurnDeg))),
+        ToolKind::Warp => {
+            // Mode 1 twists about the anchor; 0 pushes along a bearing.
+            if choice(object, PropId::WarpMode, step) == 1 {
+                Some(Modifier::Warp(Warp::Twist {
+                    degrees: get(PropId::TwistDeg),
+                }))
+            } else {
+                // The push is the target's own place in the object's frame:
+                // the field under the anchor is dragged to the target, and the
+                // frame does the geodesy. Both ends are animatable positions,
+                // so a warp that grows or travels is two keyframed points
+                // (spec.md 6.3).
+                let target = position(object, PropId::PushTo, step)?;
+                let local = frame_for(object, step)?.to_local(target);
+                Some(Modifier::Warp(Warp::Push {
+                    x: local[0],
+                    y: local[1],
+                }))
+            }
+        }
+        _ => None,
     }
 }
 
@@ -426,6 +565,14 @@ pub fn flatten_object(object: &Object, step: u32) -> Option<FlatObject> {
         } else {
             OffsetMode::Aligned
         },
+        modifier: modifier_of(object, step),
+        // Only the mask has the property; everything else reads `false` and
+        // covers what it is drawn over, as it always did.
+        invert: object
+            .props
+            .value_at(object.tool, PropId::Invert, step)
+            .and_then(PropValue::as_bool)
+            .unwrap_or(false),
     })
 }
 
@@ -442,11 +589,28 @@ pub fn covers(object: &FlatObject, position: LonLat) -> bool {
 }
 
 /// Flattens a whole project for one time step, in z-order.
+///
+/// A layer's imported field, if it has one, goes in beneath the layer's own
+/// objects — at the steps the file has a message for, and at no others: a step
+/// whose time the file says nothing about has no imported field at all, and
+/// what was painted on the layer stands alone there (spec.md 4.8).
 pub fn flatten(project: &Project, step: u32) -> Scene {
-    Scene {
-        objects: project
-            .objects_in_z_order()
-            .filter_map(|(_, object)| flatten_object(object, step))
-            .collect(),
+    let hour = f64::from(project.settings.forecast_hour(step));
+    let mut scene = Scene::default();
+    for layer in project.layers.iter().filter(|l| l.visible) {
+        if let Some(frame) = layer.raster.as_ref().and_then(|s| s.frame_at(hour)) {
+            scene.rasters.push(FlatRaster {
+                z: scene.objects.len(),
+                grid: Arc::clone(&frame.grid),
+                speed_range: layer.speed_range,
+            });
+        }
+        scene.objects.extend(
+            layer
+                .objects
+                .iter()
+                .filter_map(|object| flatten_object(object, step)),
+        );
     }
+    scene
 }

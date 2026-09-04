@@ -13,6 +13,8 @@
 
 import { memo } from "react";
 
+import NumberField from "../NumberField";
+
 import type { PropertyValue } from "../generated/PropertyValue";
 import type { ToolOptionSpec } from "../generated/ToolOptionSpec";
 import type { ToolSchema } from "../generated/ToolSchema";
@@ -21,6 +23,7 @@ import type { Camera } from "./camera";
 import {
   convertSizes,
   liveOptions,
+  offersEyedropper,
   offersUnit,
   type SizeUnit,
   shownAngle,
@@ -54,6 +57,8 @@ function ToolOptions({
   camera,
   picking,
   onPick,
+  sampling,
+  onSample,
 }: {
   schema: ToolSchema;
   state: ToolState;
@@ -65,6 +70,9 @@ function ToolOptions({
   /** The position option waiting for a click, if any. */
   picking: ToolPick | null;
   onPick: (pick: ToolPick | null) => void;
+  /** Whether the eyedropper is armed and waiting for a click. */
+  sampling: boolean;
+  onSample: (on: boolean) => void;
 }) {
   const set = (property: string, value: PropertyValue) =>
     onChange({ ...state, values: { ...state.values, [property]: value } });
@@ -78,6 +86,7 @@ function ToolOptions({
   // a ring width in km would describe a shape that does not exist (spec.md 3.5).
   const firstSize = options.find((spec) => spec.unit === "kilometres")?.property;
   const unitIsLive = offersUnit(schema, state.values);
+  const eyedropper = offersEyedropper(schema, state.values);
 
   return (
     <div className="tool-options">
@@ -101,6 +110,23 @@ function ToolOptions({
         what was dragged is a shape on the ground or one on the map (spec.md
         3.5), so it is asked here rather than nowhere.
       */}
+      {/*
+        The eyedropper: take the speed and direction from the field itself.
+        Aiming a wind by typing two numbers is guesswork next to pointing at
+        one that is already there — a stroke that continues a front, or a fill
+        that matches the flow it borders (spec.md 6.1). Offered only where the
+        tool paints a single vector; a gradient has two of each and no answer.
+      */}
+      {eyedropper && (
+        <button
+          className={sampling ? "active" : ""}
+          onClick={() => onSample(!sampling)}
+          title="Take the speed and direction from a point on the map. Only what is visible is sampled: a hidden layer contributes nothing."
+        >
+          {sampling ? "Click the map…" : "⌖ Sample field"}
+        </button>
+      )}
+
       {unitIsLive && firstSize === undefined && (
         <label>
           Size in
@@ -189,17 +215,14 @@ function Option({
       return (
         <label>
           {spec.label}
-          <input
-            type="number"
+          <NumberField
             min={0}
             max={360}
             step={5}
-            value={Math.round(shown)}
-            onChange={(e) =>
-              onValue({
-                kind: "angle",
-                degrees: shownAngle(spec.unit, convention, Number(e.target.value) || 0),
-              })
+            value={shown}
+            format={(v) => String(Math.round(v))}
+            onCommit={(degrees) =>
+              onValue({ kind: "angle", degrees: shownAngle(spec.unit, convention, degrees) })
             }
           />
           {spec.unit === "direction" ? `° (${convention})` : "°"}
@@ -213,28 +236,20 @@ function Option({
         <div className="tool-position">
           <label>
             {spec.label}
-            <input
-              type="number"
+            <NumberField
               step="any"
               title="Longitude"
               value={value.lon}
-              onChange={(e) =>
-                onValue({ kind: "position", lon: Number(e.target.value) || 0, lat: value.lat })
-              }
+              onCommit={(lon) => onValue({ kind: "position", lon, lat: value.lat })}
             />
           </label>
-          <input
-            type="number"
+          <NumberField
             step="any"
             title="Latitude"
+            min={-90}
+            max={90}
             value={value.lat}
-            onChange={(e) =>
-              onValue({
-                kind: "position",
-                lon: value.lon,
-                lat: Math.min(90, Math.max(-90, Number(e.target.value) || 0)),
-              })
-            }
+            onCommit={(lat) => onValue({ kind: "position", lon: value.lon, lat })}
           />
           <button
             className={armed ? "active" : ""}
@@ -274,15 +289,13 @@ function Option({
         return (
           <label>
             {spec.label}
-            <input
-              type="number"
+            <NumberField
               min={0}
               max={200}
               step={1}
-              value={Math.round(knotsFromMps(value.value))}
-              onChange={(e) =>
-                onValue({ kind: "number", value: mpsFromKnots(Number(e.target.value) || 0) })
-              }
+              value={knotsFromMps(value.value)}
+              format={(v) => String(Math.round(v))}
+              onCommit={(knots) => onValue({ kind: "number", value: mpsFromKnots(knots) })}
             />
             kt
           </label>
@@ -293,15 +306,19 @@ function Option({
       return (
         <label>
           {spec.label}
-          <input
-            type="number"
-            min={1}
-            max={size && state.unit === "px" ? 2000 : (spec.max ?? undefined)}
+          {/*
+            The bounds are the schema's, not a floor of 1: a modifier's amount
+            is *signed* — intensify/reduce, diverge/converge, a turn either way
+            — and a hard-coded minimum made every one of them one-directional
+            (spec.md 6.3).
+          */}
+          <NumberField
+            min={spec.min ?? 1}
+            max={size && state.unit === "px" ? 2000 : spec.max}
             step={size && state.unit === "px" ? 5 : 50}
-            value={Math.round(value.value)}
-            onChange={(e) =>
-              onValue({ kind: "number", value: Math.max(1, Number(e.target.value) || 1) })
-            }
+            value={value.value}
+            format={(v) => String(Math.round(v))}
+            onCommit={(next) => onValue({ kind: "number", value: next })}
           />
           {size && showUnit && (
             <select

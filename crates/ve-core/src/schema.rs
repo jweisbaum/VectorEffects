@@ -29,24 +29,57 @@ pub enum ToolKind {
     Circle,
     /// Polygon or preset shape filled with a vector field.
     ShapeFill,
-    /// Writes zero-speed vectors.
-    Eraser,
+    /// Writes zero-speed vectors: a mask over what is beneath it.
+    Mask,
     /// Samples the composite below it in z-order.
     CloneStamp,
     /// A vector field along a path.
     Curve,
+    /// Scales the speed of the field beneath it.
+    Intensity,
+    /// Bends the field beneath it toward or away from its anchor.
+    Divergence,
+    /// Turns the field beneath it by a fixed angle.
+    Turn,
+    /// Reads the field beneath it from a displaced position.
+    Warp,
 }
 
 impl ToolKind {
     /// Every tool, in palette order.
-    pub const ALL: [Self; 6] = [
+    ///
+    /// The tools that lay a field down first, in the order a stroke, a stamp,
+    /// a fill and a path suggest; then the mask, which takes one away; then
+    /// the modifiers, which change one — because there has to be a field
+    /// before either of those does anything.
+    pub const ALL: [Self; 10] = [
         Self::Brush,
         Self::Circle,
         Self::ShapeFill,
-        Self::Eraser,
         Self::CloneStamp,
         Self::Curve,
+        Self::Mask,
+        Self::Intensity,
+        Self::Divergence,
+        Self::Turn,
+        Self::Warp,
     ];
+
+    /// Whether the tool modifies the field beneath it rather than adding one
+    /// (spec.md 6.3).
+    ///
+    /// A modifier has no speed and no direction of its own: it reads the
+    /// composite below it in z-order, transforms it, and writes it back inside
+    /// its footprint. What follows from that is worth stating once here rather
+    /// than being rediscovered per call site — it has no `edge_mode`, because
+    /// there is nothing to replace *with*, and nothing to preview as a colour,
+    /// because its result is whatever it was given.
+    pub fn is_modifier(self) -> bool {
+        matches!(
+            self,
+            Self::Intensity | Self::Divergence | Self::Turn | Self::Warp
+        )
+    }
 
     /// Display name.
     pub fn label(self) -> &'static str {
@@ -54,9 +87,13 @@ impl ToolKind {
             Self::Brush => "Brush",
             Self::Circle => "Circle",
             Self::ShapeFill => "Shape fill",
-            Self::Eraser => "Eraser",
+            Self::Mask => "Mask",
             Self::CloneStamp => "Clone stamp",
             Self::Curve => "Curve",
+            Self::Intensity => "Intensify / reduce",
+            Self::Divergence => "Diverge / converge",
+            Self::Turn => "Rotate flow",
+            Self::Warp => "Warp / liquify",
         }
     }
 }
@@ -172,6 +209,41 @@ pub enum PropId {
     /// when the gesture was drawn and what the option bar has to remember.
     /// Creation-only for the same reason [`Self::ShapeSource`] is.
     CurveKind,
+
+    // --- Mask ---
+    /// Whether the mask covers everything but its footprint.
+    Invert,
+
+    // --- Modifiers (spec.md 6.3) ---
+    /// How much a modifier changes the speed beneath it, in percent.
+    Gain,
+    /// How strongly a modifier bends the field beneath it outward, in percent
+    /// of the local speed. Negative converges.
+    Radial,
+    /// How far a modifier turns the field beneath it, in degrees clockwise.
+    ///
+    /// Its own id rather than a share of [`Self::RotationDeg`], which every
+    /// object has and which turns the object's *frame*. Turning the frame of a
+    /// disc does nothing at all; this turns the vectors.
+    TurnDeg,
+    /// Whether a warp pushes the field to a place or twists it.
+    WarpMode,
+    /// Where a warp drags the field under its anchor to.
+    ///
+    /// Its own id rather than a share of [`Self::Target`], which is the point
+    /// an *aimed direction mode* points every vector at. Both are positions and
+    /// both are placed by pointing, but they answer different questions, and an
+    /// id shared between two questions is a trap for the first piece of code
+    /// that reads it without checking the tool (compare [`Self::BrushShape`]).
+    PushTo,
+    /// How far a warp twists the field about its anchor, in degrees.
+    TwistDeg,
+    // Where `distance_km` and `push_bearing` were, before a warp pushed to a
+    // *place* (spec.md 6.3). The ids are gone with the table rows: a property
+    // no tool declares can still be held by an object from an older file, and
+    // `value_at` returns whatever the map holds — so the migration removes the
+    // entries, and removing the ids is what stops anything reading them again
+    // (the same reasoning as D38, schema version 10).
 }
 
 /// A unit, for display and for the inspector's suffix.
@@ -403,8 +475,12 @@ pub const SHAPE_SOURCES: &[&str] = &["polygon", "square", "rectangle", "circle"]
 pub const CURVE_KINDS: &[&str] = &["polyline", "bezier"];
 /// Variants of [`PropId::OffsetMode`].
 pub const OFFSET_MODES: &[&str] = &["aligned", "fixed"];
-/// Variants of [`PropId::CurveDirectionMode`].
-pub const CURVE_DIRECTION_MODES: &[&str] = &["absolute", "relative_to_path"];
+/// Variants of [`PropId::CurveDirectionMode`]. Renamed in place, not reordered:
+/// index 0 was called `absolute` and is the same fixed bearing every other tool
+/// calls `constant`, which is what a reader of two option bars expects.
+pub const CURVE_DIRECTION_MODES: &[&str] = &["constant", "relative_to_path"];
+/// Variants of [`PropId::WarpMode`].
+pub const WARP_MODES: &[&str] = &["push", "twist"];
 
 // --- The tables --------------------------------------------------------------
 
@@ -422,6 +498,104 @@ pub const COMMON: &[PropSpec] = &[
     ang(PropId::RotationDeg, "Rotation", 0.0),
     flag(PropId::Enabled, "Enabled", true),
     choice(PropId::EdgeMode, "Edge", 0, EDGE_MODES),
+];
+
+/// [`COMMON`] without the edge mode, for the modifiers (spec.md 6.3).
+///
+/// `edge_mode` chooses between blending an object's own field into what is
+/// beneath and replacing it. A modifier has no field of its own — its output
+/// *is* what was beneath, changed — so "replace" has nothing to name, and an
+/// option that cannot do anything is worse than an absent one (D30).
+const COMMON_MODIFIER: &[PropSpec] = &[
+    pos(PropId::Position, "Position"),
+    num(
+        PropId::ScalePct,
+        "Scale",
+        100.0,
+        1.0,
+        10_000.0,
+        Unit::Percent,
+    ),
+    ang(PropId::RotationDeg, "Rotation", 0.0),
+    flag(PropId::Enabled, "Enabled", true),
+];
+
+/// The size and space every modifier shares.
+///
+/// They are painted, like the brush and the mask: a stamp swept along a
+/// polyline, so a swathe of the field can be intensified or turned in one
+/// gesture and two strokes of the same settings merge into one object
+/// (spec.md 6.1). They ask the same question about their size that every sized
+/// tool asks: px is a footprint that keeps its shape on the map, km one that
+/// keeps it on the ground (spec.md 3.5).
+macro_rules! modifier_stamp {
+    () => {
+        frozen(choice(PropId::StampSpace, "Stamp space", 0, STAMP_SPACES))
+    };
+}
+
+/// The stamp a modifier sweeps, in the same terms the brush and the mask use.
+macro_rules! modifier_size {
+    () => {
+        num(
+            PropId::SizeKm,
+            "Size",
+            1_500.0,
+            1.0,
+            20_000.0,
+            Unit::Kilometres,
+        )
+    };
+}
+
+const INTENSITY: &[PropSpec] = &[
+    modifier_stamp!(),
+    modifier_size!(),
+    // Signed, so one tool intensifies and reduces: +100% doubles the speed
+    // beneath, -100% takes it to calm. The floor is exactly -100 because a
+    // negative speed is a reversed vector, which is what the turn tool is for.
+    num(PropId::Gain, "Amount", 50.0, -100.0, 400.0, Unit::Percent),
+    num(PropId::Feather, "Feather", 0.5, 0.0, 1.0, Unit::None),
+];
+
+const DIVERGENCE: &[PropSpec] = &[
+    modifier_stamp!(),
+    modifier_size!(),
+    // Signed: positive diverges (outward), negative converges.
+    num(PropId::Radial, "Amount", 50.0, -400.0, 400.0, Unit::Percent),
+    num(PropId::Feather, "Feather", 0.5, 0.0, 1.0, Unit::None),
+];
+
+const TURN: &[PropSpec] = &[
+    modifier_stamp!(),
+    modifier_size!(),
+    // A number of degrees rather than an `Angle`, because it is an amount and
+    // not a bearing: it is signed, it may exceed a turn, and animating it from
+    // -170 to 170 should unwind through zero rather than take the short way
+    // round as a bearing would (spec.md 3.3).
+    num(PropId::TurnDeg, "Turn", 30.0, -180.0, 180.0, Unit::Degrees),
+    num(PropId::Feather, "Feather", 0.5, 0.0, 1.0, Unit::None),
+];
+
+const WARP: &[PropSpec] = &[
+    modifier_stamp!(),
+    modifier_size!(),
+    choice(PropId::WarpMode, "Warp", 0, WARP_MODES),
+    // Where the field under the anchor is dragged to. A *position*, not a
+    // distance and a bearing: a warp is set by pulling the field where you want
+    // it (shift-drag, spec.md 6.3), and the two ends of that pull are the
+    // object's own anchor and this — both animatable, so a warp that grows or
+    // travels is two keyframed points and nothing else.
+    pos(PropId::PushTo, "Push to"),
+    num(
+        PropId::TwistDeg,
+        "Twist",
+        60.0,
+        -360.0,
+        360.0,
+        Unit::Degrees,
+    ),
+    num(PropId::Feather, "Feather", 0.5, 0.0, 1.0, Unit::None),
 ];
 
 const BRUSH: &[PropSpec] = &[
@@ -529,11 +703,11 @@ const SHAPE_FILL: &[PropSpec] = &[
     num(PropId::Feather, "Feather", 0.1, 0.0, 1.0, Unit::None),
 ];
 
-// "Identical interaction to the brush" is binding (spec.md 6.2): the eraser
+// "Identical interaction to the brush" is binding (spec.md 6.2): the mask
 // sweeps the same stamp along the same kind of polyline, so it carries the same
-// stamp properties. Anything else and a px-sized eraser would paint an ellipse
+// stamp properties. Anything else and a px-sized mask would cover an ellipse
 // over a stroke that is a circle on the map.
-const ERASER: &[PropSpec] = &[
+const MASK: &[PropSpec] = &[
     frozen(choice(PropId::BrushShape, "Brush shape", 0, BRUSH_SHAPES)),
     frozen(choice(PropId::StampSpace, "Stamp space", 0, STAMP_SPACES)),
     num(
@@ -545,6 +719,10 @@ const ERASER: &[PropSpec] = &[
         Unit::Kilometres,
     ),
     num(PropId::Feather, "Feather", 0.2, 0.0, 1.0, Unit::None),
+    // Which side of the footprint is masked. Off, the mask covers what it is
+    // drawn over; on, it covers everything *except* that — which is how a
+    // field is confined to a region rather than cut out of one (spec.md 6.2).
+    flag(PropId::Invert, "Invert", false),
 ];
 
 const CLONE_STAMP: &[PropSpec] = &[
@@ -665,7 +843,7 @@ const SHAPE_FILL_DEPENDENCIES: &[Dependency] = &[
 
 /// The dependencies among `tool`'s properties.
 ///
-/// The eraser has none — every option it has is read in every mode — and
+/// The mask has none — every option it has is read in every mode — and
 /// neither does the clone stamp: both of its offset modes read `source_point`,
 /// one as a fixed sample centre and the other as the origin of the offset. The
 /// curve reads `direction` in both of its modes too, which is exactly why the
@@ -675,7 +853,13 @@ pub fn dependencies(tool: ToolKind) -> &'static [Dependency] {
         ToolKind::Brush => BRUSH_DEPENDENCIES,
         ToolKind::Circle => CIRCLE_DEPENDENCIES,
         ToolKind::ShapeFill => SHAPE_FILL_DEPENDENCIES,
-        ToolKind::Eraser | ToolKind::CloneStamp | ToolKind::Curve => &[],
+        ToolKind::Warp => WARP_DEPENDENCIES,
+        ToolKind::Mask
+        | ToolKind::CloneStamp
+        | ToolKind::Curve
+        | ToolKind::Intensity
+        | ToolKind::Divergence
+        | ToolKind::Turn => &[],
     }
 }
 
@@ -688,21 +872,90 @@ pub fn is_live(tool: ToolKind, id: PropId, choice_of: impl Fn(PropId) -> u8) -> 
         .all(|d| d.live_for.contains(&choice_of(d.on)))
 }
 
-/// The tool-specific properties for `tool`, excluding [`COMMON`].
+/// A warp's two modes read different options: one pushes the field to a place,
+/// the other twists it about the anchor, and neither reads the other's.
+const WARP_DEPENDENCIES: &[Dependency] = &[
+    dep(PropId::PushTo, PropId::WarpMode, &[0]),
+    dep(PropId::TwistDeg, PropId::WarpMode, &[1]),
+];
+
+/// The pair of properties an eyedropper writes, and when it is offered.
+///
+/// A tool that paints a *constant* vector has one speed and one bearing, and
+/// both can be read off the field the user is looking at. A tool in a gradient
+/// mode has two of each and no single answer, and a curve aiming relative to
+/// its own path has a bearing that is an offset rather than a direction — so
+/// the eyedropper is offered exactly where those two properties mean what the
+/// map is showing (spec.md 6.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Eyedropper {
+    /// The speed property it writes, in m/s.
+    pub speed: PropId,
+    /// The direction property it writes, as an azimuth-toward.
+    pub direction: PropId,
+    /// Conditions beyond those the two properties already carry.
+    ///
+    /// Empty for the brush and the shape fill, whose own dependencies already
+    /// say when a constant vector is what the tool paints.
+    pub only_when: &'static [Dependency],
+}
+
+/// The curve reads `direction` in both of its modes, so the rule that the
+/// eyedropper is for a *bearing* and not an offset has to be stated here.
+const CURVE_EYEDROPPER: &[Dependency] = &[dep(PropId::Direction, PropId::CurveDirectionMode, &[0])];
+
+/// The eyedropper `tool` offers, if it paints a constant vector at all.
+///
+/// Not the mask (no field of its own), not the clone stamp (its field is what
+/// it reads), not the circle (its flow is tangential and has no bearing to
+/// take), and not a modifier (spec.md 6.3).
+pub fn eyedropper(tool: ToolKind) -> Option<Eyedropper> {
+    match tool {
+        ToolKind::Brush | ToolKind::ShapeFill => Some(Eyedropper {
+            speed: PropId::Speed,
+            direction: PropId::Direction,
+            only_when: &[],
+        }),
+        ToolKind::Curve => Some(Eyedropper {
+            speed: PropId::Speed,
+            direction: PropId::Direction,
+            only_when: CURVE_EYEDROPPER,
+        }),
+        _ => None,
+    }
+}
+
+/// The tool-specific properties for `tool`, excluding the common ones.
 pub fn tool_specs(tool: ToolKind) -> &'static [PropSpec] {
     match tool {
         ToolKind::Brush => BRUSH,
         ToolKind::Circle => CIRCLE,
         ToolKind::ShapeFill => SHAPE_FILL,
-        ToolKind::Eraser => ERASER,
+        ToolKind::Mask => MASK,
         ToolKind::CloneStamp => CLONE_STAMP,
         ToolKind::Curve => CURVE,
+        ToolKind::Intensity => INTENSITY,
+        ToolKind::Divergence => DIVERGENCE,
+        ToolKind::Turn => TURN,
+        ToolKind::Warp => WARP,
+    }
+}
+
+/// The properties `tool` carries regardless of what it draws.
+///
+/// [`COMMON`] for everything that paints a field; [`COMMON_MODIFIER`] — the
+/// same without `edge_mode` — for the modifiers (spec.md 6.3).
+pub fn common_specs(tool: ToolKind) -> &'static [PropSpec] {
+    if tool.is_modifier() {
+        COMMON_MODIFIER
+    } else {
+        COMMON
     }
 }
 
 /// Every property of `tool`, common first then tool-specific.
 pub fn all_specs(tool: ToolKind) -> impl Iterator<Item = &'static PropSpec> {
-    COMMON.iter().chain(tool_specs(tool))
+    common_specs(tool).iter().chain(tool_specs(tool))
 }
 
 /// Looks up one property's spec for a tool.
@@ -1022,12 +1275,16 @@ mod tests {
                 (ToolKind::Circle, PropId::StampSpace),
                 (ToolKind::ShapeFill, PropId::ShapeSource),
                 (ToolKind::ShapeFill, PropId::StampSpace),
-                (ToolKind::Eraser, PropId::BrushShape),
-                (ToolKind::Eraser, PropId::StampSpace),
                 (ToolKind::CloneStamp, PropId::BrushShape),
                 (ToolKind::CloneStamp, PropId::StampSpace),
                 (ToolKind::Curve, PropId::CurveKind),
                 (ToolKind::Curve, PropId::StampSpace),
+                (ToolKind::Mask, PropId::BrushShape),
+                (ToolKind::Mask, PropId::StampSpace),
+                (ToolKind::Intensity, PropId::StampSpace),
+                (ToolKind::Divergence, PropId::StampSpace),
+                (ToolKind::Turn, PropId::StampSpace),
+                (ToolKind::Warp, PropId::StampSpace),
             ]
         );
     }
@@ -1088,11 +1345,61 @@ mod tests {
     #[test]
     fn every_tool_carries_the_common_properties() {
         for tool in ToolKind::ALL {
-            for common in COMMON {
+            for common in common_specs(tool) {
                 assert!(
                     spec_for(tool, common.id).is_some(),
                     "{tool:?} is missing common property {:?}",
                     common.id
+                );
+            }
+        }
+    }
+
+    /// Spec 6.3: a modifier has no field of its own, so it has no `edge_mode`
+    /// — there is nothing to replace what is beneath *with*. Everything else in
+    /// [`COMMON`] it does carry, placement and lifetime alike.
+    #[test]
+    fn a_modifier_carries_every_common_property_but_the_edge_mode() {
+        for tool in ToolKind::ALL.into_iter().filter(|t| t.is_modifier()) {
+            assert!(
+                spec_for(tool, PropId::EdgeMode).is_none(),
+                "{tool:?} offers an edge mode it cannot use"
+            );
+            for common in COMMON.iter().filter(|s| s.id != PropId::EdgeMode) {
+                assert!(
+                    spec_for(tool, common.id).is_some(),
+                    "{tool:?} is missing common property {:?}",
+                    common.id
+                );
+            }
+        }
+        // And a tool that paints a field still has one.
+        assert!(spec_for(ToolKind::Brush, PropId::EdgeMode).is_some());
+    }
+
+    /// Spec 6.3: every modifier is painted and sized the same way, and every
+    /// one of them has a feather. Stated as a rule so a fifth modifier cannot
+    /// ship with a different set by accident.
+    #[test]
+    fn every_modifier_is_a_feathered_swept_stamp() {
+        for tool in ToolKind::ALL.into_iter().filter(|t| t.is_modifier()) {
+            for id in [
+                PropId::Position,
+                PropId::ScalePct,
+                PropId::RotationDeg,
+                PropId::Enabled,
+                PropId::SizeKm,
+                PropId::StampSpace,
+                PropId::Feather,
+            ] {
+                assert!(spec_for(tool, id).is_some(), "{tool:?} is missing {id:?}");
+            }
+            // And none of them carries a speed or a direction of its own: what
+            // it writes is what it read.
+            for id in [PropId::Speed, PropId::Direction, PropId::DirectionMode] {
+                assert!(
+                    spec_for(tool, id).is_none(),
+                    "{tool:?} declares {id:?}, but a modifier has no field of its own"
                 );
             }
         }
@@ -1134,8 +1441,8 @@ mod tests {
 
     #[test]
     fn an_unknown_property_for_a_tool_has_no_value() {
-        let map = PropertyMap::for_tool(ToolKind::Eraser);
-        assert_eq!(map.value_at(ToolKind::Eraser, PropId::Speed, 0), None);
+        let map = PropertyMap::for_tool(ToolKind::Mask);
+        assert_eq!(map.value_at(ToolKind::Mask, PropId::Speed, 0), None);
     }
 
     /// Spec 7.5: no tool has a radial or tangential component of its own. The

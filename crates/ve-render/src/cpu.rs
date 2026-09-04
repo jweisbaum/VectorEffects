@@ -12,7 +12,9 @@ use ve_core::{LonLat, geo};
 use crate::aeqd::Local;
 use crate::error::Result;
 use crate::evaluator::{FieldEvaluator, SamplePoint};
-use crate::scene::{DirectionMode, EdgeMode, FlatObject, OffsetMode, Scene, SpeedMode};
+use crate::scene::{
+    DirectionMode, EdgeMode, FlatObject, Modifier, OffsetMode, Scene, SpeedMode, Warp,
+};
 
 /// How deep a clone stamp may read through other clone stamps.
 ///
@@ -159,29 +161,44 @@ fn direction_at(object: &FlatObject, position: LonLat, local: Local) -> Angle {
 ///
 /// `None` when the point lies outside the object entirely.
 fn sample_object(object: &FlatObject, position: LonLat) -> Option<(Uv, f64)> {
-    // Spherical-cap cull first: cheap, and rejects almost every cell for a
-    // typical object.
-    let ground_distance = object.frame.distance_m(position);
-    if ground_distance > object.cap_radius_m {
-        return None;
-    }
-
+    let weight = coverage(object, position)?;
     let local = object.frame.to_local(position);
-    let signed_distance = object.shape.distance(local);
-    if signed_distance > 0.0 {
-        return None;
-    }
-
-    let weight = feather_weight(
-        signed_distance,
-        object.feather,
-        object.shape.feather_reference_m(),
-    );
     let speed = speed_at(object, local).max(0.0);
     let bearing = direction_at(object, position, local);
     let vector = uv_from_speed_azimuth(speed, bearing);
 
     Some((vector, weight))
+}
+
+/// How strongly an object writes at a position, or `None` where it does not.
+///
+/// The one place coverage is decided, for every kind of object: the cap cull,
+/// the signed distance, the feather ramp — and the inversion, which turns all
+/// three inside out (spec.md 6.2). An inverted object covers everything outside
+/// its footprint, so the cap cull that rejects a distant cell for every other
+/// object *accepts* it here, at full weight and without touching the SDF.
+fn coverage(object: &FlatObject, position: LonLat) -> Option<f64> {
+    // Spherical-cap cull first: cheap, and rejects almost every cell for a
+    // typical object.
+    if object.frame.distance_m(position) > object.cap_radius_m {
+        return if object.invert { Some(1.0) } else { None };
+    }
+
+    let local = object.frame.to_local(position);
+    let signed_distance = object.shape.distance(local);
+    if signed_distance > 0.0 && !object.invert {
+        return None;
+    }
+
+    // The ramp runs over the same band either way; inverting reflects it, so
+    // the two sides of one edge always add to a full weight and a mask and its
+    // inverse leave no seam between them.
+    let weight = feather_weight(
+        signed_distance,
+        object.feather,
+        object.shape.feather_reference_m(),
+    );
+    Some(if object.invert { 1.0 - weight } else { weight })
 }
 
 /// Evaluates a whole scene at one position.
@@ -198,11 +215,69 @@ fn sample_upto(scene: &Scene, position: LonLat, upto: usize, depth: u32) -> Uv {
     // Unwritten cells are calm.
     let mut accumulated = Uv::default();
 
+    // Imported fields are interleaved with the objects by `z`: a raster at
+    // `z` is applied just before object `z`, and every raster at or below
+    // `upto` is beneath the object that asked. Where the grid has a value it
+    // overwrites outright.
+    let mut rasters = scene.rasters.iter().peekable();
+    let mut apply_rasters_below = |z: usize, accumulated: &mut Uv| {
+        while let Some(raster) = rasters.next_if(|r| r.z <= z) {
+            if let Some(uv) = raster.grid.sample(position.lon, position.lat) {
+                // A sample outside the layer's speed band is treated as a
+                // missing one, so the field beneath shows through exactly as it
+                // does outside a regional grid (spec.md 4.8). Filtered here and
+                // not inside `RasterGrid::sample`, which is the lattice's own
+                // reading of itself and is shared with the GPU port.
+                if raster
+                    .speed_range
+                    .is_none_or(|band| band.keeps(uv.u.hypot(uv.v)))
+                {
+                    *accumulated = uv;
+                }
+            }
+        }
+    };
+
     for (index, object) in scene.objects.iter().take(upto).enumerate() {
+        apply_rasters_below(index, &mut accumulated);
+        // A modifier has no field of its own either: it rewrites what the
+        // accumulation buffer already holds, which at this point in the loop is
+        // exactly everything below it in z-order (spec.md 6.3, 7.6).
+        if let Some(modifier) = object.modifier {
+            let Some(weight) = operator_weight(object, position) else {
+                continue;
+            };
+            let w = weight as f32;
+            let modified = match modifier {
+                // A warp reads from somewhere else, so it needs the sub-scene
+                // evaluated at that point — the clone stamp's machinery, with a
+                // displacement that varies across the footprint instead of a
+                // constant offset. The depth cap is shared, and for the same
+                // reason: there is no recursion budget beyond it.
+                Modifier::Warp(warp) => {
+                    if depth >= MAX_CLONE_DEPTH {
+                        accumulated
+                    } else {
+                        let read = warp_source_position(object, warp, position, weight);
+                        sample_upto(scene, read, index, depth + 1)
+                    }
+                }
+                _ => modified_vector(modifier, object, position, accumulated),
+            };
+            // One rule for all four: fade from what was there to what the
+            // modifier makes of it. At the footprint's edge the weight is zero
+            // and the field is untouched, which is what keeps a modifier from
+            // showing its own outline.
+            accumulated = Uv {
+                u: accumulated.u + (modified.u - accumulated.u) * w,
+                v: accumulated.v + (modified.v - accumulated.v) * w,
+            };
+            continue;
+        }
         // A clone stamp has no field of its own: it copies whatever lies
         // beneath it, from an offset position.
         if let Some(source) = object.clone_source {
-            let Some(weight) = clone_weight(object, position) else {
+            let Some(weight) = operator_weight(object, position) else {
                 continue;
             };
             let vector = if depth >= MAX_CLONE_DEPTH {
@@ -243,24 +318,88 @@ fn sample_upto(scene: &Scene, position: LonLat, upto: usize, depth: u32) -> Uv {
             },
         };
     }
+    apply_rasters_below(upto, &mut accumulated);
     accumulated
 }
 
-/// Coverage and feather for a clone stamp, without evaluating any field.
-fn clone_weight(object: &FlatObject, position: LonLat) -> Option<f64> {
-    if object.frame.distance_m(position) > object.cap_radius_m {
-        return None;
+/// What a modifier makes of the vector beneath it.
+///
+/// Every variant is a function of the vector it was handed, so a modifier over
+/// calm water leaves calm water: nothing here can conjure a field where there
+/// is none, which is what separates a modifier from a tool that paints
+/// (spec.md 6.3).
+fn modified_vector(modifier: Modifier, object: &FlatObject, position: LonLat, beneath: Uv) -> Uv {
+    match modifier {
+        Modifier::Gain(gain) => {
+            let factor = (1.0 + gain) as f32;
+            Uv {
+                u: beneath.u * factor,
+                v: beneath.v * factor,
+            }
+        }
+        // Outward from the anchor, at a fraction of the local speed. The
+        // bearing is the frame's own radial one — the same the circle's
+        // rotation is a quarter turn off (spec.md 7.5) — so the two tools
+        // agree about which way "out" is at a given cell.
+        Modifier::Radial(fraction) => {
+            let speed = f64::from(beneath.u.hypot(beneath.v));
+            let radial =
+                uv_from_speed_azimuth(speed * fraction, object.frame.radial_bearing(position));
+            Uv {
+                u: beneath.u + radial.u,
+                v: beneath.v + radial.v,
+            }
+        }
+        // Turning an azimuth by `d` is a rotation of (u, v) by `d` clockwise:
+        // u = s·sin(az) and v = s·cos(az), so expanding sin(az + d) and
+        // cos(az + d) gives exactly this pair. Written out rather than routed
+        // through speed and azimuth so a calm cell stays calm instead of
+        // acquiring a direction from atan2(0, 0).
+        Modifier::Turn(degrees) => {
+            let (sin, cos) = degrees.to_radians().sin_cos();
+            let (sin, cos) = (sin as f32, cos as f32);
+            Uv {
+                u: beneath.u * cos + beneath.v * sin,
+                v: beneath.v * cos - beneath.u * sin,
+            }
+        }
+        // Handled by the caller, which has the scene a warp has to re-read.
+        Modifier::Warp(_) => beneath,
     }
+}
+
+/// Where a warp reads from, for a point inside it.
+///
+/// The displacement fades with the same weight the result is blended by, so it
+/// is zero at the footprint's edge: a warp that displaced uniformly would tear
+/// the field along its own outline. A push reads from *behind* the direction it
+/// pushes — the field at `p` is what used to be at `p - d` — and a twist reads
+/// from the position rotated back the other way, for the same reason.
+fn warp_source_position(object: &FlatObject, warp: Warp, position: LonLat, weight: f64) -> LonLat {
     let local = object.frame.to_local(position);
-    let signed_distance = object.shape.distance(local);
-    if signed_distance > 0.0 {
-        return None;
-    }
-    Some(feather_weight(
-        signed_distance,
-        object.feather,
-        object.shape.feather_reference_m(),
-    ))
+    let moved = match warp {
+        Warp::Push { x, y } => [local[0] - x * weight, local[1] - y * weight],
+        Warp::Twist { degrees } => {
+            let (sin, cos) = (-degrees * weight).to_radians().sin_cos();
+            // Clockwise on the map is negative in the local right-handed frame,
+            // where x is east and y is north.
+            [
+                local[0] * cos + local[1] * sin,
+                local[1] * cos - local[0] * sin,
+            ]
+        }
+    };
+    object.frame.to_global(moved)
+}
+
+/// Coverage and feather for an operator, without evaluating any field.
+///
+/// Shared by the clone stamp and the modifiers: all of them need to know how
+/// strongly they write at a cell before they know what they are writing. The
+/// same [`coverage`] every other object uses — an operator is not a second
+/// notion of "inside".
+fn operator_weight(object: &FlatObject, position: LonLat) -> Option<f64> {
+    coverage(object, position)
 }
 
 /// Where a clone stamp reads from, for a point inside it.

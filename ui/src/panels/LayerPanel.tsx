@@ -1,8 +1,13 @@
 import { useEffect, useState } from "react";
 
+import type { GribLayerInfo } from "../generated/GribLayerInfo";
 import { api } from "../ipc";
 import type { DocumentTree } from "../generated/DocumentTree";
 import type { ProjectSummary } from "../generated/ProjectSummary";
+import NumberField from "../NumberField";
+import { knotsFromMps, mpsFromKnots } from "../project/format";
+import { pickGribToImport } from "../project/dialogs";
+import { EyeIcon } from "./EyeIcon";
 
 /** What is being dragged, while a reorder is in progress. */
 type Dragging =
@@ -54,6 +59,14 @@ export default function LayerPanel({
   const run = (action: Promise<ProjectSummary>) => {
     setError(null);
     action.then(onChanged).catch((err: unknown) => setError(String(err)));
+  };
+
+  /** Picks a GRIB2 file and imports it as a layer, or two if it holds both kinds. */
+  const importGrib = async () => {
+    setError(null);
+    const path = await pickGribToImport();
+    if (path === null) return;
+    run(api.importGrib(path));
   };
 
   const commitRename = (id: number, isLayer: boolean) => {
@@ -118,6 +131,13 @@ export default function LayerPanel({
         <button title="Add a layer" onClick={() => run(api.addLayer(""))}>
           +
         </button>
+        <button
+          className="import-grib"
+          title="Import a GRIB2 file as a layer"
+          onClick={() => void importGrib()}
+        >
+          Import GRIB
+        </button>
       </header>
 
       <ul className="layers">
@@ -157,10 +177,12 @@ export default function LayerPanel({
               >
                 <button
                   className={layer.visible ? "eye on" : "eye"}
-                  title={layer.visible ? "Hide" : "Show"}
+                  title={layer.visible ? "Hide layer" : "Show layer"}
+                  aria-label={layer.visible ? "Hide layer" : "Show layer"}
+                  aria-pressed={layer.visible}
                   onClick={() => run(api.setLayerVisible(layer.id, !layer.visible))}
                 >
-                  {layer.visible ? "◉" : "○"}
+                  <EyeIcon open={layer.visible} />
                 </button>
                 <button
                   className={layer.locked ? "lock on" : "lock"}
@@ -193,6 +215,14 @@ export default function LayerPanel({
                     {layer.name}
                   </span>
                 )}
+                {layer.grib && !layer.grib.loaded && (
+                  <span
+                    className="grib-missing"
+                    title={`${layer.grib.path}\nThe file could not be read, so this layer contributes nothing.`}
+                  >
+                    file missing
+                  </span>
+                )}
 
                 <span className="spacer" />
                 <button
@@ -217,6 +247,13 @@ export default function LayerPanel({
                   ×
                 </button>
               </div>
+
+              {layer.grib?.loaded && (
+                <SpeedFilter
+                  grib={layer.grib}
+                  onChange={(min, max) => run(api.setLayerSpeedRange(layer.id, min, max))}
+                />
+              )}
 
               <ul
                 className="objects"
@@ -318,7 +355,9 @@ export default function LayerPanel({
                     </li>
                   );
                 })}
-                {layer.objects.length === 0 && (
+                {/* A GRIB layer's field is its content; only a painted layer
+                    with nothing on it is empty. */}
+                {layer.objects.length === 0 && !layer.grib && (
                   <li className="object empty muted">empty</li>
                 )}
               </ul>
@@ -328,6 +367,89 @@ export default function LayerPanel({
       </ul>
 
       {error !== null && <p className="error">{error}</p>}
+    </div>
+  );
+}
+
+/**
+ * The band of speeds an imported field keeps (spec.md 4.8).
+ *
+ * A forecast is easier to read one band at a time: the calms, the gale, the
+ * jet. A sample outside the band is dropped exactly as a missing one is, so
+ * what is beneath shows through — including the layer's own painted objects,
+ * which is what makes this a filter on the *import* and not on the layer.
+ *
+ * Two sliders and two fields, not a dual-thumb control: the two ends are two
+ * numbers, they are often typed rather than dragged, and a slider whose thumbs
+ * can cross is a puzzle. Crossing them is allowed and simply orders them —
+ * dragging the low end past the high one is a gesture, not a mistake.
+ */
+function SpeedFilter({
+  grib,
+  onChange,
+}: {
+  grib: GribLayerInfo;
+  onChange: (minMps: number | null, maxMps: number | null) => void;
+}) {
+  const ceiling = Math.max(5, Math.ceil(knotsFromMps(grib.speed_ceiling_mps)));
+  const on = grib.speed_min_mps !== null && grib.speed_max_mps !== null;
+  const low = on ? knotsFromMps(grib.speed_min_mps ?? 0) : 0;
+  const high = on ? knotsFromMps(grib.speed_max_mps ?? 0) : ceiling;
+
+  const set = (nextLow: number, nextHigh: number) =>
+    onChange(mpsFromKnots(nextLow), mpsFromKnots(nextHigh));
+
+  return (
+    <div className="grib-filter">
+      <label title="Keep only the speeds inside this band; the rest of the imported field is dropped, and whatever is beneath it shows through.">
+        <input
+          type="checkbox"
+          checked={on}
+          onChange={(e) => (e.target.checked ? set(0, ceiling) : onChange(null, null))}
+        />
+        Speed filter
+      </label>
+      {on && (
+        <div className="grib-filter-band">
+          <span className="grib-filter-row">
+            <input
+              type="range"
+              min={0}
+              max={ceiling}
+              step={1}
+              value={Math.min(low, high)}
+              onChange={(e) => set(Number(e.target.value), high)}
+              title="Slowest speed kept"
+            />
+            <NumberField
+              min={0}
+              max={ceiling}
+              value={low}
+              format={(v) => String(Math.round(v))}
+              onCommit={(next) => set(next, high)}
+            />
+          </span>
+          <span className="grib-filter-row">
+            <input
+              type="range"
+              min={0}
+              max={ceiling}
+              step={1}
+              value={Math.max(low, high)}
+              onChange={(e) => set(low, Number(e.target.value))}
+              title="Fastest speed kept"
+            />
+            <NumberField
+              min={0}
+              max={ceiling}
+              value={high}
+              format={(v) => String(Math.round(v))}
+              onCommit={(next) => set(low, next)}
+            />
+          </span>
+          <span className="muted">kt, of {ceiling} in the file</span>
+        </div>
+      )}
     </div>
   );
 }

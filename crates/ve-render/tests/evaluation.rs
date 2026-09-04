@@ -72,6 +72,7 @@ fn disc(anchor: LonLat, diameter_km: f32, speed: f32) -> Object {
 
 fn scene_of(objects: Vec<Object>) -> Scene {
     Scene {
+        rasters: Vec::new(),
         objects: objects
             .iter()
             .filter_map(|o| flatten_object(o, STEP))
@@ -299,30 +300,98 @@ fn the_topmost_object_wins() {
     assert!((speed_at(&scene, outer) - 10.0).abs() < 1e-4);
 }
 
+/// A mask stamp at `anchor`, with a hard edge.
+fn mask(anchor: LonLat, size_km: f32, invert: bool) -> Object {
+    let mut object = Object::new(ToolKind::Mask, "mask", 24);
+    object.geometry = Geometry::Stroke {
+        chains: vec![vec![LocalPoint::new(0.0, 0.0)]],
+    };
+    set(&mut object, PropId::Position, PropValue::LonLat(anchor));
+    set_num(&mut object, PropId::SizeKm, size_km);
+    set_num(&mut object, PropId::Feather, 0.0);
+    set(&mut object, PropId::Invert, PropValue::Bool(invert));
+    object
+}
+
 #[test]
-fn an_eraser_writes_calm_over_existing_wind() {
+fn a_mask_writes_calm_over_existing_wind() {
     let anchor = ll(0.0, 0.0);
     let background = brush(anchor, vec![[0.0, 0.0]], 4000.0, 20.0, 90.0);
 
-    let mut eraser = Object::new(ToolKind::Eraser, "eraser", 24);
-    eraser.geometry = Geometry::Stroke {
-        chains: vec![vec![LocalPoint::new(0.0, 0.0)]],
-    };
-    set(&mut eraser, PropId::Position, PropValue::LonLat(anchor));
-    set_num(&mut eraser, PropId::SizeKm, 1000.0);
-    set_num(&mut eraser, PropId::Feather, 0.0);
-
-    let scene = scene_of(vec![background, eraser]);
-    assert!(
-        speed_at(&scene, anchor) < 1e-4,
-        "the eraser must leave calm"
-    );
+    let scene = scene_of(vec![background, mask(anchor, 1000.0, false)]);
+    assert!(speed_at(&scene, anchor) < 1e-4, "the mask must leave calm");
 
     let outside = anchor.destination(Angle::new(0.0), 1_000_000.0);
     assert!(
         (speed_at(&scene, outside) - 20.0).abs() < 1e-4,
         "only inside it"
     );
+}
+
+/// Spec 6.2: an inverted mask covers everything *except* its footprint, which
+/// is how a field is confined to a region rather than cut out of one. Exactly
+/// the complement of the same mask uninverted — including out at the far side
+/// of the globe, where the spherical-cap cull would otherwise have skipped the
+/// object entirely.
+#[test]
+fn an_inverted_mask_covers_everything_but_its_footprint() {
+    let anchor = ll(0.0, 0.0);
+    let background = brush(anchor, vec![[0.0, 0.0]], 8000.0, 20.0, 90.0);
+    let scene = scene_of(vec![background, mask(anchor, 1000.0, true)]);
+
+    assert!(
+        (speed_at(&scene, anchor) - 20.0).abs() < 1e-4,
+        "inside an inverted mask the field stands"
+    );
+    let outside = anchor.destination(Angle::new(0.0), 1_000_000.0);
+    assert!(
+        speed_at(&scene, outside) < 1e-4,
+        "and outside it there is nothing left: {} m/s",
+        speed_at(&scene, outside)
+    );
+    // Past the cap the object would have been culled. It is not.
+    let far = anchor.destination(Angle::new(90.0), 3_000_000.0);
+    assert!(
+        speed_at(&scene, far) < 1e-4,
+        "the cap cull skipped an inverted mask: {} m/s at {far:?}",
+        speed_at(&scene, far)
+    );
+}
+
+/// A mask and its inverse are complements: at every cell, what one of them
+/// covers the other leaves, and their two weights add to exactly one.
+///
+/// Read off the field, which is the only place a weight is observable: over a
+/// uniform 20 m/s easterly a mask of weight `w` leaves `20(1 - w)`, so the two
+/// halves of one edge must always leave 20 m/s *between them* — at the centre,
+/// out past the cap, and everywhere across a wide feathered rim, which is where
+/// a reflected ramp would show up as a seam if it were wrong.
+#[test]
+fn a_mask_and_its_inverse_are_exact_complements() {
+    let anchor = ll(10.0, -20.0);
+    for feather in [0.0f32, 0.5, 1.0] {
+        let scene_of_mask = |invert: bool| {
+            let background = brush(anchor, vec![[0.0, 0.0]], 8000.0, 20.0, 90.0);
+            let mut object = mask(anchor, 1500.0, invert);
+            set_num(&mut object, PropId::Feather, feather);
+            scene_of(vec![background, object])
+        };
+        let plain = scene_of_mask(false);
+        let inverted = scene_of_mask(true);
+
+        for bearing in [0.0, 90.0, 180.0, 270.0] {
+            for distance in [1.0, 400_000.0, 700_000.0, 749_000.0, 751_000.0, 2_000_000.0] {
+                let at = anchor.destination(Angle::new(bearing), distance);
+                let total = speed_at(&plain, at) + speed_at(&inverted, at);
+                assert!(
+                    (total - 20.0).abs() < 1e-3,
+                    "feather {feather}: the two weights sum to {}, not 1, \
+                     at {distance} m on {bearing}",
+                    total / 20.0
+                );
+            }
+        }
+    }
 }
 
 // --- Direction behaviour ----------------------------------------------------
@@ -791,4 +860,418 @@ fn a_clone_preserves_the_shape_of_what_it_copies() {
     let across = destination.destination(Angle::new(0.0), 400_000.0);
     assert!(speed_at(&scene, along) > 19.0, "along the copied stroke");
     assert!(speed_at(&scene, across) < 1.0, "across it should be clear");
+}
+
+// --- Imported fields --------------------------------------------------------
+
+use std::sync::Arc;
+
+use ve_core::raster::{RasterFrame, RasterGrid, RasterSequence};
+use ve_render::scene::FlatRaster;
+
+/// A 5° global lattice whose `u` is the column index and `v` the row index,
+/// so a sample's value says which nodes it was blended from.
+fn indexed_grid() -> Arc<RasterGrid> {
+    let (ni, nj) = (72, 37);
+    let mut uv = Vec::new();
+    for j in 0..nj {
+        for i in 0..ni {
+            uv.push([i as f32, j as f32]);
+        }
+    }
+    Arc::new(RasterGrid::new(ni, nj, 0.0, 90.0, 5.0, 5.0, uv).unwrap())
+}
+
+/// A uniform regional lattice over the North Atlantic.
+fn atlantic(u: f32, v: f32) -> Arc<RasterGrid> {
+    Arc::new(RasterGrid::new(41, 31, -60.0, 60.0, 1.0, 1.0, vec![[u, v]; 41 * 31]).unwrap())
+}
+
+#[test]
+fn an_imported_field_is_sampled_bilinearly_between_its_nodes() {
+    let scene = Scene {
+        objects: Vec::new(),
+        rasters: vec![FlatRaster {
+            z: 0,
+            grid: indexed_grid(),
+            speed_range: None,
+        }],
+    };
+    // Exactly on a node.
+    let at = sample_scene(&scene, ll(10.0, 80.0));
+    assert_eq!((at.u, at.v), (2.0, 2.0));
+    // Halfway between columns 2 and 3, a fifth of the way from row 2 to 3.
+    let between = sample_scene(&scene, ll(12.5, 79.0));
+    assert!((between.u - 2.5).abs() < 1e-5, "{}", between.u);
+    assert!((between.v - 2.2).abs() < 1e-5, "{}", between.v);
+    // Across the seam: between column 71 and column 0.
+    let seam = sample_scene(&scene, ll(-2.5, 90.0));
+    assert!((seam.u - 35.5).abs() < 1e-5, "{}", seam.u);
+}
+
+#[test]
+fn an_imported_field_overwrites_what_is_beneath_and_yields_to_what_is_above() {
+    let inside = ll(-30.0, 45.0);
+    let stroke = brush(inside, vec![[0.0, 0.0]], 1000.0, 20.0, 180.0);
+    let painted = flatten_object(&stroke, STEP).unwrap();
+
+    // Raster above the stroke: the raster wins.
+    let above = Scene {
+        objects: vec![painted.clone()],
+        rasters: vec![FlatRaster {
+            z: 1,
+            grid: atlantic(5.0, 0.0),
+            speed_range: None,
+        }],
+    };
+    let s = sample_scene(&above, inside);
+    assert!((s.u - 5.0).abs() < 1e-5 && s.v.abs() < 1e-5, "{s:?}");
+
+    // Raster beneath the stroke: the stroke wins inside its footprint, and
+    // the raster shows through outside it.
+    let beneath = Scene {
+        objects: vec![painted],
+        rasters: vec![FlatRaster {
+            z: 0,
+            grid: atlantic(5.0, 0.0),
+            speed_range: None,
+        }],
+    };
+    let s = sample_scene(&beneath, inside);
+    assert!((s.v + 20.0).abs() < 1e-3 && s.u.abs() < 1e-3, "{s:?}");
+    let s = sample_scene(&beneath, ll(-50.0, 40.0));
+    assert!((s.u - 5.0).abs() < 1e-5, "{s:?}");
+
+    // Outside the regional grid the field beneath is untouched: calm here.
+    let s = sample_scene(&beneath, ll(120.0, 0.0));
+    assert_eq!((s.u, s.v), (0.0, 0.0));
+}
+
+#[test]
+fn a_raster_beneath_a_clone_stamp_is_what_the_stamp_copies() {
+    let anchor = ll(-40.0, 45.0);
+    let source = ll(-30.0, 40.0);
+    let stamp = flatten_object(&clone(anchor, source, 500.0), STEP).unwrap();
+    let scene = Scene {
+        objects: vec![stamp],
+        rasters: vec![FlatRaster {
+            z: 0,
+            grid: atlantic(3.0, 4.0),
+            speed_range: None,
+        }],
+    };
+    let s = sample_scene(&scene, anchor);
+    assert!(
+        (s.u - 3.0).abs() < 1e-5 && (s.v - 4.0).abs() < 1e-5,
+        "{s:?}"
+    );
+}
+
+/// A 3-hourly file in an hourly project, and an hourly file in a 3-hourly one:
+/// each step shows the message valid *at* its forecast hour, and nothing at a
+/// step the file has no message for (spec.md 4.8).
+#[test]
+fn a_step_shows_only_the_message_valid_at_its_own_hour() {
+    let sequence = |offsets: &[f64]| {
+        let frames = offsets
+            .iter()
+            .map(|&h| RasterFrame {
+                offset_hours: h,
+                valid_unix_s: (h * 3600.0) as i64,
+                grid: atlantic(h as f32, 0.0),
+            })
+            .collect();
+        Arc::new(RasterSequence::new(FieldKind::Wind, frames).unwrap())
+    };
+    let at = ll(-30.0, 45.0);
+    let u_at = |project: &Project, step: u32| sample_scene(&flatten(project, step), at).u;
+
+    let mut hourly = Project::new(
+        "hourly",
+        ProjectSettings::new(FieldKind::Wind, Resolution::Deg1, StepHours::H1, 12),
+    );
+    hourly.layers[0].raster = Some(sequence(&[0.0, 3.0, 6.0]));
+    // Hours 1, 2, 4, 5, 7, 8 fall between messages: nothing there.
+    let seen: Vec<f32> = (0..9).map(|s| u_at(&hourly, s)).collect();
+    assert_eq!(seen, vec![0.0, 0.0, 0.0, 3.0, 0.0, 0.0, 6.0, 0.0, 0.0]);
+    assert_eq!(
+        u_at(&hourly, 11),
+        0.0,
+        "past the file's end there is no imported field at all"
+    );
+
+    let mut three_hourly = Project::new(
+        "3h",
+        ProjectSettings::new(FieldKind::Wind, Resolution::Deg1, StepHours::H3, 4),
+    );
+    three_hourly.layers[0].raster = Some(sequence(&[0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0]));
+    // 0, 3 and 6 are read; the messages between them are never shown, and the
+    // fourth step at 9 h is past the file.
+    let seen: Vec<f32> = (0..4).map(|s| u_at(&three_hourly, s)).collect();
+    assert_eq!(seen, vec![0.0, 3.0, 6.0, 0.0]);
+}
+
+#[test]
+fn a_hidden_grib_layer_contributes_nothing_and_a_missing_file_is_calm() {
+    let mut project = Project::new(
+        "T",
+        ProjectSettings::new(FieldKind::Wind, Resolution::Deg1, StepHours::H3, 4),
+    );
+    let at = ll(-30.0, 45.0);
+    let frame = RasterFrame {
+        offset_hours: 0.0,
+        valid_unix_s: 0,
+        grid: atlantic(7.0, 0.0),
+    };
+    project.layers[0].raster = Some(Arc::new(
+        RasterSequence::new(FieldKind::Wind, vec![frame]).unwrap(),
+    ));
+    assert_eq!(sample_scene(&flatten(&project, 0), at).u, 7.0);
+    project.layers[0].visible = false;
+    assert_eq!(sample_scene(&flatten(&project, 0), at).u, 0.0);
+    // A GRIB layer whose file could not be read carries no raster.
+    project.layers[0].visible = true;
+    project.layers[0].raster = None;
+    assert_eq!(sample_scene(&flatten(&project, 0), at).u, 0.0);
+}
+
+// --- Modifiers (spec.md 6.3) ------------------------------------------------
+//
+// A modifier has no field of its own: it reads the composite beneath it and
+// writes back a transformed version. Every assertion here is against a
+// hand-computed vector rather than against what the evaluator happens to
+// produce — the whole point of these tools is that the arithmetic is
+// predictable.
+
+/// A one-stamp modifier stroke centred on `anchor`, with a hard edge.
+///
+/// A modifier is painted like the brush, so a single stamp is a chain of one
+/// point — the same construction a click with the brush produces.
+fn modifier(tool: ToolKind, anchor: LonLat, size_km: f32) -> Object {
+    let mut object = Object::new(tool, "modifier", 24);
+    object.geometry = Geometry::Stroke {
+        chains: vec![vec![LocalPoint::new(0.0, 0.0)]],
+    };
+    set(&mut object, PropId::Position, PropValue::LonLat(anchor));
+    set_num(&mut object, PropId::SizeKm, size_km);
+    set_num(&mut object, PropId::Feather, 0.0);
+    object
+}
+
+/// Spec 6.3: the intensity modifier scales the speed beneath it and leaves the
+/// direction alone. +100% is twice as fast, -50% is half, -100% is calm.
+#[test]
+fn intensify_scales_the_speed_beneath_it_and_reduce_takes_it_back() {
+    let anchor = ll(0.0, 0.0);
+    for (percent, expected) in [(100.0, 40.0), (-50.0, 10.0), (-100.0, 0.0), (0.0, 20.0)] {
+        let background = brush(anchor, vec![[0.0, 0.0]], 4000.0, 20.0, 90.0);
+        let mut gain = modifier(ToolKind::Intensity, anchor, 1000.0);
+        set_num(&mut gain, PropId::Gain, percent);
+
+        let scene = scene_of(vec![background, gain]);
+        assert!(
+            (speed_at(&scene, anchor) - expected).abs() < 1e-3,
+            "{percent}% of 20 m/s should be {expected}, got {}",
+            speed_at(&scene, anchor)
+        );
+        if expected > 0.0 {
+            assert!(
+                (azimuth_at(&scene, anchor) - 90.0).abs() < 1e-3,
+                "the direction is not the intensity's business"
+            );
+        }
+        // And only inside its footprint.
+        let outside = anchor.destination(Angle::new(0.0), 900_000.0);
+        assert!((speed_at(&scene, outside) - 20.0).abs() < 1e-3);
+    }
+}
+
+/// A modifier cannot conjure a field: every one of them is a function of what
+/// it was handed, so over calm water it hands calm back. This is the line
+/// between a modifier and a tool that paints (spec.md 6.3).
+#[test]
+fn a_modifier_over_calm_water_leaves_calm_water() {
+    let anchor = ll(20.0, -10.0);
+    for (tool, prop, amount) in [
+        (ToolKind::Intensity, PropId::Gain, 300.0),
+        (ToolKind::Divergence, PropId::Radial, 300.0),
+        (ToolKind::Turn, PropId::TurnDeg, 90.0),
+    ] {
+        let mut object = modifier(tool, anchor, 2000.0);
+        set_num(&mut object, prop, amount);
+        let scene = scene_of(vec![object]);
+        assert!(
+            speed_at(&scene, anchor) < 1e-6,
+            "{tool:?} painted {} m/s onto empty ocean",
+            speed_at(&scene, anchor)
+        );
+    }
+
+    // The warp too, which reads elsewhere rather than transforming in place.
+    let mut warp = modifier(ToolKind::Warp, anchor, 2000.0);
+    set(
+        &mut warp,
+        PropId::PushTo,
+        PropValue::LonLat(anchor.destination(Angle::new(90.0), 400_000.0)),
+    );
+    assert!(speed_at(&scene_of(vec![warp]), anchor) < 1e-6);
+}
+
+/// Spec 6.3: diverging adds a component pointing away from the anchor, at a
+/// fraction of the local speed; converging adds the same component inward.
+///
+/// Hand-computed: a 10 m/s northward flow, sampled due east of the anchor where
+/// "outward" is a bearing of 90°, plus 100% of 10 m/s outward is (10, 10) —
+/// 14.142 m/s on a bearing of 45°. Converging by the same amount gives
+/// (-10, 10): the same speed, 45° the other side of north.
+#[test]
+fn diverging_bends_the_flow_outward_and_converging_bends_it_in() {
+    let anchor = ll(0.0, 0.0);
+    let east = anchor.destination(Angle::new(90.0), 300_000.0);
+
+    for (percent, expected_azimuth) in [(100.0, 45.0), (-100.0, 315.0)] {
+        let background = brush(anchor, vec![[0.0, 0.0]], 4000.0, 10.0, 0.0);
+        let mut radial = modifier(ToolKind::Divergence, anchor, 2000.0);
+        set_num(&mut radial, PropId::Radial, percent);
+
+        let scene = scene_of(vec![background, radial]);
+        let speed = speed_at(&scene, east);
+        let azimuth = azimuth_at(&scene, east);
+        assert!(
+            (speed - 200.0f64.sqrt()).abs() < 0.05,
+            "{percent}%: speed {speed}, expected {}",
+            200.0f64.sqrt()
+        );
+        assert!(
+            (azimuth - expected_azimuth).abs() < 0.5,
+            "{percent}%: azimuth {azimuth}, expected {expected_azimuth}"
+        );
+    }
+}
+
+/// Spec 6.3: the turn modifier rotates every vector beneath it by a fixed
+/// angle, clockwise for a positive amount, and does not touch the speed.
+#[test]
+fn rotating_turns_the_flow_by_the_angle_it_is_given() {
+    let anchor = ll(-30.0, 40.0);
+    for (turn, expected) in [(30.0, 120.0), (-30.0, 60.0), (180.0, 270.0)] {
+        let background = brush(anchor, vec![[0.0, 0.0]], 4000.0, 12.0, 90.0);
+        let mut object = modifier(ToolKind::Turn, anchor, 1500.0);
+        set_num(&mut object, PropId::TurnDeg, turn);
+
+        let scene = scene_of(vec![background, object]);
+        assert!(
+            (speed_at(&scene, anchor) - 12.0).abs() < 1e-3,
+            "a turn is not a change of speed"
+        );
+        let azimuth = azimuth_at(&scene, anchor);
+        assert!(
+            (azimuth - expected).abs() < 1e-2,
+            "turning 90° by {turn}° should give {expected}, got {azimuth}"
+        );
+    }
+}
+
+/// Spec 7.6: a modifier reads what is *beneath* it in z-order, so one placed
+/// below an object does not touch it.
+#[test]
+fn a_modifier_only_changes_what_is_below_it() {
+    let anchor = ll(0.0, 0.0);
+    let background = brush(anchor, vec![[0.0, 0.0]], 4000.0, 20.0, 90.0);
+    let mut gain = modifier(ToolKind::Intensity, anchor, 2000.0);
+    set_num(&mut gain, PropId::Gain, 100.0);
+
+    let above = scene_of(vec![background.clone(), gain.clone()]);
+    let below = scene_of(vec![gain, background]);
+    assert!((speed_at(&above, anchor) - 40.0).abs() < 1e-3);
+    assert!(
+        (speed_at(&below, anchor) - 20.0).abs() < 1e-3,
+        "a modifier beneath an object must not reach up into it"
+    );
+}
+
+/// Spec 6.3: a warp displaces the position the field is read from, so the patch
+/// beneath it moves. Hand-computed: a 500 km disc of wind at the anchor, and a
+/// warp pushing 600 km east, means the wind is found 600 km east of where it
+/// was painted and no longer at the anchor.
+#[test]
+fn a_warp_pushes_the_field_beneath_it_along_a_bearing() {
+    let anchor = ll(0.0, 0.0);
+    let background = brush(anchor, vec![[0.0, 0.0]], 1000.0, 15.0, 0.0);
+    // Where the patch should end up: 600 km east of where it was painted.
+    let moved_to = anchor.destination(Angle::new(90.0), 600_000.0);
+    let mut warp = modifier(ToolKind::Warp, anchor, 6000.0);
+    set(&mut warp, PropId::WarpMode, PropValue::Enum(0));
+    set(&mut warp, PropId::PushTo, PropValue::LonLat(moved_to));
+
+    let before = scene_of(vec![background.clone()]);
+    let after = scene_of(vec![background, warp]);
+
+    assert!(
+        speed_at(&before, moved_to) < 1e-6 && (speed_at(&before, anchor) - 15.0).abs() < 1e-3,
+        "the unwarped patch is at the anchor and nowhere else"
+    );
+    assert!(
+        (speed_at(&after, moved_to) - 15.0).abs() < 0.2,
+        "the warp did not carry the patch east: {} m/s there",
+        speed_at(&after, moved_to)
+    );
+    assert!(
+        speed_at(&after, anchor) < 0.2,
+        "and it did not leave a copy behind: {} m/s",
+        speed_at(&after, anchor)
+    );
+}
+
+/// A twist rotates the field about the warp's anchor. Hand-computed: a patch
+/// due north of the anchor, twisted 90° clockwise, is found due east.
+#[test]
+fn a_warp_twists_the_field_about_its_anchor() {
+    let anchor = ll(0.0, 0.0);
+    let north = anchor.destination(Angle::new(0.0), 800_000.0);
+    let east = anchor.destination(Angle::new(90.0), 800_000.0);
+    let background = brush(north, vec![[0.0, 0.0]], 600.0, 18.0, 45.0);
+
+    let mut warp = modifier(ToolKind::Warp, anchor, 6000.0);
+    set(&mut warp, PropId::WarpMode, PropValue::Enum(1));
+    set_num(&mut warp, PropId::TwistDeg, 90.0);
+
+    let scene = scene_of(vec![background, warp]);
+    assert!(
+        (speed_at(&scene, east) - 18.0).abs() < 0.5,
+        "a 90° twist should have carried the patch from north to east: {} m/s",
+        speed_at(&scene, east)
+    );
+    assert!(
+        speed_at(&scene, north) < 0.5,
+        "and away from where it was: {} m/s",
+        speed_at(&scene, north)
+    );
+}
+
+/// Spec 6.3: a modifier fades out with its feather, so it has no visible edge
+/// of its own — at the rim of its footprint the field is exactly what it was.
+#[test]
+fn a_modifier_fades_to_nothing_at_the_edge_of_its_feather() {
+    let anchor = ll(0.0, 0.0);
+    let background = brush(anchor, vec![[0.0, 0.0]], 8000.0, 20.0, 90.0);
+    let mut gain = modifier(ToolKind::Intensity, anchor, 2000.0);
+    set_num(&mut gain, PropId::Gain, 100.0);
+    set_num(&mut gain, PropId::Feather, 1.0);
+
+    let scene = scene_of(vec![background, gain]);
+    // Fully inside: doubled. At the rim: untouched. Between: in between.
+    assert!((speed_at(&scene, anchor) - 40.0).abs() < 1e-3);
+    let rim = anchor.destination(Angle::new(45.0), 999_000.0);
+    assert!(
+        (speed_at(&scene, rim) - 20.0).abs() < 0.2,
+        "the modifier showed its own edge: {} m/s at the rim",
+        speed_at(&scene, rim)
+    );
+    let middle = anchor.destination(Angle::new(45.0), 700_000.0);
+    let half = speed_at(&scene, middle);
+    assert!(
+        half > 20.5 && half < 39.5,
+        "the feather should ramp, not switch: {half} m/s"
+    );
 }

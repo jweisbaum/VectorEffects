@@ -51,6 +51,42 @@ pub struct LayerNode {
     pub locked: bool,
     /// Objects, bottom of the layer first.
     pub objects: Vec<ObjectNode>,
+    /// The imported field beneath the objects, for a GRIB layer.
+    pub grib: Option<GribLayerInfo>,
+}
+
+/// What the panel says about a layer's imported field (spec.md 4.8).
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export, export_to = "GribLayerInfo.ts")]
+pub struct GribLayerInfo {
+    /// The file the field is read from.
+    pub path: String,
+    /// `"wind"` or `"current"`.
+    pub field_kind: String,
+    /// Whether the file was read; false when it is missing or unreadable,
+    /// in which case the layer contributes nothing.
+    pub loaded: bool,
+    /// Time slices the file holds, or 0 when not loaded.
+    pub frame_count: u32,
+    /// Hours from the first slice to the last, or 0 when not loaded.
+    pub span_hours: f64,
+    /// The band of speeds the layer keeps, in m/s, if it filters (spec.md 4.8).
+    pub speed_min_mps: Option<f32>,
+    /// The top of that band.
+    pub speed_max_mps: Option<f32>,
+    /// The fastest speed the file holds, in m/s, over every message.
+    ///
+    /// What the panel's slider runs to: a filter is set by looking at the
+    /// field, and a scale that ended at a number the file never reaches would
+    /// spend most of its travel on nothing.
+    pub speed_ceiling_mps: f32,
+    /// Which of the project's steps the file has a message for.
+    ///
+    /// One entry per step, in step order. A step the file says nothing about
+    /// shows no imported field at all (spec.md 4.8), and a timeline that did
+    /// not say which those were would leave the user to work it out from a
+    /// field that comes and goes. The timeline marks them.
+    pub covered_steps: Vec<bool>,
 }
 
 /// The whole document, for the panel.
@@ -172,13 +208,17 @@ fn tool_name(tool: ToolKind) -> &'static str {
         ToolKind::Brush => "brush",
         ToolKind::Circle => "circle",
         ToolKind::ShapeFill => "shape_fill",
-        ToolKind::Eraser => "eraser",
+        ToolKind::Mask => "mask",
         ToolKind::CloneStamp => "clone_stamp",
         ToolKind::Curve => "curve",
+        ToolKind::Intensity => "intensity",
+        ToolKind::Divergence => "divergence",
+        ToolKind::Turn => "turn",
+        ToolKind::Warp => "warp",
     }
 }
 
-fn unit_name(unit: ve_core::schema::Unit) -> &'static str {
+pub(crate) fn unit_name(unit: ve_core::schema::Unit) -> &'static str {
     use ve_core::schema::Unit;
     match unit {
         Unit::None => "none",
@@ -200,6 +240,34 @@ fn tree_of(project: &Project, step: u32) -> DocumentTree {
                 name: layer.name.clone(),
                 visible: layer.visible,
                 locked: layer.locked,
+                grib: match &layer.source {
+                    ve_core::document::LayerSource::Painted => None,
+                    ve_core::document::LayerSource::Grib { path, field } => Some(GribLayerInfo {
+                        path: path.to_string_lossy().into_owned(),
+                        field_kind: match field {
+                            ve_core::FieldKind::Wind => "wind".to_owned(),
+                            ve_core::FieldKind::Current => "current".to_owned(),
+                        },
+                        loaded: layer.raster.is_some(),
+                        frame_count: layer.raster.as_ref().map_or(0, |r| r.frames.len() as u32),
+                        span_hours: layer.raster.as_ref().map_or(0.0, |r| r.span_hours()),
+                        speed_min_mps: layer.speed_range.map(|b| b.min_mps),
+                        speed_max_mps: layer.speed_range.map(|b| b.max_mps),
+                        speed_ceiling_mps: layer
+                            .raster
+                            .as_ref()
+                            .map_or(0.0, |sequence| sequence.fastest_mps()),
+                        covered_steps: (0..project.settings.step_count)
+                            .map(|s| {
+                                let hour = f64::from(project.settings.forecast_hour(s));
+                                layer
+                                    .raster
+                                    .as_ref()
+                                    .is_some_and(|seq| seq.frame_at(hour).is_some())
+                            })
+                            .collect(),
+                    }),
+                },
                 objects: layer
                     .objects
                     .iter()
@@ -511,6 +579,52 @@ pub fn layer_rename(state: &AppState, layer: u64, name: String) -> Result<Projec
             layer: found.id,
             before: found.name.clone(),
             after: name,
+        })
+    })
+}
+
+/// Sets which speeds an imported field keeps, or clears the filter (spec.md 4.8).
+///
+/// In m/s, like everything below the IPC boundary; the panel shows knots.
+/// Passing `null` for either end clears the band, which is what "keep
+/// everything" means — a range with no ends is not a range.
+#[tauri::command]
+pub fn set_layer_speed_range(
+    state: tauri::State<'_, AppState>,
+    layer: u64,
+    min_mps: Option<f32>,
+    max_mps: Option<f32>,
+) -> Result<ProjectSummary> {
+    layer_speed_range(&state, layer, min_mps, max_mps)
+}
+
+/// Implementation of [`set_layer_speed_range`].
+pub fn layer_speed_range(
+    state: &AppState,
+    layer: u64,
+    min_mps: Option<f32>,
+    max_mps: Option<f32>,
+) -> Result<ProjectSummary> {
+    let after = match (min_mps, max_mps) {
+        (Some(min), Some(max)) if min.is_finite() && max.is_finite() => {
+            // Ordered here rather than refused: the panel has two fields and a
+            // slider apiece, and dragging the low end past the high one is a
+            // gesture, not a mistake.
+            Some(ve_core::document::SpeedRange {
+                min_mps: min.min(max).max(0.0),
+                max_mps: max.max(min),
+            })
+        }
+        _ => None,
+    };
+    apply(state, |project| {
+        let found = project
+            .layer(object_id(layer))
+            .ok_or_else(|| missing_layer(layer))?;
+        Ok(Command::SetLayerSpeedRange {
+            layer: found.id,
+            before: found.speed_range,
+            after,
         })
     })
 }

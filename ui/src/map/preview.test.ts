@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { previewHasLanded, SETTLE_TIMEOUT_MS, type HeldPreview } from "./preview";
+import { overlayPlan, previewHasLanded, SETTLE_TIMEOUT_MS, type HeldPreview } from "./preview";
 
 /** A preview committed at t=1000, whose commit returned revision 7. */
 const held: HeldPreview = {
@@ -52,5 +52,29 @@ describe("previewHasLanded", () => {
     expect(previewHasLanded(held, 6, 4, 1000 + SETTLE_TIMEOUT_MS)).toBe(true);
     expect(previewHasLanded({ ...held, revision: null }, 6, 4, 1000 + SETTLE_TIMEOUT_MS))
       .toBe(true);
+  });
+});
+
+describe("overlayPlan", () => {
+  /**
+   * Spec 6.1: what the user is aiming is a wind, so a tool that paints one
+   * shows it — and the hover footprint gives way to the gesture.
+   */
+  it("draws the field for a tool that paints one, and its nib when idle", () => {
+    expect(overlayPlan("field", true)).toEqual({ sweep: "field", nib: false });
+    expect(overlayPlan("field", false)).toEqual({ sweep: "none", nib: true });
+  });
+
+  /**
+   * Spec 6.2/D37: an operator is previewed by the map, through a mask. The
+   * overlay never draws over its sweep — a stroked footprint is a chain of
+   * circles, not the silhouette of one — and the nib stays up through the drag
+   * because it is the only thing either operator draws.
+   */
+  it("gives an operator its nib and nothing else, drag or no drag", () => {
+    for (const kind of ["mask", "clone"] as const) {
+      expect(overlayPlan(kind, true)).toEqual({ sweep: "none", nib: true });
+      expect(overlayPlan(kind, false)).toEqual({ sweep: "none", nib: true });
+    }
   });
 });

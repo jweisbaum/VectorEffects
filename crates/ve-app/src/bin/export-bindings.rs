@@ -8,12 +8,15 @@
 use std::path::PathBuf;
 
 use ts_rs::{Config, TS};
-use ve_app::animation::{InterpolationView, KeyframeView, ObjectTracks, ShrinkImpact, TrackView};
+use ve_app::animation::{
+    InterpolationView, KeyframeView, ObjectTracks, ShrinkImpact, TrackSamples, TrackSeries,
+    TrackView,
+};
 use ve_app::commands::{AppInfo, EvaluatorSelection, FieldSample};
 use ve_app::create::{Gesture, NewObject, PathPoint, Tool, ToolOption};
 use ve_app::document::{
-    ClipboardState, DocumentTree, HistoryEntry, HistoryView, LayerNode, ObjectNode, PropertyValue,
-    PropertyView,
+    ClipboardState, DocumentTree, GribLayerInfo, HistoryEntry, HistoryView, LayerNode, ObjectNode,
+    PropertyValue, PropertyView,
 };
 use ve_app::edit::{BrushDirectionMode, BrushShape, BrushStroke};
 use ve_app::error::AppErrorPayload;
@@ -53,12 +56,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     NewObject::export_all(&cfg)?;
     ToolSchema::export_all(&cfg)?;
     ToolOptionSpec::export_all(&cfg)?;
+    ve_app::palette::EyedropperSpec::export_all(&cfg)?;
     OptionDependency::export_all(&cfg)?;
     GestureSelector::export_all(&cfg)?;
     Sizing::export_all(&cfg)?;
     PreviewKind::export_all(&cfg)?;
     ObjectTracks::export_all(&cfg)?;
     TrackView::export_all(&cfg)?;
+    TrackSamples::export_all(&cfg)?;
+    TrackSeries::export_all(&cfg)?;
     KeyframeView::export_all(&cfg)?;
     InterpolationView::export_all(&cfg)?;
     ShrinkImpact::export_all(&cfg)?;
@@ -71,10 +77,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ve_app::transform::TransformKind::export_all(&cfg)?;
     ve_app::transform::TransformPreview::export_all(&cfg)?;
     ve_app::transform::ObjectOutline::export_all(&cfg)?;
+    ve_app::transform::OperatorOutline::export_all(&cfg)?;
     ClipboardState::export_all(&cfg)?;
     HistoryView::export_all(&cfg)?;
     HistoryEntry::export_all(&cfg)?;
     LayerNode::export_all(&cfg)?;
+    GribLayerInfo::export_all(&cfg)?;
     ObjectNode::export_all(&cfg)?;
     PropertyView::export_all(&cfg)?;
     PropertyValue::export_all(&cfg)?;

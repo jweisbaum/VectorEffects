@@ -20,7 +20,7 @@ use ve_core::project::{FieldKind, Project, ProjectSettings, Resolution, StepHour
 use ve_core::schema::{PropId, ToolKind, all_specs};
 use ve_core::value::{Interpolation, PropKind, PropValue};
 
-const TOOLS: [ToolKind; 6] = ToolKind::ALL;
+const TOOLS: [ToolKind; ToolKind::ALL.len()] = ToolKind::ALL;
 const INTERPS: [Interpolation; 5] = [
     Interpolation::Step,
     Interpolation::Linear,

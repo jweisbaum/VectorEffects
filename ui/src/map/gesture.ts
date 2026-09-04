@@ -8,7 +8,7 @@
  *
  * The rules are keyed on the *gesture*, never on the tool. Two tools that draw
  * the same way behave the same way because they reach the same branch, which is
- * what makes the eraser brush-like rather than merely similar (spec.md 6.1).
+ * what makes the mask brush-like rather than merely similar (spec.md 6.1).
  */
 
 import type { Gesture } from "../generated/Gesture";

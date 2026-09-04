@@ -6,7 +6,7 @@ import type { PathPoint } from "./PathPoint";
  *
  * Deliberately a small closed set rather than one variant per tool: two tools
  * that draw the same way should share the same gesture, so that anything true
- * of one gesture is true for every tool that uses it. The eraser and the clone
+ * of one gesture is true for every tool that uses it. The mask and the clone
  * stamp are brush-like *because* all three send a [`Self::Stroke`], not
  * because three separate code paths were written to match.
  */

@@ -8,6 +8,7 @@ import {
   kmFromPixels,
   pixelsFromKm,
   type PathSink,
+  footprintOfOutline,
 } from "./footprint";
 import type { Camera, Viewport } from "./camera";
 
@@ -301,5 +302,83 @@ describe("square footprints", () => {
     const sink = recorder();
     addFootprint(sink, camera, view, 0, 0, 300);
     expect(sink.calls).toEqual(["moveTo", "ellipse"]);
+  });
+});
+
+describe("footprintOfOutline", () => {
+  /**
+   * The backend's `radius_km` is the stamp's radius — the same half-extent a
+   * `Footprint` carries — and it is passed through, not halved. Halving it drew
+   * every outline at half the size of the object it outlined, which reads as an
+   * outline sitting well inside the paint it belongs to.
+   *
+   * The independent reference is the backend's own construction: it sends
+   * `radius_m * scale / 1000`, so a 400 km stamp at 100% arrives as 200.
+   */
+  it("keeps a swept outline's radius as the radius it is", () => {
+    const [footprint] = footprintOfOutline({
+      kind: "swept",
+      chains: [[[0, 0] as const, [1, 0] as const]],
+      radius_km: 200,
+      square: false,
+      space: "geodesic",
+    });
+    expect(footprint).toEqual({
+      kind: "swept",
+      points: [
+        [0, 0],
+        [1, 0],
+      ],
+      radiusKm: 200,
+      shape: "circle",
+      space: "geodesic",
+    });
+  });
+
+  /** A stamp is a square by the same half-extent, measured across the flats. */
+  it("carries the square stamp through", () => {
+    const [footprint] = footprintOfOutline({
+      kind: "swept",
+      chains: [[[0, 0] as const]],
+      radius_km: 50,
+      square: true,
+      space: "projected",
+    });
+    expect(footprint).toMatchObject({ shape: "square", space: "projected", radiusKm: 50 });
+  });
+
+  /** One footprint per chain: a merged object is several strokes in one. */
+  it("gives a footprint per chain", () => {
+    const outlines = footprintOfOutline({
+      kind: "swept",
+      chains: [[[0, 0] as const], [[5, 5] as const]],
+      radius_km: 10,
+      square: false,
+      space: "geodesic",
+    });
+    expect(outlines).toHaveLength(2);
+  });
+
+  /** A closed ring is a polygon, which has no stamp and no radius. */
+  it("turns a ring into a polygon", () => {
+    expect(
+      footprintOfOutline({
+        kind: "ring",
+        points: [
+          [0, 0],
+          [1, 0],
+          [1, 1],
+        ],
+      }),
+    ).toEqual([
+      {
+        kind: "polygon",
+        points: [
+          [0, 0],
+          [1, 0],
+          [1, 1],
+        ],
+      },
+    ]);
   });
 });

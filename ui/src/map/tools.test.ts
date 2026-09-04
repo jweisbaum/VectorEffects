@@ -24,7 +24,9 @@ import {
   gestureKind,
   isLive,
   liveOptions,
+  offersEyedropper,
   offersUnit,
+  sampled,
   shownAngle,
   sizeKm,
   spaceFor,
@@ -62,6 +64,7 @@ const shapeFill: ToolSchema = {
   // Presets are measured; a freehand polygon is not, so the unit is inert for
   // it — the same rule `stamp_space` carries, which the unit stands in for.
   sizing: { depends_on: [{ on: "ShapeSource", live_for: [1, 2, 3] }] },
+  eyedropper: null,
   options: [
     option({
       property: "ShapeSource",
@@ -121,6 +124,7 @@ const brush: ToolSchema = {
   preview: "field",
   gesture: { kind: "always", gesture: "stroke" },
   sizing: { depends_on: [] },
+  eyedropper: null,
   options: [
     option({
       property: "BrushShape",
@@ -666,5 +670,67 @@ describe("cloneSourceCamera", () => {
     expect(
       cloneSourceCamera(state([40, 0]), { kind: "stroke", points: [] }, camera),
     ).toBeNull();
+  });
+});
+
+describe("offersEyedropper", () => {
+  /**
+   * Spec 6.1: the eyedropper writes one speed and one bearing, so it is offered
+   * exactly where the tool paints one of each. The shape fill's gradient mode
+   * has two of each, and no single answer to give.
+   */
+  it("follows the same dependency rules as the options it writes", () => {
+    const withDropper: ToolSchema = {
+      ...shapeFill,
+      eyedropper: {
+        speed: "Speed",
+        direction: "Direction",
+        depends_on: [
+          { on: "VectorMode", live_for: [0] },
+          { on: "DirectionMode", live_for: [0] },
+        ],
+      },
+    };
+    const values = (vector: number, direction: number) => ({
+      VectorMode: { kind: "choice" as const, index: vector },
+      DirectionMode: { kind: "choice" as const, index: direction },
+    });
+    expect(offersEyedropper(withDropper, values(0, 0))).toBe(true);
+    expect(offersEyedropper(withDropper, values(1, 0))).toBe(false);
+    expect(offersEyedropper(withDropper, values(0, 1))).toBe(false);
+  });
+
+  it("is not offered at all by a tool that declares none", () => {
+    expect(offersEyedropper(shapeFill, {})).toBe(false);
+  });
+});
+
+describe("sampled", () => {
+  /**
+   * A sample is written in stored units — m/s and an azimuth-toward — so it
+   * takes exactly the path a typed number takes and is converted for display
+   * once, in the bar (spec.md 3.3). Writing knots here would paint a stroke
+   * nearly twice as fast as the one it was taken from.
+   */
+  it("writes the speed and the bearing as the backend reported them", () => {
+    const schema: ToolSchema = {
+      ...shapeFill,
+      eyedropper: { speed: "Speed", direction: "Direction", depends_on: [] },
+    };
+    const state: ToolState = { values: { Feather: { kind: "number", value: 0.5 } }, unit: "km" };
+    const next = sampled(state, schema, { speed_mps: 12.5, azimuth_toward_deg: 275.5 });
+
+    expect(next.values.Speed).toEqual({ kind: "number", value: 12.5 });
+    expect(next.values.Direction).toEqual({ kind: "angle", degrees: 275.5 });
+    expect(next.values.Feather, "everything else is left alone").toEqual({
+      kind: "number",
+      value: 0.5,
+    });
+    expect(next.unit).toBe("km");
+  });
+
+  it("leaves a tool with no eyedropper untouched", () => {
+    const state: ToolState = { values: {}, unit: "px" };
+    expect(sampled(state, shapeFill, { speed_mps: 9, azimuth_toward_deg: 90 })).toBe(state);
   });
 });

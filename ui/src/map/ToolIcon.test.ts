@@ -36,13 +36,26 @@ function paths(tool: (typeof ICON_TOOLS)[number]): string[] {
 
 describe("the icon set", () => {
   /**
-   * Seven: the hand, and the six tools of spec 6.2. Named rather than counted
-   * against the palette, because the palette arrives over IPC and a test that
-   * compared the two would only be comparing the frontend to itself.
+   * Eleven: the hand, the six tools of spec 6.2, and the four modifiers of 6.3.
+   * Named rather than counted against the palette, because the palette arrives
+   * over IPC and a test that compared the two would only be comparing the
+   * frontend to itself.
    */
   it("covers the hand and every tool", () => {
     expect([...ICON_TOOLS].sort()).toEqual(
-      ["brush", "circle", "clone_stamp", "curve", "eraser", HAND, "shape_fill"].sort(),
+      [
+        "brush",
+        "circle",
+        "clone_stamp",
+        "curve",
+        "divergence",
+        "mask",
+        HAND,
+        "intensity",
+        "shape_fill",
+        "turn",
+        "warp",
+      ].sort(),
     );
   });
 

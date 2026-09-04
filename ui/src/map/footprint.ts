@@ -132,9 +132,16 @@ export function addFootprint(
   radiusKm: number,
   shape: BrushShape = "circle",
   space: StampSpace = "geodesic",
+  insetPx = 0,
 ): void {
   const point = project(camera, view, { lon, lat });
-  const { rx, ry } = footprintRadii(camera, lat, radiusKm, space);
+  const full = footprintRadii(camera, lat, radiusKm, space);
+  // Inset in *screen* pixels, not in kilometres: it exists to draw a band of a
+  // constant width along a footprint's edge, and a band is a screen measure.
+  // Never past nothing — a stamp smaller than the inset shrinks to a point
+  // rather than turning inside out.
+  const rx = Math.max(0, full.rx - insetPx);
+  const ry = Math.max(0, full.ry - insetPx);
   if (shape === "square") {
     sink.rect(point.x - rx, point.y - ry, rx * 2, ry * 2);
     return;
@@ -191,8 +198,19 @@ export function buildStrokePath(
   radiusKm: number,
   shape: BrushShape = "circle",
   space: StampSpace = "geodesic",
+  insetPx = 0,
 ): void {
-  extendStrokePath(sink, camera, view, points, freshSweptPath(), radiusKm, shape, space);
+  extendStrokePath(
+    sink,
+    camera,
+    view,
+    points,
+    freshSweptPath(),
+    radiusKm,
+    shape,
+    space,
+    insetPx,
+  );
 }
 
 /**
@@ -212,10 +230,11 @@ export function extendStrokePath(
   radiusKm: number,
   shape: BrushShape = "circle",
   space: StampSpace = "geodesic",
+  insetPx = 0,
 ): void {
   const stamp = (lon: number, lat: number) => {
     if (progress.drawn >= MAX_FOOTPRINTS) return;
-    addFootprint(sink, camera, view, lon, lat, radiusKm, shape, space);
+    addFootprint(sink, camera, view, lon, lat, radiusKm, shape, space, insetPx);
     progress.drawn += 1;
   };
 
@@ -256,7 +275,7 @@ export function extendStrokePath(
  * than each knowing what any tool is: a new tool supplies its footprint and
  * inherits the whole preview path, which is what spec 6.1 means by the gesture
  * previewing the field. The variants are geometries, not tools — the brush, the
- * eraser and the clone stamp all produce a `swept` one, and that is precisely
+ * mask and the clone stamp all produce a `swept` one, and that is precisely
  * why they cannot drift apart.
  *
  * Rotation is absent on purpose: a footprint is only ever previewed at the
@@ -302,6 +321,49 @@ export type Footprint =
       points: ReadonlyArray<readonly [number, number]>;
     };
 
+/**
+ * A backend outline as a footprint the map can draw.
+ *
+ * `ObjectOutline` is what the evaluator's own shape looks like lifted into
+ * geographic coordinates, and its `radius_km` is the stamp's **radius** — the
+ * same half-extent `Footprint` carries, and the same one a square stamp
+ * measures from its centre. It is passed through, not halved: halving it drew
+ * every outline at half the size of the object it was outlining, which reads as
+ * an outline sitting well inside the paint it belongs to.
+ *
+ * Its own function so that the two places that draw one — the selected and
+ * hovered edges, and a drag's outlines — cannot come to disagree about that,
+ * and so the conversion can be tested against the backend's contract.
+ */
+export function footprintOfOutline(outline: ObjectOutlineShape): Footprint[] {
+  if (outline.kind === "ring") {
+    return [{ kind: "polygon", points: outline.points }];
+  }
+  return outline.chains.map((chain) => ({
+    kind: "swept",
+    points: chain,
+    radiusKm: outline.radius_km,
+    shape: outline.square ? "square" : "circle",
+    space: outline.space,
+  }));
+}
+
+/**
+ * The shape of a backend outline, as much of it as this needs.
+ *
+ * Structural rather than the generated type, so `footprint.ts` stays free of
+ * the IPC bindings and can be tested without them.
+ */
+export type ObjectOutlineShape =
+  | {
+      kind: "swept";
+      chains: ReadonlyArray<ReadonlyArray<readonly [number, number]>>;
+      radius_km: number;
+      square: boolean;
+      space: StampSpace;
+    }
+  | { kind: "ring"; points: ReadonlyArray<readonly [number, number]> };
+
 /** The part of `Path2D` a polygon needs beyond {@link PathSink}. */
 export interface PolygonSink extends PathSink {
   lineTo(x: number, y: number): void;
@@ -316,12 +378,20 @@ export interface PolygonSink extends PathSink {
  * circles are wound the same way and the non-zero fill rule leaves the hole,
  * which is the same trick the evaluator's annulus distance performs
  * arithmetically.
+ *
+ * `insetPx` shrinks every stamp by that many screen pixels. It exists for the
+ * one thing a *stroke* of this path cannot do: draw the outline of the union.
+ * A footprint is a union of stamps and `Path2D` has no union operator, so
+ * stroking it traces every stamp's own circle; filling it and then knocking out
+ * an inset fill of the same path leaves a band along the union's true edge and
+ * nothing inside it (spec.md 6.1).
  */
 export function buildFootprintPath(
   sink: PolygonSink,
   camera: Camera,
   view: Viewport,
   footprint: Footprint,
+  insetPx = 0,
 ): void {
   switch (footprint.kind) {
     case "swept":
@@ -333,12 +403,23 @@ export function buildFootprintPath(
         footprint.radiusKm,
         footprint.shape,
         footprint.space,
+        insetPx,
       );
       return;
 
     case "disc": {
       const [lon, lat] = footprint.centre;
-      addFootprint(sink, camera, view, lon, lat, footprint.radiusKm, "circle", footprint.space);
+      addFootprint(
+        sink,
+        camera,
+        view,
+        lon,
+        lat,
+        footprint.radiusKm,
+        "circle",
+        footprint.space,
+        insetPx,
+      );
       return;
     }
 

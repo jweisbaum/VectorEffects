@@ -59,7 +59,7 @@ void main() { fragColor = uColor; }
 /**
  * The live-operator mask.
  *
- * A gesture with the eraser or the clone stamp is an operation on the field
+ * A gesture with the mask or the clone stamp is an operation on the field
  * that is already drawn, and the 2D overlay cannot express one: it sits above
  * the field and can add pixels, never take them away (spec.md 6.1). So the mask
  * is applied here, where the field itself is drawn.
@@ -84,7 +84,7 @@ float maskFactor() {
   if (uMaskMode == 0) return 1.0;
   float covered = maskCoverage();
   // Mode 1 takes the field away where the gesture covers, which is what an
-  // eraser does and what a clone does before it puts the source in its place.
+  // mask does and what a clone does before it puts the source in its place.
   // Mode 2 keeps only what the gesture covers, which is how the source is
   // drawn into it.
   return uMaskMode == 1 ? 1.0 - covered : covered;
@@ -345,6 +345,6 @@ uniform vec4 uColor;
 ${MASK}
 out vec4 fragColor;
 // The glyphs follow the field they describe: a glyph left standing over an
-// erased patch would be pointing at a wind that is no longer there.
+// masked patch would be pointing at a wind that is no longer there.
 void main() { fragColor = vec4(uColor.rgb, uColor.a * vShade * maskFactor()); }
 `;
