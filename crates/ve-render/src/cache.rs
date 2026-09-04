@@ -12,7 +12,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Condvar, Mutex};
 
 use crate::aeqd::Space;
 use crate::error::{RenderError, Result};
@@ -243,6 +243,11 @@ pub struct RenderCache {
     root: PathBuf,
     capacity: u64,
     index: Mutex<Index>,
+    /// Keys being rendered right now, so a second request for one of them
+    /// waits for the first rather than rendering it again. A `Vec`: a handful
+    /// of entries, scanned, never iterated as a map.
+    in_flight: Mutex<Vec<TileKey>>,
+    landed: Condvar,
 }
 
 impl RenderCache {
@@ -274,7 +279,56 @@ impl RenderCache {
             root,
             capacity,
             index: Mutex::new(index),
+            in_flight: Mutex::new(Vec::new()),
+            landed: Condvar::new(),
         })
+    }
+
+    /// The tile for `key`: from the cache, or rendered once and stored.
+    ///
+    /// Single-flight. The map asks for the tiles of the step it is showing at
+    /// the same moment the render pool starts on that step, and without this
+    /// both would evaluate the same tile — an identical result, twice the cost,
+    /// on the one step the user is waiting for. The second caller waits for
+    /// the first and reads what it stored. A render that fails releases the
+    /// key, so a waiter retries rather than hanging on a tile that never lands.
+    pub fn get_or_render(
+        &self,
+        key: &TileKey,
+        render: impl FnOnce() -> Result<Vec<u8>>,
+    ) -> Result<Vec<u8>> {
+        loop {
+            if let Some(cached) = self.get(key) {
+                return Ok(cached);
+            }
+            let mut in_flight = self
+                .in_flight
+                .lock()
+                .map_err(|_| RenderError::Flatten("in-flight lock was poisoned".to_owned()))?;
+            if !in_flight.contains(key) {
+                in_flight.push(*key);
+                break;
+            }
+            // Someone else is on it: sleep until any tile lands, then look again.
+            let guard = self
+                .landed
+                .wait(in_flight)
+                .map_err(|_| RenderError::Flatten("in-flight lock was poisoned".to_owned()))?;
+            drop(guard);
+        }
+
+        let rendered = render();
+        if let Ok(bytes) = &rendered
+            && let Err(err) = self.put(key, bytes)
+        {
+            // A cache write failure must not fail the request.
+            tracing::warn!(%err, "could not cache tile");
+        }
+        if let Ok(mut in_flight) = self.in_flight.lock() {
+            in_flight.retain(|k| k != key);
+        }
+        self.landed.notify_all();
+        rendered
     }
 
     fn path_for(&self, digest: &str) -> PathBuf {
@@ -720,5 +774,66 @@ mod tests {
                 objects: vec![object(1.0)]
             })
         );
+    }
+
+    /// Two callers for one tile evaluate it once. The second arrives while
+    /// the first is rendering, waits, and is served what the first stored.
+    #[test]
+    fn concurrent_requests_for_one_tile_render_it_once() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let temp = Arc::new(TempCache::new("single-flight", 1 << 20));
+        let key = TileKey {
+            scene: [7; 32],
+            tile: TileId::new(2, 1, 1).expect("valid"),
+            quality: Quality::Exact,
+        };
+        let renders = Arc::new(AtomicUsize::new(0));
+        let started = Arc::new(std::sync::Barrier::new(2));
+
+        let workers: Vec<_> = (0..2)
+            .map(|_| {
+                let temp = Arc::clone(&temp);
+                let renders = Arc::clone(&renders);
+                let started = Arc::clone(&started);
+                std::thread::spawn(move || {
+                    started.wait();
+                    temp.cache
+                        .get_or_render(&key, || {
+                            renders.fetch_add(1, Ordering::SeqCst);
+                            std::thread::sleep(std::time::Duration::from_millis(50));
+                            Ok(vec![1, 2, 3])
+                        })
+                        .expect("render")
+                })
+            })
+            .collect();
+        for worker in workers {
+            assert_eq!(worker.join().expect("thread"), vec![1, 2, 3]);
+        }
+        assert_eq!(renders.load(Ordering::SeqCst), 1, "rendered twice");
+        assert!(temp.cache.contains(&key));
+    }
+
+    /// A failed render releases the key: the next request renders again.
+    #[test]
+    fn a_failed_render_does_not_wedge_the_key() {
+        let temp = TempCache::new("failed-flight", 1 << 20);
+        let key = TileKey {
+            scene: [9; 32],
+            tile: TileId::new(2, 1, 1).expect("valid"),
+            quality: Quality::Exact,
+        };
+        assert!(
+            temp.cache
+                .get_or_render(&key, || Err(RenderError::Flatten("boom".to_owned())))
+                .is_err()
+        );
+        let bytes = temp
+            .cache
+            .get_or_render(&key, || Ok(vec![4]))
+            .expect("second try");
+        assert_eq!(bytes, vec![4]);
     }
 }

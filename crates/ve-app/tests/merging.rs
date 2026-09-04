@@ -211,3 +211,19 @@ fn an_object_active_only_later_still_blocks() {
 
     assert_eq!(object_count(&state), 3);
 }
+
+/// Two strokes aimed at the same point render identically apart from where
+/// they sit, exactly as two constant strokes do, so they merge the same way.
+#[test]
+fn aimed_strokes_with_the_same_target_join_like_constant_ones() {
+    let (_root, state) = project("aimed");
+    let mut first = stroke(vec![[0.0, 0.0], [4.0, 0.0]]);
+    first.direction_mode = ve_app::edit::BrushDirectionMode::TowardPoint;
+    first.target = Some([20.0, 10.0]);
+    let mut second = stroke(vec![[3.0, 0.0], [7.0, 0.0]]);
+    second.direction_mode = ve_app::edit::BrushDirectionMode::TowardPoint;
+    second.target = Some([20.0, 10.0]);
+    paint(&state, first);
+    paint(&state, second);
+    assert_eq!(object_count(&state), 1, "aimed strokes merge");
+}

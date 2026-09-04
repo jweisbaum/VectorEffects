@@ -33,6 +33,7 @@ import {
   type ReadinessMemory,
   stepAt,
   type StepState,
+  nextStep,
   tick,
   utcLabel,
 } from "./playback";
@@ -88,6 +89,7 @@ export default function Timeline({
   selection,
   onSelect,
   viewport,
+  warm,
   autoKey,
   onAutoKey,
   onChanged,
@@ -99,6 +101,12 @@ export default function Timeline({
   onSelect: (objects: number[]) => void;
   /** The map's visible tiles, for render-ahead and readiness (spec.md 9.5). */
   viewport: TileAddress[];
+  /**
+   * Fetches a step's tiles onto the GPU and says whether they are all there.
+   * Playback advances into a step only when the backend has it rendered *and*
+   * the map has it resident (spec.md 9.4).
+   */
+  warm: (step: number) => boolean;
   autoKey: boolean;
   onAutoKey: (on: boolean) => void;
   onChanged: (project: ProjectSummary) => void;
@@ -183,6 +191,8 @@ export default function Timeline({
   loopRef.current = loop;
   const rateRef = useRef(rate);
   rateRef.current = rate;
+  const warmRef = useRef(warm);
+  warmRef.current = warm;
 
   useEffect(() => {
     if (!playing) {
@@ -192,6 +202,14 @@ export default function Timeline({
     let frame = 0;
     let lastAdvance = performance.now();
     const loopFrame = (now: number) => {
+      // Keep the map two steps ahead of the playhead, so a step's tiles are on
+      // the GPU before its turn comes and playback never waits on a fetch it
+      // could have started earlier.
+      const next = nextStep(stepRef.current, last, loopRef.current);
+      if (next !== null && warmRef.current(next)) {
+        const after = nextStep(next, last, loopRef.current);
+        if (after !== null) warmRef.current(after);
+      }
       const result = tick(
         stepRef.current,
         last,
@@ -199,6 +217,7 @@ export default function Timeline({
         rateRef.current,
         now - lastAdvance,
         statesRef.current,
+        (target) => warmRef.current(target),
       );
       if (result.finished) {
         setPlaying(false);

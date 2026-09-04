@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import {
+  type Ref,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 
 import { api } from "../ipc";
 import type { Gesture } from "../generated/Gesture";
@@ -232,7 +240,18 @@ function heldOperator(held: readonly HeldPreview[]): OperatorPreview | null {
  */
 const MAX_PREVIEW_GLYPHS = 600;
 
+/** What the map does for the timeline (spec.md 9.4). */
+export interface MapHandle {
+  /**
+   * Starts fetching a step's tiles for the current viewport onto the GPU, and
+   * says whether they are all there. Playback advances into a step only once
+   * they are; the backend holding them rendered is not enough.
+   */
+  warm(step: number): boolean;
+}
+
 export default function MapView({
+  ref,
   project,
   step,
   selection,
@@ -245,6 +264,7 @@ export default function MapView({
   onViewport,
   autoKey,
 }: {
+  ref?: Ref<MapHandle>;
   project: ProjectSummary;
   step: number;
   selection: number[];
@@ -267,6 +287,11 @@ export default function MapView({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const rendererRef = useRef<MapRenderer | null>(null);
   const tilesRef = useRef<TileCache | null>(null);
+  /**
+   * The last frame whose tiles were all on screen. A frame that is not yet
+   * draws its missing tiles from this one, dimmed, rather than blank.
+   */
+  const shownFrameRef = useRef<string | null>(null);
   const cameraRef = useRef<Camera>({ centerLon: 0, centerLat: 20, pxPerDeg: 3 });
   const viewRef = useRef<Viewport>({ width: 1, height: 1 });
   /**
@@ -659,17 +684,19 @@ export default function MapView({
       overlayScheduled.current = null;
     }
 
+    // Revision then step: an edit changes the address, so a cached tile can
+    // never show a field that no longer exists.
+    const frame = `${projectRef.current.revision}/${stepRef.current}`;
+    const shown = shownFrameRef.current;
     const state: RenderState = {
       camera: cameraRef.current,
       view: viewRef.current,
-      // Revision then step: an edit changes the address, so a cached tile can
-      // never show a field that no longer exists.
-      frame: `${projectRef.current.revision}/${stepRef.current}`,
+      frame,
       glyphStyle: glyphStyleRef.current,
       showGlyphs: showGlyphsRef.current,
       showGraticule: showGraticuleRef.current,
       rampMax,
-      stale: (tilesRef.current?.stats().pending ?? 0) > 0,
+      heldFrame: shown !== null && shown !== frame ? shown : null,
       pixelRatio: window.devicePixelRatio || 1,
       // The gesture's own operation while it is being drawn, and the one it
       // committed while its tiles are still on their way.
@@ -687,6 +714,11 @@ export default function MapView({
 
     try {
       renderer.render(state);
+      // Once every tile of this frame is on screen it is the one to hold.
+      const tiles = tilesRef.current;
+      if (tiles && tiles.residentCount(frame, unique) === unique.length) {
+        shownFrameRef.current = frame;
+      }
     } catch (err) {
       // A GL failure inside an animation frame is easy to lose. Report it once
       // and stop drawing rather than flooding the log every frame.
@@ -973,6 +1005,15 @@ export default function MapView({
     gestureRef.current = null;
     abandonRef.current();
   }, [tool]);
+
+  // What the timeline asks of the map (spec.md 9.4).
+  const warm = useCallback((target: number): boolean => {
+    const tiles = tilesRef.current;
+    if (!tiles) return true;
+    const frame = `${projectRef.current.revision}/${target}`;
+    return tiles.prefetch(frame, uniqueTiles(visibleTiles(cameraRef.current, viewRef.current)));
+  }, []);
+  useImperativeHandle(ref, () => ({ warm }), [warm]);
 
   // A project change can shorten the timeline or forbid barbs.
   useEffect(() => {
@@ -2396,7 +2437,7 @@ export default function MapView({
           view,
           frame: `${projectRef.current.revision}/0`,
           glyphStyle: "barb", showGlyphs: true,
-          showGraticule: true, rampMax, stale: false,
+          showGraticule: true, rampMax, heldFrame: null,
           pixelRatio: window.devicePixelRatio || 1,
         });
       }
@@ -2408,7 +2449,7 @@ export default function MapView({
           view,
           frame: `${projectRef.current.revision}/0`,
           glyphStyle: "barb", showGlyphs: true,
-          showGraticule: true, rampMax, stale: false,
+          showGraticule: true, rampMax, heldFrame: null,
           pixelRatio: window.devicePixelRatio || 1,
         });
       }

@@ -24,7 +24,8 @@ use std::sync::{Arc, Condvar, Mutex};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use ve_core::project::Project;
-use ve_render::cache::{SceneHash, scene_hash};
+use ve_render::cache::{SceneHash, TileKey, scene_hash};
+use ve_render::preview::Quality;
 use ve_render::scene::{Scene, flatten};
 use ve_render::tile::TileId;
 
@@ -77,16 +78,37 @@ pub struct RenderProgress {
     pub step: u32,
 }
 
-/// The document as the pool sees it: one revision, its scenes hashed on demand.
+/// One step, flattened, hashed and planned — everything a tile of it needs
+/// that does not depend on which tile.
+struct Prepared {
+    scene: Scene,
+    hash: SceneHash,
+    quality: Quality,
+}
+
+impl Prepared {
+    fn key(&self, tile: TileId) -> TileKey {
+        TileKey {
+            scene: self.hash,
+            tile,
+            quality: self.quality,
+        }
+    }
+}
+
+/// The document as the pool sees it: one revision, its steps prepared on
+/// demand.
 ///
 /// Held as an `Arc` so a worker can flatten a step without holding the session
-/// lock — a render is milliseconds, and the map must never wait on one.
+/// lock — a render is milliseconds, and the map must never wait on one. Each
+/// step is flattened and hashed once per snapshot, not once per tile: a
+/// viewport is a hundred tiles, and the readiness probe asks after every step
+/// several times a second.
 struct Snapshot {
     revision: u64,
     project: Arc<Project>,
-    /// The scene hash per step, computed the first time a step is asked about.
     /// Indexed by step: no map is iterated on this path.
-    hashes: Mutex<Vec<Option<SceneHash>>>,
+    steps: Mutex<Vec<Option<Arc<Prepared>>>>,
 }
 
 impl Snapshot {
@@ -95,28 +117,31 @@ impl Snapshot {
         Self {
             revision,
             project: Arc::new(project),
-            hashes: Mutex::new(vec![None; steps]),
+            steps: Mutex::new(vec![None; steps]),
         }
     }
 
-    fn scene(&self, step: u32) -> Scene {
-        flatten(&self.project, step)
-    }
-
-    /// The scene hash for a step, flattening it once.
-    fn hash(&self, step: u32) -> SceneHash {
-        if let Ok(hashes) = self.hashes.lock()
-            && let Some(Some(hash)) = hashes.get(step as usize)
+    /// The step, prepared the first time it is asked for.
+    fn prepared(&self, state: &AppState, step: u32) -> Arc<Prepared> {
+        if let Ok(steps) = self.steps.lock()
+            && let Some(Some(prepared)) = steps.get(step as usize)
         {
-            return *hash;
+            return Arc::clone(prepared);
         }
-        let hash = scene_hash(&self.scene(step));
-        if let Ok(mut hashes) = self.hashes.lock()
-            && let Some(slot) = hashes.get_mut(step as usize)
+        let scene = flatten(&self.project, step);
+        let hash = scene_hash(&scene);
+        let (_, quality) = protocol::plan_for(state, &scene);
+        let prepared = Arc::new(Prepared {
+            scene,
+            hash,
+            quality,
+        });
+        if let Ok(mut steps) = self.steps.lock()
+            && let Some(slot) = steps.get_mut(step as usize)
         {
-            *slot = Some(hash);
+            *slot = Some(Arc::clone(&prepared));
         }
-        hash
+        prepared
     }
 }
 
@@ -271,12 +296,12 @@ impl RenderPool {
             (unit, snapshot)
         };
 
-        let scene = snapshot.scene(unit.step);
-        let key = protocol::key_for(state, &scene, unit.tile);
+        let prepared = snapshot.prepared(state, unit.step);
+        let key = prepared.key(unit.tile);
         if state.tiles.contains(&key) {
             return true;
         }
-        if let Err(err) = protocol::serve(state, &scene, unit.tile) {
+        if let Err(err) = protocol::serve_keyed(state, &prepared.scene, key) {
             tracing::warn!(%err, step = unit.step, "render ahead failed");
             return true;
         }
@@ -369,18 +394,10 @@ impl RenderPool {
         let total = ids.len() as u32;
         let steps = (0..snapshot.project.settings.step_count)
             .map(|step| {
-                let scene = snapshot.scene(step);
-                let (_, quality) = protocol::plan_for(state, &scene);
-                let hash = snapshot.hash(step);
+                let prepared = snapshot.prepared(state, step);
                 let ready = ids
                     .iter()
-                    .filter(|tile| {
-                        state.tiles.contains(&ve_render::cache::TileKey {
-                            scene: hash,
-                            tile: **tile,
-                            quality,
-                        })
-                    })
+                    .filter(|tile| state.tiles.contains(&prepared.key(**tile)))
                     .count() as u32;
                 StepReadiness { step, ready, total }
             })

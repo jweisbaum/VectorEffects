@@ -73,17 +73,25 @@ export function nextStep(step: number, last: number, loop: boolean): number | nu
   return loop ? 0 : null;
 }
 
+/** Whether the map holds a step's tiles on the GPU. */
+export type Resident = (step: number) => boolean;
+
 /**
  * Whether playback may advance into `next` (spec.md 9.4).
  *
- * Only into a frame that is ready. Anything else — partial, empty, stale — and
- * playback holds where it is and shows that it is buffering, rather than
- * showing the previous revision's tiles dimmed under a step they no longer
- * belong to. A state list shorter than the step count is a report for another
- * timeline; nothing is ready in it.
+ * Only into a frame that is ready — rendered, by the backend's account, *and*
+ * resident on the GPU, by the map's. Anything else — partial, empty, stale, or
+ * rendered but not yet fetched — and playback holds where it is and shows that
+ * it is buffering, rather than showing the previous step's tiles under a step
+ * they do not belong to. A state list shorter than the step count is a report
+ * for another timeline; nothing is ready in it.
  */
-export function mayAdvanceInto(next: number, states: readonly StepState[]): boolean {
-  return states[next] === "solid";
+export function mayAdvanceInto(
+  next: number,
+  states: readonly StepState[],
+  resident: Resident = () => true,
+): boolean {
+  return states[next] === "solid" && resident(next);
 }
 
 /**
@@ -102,6 +110,7 @@ export function tick(
   rateStepsPerSecond: number,
   elapsedMs: number,
   states: readonly StepState[],
+  resident: Resident = () => true,
 ): { step: number; advanced: boolean; buffering: boolean; finished: boolean } {
   const interval = 1000 / Math.max(rateStepsPerSecond, 0.01);
   if (elapsedMs < interval) {
@@ -111,7 +120,7 @@ export function tick(
   if (next === null) {
     return { step, advanced: false, buffering: false, finished: true };
   }
-  if (!mayAdvanceInto(next, states)) {
+  if (!mayAdvanceInto(next, states, resident)) {
     return { step, advanced: false, buffering: true, finished: false };
   }
   return { step: next, advanced: true, buffering: false, finished: false };

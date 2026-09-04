@@ -92,6 +92,16 @@ describe("advancing", () => {
     expect(mayAdvanceInto(1, ["solid", "stale"])).toBe(false);
     expect(mayAdvanceInto(5, ["solid"])).toBe(false);
   });
+
+  /**
+   * Rendered is not shown: the backend can hold a tile the GPU has not fetched
+   * yet, and advancing on the backend's word alone draws the previous step
+   * under the new one for a frame. Both have to agree.
+   */
+  it("advances only into a frame the map holds", () => {
+    expect(mayAdvanceInto(1, ["solid", "solid"], () => false)).toBe(false);
+    expect(mayAdvanceInto(1, ["solid", "solid"], (step) => step === 1)).toBe(true);
+  });
 });
 
 describe("tick", () => {
@@ -109,6 +119,12 @@ describe("tick", () => {
     states[1] = "partial";
     const result = tick(0, 9, false, 8, 500, states);
     expect(result).toEqual({ step: 0, advanced: false, buffering: true, finished: false });
+  });
+
+  it("holds and reports buffering until the map holds the next frame", () => {
+    const result = tick(0, 9, false, 8, 500, allSolid, () => false);
+    expect(result).toEqual({ step: 0, advanced: false, buffering: true, finished: false });
+    expect(tick(0, 9, false, 8, 500, allSolid, () => true).step).toBe(1);
   });
 
   /**

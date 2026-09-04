@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import ExportDialog from "./project/ExportDialog";
 import HistoryPanel from "./panels/HistoryPanel";
 import Inspector from "./panels/Inspector";
 import LayerPanel from "./panels/LayerPanel";
-import MapView from "./map/MapView";
+import MapView, { type MapHandle } from "./map/MapView";
 import Timeline from "./timeline/Timeline";
 import NewProjectDialog from "./project/NewProjectDialog";
 import StartScreen from "./project/StartScreen";
@@ -58,6 +58,10 @@ export default function App() {
   // The map's visible tiles, which the timeline renders ahead for and asks
   // readiness about (spec.md 9.5). The map reports them; nothing else knows.
   const [viewport, setViewport] = useState<TileAddress[]>([]);
+  const mapRef = useRef<MapHandle | null>(null);
+  // The map holds the tiles; playback asks it, not the backend, whether a step
+  // can be shown (spec.md 9.4). Before the map exists there is nothing to wait for.
+  const warm = useCallback((target: number) => mapRef.current?.warm(target) ?? true, []);
 
   // A shorter timeline cannot leave the playhead past its end.
   useEffect(() => {
@@ -279,6 +283,7 @@ export default function App() {
         </aside>
 
         <MapView
+          ref={mapRef}
           project={project}
           step={step}
           selection={selection}
@@ -313,6 +318,7 @@ export default function App() {
         selection={selection}
         onSelect={setSelection}
         viewport={viewport}
+        warm={warm}
         autoKey={autoKey}
         onAutoKey={setAutoKey}
         onChanged={setProject}

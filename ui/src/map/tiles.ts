@@ -29,7 +29,14 @@ export class TileCache {
   /** Called when a fetch fails, so the failure reaches the application log. */
   onError: ((message: string) => void) | null = null;
 
-  constructor(gl: WebGL2RenderingContext, baseUrl: string, limit = 320) {
+  /**
+   * `limit` is in tiles of a quarter megabyte each. Playback shows a viewport
+   * at every step in turn and loops, so the cache wants room for a viewport
+   * (up to 192 tiles) at several steps, or a loop refetches every step every
+   * time round. 768 is 192 MB at the very largest viewport; typical viewports
+   * are a quarter of that.
+   */
+  constructor(gl: WebGL2RenderingContext, baseUrl: string, limit = 768) {
     this.gl = gl;
     this.baseUrl = baseUrl;
     this.limit = limit;
@@ -60,6 +67,35 @@ export class TileCache {
     void this.fetch(key, entry);
     this.evict();
     return null;
+  }
+
+  /** The texture for a tile if it is resident, fetching nothing. */
+  peek(frame: string, z: number, x: number, y: number): WebGLTexture | null {
+    return this.entries.get(TileCache.key(frame, z, x, y))?.texture ?? null;
+  }
+
+  /** How many of a frame's tiles are resident, fetching nothing. */
+  residentCount(frame: string, tiles: ReadonlyArray<{ z: number; x: number; y: number }>): number {
+    let count = 0;
+    for (const tile of tiles) {
+      if (this.peek(frame, tile.z, tile.x, tile.y)) count++;
+    }
+    return count;
+  }
+
+  /**
+   * Starts fetching a frame's tiles, and says whether they are all resident.
+   *
+   * Playback asks this of the step it is about to show: the backend can hold a
+   * rendered tile the GPU does not yet, and advancing on the backend's word
+   * alone shows the previous step under the new one for a frame (spec.md 9.4).
+   */
+  prefetch(frame: string, tiles: ReadonlyArray<{ z: number; x: number; y: number }>): boolean {
+    let resident = 0;
+    for (const tile of tiles) {
+      if (this.get(frame, tile.z, tile.x, tile.y)) resident++;
+    }
+    return resident === tiles.length;
   }
 
   private async fetch(key: string, entry: Entry): Promise<void> {

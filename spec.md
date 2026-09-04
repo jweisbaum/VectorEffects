@@ -1424,7 +1424,17 @@ concept per the requirements.
 - Playback only advances into frames that are ready; if the next frame is not
   cached, playback holds and shows a buffering state rather than stuttering.
   "Ready" means **solid** in §9.5's terms — a stale frame is not ready, since
-  the tiles on screen for it belong to a revision that no longer exists.
+  the tiles on screen for it belong to a revision that no longer exists — *and*
+  resident: every tile of the step is on the GPU, by the map's own account.
+  The backend holding a tile rendered is not enough; advancing on that alone
+  draws the previous step under the new one for a frame, which is the flicker.
+  While playing, the map keeps the next two steps' tiles fetched ahead of the
+  playhead.
+- **A frame that is not yet on screen draws its missing tiles from the last
+  frame that was, dimmed.** A step change or an edit re-addresses every tile;
+  blanking the map until the new ones land is a flicker on every scrub and a
+  flash on every stroke. The dim says the tile belongs to another frame.
+  Playback never shows a dimmed tile, by the rule above.
 - A stall of several intervals — a slow render, a suspended window — resumes
   at the *next* step. Advancing as many steps as the clock says would turn a
   long render into a skip.
@@ -1455,6 +1465,12 @@ A worker pool renders frames ahead of the playhead.
 - Nothing is cancelled. A unit in flight when an edit lands finishes into a key
   that is merely unreachable — one tile of wasted work, and no bookkeeping that
   could be wrong.
+- **A tile is evaluated once.** The map's own request for a tile and the pool
+  working ahead on the same step meet in the cache: a request for a key already
+  being rendered waits for that render and reads what it stored. No frame is
+  rendered again unless its content hash changes.
+- Each step is flattened, hashed and planned once per document revision, not
+  once per tile or per readiness probe.
 - **Stale** is the frontend's memory: the backend reports what the cache holds,
   and "was solid at an earlier revision, is not at this one" is the timeline
   remembering. It clears when the frame is solid again.

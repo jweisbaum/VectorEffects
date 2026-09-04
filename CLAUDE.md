@@ -291,6 +291,18 @@ to the hash input is a correctness bug that shows up as stale frames.
   every step, so rendering one tile readies every step at once and the cache
   holds one frame, not `step_count`. Any test that counts entries or observes
   render order per step has to animate the scene first (`readiness.rs`).
+- **Rendered is not shown.** The backend's readiness says a tile is in the
+  cache; only the map knows whether the webview has fetched it onto the GPU.
+  Playback asks the map (`MapHandle.warm`) and advances only when every tile
+  of the next step is resident — advancing on the backend's word alone drew a
+  blank map for a frame at every step, which looked like flicker. A frame that
+  is not yet on screen draws its missing tiles from the last frame that was,
+  dimmed (`heldFrame` in `RenderState`); never leave them blank.
+- **A tile is rendered once.** `RenderCache::get_or_render` is single-flight:
+  the map's request for a tile and the pool's unit for the same tile meet
+  there and one waits for the other. Every path that renders a tile goes
+  through `protocol::serve_keyed`; a new one that calls `render_tile` itself
+  will evaluate tiles twice again.
 - **Stale is frontend memory.** The backend reports what the cache holds now;
   "solid at an earlier revision, not at this one" is the timeline remembering
   (`playback.ts`, `classify`). Playback advances only into a *solid* step and

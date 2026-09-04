@@ -100,6 +100,13 @@ fn pick(id: PropId, index: u8) -> ToolOption {
     option(id, PropertyValue::Choice { index })
 }
 
+fn angle(id: PropId, degrees: f64) -> ToolOption {
+    ToolOption {
+        property: format!("{id:?}"),
+        value: PropertyValue::Angle { degrees },
+    }
+}
+
 fn at(id: PropId, lon: f64, lat: f64) -> ToolOption {
     option(id, PropertyValue::Position { lon, lat })
 }
@@ -1193,4 +1200,43 @@ fn a_polygon_around_the_pole_is_anchored_near_it() {
             .any(|flat| ve_render::scene::covers(flat, ll(0.0, 89.0))),
         "the polygon does not cover what it was drawn around"
     );
+}
+
+/// Two aimed strokes at the same target render identically apart from where
+/// they sit, exactly as two constant ones do, and merge the same way — with
+/// every option the bar sends, inert ones included.
+#[test]
+fn aimed_strokes_at_one_target_merge_like_constant_ones() {
+    let (_root, state) = project("merge-aimed");
+    let options = || {
+        vec![
+            pick(PropId::BrushShape, 0),
+            pick(PropId::StampSpace, 0),
+            number(PropId::SizeKm, 800.0),
+            number(PropId::Speed, 12.0),
+            pick(PropId::DirectionMode, 1),
+            angle(PropId::Direction, 45.0),
+            at(PropId::Target, 30.0, 10.0),
+            number(PropId::Feather, 0.2),
+        ]
+    };
+    draw(
+        &state,
+        Tool::Brush,
+        Gesture::Stroke {
+            points: vec![[0.0, 0.0], [2.0, 0.0]],
+        },
+        options(),
+    );
+    draw(
+        &state,
+        Tool::Brush,
+        Gesture::Stroke {
+            points: vec![[2.0, 0.0], [4.0, 0.0]],
+        },
+        options(),
+    );
+    let objects = &document(&state).layers[0].objects;
+    assert_eq!(objects.len(), 1, "aimed strokes stayed two objects");
+    assert_eq!(objects[0].geometry.stroke_chains().len(), 2);
 }

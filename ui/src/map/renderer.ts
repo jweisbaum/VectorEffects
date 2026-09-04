@@ -82,8 +82,16 @@ export interface RenderState {
   showGraticule: boolean;
   /** Speed mapped to the top of the colour ramp, m/s. */
   rampMax: number;
-  /** Dim the raster while a frame is still resolving. */
-  stale: boolean;
+  /**
+   * The frame shown before this one, or null.
+   *
+   * A tile this frame does not have yet is drawn from it, dimmed, rather than
+   * left blank: a step change or an edit re-addresses every tile, and blanking
+   * the map until the new ones land is a flicker on every scrub and a flash on
+   * every stroke. The dim says the tile is not this frame's; playback never
+   * shows one at all, because it advances only into resident frames.
+   */
+  heldFrame: string | null;
   /**
    * Device pixels per CSS pixel.
    *
@@ -100,6 +108,9 @@ const LAND: [number, number, number, number] = [0.20, 0.25, 0.23, 1];
 const COAST: [number, number, number, number] = [0.86, 0.93, 1.0, 0.75];
 const GRATICULE: [number, number, number, number] = [0.55, 0.68, 0.85, 0.16];
 const GLYPH: [number, number, number, number] = [0.94, 0.97, 1.0, 0.9];
+
+/** How much a tile held over from the previous frame is dimmed. */
+const HELD_DIM = 0.55;
 
 function compile(gl: WebGL2RenderingContext, type: number, source: string): WebGLShader {
   const shader = gl.createShader(type);
@@ -321,15 +332,15 @@ export class MapRenderer {
     gl.uniform1i(this.rasterUniforms.uTile ?? null, 0);
     gl.uniform1f(this.rasterUniforms.uSpeedScale ?? null, SPEED_SCALE_MPS);
     gl.uniform1f(this.rasterUniforms.uRampMax ?? null, state.rampMax);
-    gl.uniform1f(this.rasterUniforms.uDim ?? null, state.stale ? 0.55 : 1.0);
     this.setMask(this.rasterUniforms, state.view, mode);
     gl.activeTexture(gl.TEXTURE0);
 
     for (const tile of tiles) {
-      const texture = this.tiles.get(state.frame, tile.z, tile.x, tile.y);
+      const { texture, held } = this.textureFor(state, tile);
       if (!texture) continue;
       const b = tileBounds(tile.z, tile.x, tile.y);
       this.setShared(this.rasterUniforms, camera, state.view, tile.lonOffset);
+      gl.uniform1f(this.rasterUniforms.uDim ?? null, held ? HELD_DIM : 1.0);
       gl.uniform4f(
         this.rasterUniforms.uTileGeo ?? null,
         b.west, b.north, b.east - b.west, b.north - b.south,
@@ -337,6 +348,19 @@ export class MapRenderer {
       gl.bindTexture(gl.TEXTURE_2D, texture);
       gl.drawArrays(gl.TRIANGLES, 0, 6);
     }
+  }
+
+  /**
+   * This frame's texture for a tile, fetching it if absent — or, until it
+   * lands, the held frame's, which is marked so the raster can dim it.
+   */
+  private textureFor(
+    state: RenderState,
+    tile: VisibleTile,
+  ): { texture: WebGLTexture | null; held: boolean } {
+    const texture = this.tiles.get(state.frame, tile.z, tile.x, tile.y);
+    if (texture || !state.heldFrame) return { texture, held: false };
+    return { texture: this.tiles.peek(state.heldFrame, tile.z, tile.x, tile.y), held: true };
   }
 
   /** Graticule interval that keeps lines at least ~70 px apart. */
@@ -414,7 +438,7 @@ export class MapRenderer {
     gl.activeTexture(gl.TEXTURE0);
 
     for (const tile of tiles) {
-      const texture = this.tiles.get(state.frame, tile.z, tile.x, tile.y);
+      const { texture } = this.textureFor(state, tile);
       if (!texture) continue;
       const b = tileBounds(tile.z, tile.x, tile.y);
       const originX =

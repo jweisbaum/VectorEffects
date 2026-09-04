@@ -11,11 +11,11 @@
 //! exists. A request for a revision that is no longer current is refused rather
 //! than answered with current data under a stale URL.
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use tauri::Manager;
 use tauri::http::{Request, Response};
-use ve_render::cache::{TileKey, scene_hash};
+use ve_render::cache::{SceneHash, TileKey, scene_hash};
 use ve_render::cpu::CpuEvaluator;
 use ve_render::evaluator::FieldEvaluator;
 use ve_render::preview::{Quality, render_tile};
@@ -27,22 +27,31 @@ use crate::commands::AppState;
 /// The scheme name.
 pub const SCHEME: &str = "ve-tile";
 
-/// The most recently flattened scene, reused across the tiles of one frame.
+/// One frame, flattened and hashed: what every tile of it is served from.
+#[derive(Debug)]
+pub struct Frame {
+    /// The scene at this step.
+    pub scene: Scene,
+    /// Its content hash, computed once for the frame rather than per tile.
+    pub hash: SceneHash,
+}
+
+/// The most recently flattened frame, reused across the tiles of it.
 ///
-/// A viewport is over a hundred tiles and flattening is per *frame*, not per
-/// tile, so without this every tile would redo the same work.
+/// A viewport is over a hundred tiles and flattening and hashing are per
+/// *frame*, not per tile, so without this every tile would redo the same work.
 #[derive(Debug, Default)]
-pub struct SceneCache(Mutex<Option<(u64, u32, Scene)>>);
+pub struct SceneCache(Mutex<Option<(u64, u32, Arc<Frame>)>>);
 
 impl SceneCache {
-    /// Returns the scene for `(revision, step)`, flattening it if needed.
-    fn scene_for(&self, state: &AppState, revision: u64, step: u32) -> Option<Scene> {
+    /// Returns the frame for `(revision, step)`, flattening it if needed.
+    fn frame_for(&self, state: &AppState, revision: u64, step: u32) -> Option<Arc<Frame>> {
         if let Ok(cached) = self.0.lock()
-            && let Some((cached_revision, cached_step, scene)) = cached.as_ref()
+            && let Some((cached_revision, cached_step, frame)) = cached.as_ref()
             && *cached_revision == revision
             && *cached_step == step
         {
-            return Some(scene.clone());
+            return Some(Arc::clone(frame));
         }
 
         let session = state.session.lock().ok()?;
@@ -53,10 +62,12 @@ impl SceneCache {
         let scene = flatten(&open.project, step);
         drop(session);
 
+        let hash = scene_hash(&scene);
+        let frame = Arc::new(Frame { scene, hash });
         if let Ok(mut cached) = self.0.lock() {
-            *cached = Some((revision, step, scene.clone()));
+            *cached = Some((revision, step, Arc::clone(&frame)));
         }
-        Some(scene)
+        Some(frame)
     }
 }
 
@@ -120,9 +131,9 @@ pub fn handle(app: &tauri::AppHandle, request: &Request<Vec<u8>>) -> Response<Ve
     };
 
     let state = app.state::<AppState>();
-    let Some(scene) = app
+    let Some(frame) = app
         .state::<SceneCache>()
-        .scene_for(&state, parsed.revision, parsed.step)
+        .frame_for(&state, parsed.revision, parsed.step)
     else {
         // The document moved on, or nothing is open. Refusing beats answering
         // with current data under a URL that names an older revision.
@@ -133,7 +144,8 @@ pub fn handle(app: &tauri::AppHandle, request: &Request<Vec<u8>>) -> Response<Ve
         return respond(409, Vec::new());
     };
 
-    match serve(&state, &scene, parsed.id) {
+    let key = key_with(&state, &frame.scene, frame.hash, parsed.id);
+    match serve_keyed(&state, &frame.scene, key) {
         Ok(encoded) => respond(200, encoded),
         Err(err) => {
             tracing::error!(%err, "tile evaluation failed");
@@ -172,11 +184,19 @@ pub fn plan_for<'a>(
     (gpu, quality)
 }
 
-/// The cache key a tile of `scene` is served under.
+/// The cache key a tile of `scene` is served under, hashing the scene.
 pub fn key_for(state: &AppState, scene: &Scene, id: tile::TileId) -> TileKey {
+    key_with(state, scene, scene_hash(scene), id)
+}
+
+/// The cache key a tile of `scene` is served under, given the scene's hash.
+///
+/// Hashing is per frame and a frame is a hundred tiles, so a caller that
+/// serves many tiles of one scene hashes once and comes through here.
+pub fn key_with(state: &AppState, scene: &Scene, hash: SceneHash, id: tile::TileId) -> TileKey {
     let (_, quality) = plan_for(state, scene);
     TileKey {
-        scene: scene_hash(scene),
+        scene: hash,
         tile: id,
         quality,
     }
@@ -193,30 +213,31 @@ pub fn serve(
     scene: &Scene,
     id: tile::TileId,
 ) -> ve_render::error::Result<Vec<u8>> {
-    let (gpu, quality) = plan_for(state, scene);
-    let key = TileKey {
-        scene: scene_hash(scene),
-        tile: id,
-        quality,
-    };
-    if let Some(cached) = state.tiles.get(&key) {
-        return Ok(cached);
-    }
+    serve_keyed(state, scene, key_for(state, scene, id))
+}
 
-    // A preview may evaluate coarsely and interpolate: the view is a proxy,
-    // never a source (spec.md, invariant 3). Cells straddling an edge are still
-    // evaluated exactly, so nothing is smeared.
-    let evaluator: &dyn FieldEvaluator = match gpu {
-        Some(gpu) => gpu,
-        None => &CpuEvaluator,
-    };
-    let samples = render_tile(evaluator, scene, id, quality)?;
-    let encoded = tile::encode(&samples);
-    if let Err(err) = state.tiles.put(&key, &encoded) {
-        // A cache write failure must not fail the request.
-        tracing::warn!(%err, "could not cache tile");
-    }
-    Ok(encoded)
+/// [`serve`], with the key already made — see [`key_with`].
+///
+/// Single-flight through the cache: the map's own request for a tile and the
+/// pool rendering ahead on the same step meet here, and one of them waits for
+/// the other rather than evaluating the tile a second time.
+pub fn serve_keyed(
+    state: &AppState,
+    scene: &Scene,
+    key: TileKey,
+) -> ve_render::error::Result<Vec<u8>> {
+    state.tiles.get_or_render(&key, || {
+        // A preview may evaluate coarsely and interpolate: the view is a proxy,
+        // never a source (spec.md, invariant 3). Cells straddling an edge are
+        // still evaluated exactly, so nothing is smeared.
+        let (gpu, _) = plan_for(state, scene);
+        let evaluator: &dyn FieldEvaluator = match gpu {
+            Some(gpu) => gpu,
+            None => &CpuEvaluator,
+        };
+        let samples = render_tile(evaluator, scene, key.tile, key.quality)?;
+        Ok(tile::encode(&samples))
+    })
 }
 
 #[cfg(test)]
