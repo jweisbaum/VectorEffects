@@ -24,7 +24,9 @@ import type { Tool } from "./generated/Tool";
 import type { ToolSchema } from "./generated/ToolSchema";
 import type { DocumentTree } from "./generated/DocumentTree";
 import type { ClipboardState } from "./generated/ClipboardState";
+import type { CaptureState } from "./generated/CaptureState";
 import type { FrameClipboardState } from "./generated/FrameClipboardState";
+import type { RegionShape } from "./generated/RegionShape";
 import type { HistoryView } from "./generated/HistoryView";
 import type { PropertyValue } from "./generated/PropertyValue";
 import type { PropertyView } from "./generated/PropertyView";
@@ -380,6 +382,19 @@ export const api = {
    */
   setFollow: (object: number, property: string, primary: number | null, step: number) =>
     call<ProjectSummary>("set_follow", { object, property, primary, step }),
+
+  /**
+   * Captures the visible composite inside a region (spec.md 8.5, M14).
+   * Evaluated on the CPU, like an export: a capture is a value the user keeps
+   * rather than a frame they are looking at.
+   */
+  captureRegion: (region: RegionShape, step: number) =>
+    call<CaptureState>("capture_region", { region, step }),
+  /** Pastes the captured field as a patch, at a position or where it came from. */
+  pasteCapture: (lon: number | null, lat: number | null, step: number) =>
+    call<ProjectSummary>("paste_capture", { lon, lat, step }),
+  /** What the capture clipboard holds. */
+  captureState: () => call<CaptureState>("capture_state", {}),
 
   /** What the frame clipboard holds. */
   frameClipboardState: () => call<FrameClipboardState>("frame_clipboard_state", {}),

@@ -8,6 +8,7 @@
 use std::sync::Arc;
 
 use ve_core::angle::Angle;
+use ve_core::capture::Capture;
 use ve_core::document::{Geometry, Object, PathNode, SpeedRange};
 use ve_core::project::Project;
 use ve_core::raster::RasterGrid;
@@ -229,6 +230,18 @@ fn east_north(position: LonLat) -> ([f64; 3], [f64; 3]) {
     )
 }
 
+/// A patch's samples, resolved for one step.
+///
+/// Shared rather than owned: the document is cloned freely — into history,
+/// into render snapshots — and a captured field can run to megabytes.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FlatCapture {
+    /// The whole capture, for its lattice geometry.
+    pub capture: Arc<Capture>,
+    /// Which of its frames this step shows.
+    pub frame: usize,
+}
+
 /// One object with every property resolved for a single time step.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FlatObject {
@@ -278,6 +291,26 @@ pub struct FlatObject {
     /// anything: a modifier writes what it read, changed. The evaluator tests
     /// this before it tests anything else about the object.
     pub modifier: Option<Modifier>,
+    /// The captured field this object replays, if it is a patch
+    /// (spec.md 8.5, M14).
+    ///
+    /// The lattice is in the object's **own frame**, measured in degrees of
+    /// the map: a patch is captured over a region, a region is map space, and
+    /// the frame carries the anchor, the rotation and the scale. So a patch
+    /// moves, turns and grows like any object and the samples never move at
+    /// all.
+    pub capture: Option<FlatCapture>,
+    /// Whether the object *removes* field rather than writing one.
+    ///
+    /// True for the mask, and only for it. The mask writes calm, which is what
+    /// the field shows — but a cell it removed is **undefined** in a capture
+    /// rather than a real zero, so that a patch taken over one is transparent
+    /// there instead of painting a hole of dead air (spec.md 8.5, D58).
+    ///
+    /// Read by the capture and by nothing else, so it is deliberately **not**
+    /// in the render cache's key: it changes no frame, and §7.10's rule is
+    /// that a key changes exactly when a frame does.
+    pub erases: bool,
     /// The object's own movement, added to what it paints (spec.md 9.3, M13).
     ///
     /// Still unless the user asked for it, and set by [`flatten`] rather than
@@ -671,6 +704,8 @@ pub fn flatten_object_at(object: &Object, step: u32, derived: Derived) -> Option
             OffsetMode::Aligned
         },
         modifier: modifier_of(object, step),
+        capture: None,
+        erases: object.tool == ToolKind::Mask,
         motion: Motion::default(),
         // Only the mask has the property; everything else reads `false` and
         // covers what it is drawn over, as it always did.
@@ -849,6 +884,33 @@ fn translation_omega(from: LonLat, to: LonLat, dt: f64) -> [f64; 3] {
     [axis[0] * rate, axis[1] * rate, axis[2] * rate]
 }
 
+/// The captured field a patch shows at a step (spec.md 8.5, M14).
+///
+/// A still capture shows its one frame at every step. An animated one is
+/// aligned with the project's own hours from the object's first active step,
+/// so a captured run of frames plays where the patch was put rather than
+/// where it was taken.
+fn capture_of(project: &Project, object: &Object, step: u32) -> Option<FlatCapture> {
+    let hash = object.capture.as_deref()?;
+    let capture = project.captures.get(hash)?;
+    if capture.frames.len() == 1 {
+        return Some(FlatCapture {
+            capture: Arc::clone(capture),
+            frame: 0,
+        });
+    }
+    let hours_per_step = f64::from(project.settings.step_hours.hours());
+    let elapsed = f64::from(step.saturating_sub(object.active_range.start)) * hours_per_step;
+    let frame = capture
+        .frames
+        .iter()
+        .position(|f| (f.offset_hours - elapsed).abs() < 1e-6)?;
+    Some(FlatCapture {
+        capture: Arc::clone(capture),
+        frame,
+    })
+}
+
 /// Flattens a whole project for one time step, in z-order.
 ///
 /// A layer's imported field, if it has one, goes in beneath the layer's own
@@ -881,6 +943,11 @@ pub fn flatten(project: &Project, step: u32) -> Scene {
             .extend(layer.objects.iter().filter_map(|object| {
                 let mut flat = flatten_object_at(object, step, links.at.of(object.id))?;
                 flat.motion = motion_of(object, step, hours, last, &links);
+                // A patch replays a captured field (spec.md 8.5). The samples
+                // live beside the project, keyed by hash, so a patch whose
+                // entry is missing simply has none — it draws nothing, exactly
+                // as a GRIB layer whose file has gone.
+                flat.capture = capture_of(project, object, step);
                 Some(flat)
             }));
     }

@@ -9,11 +9,11 @@ use ve_core::angle::Angle;
 use ve_core::vector::{Uv, uv_from_speed_azimuth};
 use ve_core::{LonLat, geo};
 
-use crate::aeqd::Local;
+use crate::aeqd::{Local, M_PER_DEGREE};
 use crate::error::Result;
 use crate::evaluator::{FieldEvaluator, SamplePoint};
 use crate::scene::{
-    DirectionMode, EdgeMode, FlatObject, Modifier, OffsetMode, Scene, SpeedMode, Warp,
+    DirectionMode, EdgeMode, FlatCapture, FlatObject, Modifier, OffsetMode, Scene, SpeedMode, Warp,
 };
 
 /// How deep a clone stamp may read through other clone stamps.
@@ -203,24 +203,51 @@ fn coverage(object: &FlatObject, position: LonLat) -> Option<f64> {
 
 /// Evaluates a whole scene at one position.
 pub fn sample_scene(scene: &Scene, position: LonLat) -> Uv {
-    sample_upto(scene, position, scene.objects.len(), 0)
+    sample_upto(scene, position, scene.objects.len(), 0).0
 }
+
+/// Evaluates a scene, and says whether anything wrote at the position.
+///
+/// **Zero and undefined are different things** (spec.md 8.5, D58). A cell no
+/// object and no raster wrote is undefined, and so is one a mask removed — the
+/// mask exists to let what is beneath show through, and a capture that turned
+/// that into a real zero would overwrite whatever it is later pasted over.
+///
+/// Only the capture asks. The field itself is unchanged: an undefined cell
+/// composites as calm, which is what it has always done, so this cannot move a
+/// single exported byte.
+pub fn sample_scene_covered(scene: &Scene, position: LonLat) -> Option<Uv> {
+    let (uv, coverage) = sample_upto(scene, position, scene.objects.len(), 0);
+    (coverage > COVERAGE_EPSILON).then_some(uv)
+}
+
+/// How much of a cell has to be written for it to count as written.
+///
+/// Small rather than a half: the rule is "anything wrote here", so the faded
+/// outer edge of a feathered stroke is captured — faded, but there. A patch's
+/// own feather is how it is softened again.
+const COVERAGE_EPSILON: f32 = 1e-4;
 
 /// Evaluates the first `upto` objects of a scene.
 ///
 /// `depth` counts nested clone-stamp reads. A clone stamp evaluates the scene
 /// beneath *itself*, which is exactly `upto = its own index` — so "everything
 /// below me in z-order" needs no separate sub-scene to be built.
-fn sample_upto(scene: &Scene, position: LonLat, upto: usize, depth: u32) -> Uv {
+fn sample_upto(scene: &Scene, position: LonLat, upto: usize, depth: u32) -> (Uv, f32) {
     // Unwritten cells are calm.
     let mut accumulated = Uv::default();
+    // ...and uncovered. Coverage accumulates exactly as the field does, so
+    // that "was anything written here" has the same answer at a feathered edge
+    // that the field has. Only a capture reads it (spec.md 8.5, D58); it costs
+    // a few floating-point operations per object and moves no field value.
+    let mut coverage = 0.0f32;
 
     // Imported fields are interleaved with the objects by `z`: a raster at
     // `z` is applied just before object `z`, and every raster at or below
     // `upto` is beneath the object that asked. Where the grid has a value it
     // overwrites outright.
     let mut rasters = scene.rasters.iter().peekable();
-    let mut apply_rasters_below = |z: usize, accumulated: &mut Uv| {
+    let mut apply_rasters_below = |z: usize, accumulated: &mut Uv, coverage: &mut f32| {
         while let Some(raster) = rasters.next_if(|r| r.z <= z) {
             if let Some(uv) = raster.grid.sample(position.lon, position.lat) {
                 // A sample outside the layer's speed band is treated as a
@@ -233,13 +260,14 @@ fn sample_upto(scene: &Scene, position: LonLat, upto: usize, depth: u32) -> Uv {
                     .is_none_or(|band| band.keeps(uv.u.hypot(uv.v)))
                 {
                     *accumulated = uv;
+                    *coverage = 1.0;
                 }
             }
         }
     };
 
     for (index, object) in scene.objects.iter().take(upto).enumerate() {
-        apply_rasters_below(index, &mut accumulated);
+        apply_rasters_below(index, &mut accumulated, &mut coverage);
         // A modifier has no field of its own either: it rewrites what the
         // accumulation buffer already holds, which at this point in the loop is
         // exactly everything below it in z-order (spec.md 6.3, 7.6).
@@ -259,7 +287,7 @@ fn sample_upto(scene: &Scene, position: LonLat, upto: usize, depth: u32) -> Uv {
                         accumulated
                     } else {
                         let read = warp_source_position(object, warp, position, weight);
-                        sample_upto(scene, read, index, depth + 1)
+                        sample_upto(scene, read, index, depth + 1).0
                     }
                 }
                 _ => modified_vector(modifier, object, position, accumulated),
@@ -284,13 +312,42 @@ fn sample_upto(scene: &Scene, position: LonLat, upto: usize, depth: u32) -> Uv {
                 Uv::default()
             } else {
                 let sampled = clone_source_position(object, source, position);
-                sample_upto(scene, sampled, index, depth + 1)
+                sample_upto(scene, sampled, index, depth + 1).0
             };
             // A moving clone stamp carries its own motion into what it copies
             // (spec.md 9.3), added before the edge so the feather fades the
             // sum rather than the two separately.
             let vector = with_motion(object, position, vector);
             let w = weight as f32;
+            accumulated = match object.edge_mode {
+                EdgeMode::Blend => Uv {
+                    u: accumulated.u + (vector.u - accumulated.u) * w,
+                    v: accumulated.v + (vector.v - accumulated.v) * w,
+                },
+                EdgeMode::Replace => Uv {
+                    u: vector.u * w,
+                    v: vector.v * w,
+                },
+            };
+            coverage = covered(object, coverage, w);
+            continue;
+        }
+
+        // A patch replays a captured field rather than computing one
+        // (spec.md 8.5, M14). Where the capture is undefined it writes
+        // *nothing* — that is the whole of D58 — so a cell its source never
+        // covered leaves what is beneath alone, exactly as a raster's gap
+        // does.
+        if let Some(patch) = object.capture.as_ref() {
+            let Some(weight) = operator_weight(object, position) else {
+                continue;
+            };
+            let Some(vector) = patch_sample(object, patch, position) else {
+                continue;
+            };
+            let vector = with_motion(object, position, vector);
+            let w = weight as f32;
+            coverage = covered(object, coverage, w);
             accumulated = match object.edge_mode {
                 EdgeMode::Blend => Uv {
                     u: accumulated.u + (vector.u - accumulated.u) * w,
@@ -309,6 +366,7 @@ fn sample_upto(scene: &Scene, position: LonLat, upto: usize, depth: u32) -> Uv {
         };
         let vector = with_motion(object, position, vector);
         let w = weight as f32;
+        coverage = covered(object, coverage, w);
         accumulated = match object.edge_mode {
             // Fade into whatever is underneath. Identical to Replace where the
             // field below is calm, which is why it is the default (D12).
@@ -323,8 +381,47 @@ fn sample_upto(scene: &Scene, position: LonLat, upto: usize, depth: u32) -> Uv {
             },
         };
     }
-    apply_rasters_below(upto, &mut accumulated);
-    accumulated
+    apply_rasters_below(upto, &mut accumulated, &mut coverage);
+    (accumulated, coverage)
+}
+
+/// A patch's captured value at a position, in the object's own frame.
+///
+/// The frame does the moving: `to_local` gives metres in the object's space,
+/// which for the projected space a region always has is degrees of the map
+/// times `M_PER_DEGREE`. Dividing that back out gives the degrees the capture
+/// indexed itself by, so a patch that has been dragged, turned or scaled reads
+/// the same samples through a different transform rather than resampling them.
+///
+/// `None` where the capture has nothing: outside its lattice, or at a cell its
+/// source never covered.
+fn patch_sample(object: &FlatObject, patch: &FlatCapture, position: LonLat) -> Option<Uv> {
+    let frame = patch.capture.frames.get(patch.frame)?;
+    let local = object.frame.to_local(position);
+    let sample = patch
+        .capture
+        .sample(frame, local[0] / M_PER_DEGREE, local[1] / M_PER_DEGREE)?;
+    Some(Uv {
+        u: sample[0],
+        v: sample[1],
+    })
+}
+
+/// How much of a cell an object has written, after it (spec.md 8.5, D58).
+///
+/// The same shape as the field's own blend, so coverage and field agree at
+/// every feathered edge. A mask **subtracts**: it is there to let what is
+/// beneath show through, and what it removes is undefined rather than calm —
+/// so a patch captured over one is transparent exactly where the mask was, and
+/// does not paint a hole of dead air over whatever it is pasted onto.
+fn covered(object: &FlatObject, before: f32, weight: f32) -> f32 {
+    if object.erases {
+        return before * (1.0 - weight);
+    }
+    match object.edge_mode {
+        EdgeMode::Blend => before + (1.0 - before) * weight,
+        EdgeMode::Replace => weight,
+    }
 }
 
 /// Adds an object's own movement to the vector it paints (spec.md 9.3, M13).

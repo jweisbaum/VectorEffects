@@ -37,6 +37,8 @@ tracing-appender = "0.2.5"
 tauri-plugin-dialog = "2.7.3"
 
 [dev-dependencies]
+# Reading a saved project's archive directly, to check what a capture writes.
+zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 ve-grib = { workspace = true, features = ["testing"] }
 
 [lints]

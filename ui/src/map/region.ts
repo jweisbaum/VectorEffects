@@ -15,6 +15,7 @@
  * pointing is not an edit.
  */
 
+import type { RegionShape } from "../generated/RegionShape";
 import { type Camera, normalizeLon } from "./camera";
 
 /** How a drag with the select tool draws its region. */
@@ -260,3 +261,30 @@ export function fillGesture(region: Region): {
 export type RegionGesture =
   | { kind: "extent"; centre: [number, number]; rim: [number, number] }
   | { kind: "ring"; points: Array<[number, number]> };
+
+/**
+ * The region as the backend's `RegionShape`, for a capture (spec.md 8.5).
+ *
+ * The wire shape is the region itself — degrees, map space — because that is
+ * what it is. The backend turns it into the patch's geometry and its lattice;
+ * nothing here decides either.
+ */
+export function regionShape(region: Region): RegionShape {
+  switch (region.kind) {
+    case "rect":
+      return {
+        kind: "rect",
+        centre: [region.centre[0], region.centre[1]],
+        half_width_deg: region.halfWidthDeg,
+        half_height_deg: region.halfHeightDeg,
+      };
+    case "disc":
+      return {
+        kind: "disc",
+        centre: [region.centre[0], region.centre[1]],
+        radius_deg: region.radiusDeg,
+      };
+    case "polygon":
+      return { kind: "polygon", points: region.points.map((p) => [p[0], p[1]]) };
+  }
+}

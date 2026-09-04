@@ -208,6 +208,20 @@ fn hash_object(hasher: &mut blake3::Hasher, object: &FlatObject) {
         }
     };
 
+    // The captured field a patch replays, by its content hash (spec.md 8.5).
+    // Two patches of the same shape and different samples are two different
+    // frames, and the hash is the only thing that says so — the samples
+    // themselves are megabytes and hashing them here would repeat the work
+    // the capture already did.
+    match object.capture.as_ref() {
+        None => hasher.update(&[0]),
+        Some(patch) => {
+            hasher.update(&[1]);
+            hasher.update(patch.capture.hash.as_bytes());
+            hasher.update(&(patch.frame as u32).to_le_bytes())
+        }
+    };
+
     // The object's own movement, which is added to every vector it paints and
     // so changes the frame without moving the footprint (spec.md 9.3). Two
     // steps of a travelling stroke have the same geometry and different
@@ -581,6 +595,8 @@ mod tests {
             clone_offset: OffsetMode::Aligned,
             modifier: None,
             invert: false,
+            capture: None,
+            erases: false,
             motion: crate::scene::Motion::default(),
         }
     }

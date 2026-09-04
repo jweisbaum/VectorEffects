@@ -160,9 +160,7 @@ preset, a circle its circle and a lasso its freehand polygon. No new gesture,
 no new shape, no backend change at all — which is what keeps the object a shape
 fill and the seven shared-rule tests covering it unchanged.
 
-**The capture is the rest of M14**, and the large half: a coverage bit through the CPU composite, the `.vecap` container, a patch
-object both kernels sample, and the rewording of invariants 1 and 2 that D52
-settled.
+**M15 is next.**
 
 **Unplanned, after M7: GRIB import** (spec §4.8, D44). A GRIB2 file becomes a
 layer — two, when it holds both wind and currents — whose lattice is sampled
@@ -545,7 +543,7 @@ M0 ─ M1 ─ M2 ─ M3 ─ M4 ══ walking skeleton complete
                     ├─ M21 ────── ICON's icosahedral grid                  ✓
                     ├─ M22 ────── every grid definition the centres ship   ✓
                     ├─ M13 ────── motion vectors, linked objects        ✓
-                    ├─ M14 ────── region selection, fill, copy/paste
+                    ├─ M14 ────── region selection, fill, copy/paste      ✓
                     ├─ M15 ────── settings and shortcuts
                     ├─ M16 ────── macros                                 (needs M14, M15)
                     ├─ M17 ────── warp and liquify, two tools
@@ -1357,7 +1355,7 @@ Both are model work of spec §9.3's kind. Only the first reaches the kernels.
 
 ---
 
-### M14 — Region selection, fill, copy and paste
+### M14 — Region selection, fill, copy and paste · **complete**
 
 **Goal:** a region of the map can be selected, filled with a vector, and
 copied as a field.

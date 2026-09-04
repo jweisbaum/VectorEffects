@@ -55,6 +55,11 @@ pub enum Tool {
     Turn,
     /// Displaces the field beneath it.
     Warp,
+    /// Replays a field captured from a region (spec.md 8.5, M14).
+    ///
+    /// In the wire enum but not in the palette: a patch is pasted rather than
+    /// drawn, and the panels still have to name it.
+    Patch,
 }
 
 impl Tool {
@@ -71,6 +76,7 @@ impl Tool {
             Self::Divergence => ToolKind::Divergence,
             Self::Turn => ToolKind::Turn,
             Self::Warp => ToolKind::Warp,
+            Self::Patch => ToolKind::Patch,
         }
     }
 
@@ -87,6 +93,7 @@ impl Tool {
             ToolKind::Divergence => Self::Divergence,
             ToolKind::Turn => Self::Turn,
             ToolKind::Warp => Self::Warp,
+            ToolKind::Patch => Self::Patch,
         }
     }
 
@@ -103,6 +110,7 @@ impl Tool {
             Self::Divergence => "Divergence",
             Self::Turn => "Rotation",
             Self::Warp => "Warp",
+            Self::Patch => "Patch",
         }
     }
 }

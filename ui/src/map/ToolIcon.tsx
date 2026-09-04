@@ -61,6 +61,13 @@ const ICONS: Record<ActiveTool, Icon> = {
     line("M7 20H5a1 1 0 0 1-1-1v-2", "corner-sw"),
     line("M10 4h4M10 20h4M4 10v4M20 10v4", "dashes"),
   ],
+  // The patch: a rectangle of captured field, dashed on the side it came from
+  // and solid where it is now. Never in the palette — a patch is pasted, not
+  // drawn — but the panels name every object by its tool, so it needs a mark.
+  patch: [
+    line("M4 8h9v9H4z", "pasted"),
+    line("M8 4h9v9h-2M11 4v2", "taken"),
+  ],
   // The fill tool: a bucket tipped over what it fills.
   [FILL]: [
     line("M11 4 4 11a2 2 0 0 0 0 3l5 5a2 2 0 0 0 3 0l7-7z", "bucket"),

@@ -54,6 +54,15 @@ export default function App() {
   const onFramesSelected = useCallback((active: boolean) => {
     framesSelected.current = active;
   }, []);
+  /**
+   * Whether the map has a region selected or a captured field held, in which
+   * case copy and paste belong to the field and not to the object clipboard
+   * (spec.md 8.5, M14).
+   */
+  const regionActive = useRef(false);
+  const onRegionActive = useCallback((active: boolean) => {
+    regionActive.current = active;
+  }, []);
   // Which layer receives new objects, and what a plain marquee is scoped to
   // (spec.md 6.1, 8.2). Null means the top of the stack.
   const [activeLayer, setActiveLayer] = useState<number | null>(null);
@@ -227,10 +236,14 @@ export default function App() {
       } else if (key === "o") {
         event.preventDefault();
         void openProject();
-      } else if (framesSelected.current && (key === "c" || key === "v")) {
+      } else if (
+        (framesSelected.current || regionActive.current) &&
+        (key === "c" || key === "v")
+      ) {
         // The timeline owns copy and paste while one of an imported layer's
-        // frames is selected (spec.md 4.8, M20). Nothing to do here: its own
-        // handler has already acted.
+        // frames is selected (spec.md 4.8, M20), and the map owns them while a
+        // region is selected or a capture is held (spec.md 8.5, M14). Nothing
+        // to do here: their own handlers have already acted.
       } else if (key === "c" && selection.length > 0) {
         event.preventDefault();
         void api.copyObjects(selection, step).catch(report);
@@ -304,6 +317,7 @@ export default function App() {
           picking={picking}
           onPicked={() => setPicking(null)}
           onProjectChanged={setProject}
+          onRegionActive={onRegionActive}
           onStepChange={setStep}
           onSelect={setSelection}
           onViewport={setViewport}

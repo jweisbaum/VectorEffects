@@ -203,6 +203,8 @@ pub struct Session {
     /// different things to paste and the timeline decides which gesture the
     /// key press was.
     pub frames: crate::frames::FrameClipboard,
+    /// A field captured from a region, held for pasting (spec.md 8.5, M14).
+    pub capture: crate::capture::CaptureClipboard,
     /// The transform drag in progress, if any.
     pub transform: Option<TransformGesture>,
     /// Counter behind [`Session::next_gesture_id`].

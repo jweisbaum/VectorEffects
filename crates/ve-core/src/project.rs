@@ -272,6 +272,16 @@ pub struct Project {
     /// target. Losing it costs time and nothing else.
     #[serde(skip)]
     pub regrid: std::collections::BTreeMap<String, std::sync::Arc<crate::regrid::Neighbours>>,
+    /// Fields captured from regions of the map, by content hash
+    /// (spec.md 8.5, M14).
+    ///
+    /// **Not JSON, and not derived.** A *rendered* raster is a cache product,
+    /// reproducible from the objects, and stays forbidden; a *captured* one is
+    /// user content that stops being reproducible the moment its sources
+    /// change, so it travels with the project as its own compressed archive
+    /// entry (D52). The document keeps the hash and nothing else.
+    #[serde(skip)]
+    pub captures: std::collections::BTreeMap<String, std::sync::Arc<crate::capture::Capture>>,
     /// Document schema version. See [`SCHEMA_VERSION`].
     pub schema_version: u32,
     /// Stable identity.
@@ -302,6 +312,7 @@ impl Project {
             annotations: Annotations::default(),
             view: ViewState::default(),
             regrid: std::collections::BTreeMap::new(),
+            captures: std::collections::BTreeMap::new(),
         }
     }
 

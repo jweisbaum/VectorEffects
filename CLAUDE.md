@@ -21,10 +21,17 @@ evaluation, caching, GRIB encoding. React/TypeScript is a view layer only.
 Violating any of these is a design regression. If a task seems to require it,
 stop and raise it rather than working around it.
 
-1. **No raster is ever persisted as project data.** Rasters exist only in memory,
-   in the evictable content-hashed render cache, or inside an exported `.grib2`.
-   Deleting the cache directory must always be lossless.
-2. **The project file stores geometry and parameters, never pixels.**
+1. **No *rendered* raster is ever persisted as project data.** A render is a
+   cache product, reproducible from the objects. Rendered rasters exist only in
+   memory, in the evictable content-hashed render cache, or inside an exported
+   `.grib2`. Deleting the cache directory must always be lossless.
+   **A *captured* raster is allowed** (spec §8.5, D52): it is user content that
+   stops being reproducible once its sources change, so it travels with the
+   project as its own `captures/<hash>.vecap` archive entry. Rendered stays
+   forbidden; captured is written only by the region capture and the macro
+   library.
+2. **The project file's JSON stores geometry and parameters, never pixels.** A
+   captured field is a hash in the JSON and an archive entry beside it.
 3. **The view is a proxy, never a source.** The preview renders from the objects
    at whatever resolution is fast; the GRIB is baked from the same objects at
    full grid resolution. **No preview pixel ever reaches an export.** The two
@@ -48,7 +55,9 @@ stop and raise it rather than working around it.
 ```
 crates/
   ve-core/     Document model, properties, keyframes/interpolation,
-               undo/redo, IDs, geodesy, serde, .veproj I/O, migrations
+               undo/redo, IDs, geodesy, serde, .veproj I/O, migrations.
+               `capture` holds the `.vecap` container a region capture
+               travels in; `follow` resolves objects that follow objects
   ve-render/   Scene flattening, SDF rasterisation, compositing,
                FieldEvaluator trait, CpuEvaluator, GpuEvaluator (+ WGSL),
                tile pyramid, content-hashed render cache

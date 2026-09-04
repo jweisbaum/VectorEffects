@@ -94,6 +94,7 @@ import {
 import {
   fillGesture,
   type Region,
+  regionShape,
   type RegionMode,
   regionFromDrag,
   regionFromLasso,
@@ -297,6 +298,7 @@ export default function MapView({
   picking,
   onPicked,
   onProjectChanged,
+  onRegionActive,
   onStepChange,
   onSelect,
   onViewport,
@@ -311,6 +313,12 @@ export default function MapView({
   picking: PositionPick | null;
   onPicked: () => void;
   onProjectChanged: (project: ProjectSummary) => void;
+  /**
+   * Whether a region is selected or a captured field is held, so the app's own
+   * copy and paste stand down: with a region, both belong to the field
+   * (spec.md 8.5, M14).
+   */
+  onRegionActive: (active: boolean) => void;
   onStepChange: (step: number) => void;
   onSelect: (objects: number[]) => void;
   /**
@@ -453,6 +461,11 @@ export default function MapView({
     and pointing is not an edit.
   */
   const [region, setRegion] = useState<Region | null>(null);
+  /** Whether a captured field is waiting to be pasted (spec.md 8.5, M14). */
+  const [captured, setCaptured] = useState(false);
+  useEffect(() => {
+    onRegionActive(region !== null || captured);
+  }, [region, captured, onRegionActive]);
   const [regionMode, setRegionMode] = useState<RegionMode>("rect");
   /** The region drag in flight, in geographic degrees. */
   const regionDrag = useRef<{ from: [number, number]; points: Array<[number, number]> } | null>(
@@ -1037,6 +1050,30 @@ export default function MapView({
           requestOverlay();
           return;
         }
+        // With a region active, copy takes the *field* inside it and paste
+        // puts it down as a patch (spec.md 8.5, M14). With no region, both
+        // belong to the object clipboard and the app's own handler has them.
+        if (key === "c" && region !== null) {
+          event.preventDefault();
+          void api
+            .captureRegion(regionShape(region), stepRef.current)
+            .then((held) => setCaptured(held.has_capture))
+            .catch((err: unknown) => setError(String(err)));
+          return;
+        }
+        if (key === "v" && captured) {
+          event.preventDefault();
+          // Under the pointer when it is over the map, because that is where
+          // the user is pointing; otherwise back where it was taken, nudged.
+          const at = cursorRef.current
+            ? unproject(cameraRef.current, viewRef.current, cursorRef.current)
+            : null;
+          void api
+            .pasteCapture(at?.lon ?? null, at?.lat ?? null, stepRef.current)
+            .then(onProjectChanged)
+            .catch((err: unknown) => setError(String(err)));
+          return;
+        }
         return;
       }
       if (event.altKey) return;
@@ -1091,7 +1128,7 @@ export default function MapView({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [palette, requestOverlay]);
+  }, [captured, onProjectChanged, palette, region, requestOverlay]);
 
   // The selection's handles, so the map shows what the panels are pointing at
   // and where a drag would act.

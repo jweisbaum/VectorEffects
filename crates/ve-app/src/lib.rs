@@ -4,6 +4,7 @@
 //! frontend can reach goes through [`commands`].
 
 pub mod animation;
+pub mod capture;
 pub mod commands;
 pub mod create;
 pub mod document;
@@ -115,6 +116,9 @@ pub fn run() -> anyhow::Result<()> {
             document::cut_objects,
             document::paste_objects,
             document::clipboard_state,
+            capture::capture_region,
+            capture::paste_capture,
+            capture::capture_state,
             frames::copy_grib_frames,
             frames::paste_grib_frames,
             frames::delete_grib_frames,

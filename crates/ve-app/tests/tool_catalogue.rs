@@ -234,16 +234,27 @@ fn needs_a_field_beneath(tool: Tool) -> bool {
 /// Every shared-rule test below walks it, so a tool missing from it is a tool
 /// that none of them cover — which is exactly the kind of gap that looks like
 /// passing tests.
+///
+/// Scoped to the tools the **palette** offers, because every rule below is
+/// about drawing one: each entry names a gesture, and a tool with no gesture
+/// has no entry to make. The one such tool is the patch, which is pasted
+/// rather than drawn (spec.md 8.5) — `ve-app/tests/capture.rs` is where its
+/// save, paste, keyframe and undo coverage lives, and this assertion is what
+/// stops a *drawable* tool being added without any.
 #[test]
 fn the_catalogue_covers_every_tool_the_palette_offers() {
     let covered: Vec<ToolKind> = catalogue()
         .into_iter()
         .map(|(tool, ..)| tool.kind())
         .collect();
-    for tool in ToolKind::ALL {
+    let drawable: Vec<ToolKind> = ToolKind::ALL
+        .into_iter()
+        .filter(|tool| tool.in_palette())
+        .collect();
+    for &tool in &drawable {
         assert!(covered.contains(&tool), "{tool:?} is not in the catalogue");
     }
-    assert_eq!(covered.len(), ToolKind::ALL.len(), "a tool is in it twice");
+    assert_eq!(covered.len(), drawable.len(), "a tool is in it twice");
 }
 
 // --- Each tool draws something ----------------------------------------------

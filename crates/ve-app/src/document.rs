@@ -240,6 +240,7 @@ fn tool_name(tool: ToolKind) -> &'static str {
         ToolKind::Divergence => "divergence",
         ToolKind::Turn => "turn",
         ToolKind::Warp => "warp",
+        ToolKind::Patch => "patch",
     }
 }
 

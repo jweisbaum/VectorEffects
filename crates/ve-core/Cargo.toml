@@ -15,6 +15,11 @@ zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 blake3 = { version = "1.8.7", default-features = false, features = ["std"] }
 # Resampling an unstructured grid is a few million independent searches.
 rayon = { workspace = true }
+# Captured fields inside a project archive (spec.md 8.5). Pure Rust, no C
+# library behind it (invariant 5), and chosen for decode speed rather than
+# ratio: a capture is read every time the project opens and written once.
+# `safe-decode`/`safe-encode` are the default; no `unsafe` reaches the archive.
+lz4_flex = { version = "0.14.0", default-features = false, features = ["std", "safe-encode", "safe-decode"] }
 
 [lints]
 workspace = true

@@ -43,6 +43,12 @@ pub enum ToolKind {
     Turn,
     /// Reads the field beneath it from a displaced position.
     Warp,
+    /// Replays a field captured from a region of the map (spec.md 8.5, M14).
+    ///
+    /// Not in the palette: a patch is not *drawn*, it is pasted. It is a tool
+    /// kind all the same, because it is an object in the document with a
+    /// lifetime, a frame, keyframes and an inspector row like any other.
+    Patch,
 }
 
 impl ToolKind {
@@ -52,7 +58,7 @@ impl ToolKind {
     /// a fill and a path suggest; then the mask, which takes one away; then
     /// the modifiers, which change one — because there has to be a field
     /// before either of those does anything.
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 11] = [
         Self::Brush,
         Self::Circle,
         Self::ShapeFill,
@@ -63,7 +69,17 @@ impl ToolKind {
         Self::Divergence,
         Self::Turn,
         Self::Warp,
+        Self::Patch,
     ];
+
+    /// Whether the palette offers this tool.
+    ///
+    /// Every kind but the patch, which is pasted rather than drawn: there is
+    /// no gesture that makes one, so a palette entry would be a button that
+    /// does nothing (spec.md 8.5).
+    pub fn in_palette(self) -> bool {
+        self != Self::Patch
+    }
 
     /// Whether the tool modifies the field beneath it rather than adding one
     /// (spec.md 6.3).
@@ -94,6 +110,7 @@ impl ToolKind {
             Self::Divergence => "Diverge / converge",
             Self::Turn => "Rotate flow",
             Self::Warp => "Warp / liquify",
+            Self::Patch => "Patch",
         }
     }
 }
@@ -707,6 +724,21 @@ const SHAPE_FILL: &[PropSpec] = &[
 // sweeps the same stamp along the same kind of polyline, so it carries the same
 // stamp properties. Anything else and a px-sized mask would cover an ellipse
 // over a stroke that is a circle on the map.
+/// The patch (spec.md 8.5, M14).
+///
+/// It paints a *captured* field, so it has no speed and no direction of its
+/// own — the samples are the field, and there is nothing for a bar to set.
+/// What is left is the edge: how the patch meets what is beneath it, which is
+/// exactly the question every other tool answers with these two properties.
+///
+/// Its shape came from the region it was captured over, so the stamp space is
+/// frozen at `projected` (D28, D55) and its size is the geometry rather than a
+/// number anyone typed.
+const PATCH: &[PropSpec] = &[
+    frozen(choice(PropId::StampSpace, "Stamp space", 1, STAMP_SPACES)),
+    num(PropId::Feather, "Feather", 0.0, 0.0, 1.0, Unit::None),
+];
+
 const MASK: &[PropSpec] = &[
     frozen(choice(PropId::BrushShape, "Brush shape", 0, BRUSH_SHAPES)),
     frozen(choice(PropId::StampSpace, "Stamp space", 0, STAMP_SPACES)),
@@ -859,7 +891,8 @@ pub fn dependencies(tool: ToolKind) -> &'static [Dependency] {
         | ToolKind::Curve
         | ToolKind::Intensity
         | ToolKind::Divergence
-        | ToolKind::Turn => &[],
+        | ToolKind::Turn
+        | ToolKind::Patch => &[],
     }
 }
 
@@ -938,6 +971,7 @@ pub fn tool_specs(tool: ToolKind) -> &'static [PropSpec] {
         ToolKind::Divergence => DIVERGENCE,
         ToolKind::Turn => TURN,
         ToolKind::Warp => WARP,
+        ToolKind::Patch => PATCH,
     }
 }
 
@@ -1285,6 +1319,10 @@ mod tests {
                 (ToolKind::Divergence, PropId::StampSpace),
                 (ToolKind::Turn, PropId::StampSpace),
                 (ToolKind::Warp, PropId::StampSpace),
+                // A patch's space came from the region it was captured over,
+                // which is map space and cannot be reconsidered afterwards
+                // (spec.md 8.5, D55).
+                (ToolKind::Patch, PropId::StampSpace),
             ]
         );
     }

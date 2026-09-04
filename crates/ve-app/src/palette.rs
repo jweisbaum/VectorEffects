@@ -218,7 +218,10 @@ fn gesture_for(tool: ToolKind) -> GestureSelector {
         | ToolKind::Warp => GestureSelector::Always {
             gesture: "stroke".to_owned(),
         },
-        ToolKind::Circle => GestureSelector::Always {
+        // A patch is pasted rather than drawn, so it has no gesture at all.
+        // Named here rather than left to a wildcard: the compiler is what
+        // makes a new tool declare how it is drawn.
+        ToolKind::Circle | ToolKind::Patch => GestureSelector::Always {
             gesture: "point".to_owned(),
         },
         ToolKind::Curve => GestureSelector::Always {
@@ -248,10 +251,14 @@ fn preview_for(tool: ToolKind) -> PreviewKind {
             PreviewKind::Outline
         }
         // Everything else paints a field of its own, which is what its gesture
-        // shows.
-        ToolKind::Brush | ToolKind::Circle | ToolKind::ShapeFill | ToolKind::Curve => {
-            PreviewKind::Field
-        }
+        // shows. The patch's is a captured one and it has no gesture at all,
+        // but it is a field, and `operator_outlines` keys off this: anything
+        // that is not `Field` is expected to be in that list (spec.md 6.3).
+        ToolKind::Brush
+        | ToolKind::Circle
+        | ToolKind::ShapeFill
+        | ToolKind::Curve
+        | ToolKind::Patch => PreviewKind::Field,
     }
 }
 
@@ -269,8 +276,9 @@ fn has_hover(tool: ToolKind) -> bool {
         | ToolKind::Turn
         | ToolKind::Warp => true,
         // Stated, not omitted: a polygon is built vertex by vertex and a curve
-        // node by node, so a single click produces no footprint to show.
-        ToolKind::ShapeFill | ToolKind::Curve => false,
+        // node by node, so a single click produces no footprint to show, and
+        // a patch is never under the cursor before it exists.
+        ToolKind::ShapeFill | ToolKind::Curve | ToolKind::Patch => false,
     }
 }
 
@@ -294,6 +302,10 @@ fn shortcut_for(tool: ToolKind) -> &'static str {
         ToolKind::Divergence => "d",
         ToolKind::Turn => "r",
         ToolKind::Warp => "w",
+        // Not in the palette, so it has no key. Named rather than left to a
+        // wildcard, so a tool that *is* added to the palette cannot ship
+        // without one.
+        ToolKind::Patch => "",
     }
 }
 
@@ -393,7 +405,12 @@ pub fn tool_palette() -> Result<Vec<ToolSchema>> {
 
 /// Implementation of [`tool_palette`], callable without a Tauri handle.
 pub fn palette() -> Vec<ToolSchema> {
-    ToolKind::ALL.iter().copied().map(describe).collect()
+    ToolKind::ALL
+        .iter()
+        .copied()
+        .filter(|tool| tool.in_palette())
+        .map(describe)
+        .collect()
 }
 
 #[cfg(test)]

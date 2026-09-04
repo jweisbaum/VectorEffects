@@ -64,7 +64,16 @@ fn raster_bytes(scene: &Scene) -> usize {
 /// other unsupported one.
 pub fn supports(scene: &Scene) -> bool {
     scene.objects.iter().all(|object| {
-        object.clone_source.is_none() && !matches!(object.modifier, Some(Modifier::Warp(_)))
+        object.clone_source.is_none()
+            && !matches!(object.modifier, Some(Modifier::Warp(_)))
+            // A patch replays a captured lattice in the object's *own* frame,
+            // which is a second sampler and a second storage buffer beyond the
+            // one the imported rasters use (spec.md 8.5, M14). Declined for
+            // now rather than approximated: the CPU is the authority, and a
+            // scene the GPU never sees cannot disagree with it. The fallback
+            // is the clone stamp's, for the same reason and through the same
+            // path.
+            && object.capture.is_none()
     }) && raster_bytes(scene) <= MAX_RASTER_BYTES
 }
 

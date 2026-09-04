@@ -291,6 +291,8 @@ mod tests {
                 clone_offset: OffsetMode::Aligned,
                 modifier: None,
                 invert: false,
+                capture: None,
+                erases: false,
                 motion: Motion::default(),
             }],
         }
@@ -384,6 +386,8 @@ mod tests {
                 clone_offset: OffsetMode::Aligned,
                 modifier: None,
                 invert: false,
+                capture: None,
+                erases: false,
                 motion: Motion::default(),
             }],
         };

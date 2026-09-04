@@ -133,7 +133,10 @@ impl Geometry {
             | ToolKind::Turn
             | ToolKind::Warp => Self::Stroke { chains: Vec::new() },
             ToolKind::Circle => Self::Disc { radius_m: None },
-            ToolKind::ShapeFill => Self::Polygon { points: Vec::new() },
+            // A patch is pasted with the shape it was captured over, which is
+            // one of the region's three; an empty polygon is what it has
+            // before that shape arrives (spec.md 8.5).
+            ToolKind::ShapeFill | ToolKind::Patch => Self::Polygon { points: Vec::new() },
             ToolKind::Curve => Self::Path { nodes: Vec::new() },
         }
     }
@@ -272,6 +275,17 @@ pub struct Object {
     pub active_range: StepRange,
     /// Every property, animatable.
     pub props: PropertyMap,
+    /// The captured field this object replays, by content hash
+    /// (spec.md 8.5, M14).
+    ///
+    /// `Some` only for a patch. The samples themselves are **not** here and
+    /// never in the JSON: they live in the project's own `captures/` archive
+    /// entry, keyed by this hash, and are loaded into
+    /// [`Project::captures`](crate::project::Project::captures) on open. A
+    /// patch whose entry is missing draws nothing and is marked, exactly as a
+    /// GRIB layer whose file has gone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capture: Option<String>,
     /// Which of the object's own movements reach the field it paints
     /// (spec.md 9.3, M13).
     ///
@@ -297,6 +311,7 @@ impl Object {
             geometry: Geometry::default_for(tool),
             active_range: StepRange::full(step_count),
             props: PropertyMap::for_tool(tool),
+            capture: None,
             motion: MotionFlags::default(),
         }
     }

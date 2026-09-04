@@ -73,6 +73,10 @@ pub enum CoreError {
         len: usize,
     },
 
+    /// A captured field, or its container, was not readable (spec.md 8.5).
+    #[error("captured field is malformed: {0}")]
+    Capture(String),
+
     /// A property held a value that cannot be written to JSON.
     #[error("object '{object}' property {property} holds a non-finite value")]
     NonFiniteProperty {

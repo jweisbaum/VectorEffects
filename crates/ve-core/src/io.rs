@@ -442,6 +442,9 @@ fn temp_path_for(path: &Path) -> PathBuf {
 /// Directory of neighbour-set entries inside the archive.
 const REGRID_PREFIX: &str = "regrid/";
 
+/// Directory of captured-field entries inside the archive (spec.md 8.5).
+const CAPTURE_PREFIX: &str = "captures/";
+
 fn write_archive(path: &Path, json: &str, project: &Project) -> Result<()> {
     use zip::CompressionMethod;
     use zip::write::SimpleFileOptions;
@@ -463,6 +466,7 @@ fn write_archive(path: &Path, json: &str, project: &Project) -> Result<()> {
     zip.write_all(json.as_bytes())?;
 
     write_regrid(&mut zip, project)?;
+    write_captures(&mut zip, project)?;
 
     zip.finish().map_err(zip_err)?;
     Ok(())
@@ -485,6 +489,83 @@ fn write_regrid(zip: &mut zip::ZipWriter<std::fs::File>, project: &Project) -> R
             .map_err(zip_err)?;
         zip.write_all(&(set.cells() as u32).to_le_bytes())?;
         zip.write_all(&set.encode())?;
+    }
+    Ok(())
+}
+
+/// Writes the captured fields the document still refers to.
+///
+/// **Only the ones still referenced.** A capture is user content, but a
+/// capture nothing points at is a patch that was deleted, and carrying it
+/// would make a project grow forever with fields nobody can see. Undo holds
+/// the object, not the file, so an undone delete finds its samples again from
+/// the map in memory — and a project saved between the two is the one case
+/// where the entry is gone, which is the same bargain a GRIB layer's path
+/// already makes.
+///
+/// Already compressed, so the entry is **stored** rather than deflated: lz4
+/// over deflate is two passes for a percent (spec.md 8.5).
+fn write_captures(zip: &mut zip::ZipWriter<std::fs::File>, project: &Project) -> Result<()> {
+    use zip::CompressionMethod;
+    use zip::write::SimpleFileOptions;
+
+    let options = SimpleFileOptions::default()
+        .compression_method(CompressionMethod::Stored)
+        .last_modified_time(zip::DateTime::default());
+    for hash in referenced_captures(project) {
+        let Some(capture) = project.captures.get(&hash) else {
+            continue;
+        };
+        zip.start_file(format!("{CAPTURE_PREFIX}{hash}.vecap"), options)
+            .map_err(zip_err)?;
+        capture.write(&mut *zip)?;
+    }
+    Ok(())
+}
+
+/// Every capture hash some object still refers to, sorted and unique.
+///
+/// Sorted so the archive's entry order is the document's and not a hash map's:
+/// two saves of one project must produce the same bytes (invariant 4).
+fn referenced_captures(project: &Project) -> Vec<String> {
+    let mut hashes: Vec<String> = project
+        .layers
+        .iter()
+        .flat_map(|layer| layer.objects.iter())
+        .filter_map(|object| object.capture.clone())
+        .collect();
+    hashes.sort();
+    hashes.dedup();
+    hashes
+}
+
+/// Reads the captured fields back.
+///
+/// A capture that will not decode is **skipped**, not fatal: the patch that
+/// referred to it draws nothing and is marked, and everything else the user
+/// authored still opens. Refusing the project over one bad entry would lose
+/// the work around it to save the work in it.
+fn read_captures(
+    archive: &mut zip::ZipArchive<std::fs::File>,
+    project: &mut Project,
+) -> Result<()> {
+    let names: Vec<String> = archive
+        .file_names()
+        .filter(|n| n.starts_with(CAPTURE_PREFIX) && n.ends_with(".vecap"))
+        .map(str::to_owned)
+        .collect();
+    for name in names {
+        let Ok(entry) = archive.by_name(&name) else {
+            continue;
+        };
+        let Ok(capture) = crate::capture::Capture::read(entry) else {
+            continue;
+        };
+        // Keyed by the capture's *own* hash rather than by the file name, so a
+        // renamed entry cannot make a patch draw somebody else's field.
+        project
+            .captures
+            .insert(capture.hash.clone(), std::sync::Arc::new(capture));
     }
     Ok(())
 }
@@ -539,6 +620,7 @@ pub fn load(path: &Path) -> Result<Project> {
 
     let mut project = from_json(&json)?;
     read_regrid(&mut archive, &mut project)?;
+    read_captures(&mut archive, &mut project)?;
     Ok(project)
 }
 

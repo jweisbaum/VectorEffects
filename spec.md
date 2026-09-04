@@ -55,12 +55,25 @@ steps, and exports GRIB2.
 These are the load-bearing rules of the architecture. Violating any one of them
 is a design regression, not a trade-off.
 
-1. **No raster is ever persisted as project data.** Rasters exist only as (a) a
-   transient in-memory buffer, (b) an evictable on-disk render cache keyed by
-   content hash, or (c) the bytes inside an exported GRIB2 file. Deleting the
-   entire render cache must be lossless.
-2. **The project file stores geometry and parameters, never pixels.** A brush
-   stroke is a polyline plus a radius, not a bitmap.
+1. **No *rendered* raster is ever persisted as project data.** A render is a
+   cache product: reproducible from the objects, and therefore something a
+   project must never be able to disagree with. Rendered rasters exist only as
+   (a) a transient in-memory buffer, (b) an evictable on-disk render cache
+   keyed by content hash, or (c) the bytes inside an exported GRIB2 file.
+   Deleting the entire render cache must be lossless.
+
+   A **captured** raster is the other thing entirely, and is allowed
+   (§8.5, D52). It is user content — what the field looked like at the moment
+   they took it — and it stops being reproducible the instant its sources
+   change; keeping it by reference, as a GRIB layer keeps a path, would make
+   every pasted patch go blank the day the stroke it came from was edited. It
+   travels **with** the project, as its own compressed archive entry keyed by
+   content hash, and is written by exactly one gesture the user performs
+   deliberately.
+2. **The project file's JSON stores geometry and parameters, never pixels.** A
+   brush stroke is a polyline plus a radius, not a bitmap. A captured field is
+   a hash in the JSON and an archive entry beside it — never samples in the
+   document.
 3. **The view is a proxy, never a source.** The preview renders from the
    objects at whatever resolution is fast; the GRIB is baked from the same
    objects at the project's full grid resolution. **No pixel from the preview
@@ -1870,6 +1883,57 @@ The clipboard holds fully serialised objects, including all keyframes.
 - Pasting into the same location offsets by a small delta so the copy is
   visible.
 - Object `Id`s are always regenerated on paste; names get a `copy` suffix.
+
+**Copying a region copies the field, not the objects.** With a region selected
+(§8.2), `Cmd`-`C` captures the **visible composite** inside it — what the map
+is showing — onto the project's own lattice, and `Cmd`-`V` puts it down as a
+**patch**: an object whose field is those samples instead of a formula. It
+lands under the pointer when the pointer is over the map, and otherwise back
+where it was taken with the small offset every pasted object gets. With no
+region, both keys mean the objects, exactly as above.
+
+A patch is an object like any other. It moves, rotates, scales, keys, feathers,
+edge-modes, takes §9.3's motion, and shows in the panels — it is simply not in
+the palette, because there is no gesture that draws one.
+
+**Zero and undefined are different things.** A cell no object and no raster
+wrote is undefined, and so is one a mask removed: the mask exists to let what
+is beneath show through, and a capture that turned that into a real zero would
+overwrite whatever the patch is later pasted over. An undefined cell writes
+nothing when the patch is composited, so the paste is transparent exactly where
+its source was. A real zero is calm and overwrites. Coverage accumulates the
+way the field does, so the two agree at a feathered edge; the faded outer edge
+of a stroke is captured faded but *present*, and the patch's own feather is how
+it is softened again.
+
+The capture is evaluated with `CpuEvaluator`, the way an export is: a capture
+is a value the user keeps rather than a frame they are looking at, and
+invariant 3 makes the CPU the authority for what a field is.
+
+**Where the samples live.** The `.veproj` archive gains a
+`captures/<hash>.vecap` entry and the JSON keeps the hash and nothing else
+(D52, and the rewording of invariants 1 and 2 in §1.5). The container is a
+plain header — magic, version, field kind, lattice, frame count, the region's
+own shape — followed by the `u`/`v` pairs as `f32` with `NaN` for undefined,
+compressed with `lz4_flex`: pure Rust, and chosen for decode speed, since a
+capture is read every time the project opens and written once. The header is
+uncompressed so a reader can reject a version, or read a shape, without
+inflating megabytes first. An entry that will not decode is skipped rather than
+refusing the project: the patch draws nothing and is marked, and everything
+around it still opens.
+
+Only the captures the document still refers to are written, so a project does
+not grow forever with fields nobody can see, and the entry order is the
+document's rather than a hash map's — two saves of one project produce the same
+bytes (invariant 4).
+
+**The CPU samples a patch; the GPU declines the scene.** The samples are a
+lattice in the object's *own frame*, which is a second sampler and a second
+storage buffer beyond the one the imported rasters use. Rather than approximate
+it, `gpu::supports` sends a scene containing a patch to the CPU — the same
+fallback, through the same path, that a clone stamp and a warp already take
+(§7.8). The preview is slower on such a scene and correct; nothing can diverge,
+because the GPU never evaluates one.
 
 ---
 

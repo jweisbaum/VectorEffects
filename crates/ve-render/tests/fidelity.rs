@@ -268,6 +268,11 @@ fn object(rng: &mut Rng) -> FlatObject {
     FlatObject {
         modifier,
         invert,
+        // The mask is the one tool that erases, and `invert` is the one flag
+        // the generator gives only to it (spec.md 6.2) — so a scene's erasing
+        // objects are exactly its calm inverted ones.
+        capture: None,
+        erases: invert,
         motion,
         frame: Frame::in_space(anchor, rng.range(0.0, 360.0), rng.range(50.0, 250.0), space),
         cap_radius_m: shape.bounding_radius_m() * 3.0,
