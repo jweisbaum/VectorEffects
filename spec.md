@@ -549,16 +549,23 @@ binding, so a scene with more than 128 MB of lattice (two global 0.1° grids)
 falls back to the CPU like a clone-stamp scene does. The render cache keys on
 the lattice's content hash and its place in the stack (§7.10).
 
-**Decoder.** Hand-written, pure Rust, in `ve-grib`: regular lat/lon grids
-(template 3.0) in any scanning mode, the common product templates, simple
-packing (5.0), complex packing with and without spatial differencing (5.2,
-5.3), and bitmaps. JPEG 2000 and PNG packing (5.40, 5.41), Gaussian, thinned
-and rotated grids, and GRIB edition 1 are refused by name. NOAA's GFS as
-distributed is JPEG 2000 and has to be repacked first (`wgrib2 in.grib2
--set_grib_type simple -grib_out out.grib2`). A message that cannot be read
-is skipped and logged rather than failing the file; a file with no usable
-`u`/`v` pair is refused with the reasons. Invariant 5 holds: no external
-decoder, no network.
+**Decoder.** Pure Rust, in `ve-grib`: regular lat/lon grids (template 3.0) in
+any scanning mode, the common product templates, and **every packing the
+forecast centres ship** — simple (5.0), complex with and without spatial
+differencing (5.2, 5.3), JPEG 2000 (5.40) and CCSDS adaptive entropy coding
+(5.42) — with bitmaps throughout. PNG packing (5.41), Gaussian, thinned and
+rotated grids, and GRIB edition 1 are refused by name, as is a CCSDS stream
+of signed samples, which the shared 5.0 scaling has no meaning for.
+
+The section walking and the three integer packings are hand-written; the two
+compressed ones are `hayro-jpeg2000` and `rust-aec`. Both are pure Rust with
+no C library behind them, so invariant 5 holds — no external decoder, no
+network — and the three-platform build needs nothing installed. Every one of
+them yields the same packed integers 5.0 stores in the clear, so one scaling
+formula serves all five.
+
+A message that cannot be read is skipped and logged rather than failing the
+file; a file with no usable `u`/`v` pair is refused with the reasons.
 
 ---
 
@@ -2117,8 +2124,6 @@ Recorded so they are not accidentally designed out:
 - Region-limited grids.
 - Tracing an imported forecast into objects, and interpolating between an
   imported file's time steps rather than holding (§4.8).
-- JPEG 2000 packing on import, which needs a decoder the project does not
-  carry (§4.8).
 - Scriptable/batch export.
 - Additional interpolation curve editing (full graph editor).
 - Presets and object libraries shareable between projects.

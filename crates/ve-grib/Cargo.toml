@@ -9,6 +9,11 @@ description = "GRIB2 encoder, and a decoder for importing forecast files as laye
 [dependencies]
 ve-core = { workspace = true }
 thiserror = { workspace = true }
+# CCSDS (template 5.42) and JPEG 2000 (5.40) packing, both pure Rust.
+# `hayro-jpeg2000` carries `image` and SIMD support in its default features,
+# neither of which a single-component 16-bit codestream needs.
+hayro-jpeg2000 = { workspace = true }
+rust-aec = { workspace = true }
 
 [features]
 # A minimal reader for verifying what the writer produces. Never enabled for

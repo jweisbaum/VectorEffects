@@ -23,7 +23,46 @@ projections (M11) are pulled forward into the same run. The seven questions
 the re-plan raised — one of them touching invariants 1 and 2 — were put to the
 user the same day and are settled: D52–D58 in §5, and §6 records them.
 
-**M12 is next.**
+**M12 complete (2026-09-04): every packing the forecast centres ship.** All ten
+files in the reference set now import, and every value matches ecCodes. CCSDS
+(5.42) and JPEG 2000 (5.40) are decoded by `rust-aec` and `hayro-jpeg2000`,
+both pure Rust: no `-sys` crate, no C library, nothing to install on any of the
+three platforms. Both were verified bit-exact on the real files before being
+chosen, which is what the spike was for — 100% of 1,038,240 values on each
+ECMWF-family file and of 2,882,400 on GEM's 0.15° grid.
+
+**What the reference set actually found was a bug in the packing that already
+"worked".** Complex packing with spatial differencing (5.3) read the group
+lengths for every group *but the last*, whose length section 5 gives
+separately. The skipped read left the bit reader seven bits short, and the
+octet alignment that follows then started the data one octet early — but only
+when those bits crossed a boundary, which is a property of the group count. So
+half the messages in the set decoded perfectly and the other half came out as
+smooth garbage drifting to ±10⁹, with nothing complaining, because the group
+lengths still summed to the value count. Five of the eight messages in the four
+GFS-family files were wrong. It had been in the shipped decoder since import
+landed and no test could see it: the import suite checks the decoder against
+the *writer's* output, and the writer only ever emits simple packing.
+
+That is the whole argument for the fixture set. There are seven packings of one
+analytic field in `crates/ve-grib/tests/fixtures` now, six of them the writer's
+own output repacked by ecCodes, and the complex one fails against the old code.
+The ten real files stay out of the repository and run as an `#[ignore]`d test
+keyed on `$VE_TEST_GRIBS`, against 200 spot values ecCodes decoded.
+
+**Measured.** GEM's 0.15° message, the densest in the set at 2,882,400 values,
+decodes in 283 ms — inside the one-second budget the milestone set, and the
+number that had to be checked before a pure-Rust JPEG 2000 decoder could be
+trusted on a file with one message per component per step. The CCSDS files take
+about 60 ms per file and the complex-packed ones about 30. 694 Rust tests and
+312 frontend tests pass.
+
+**One acceptance criterion was written wrong and is corrected rather than
+quietly met**: "no `cc` in `cargo tree`". `blake3` has carried a `cc` build
+dependency for its SIMD assembly since M3, by way of `ve-core`. Neither new
+codec adds one, which is what the criterion was for.
+
+**M20 is next.**
 
 **Unplanned, after M7: GRIB import** (spec §4.8, D44). A GRIB2 file becomes a
 layer — two, when it holds both wind and currents — whose lattice is sampled
@@ -1031,9 +1070,18 @@ this rule, or its replacement, before the first curved projection ships.
 
 ---
 
-### M12 — Every packing the forecast centres ship
+### M12 — Every packing the forecast centres ship · **complete**
 
 **Goal:** every file in the reference set imports, with no C library.
+
+**Delivered as planned, plus one thing nobody was looking for.** The spike
+came first and both candidate crates were bit-exact on the real files, so the
+codec choice took an afternoon rather than a milestone: `rust-aec` for 5.42,
+`hayro-jpeg2000` for 5.40 with its default features off, which leaves it with
+no dependencies at all. `pure_jpeg2k` was the named fallback and was not
+needed. What the reference set found instead was a live bug in template 5.3 —
+see the status notes above — which is the reason this milestone was worth
+running before any of the feature work.
 
 **What the reference set needs.** The ten sample files in
 `/Users/jon/temp_test_gribs` — GFS, GEFS, NCEP's two AI models, ECMWF
@@ -1086,12 +1134,17 @@ app builds for gets the decoder with nothing installed.
 
 - All ten sample files import, and every decoded value matches ecCodes to
   within the packing's own step (`2^E · 10^−D`); `u` and `v` at ten spot
-  cells — both poles and the seam among them — match `grib_get -l`.
+  cells — both poles and the seam among them — match `grib_get -l`. **Met**:
+  200 spot values across ten files, and every message decoded bit-exactly
+  against a full ecCodes dump during development.
 - A 0.15° GEM message (2,882,400 values) decodes in under a second in
   release, measured: a pure-Rust JPEG 2000 decoder may be an order slower than
-  OpenJPEG, and a file has one message per component per step.
-- `cargo tree` shows no `-sys` crate and no `cc`.
+  OpenJPEG, and a file has one message per component per step. **Met**: 283 ms.
+- ~~`cargo tree` shows no `-sys` crate and no `cc`.~~ **Corrected**: no `-sys`
+  crate, and neither codec adds a `cc`. `blake3` has had one since M3 for its
+  SIMD assembly, which the criterion overlooked.
 - A bitmapped 5.42 and 5.40 message each decode with the bitmap honoured.
+  **Met**, as fixtures.
 
 **Risks:** decoder maturity. A 16-bit single-component reversible codestream
 is a corner the PDF-oriented crates may never have been run on; the spike
@@ -1640,6 +1693,7 @@ relitigated by accident.
 | D57 | The motion checkbox is per track row — position, rotation, scale — not per object | A rotating system that also travels may want its spin in the field and not its translation, or the reverse; one switch per object cannot say which. Three booleans, each beside the track it reads (M13). Settled with the user 2026-09-04 |
 | D58 | A cell a mask removed is *undefined* in a capture, not calm | The mask exists to let what is beneath show through; a capture that turned that into a real zero would overwrite whatever lies beneath the paste. Undefined writes nothing when composited, so the paste is transparent exactly where the source was (M14, M16). Settled with the user 2026-09-04 |
 | D59 | A GRIB frame copied to another step is a step number in the layer, never a copy of the lattice | The project keeps a file's path and nothing of its samples (D44); a pasted frame that copied the grid would be a raster in the document by another route. Mapping the step to the source step gives the same picture from the same file, and because the flat scene already carries the served frame's hash, the render cache, readiness and both kernels are right by construction. It is an instruction, so unlike a message it stays where it was put, one step at a time, and D48's rule against holding a measurement forward is not touched (M20) |
+| D60 | The two compressed GRIB2 packings are decoded by crates, not by us | 5.40 is a JPEG 2000 codestream and 5.42 a CCSDS entropy coder; hand-writing either would be thousands of lines of wavelet and adaptive-coding work to no product end, and the risk is not that they are hard but that they are subtly wrong on files nobody has. `hayro-jpeg2000` (default features off, which leaves it with *no* dependencies) and `rust-aec` were both shown bit-exact against ecCodes on every real file in the reference set before being chosen, and neither pulls a `-sys` crate: invariant 5 and the three-platform build both forbid a C library, which is what ruled out OpenJPEG and libaec (M12). The three integer packings stay hand-written, since they are a bit reader and a formula |
 | D49 | The modifiers are painted, and merge — except the two measured from their own anchor | They were click-placed discs, which made a swathe of intensification a row of stamps and gave them none of the merging the brush and the mask have. Painting them is the same gesture, geometry and merge rule the other swept tools already use, so it is subtraction rather than addition. The exception is the rule §6.1 already states: a merge re-expresses the new chain under the *target's* anchor, and a divergence radiates from its anchor while a twisting warp turns about it, so absorbing one would change what it paints. Intensify, rotate and a pushing warp refer to no anchor and merge freely. The edge highlight and the selection outline are the mask's, generalised: one `operator_outlines` command for every object that has no field of its own (spec §6.3, schema version 9) |
 | D48 | A step the file has no message for shows no imported field — reverses the hold half of D44 | Holding the last message forward draws a forecast for a time it was never made for, and does it most misleadingly past the end of a short file, where a six-hour file stood in for a ten-day timeline unchanged and looking like data. Found by hand. A keyframe holds because it is an instruction the user gave, and between two of them the document still means something; a message is a measurement, and between two of them the file means nothing. The consequence is that a step size that does not divide the message times hides most of the file, so "Open from GRIB" now derives the largest offered step that *divides* every message's offset rather than the largest no wider than the gap — a 4-hourly file takes hourly steps and blanks three in four, where before it took 3-hourly steps and showed one message in four (spec §4.8) |
 | D44 | A GRIB2 file imports as a layer that keeps the file's *path*, never its samples; one layer per field kind, the other kind hidden; ~~each step shows the last message at or before its forecast hour~~ — the hold rule is reversed by D48 | Invariants 1 and 2 forbid a raster in the project, and copying forecast data into every project that references it would have been the cost of relaxing them. The lattice lives in memory beside the layer and is read back on open; a missing file leaves an empty, marked layer rather than refusing the project. Hold-previous was chosen because it is the rule keyframes already follow (spec §4.5); D48 reverses it, a message not being a keyframe. Both kernels sample the lattice, so the preview and the export agree on it as they do on everything else (spec §4.8) |

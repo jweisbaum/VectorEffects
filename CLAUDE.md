@@ -54,7 +54,8 @@ crates/
                tile pyramid, content-hashed render cache
   ve-grib/     GRIB2 writer: sections, templates, simple packing. And the
                import decoder (`decode`, `import`): 3.0 grids, 5.0/5.2/5.3
-               packing, bitmaps. `reader` is the writer's test-only verifier.
+               packing hand-written, 5.40 and 5.42 through pure-Rust codec
+               crates, bitmaps. `reader` is the writer's test-only verifier.
   ve-polar/    Boat polars, polar inversion, route tree, route solving
   ve-app/      Tauri app: IPC commands, app state, background workers,
                custom URI scheme, autosave
@@ -292,6 +293,38 @@ hold the way a keyframe does.
    the app displayed them. This is the check that catches a u/v swap or a
    from/toward inversion — the two most likely silent bugs in the codebase.
 4. Confirm byte-identical output across all three CI platforms.
+
+### Changing the GRIB decoder
+
+The decoder's reference is `crates/ve-grib/tests/fixtures`: one analytic field
+in seven packings, six of them made by repacking the **writer's own** output
+with ecCodes, so the values are known without trusting any decoder.
+`fixtures/README.md` has the recipe. Re-record them only when the field itself
+changes — a fixture regenerated from our own output asserts nothing.
+
+`reference_set.rs` is the other half and the one that finds real bugs: ten
+forecast files from nine centres, checked against 200 values ecCodes decoded.
+The files are 17 MB and not committed, so it is `#[ignore]`d and reads
+`$VE_TEST_GRIBS`. **Run it after any decoder change**, in release:
+
+```bash
+VE_TEST_GRIBS=~/temp_test_gribs cargo test -p ve-grib --release \
+    --test reference_set -- --ignored --nocapture
+```
+
+**A group length is read for every group, the last one included** — and only
+then replaced by section 5's true length (template 5.2/5.3). Skipping the read
+leaves the bit reader short, and the octet alignment that follows lands one
+octet early whenever those bits cross a boundary. Nothing downstream notices,
+because the lengths still sum to the value count; the data is simply read from
+the wrong place, and only for the group counts where the two alignments happen
+to differ. That was live in the shipped decoder and made most real GFS and
+GEFS messages decode as garbage while others were perfect.
+
+Both compressed packings are decoded by crates, not by us: `hayro-jpeg2000`
+(5.40) and `rust-aec` (5.42). Neither may gain a `-sys` dependency — invariant
+5 and the three-platform build both forbid a C library — so check `cargo tree`
+after any version bump.
 
 ### Touching the render cache
 

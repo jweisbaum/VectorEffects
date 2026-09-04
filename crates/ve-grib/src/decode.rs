@@ -2,15 +2,20 @@
 //!
 //! Reads what real forecast files carry: any number of concatenated messages,
 //! regular lat/lon grids (template 3.0) in any scanning order, the common
-//! product templates, simple packing (5.0) and complex packing with and
-//! without spatial differencing (5.2, 5.3), and a bitmap. Everything is
-//! hand-written and pure Rust, so the shipped binary still depends on no
-//! external decoder and invariant 5 holds.
+//! product templates, every packing the forecast centres ship — simple (5.0),
+//! complex with and without spatial differencing (5.2, 5.3), JPEG 2000 (5.40)
+//! and CCSDS adaptive entropy coding (5.42) — and a bitmap.
 //!
-//! Not handled, and reported by name rather than misread: JPEG 2000 and PNG
-//! packing (5.40, 5.41), Gaussian, thinned and rotated grids, GRIB edition 1.
-//! A file packed with JPEG 2000 — NOAA's GFS as distributed — has to be
-//! repacked first: `wgrib2 in.grib2 -set_grib_type simple -grib_out out.grib2`.
+//! The section walking and the three integer packings are hand-written. The
+//! two compressed packings are not: `hayro-jpeg2000` and `rust-aec` decode
+//! them. Both are pure Rust with no C library behind them, so the shipped
+//! binary still depends on no external decoder, invariant 5 holds, and the
+//! three-platform build needs nothing installed. Every one of those crates
+//! gives back the same packed integers template 5.0 stores directly, so the
+//! scaling formula below is shared by all five.
+//!
+//! Not handled, and reported by name rather than misread: PNG packing (5.41),
+//! Gaussian, thinned and rotated grids, GRIB edition 1.
 //!
 //! Octet numbers in comments are the 1-based ones the WMO tables use; the code
 //! indexes from 0 within each section, so octet `n` is `section[n - 1]`.
@@ -627,14 +632,21 @@ fn unpack_complex(s5: &[u8], data: &[u8], count: usize, differenced: bool) -> Re
         widths.push(width_reference + reader.read(width_bits)?);
     }
     reader.align();
+    // Every group's length is in the stream, the last one's included — and
+    // then the last one is overridden by the true length from section 5. The
+    // read cannot be skipped for it: doing so leaves the reader `length_bits`
+    // short, and the alignment that follows then lands on the wrong octet
+    // whenever those bits cross a boundary. The group lengths still sum to
+    // the value count, so nothing downstream notices; the data is simply read
+    // from an octet earlier. That was live for every complex-packed file
+    // whose group count did not happen to make the two alignments agree.
     let mut lengths = Vec::with_capacity(group_count);
-    for g in 0..group_count {
-        let length = if g + 1 == group_count {
-            last_length
-        } else {
-            length_reference + reader.read(length_bits)? * length_increment
-        };
+    for _ in 0..group_count {
+        let length = length_reference + reader.read(length_bits)? * length_increment;
         lengths.push(length as usize);
+    }
+    if let Some(last) = lengths.last_mut() {
+        *last = last_length as usize;
     }
     reader.align();
 
@@ -731,6 +743,135 @@ fn undo_spatial_differencing(values: &mut [Option<i64>], order: u32, first: [i64
     }
 }
 
+/// Template 5.42: CCSDS adaptive entropy coding (CCSDS 121.0-B).
+///
+/// The entropy coder gives back exactly the integers template 5.0 stores in
+/// the clear, so all this adds is the decode and the sample width the
+/// decoder chose. That width is derived from the output rather than from the
+/// bit count, because the 3-byte flag is advisory: `libaec` and the crate
+/// that follows it both ignore it below 17 bits, and every ECMWF file in the
+/// reference set sets it while packing 12 bits into two bytes.
+fn unpack_ccsds(s5: &[u8], data: &[u8], count: usize) -> Result<Vec<f32>> {
+    let scaling = Scaling::read(s5)?;
+    if scaling.bits == 0 {
+        return Ok(vec![scaling.value(0); count]);
+    }
+    if scaling.bits > 32 {
+        return Err(malformed(format!("{} bits per CCSDS sample", scaling.bits)));
+    }
+    // Octets 22-25: the compression options mask, the block size, and the
+    // reference sample interval. The coder cannot be run without all three.
+    let flags = byte(s5, 21)?;
+    let block_size = u32::from(byte(s5, 22)?);
+    let reference_interval = u32::from(u16_at(s5, 23)?);
+
+    // Bit 0 of the mask. A signed sample would make `X` negative, which the
+    // 5.0 formula this shares has no meaning for — its reference is the
+    // field's minimum. No centre writes one; if one does, say so rather than
+    // reading the sign bit as magnitude.
+    if flags & 0x01 != 0 {
+        return Err(unsupported(
+            "CCSDS packing with signed samples (template 5.42, options bit 1)",
+        ));
+    }
+    // Bit 2 says the coder wrote each sample big-endian. It is the same bit
+    // the decoder is given below, so the two cannot disagree about the order.
+    let big_endian = flags & 0x04 != 0;
+
+    let params = rust_aec::AecParams::new(
+        // Checked above, so this cannot truncate.
+        scaling.bits as u8,
+        block_size,
+        reference_interval,
+        rust_aec::flags_from_grib2_ccsds_flags(flags),
+    );
+    let bytes = rust_aec::decode(data, params, count)
+        .map_err(|e| malformed(format!("CCSDS packing (template 5.42): {e:?}")))?;
+
+    if count == 0 {
+        return Ok(Vec::new());
+    }
+    if !bytes.len().is_multiple_of(count) {
+        return Err(malformed(format!(
+            "CCSDS decode produced {} bytes for {count} samples",
+            bytes.len()
+        )));
+    }
+    let width = bytes.len() / count;
+    if !(1..=4).contains(&width) {
+        return Err(malformed(format!("{width} bytes per CCSDS sample")));
+    }
+    Ok(bytes
+        .chunks_exact(width)
+        .map(|sample| {
+            let x = if big_endian {
+                sample
+                    .iter()
+                    .fold(0i64, |acc, &b| (acc << 8) | i64::from(b))
+            } else {
+                sample
+                    .iter()
+                    .rev()
+                    .fold(0i64, |acc, &b| (acc << 8) | i64::from(b))
+            };
+            scaling.value(x)
+        })
+        .collect())
+}
+
+/// Template 5.40: JPEG 2000 packing.
+///
+/// Section 7 holds a bare J2K codestream — no JP2 wrapper — of one component
+/// whose precision is the bit count. The samples come back as `f32` because
+/// the decoder is written for images; every value a GRIB message carries is a
+/// non-negative integer below `2^bits`, and `f32` represents those exactly up
+/// to 24 bits, which is past anything a centre packs.
+///
+/// Lossy codestreams (octet 22 = 1) are decoded too. A lossy file's values
+/// are approximate, but that is the file's own bargain and not the decoder's
+/// to refuse.
+fn unpack_jpeg2000(s5: &[u8], data: &[u8], count: usize) -> Result<Vec<f32>> {
+    let scaling = Scaling::read(s5)?;
+    if scaling.bits == 0 {
+        return Ok(vec![scaling.value(0); count]);
+    }
+    let settings = hayro_jpeg2000::DecodeSettings {
+        // A GRIB codestream carries no palette; resolving one would be a
+        // lookup into a table that is not there.
+        resolve_palette_indices: false,
+        strict: false,
+        target_resolution: None,
+    };
+    let image = hayro_jpeg2000::Image::new(data, &settings)
+        .map_err(|e| malformed(format!("JPEG 2000 packing (template 5.40): {e:?}")))?;
+    let mut context = hayro_jpeg2000::DecoderContext::default();
+    let decoded = image
+        .decode(&mut context)
+        .map_err(|e| malformed(format!("JPEG 2000 packing (template 5.40): {e:?}")))?;
+
+    let components = decoded.components();
+    let [component] = components else {
+        return Err(unsupported(format!(
+            "a JPEG 2000 codestream of {} components",
+            components.len()
+        )));
+    };
+    let samples = component.samples();
+    if samples.len() < count {
+        return Err(malformed(format!(
+            "JPEG 2000 codestream holds {} samples for {count} values",
+            samples.len()
+        )));
+    }
+    // The codestream is a rectangle and the message a run of values; when a
+    // bitmap leaves nodes out the encoder pads the last row, so take the run.
+    Ok(samples
+        .iter()
+        .take(count)
+        .map(|&x| scaling.value(x.round() as i64))
+        .collect())
+}
+
 /// Decodes the data of a message whose header has been read.
 fn values_of(header: &Header, s: &Sections<'_>) -> Result<Vec<f32>> {
     let point_count = header.grid.point_count();
@@ -743,13 +884,9 @@ fn values_of(header: &Header, s: &Sections<'_>) -> Result<Vec<f32>> {
         0 => unpack_simple(s.s5, data, packed_count)?,
         2 => unpack_complex(s.s5, data, packed_count, false)?,
         3 => unpack_complex(s.s5, data, packed_count, true)?,
-        40 => {
-            return Err(unsupported(
-                "JPEG 2000 packing (template 5.40); repack the file with \
-                 `wgrib2 in.grib2 -set_grib_type simple -grib_out out.grib2`",
-            ));
-        }
+        40 => unpack_jpeg2000(s.s5, data, packed_count)?,
         41 => return Err(unsupported("PNG packing (template 5.41)")),
+        42 => unpack_ccsds(s.s5, data, packed_count)?,
         other => {
             return Err(unsupported(format!(
                 "data representation template 5.{other}"
@@ -918,7 +1055,8 @@ mod tests {
 
         // References: 10, 100 (8 bits each) -> 0x0A 0x64.
         // Widths: 2, 0 (2 bits each) -> 10 00 -> 0x80 padded.
-        // Lengths: group 1 scaled 0 (1 bit) -> 0 -> 0x00 padded.
+        // Lengths: *both* groups are in the stream at 1 bit each, the last
+        // one's value then discarded for section 5's true length -> 0x00.
         // Values: 00 01 10 (6 bits) -> 0x18 padded.
         let data = [0x0A, 0x64, 0x80, 0x00, 0x18];
         let values = unpack_complex(&s5, &data, 5, false).unwrap();
@@ -938,13 +1076,47 @@ mod tests {
         s5[41] = 1;
         s5[42..46].copy_from_slice(&3u32.to_be_bytes());
         s5[46] = 1;
-        // Reference 4, width 2 (10b); the only group is the last, so no
-        // length bits are stored; values 00 11 01.
-        let data = [0x04, 0x80, 0b0011_0100];
+        // Reference 4, width 2 (10b). The one group is also the last, and
+        // its length still occupies its bit in the stream before section 5's
+        // true length replaces it -> 0x00. Values 00 11 01.
+        let data = [0x04, 0x80, 0x00, 0b0011_0100];
         let values = unpack_complex(&s5, &data, 3, false).unwrap();
         assert_eq!(values[0], 4.0);
         assert!(ve_core::raster::is_missing(values[1]));
         assert_eq!(values[2], 5.0);
+    }
+
+    /// The last group's length is read from the stream like every other, and
+    /// only *then* replaced by section 5's true length.
+    ///
+    /// Skipping the read leaves the reader short by `length_bits`, and the
+    /// octet alignment that follows then lands one octet early whenever those
+    /// bits cross a boundary — so the values are read from the wrong place
+    /// while the group lengths still sum correctly and nothing complains.
+    /// Here the two groups' 7-bit lengths span two octets where one group's
+    /// would span one, which is exactly the case that breaks.
+    #[test]
+    fn the_last_group_length_still_occupies_the_stream() {
+        let mut s5 = vec![0u8; 47];
+        s5[5..9].copy_from_slice(&5u32.to_be_bytes());
+        s5[9..11].copy_from_slice(&2u16.to_be_bytes());
+        s5[11..15].copy_from_slice(&0f32.to_be_bytes());
+        s5[19] = 8; // bits per reference
+        s5[21] = 1; // general group splitting
+        s5[22] = 0; // no missing management
+        s5[31..35].copy_from_slice(&2u32.to_be_bytes()); // NG
+        s5[35] = 0; // width reference
+        s5[36] = 2; // bits per width
+        s5[37..41].copy_from_slice(&3u32.to_be_bytes()); // length reference
+        s5[41] = 1; // length increment
+        s5[42..46].copy_from_slice(&2u32.to_be_bytes()); // last group length
+        s5[46] = 7; // bits per length — two of them cross an octet
+
+        // References 10, 100; widths 2 and 0; two 7-bit lengths, both zero,
+        // filling two octets; then group 1's deviations 00 01 10.
+        let data = [0x0A, 0x64, 0x80, 0x00, 0x00, 0x18];
+        let values = unpack_complex(&s5, &data, 5, false).unwrap();
+        assert_eq!(values, vec![10.0, 11.0, 12.0, 100.0, 100.0]);
     }
 
     #[test]

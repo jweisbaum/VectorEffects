@@ -1424,6 +1424,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "hayro-jpeg2000"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bab0c77d09c0d9b144d429d0bf0fcd4c63c01d5f6c33f9b8ed501283e0f1ef76"
+
+[[package]]
 name = "heck"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3000,6 +3006,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rust-aec"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c9053fe9dc492823823e21aa267e48dbbe3e6cbc7b1557f95979c04af11aad0f"
+dependencies = [
+ "bitflags 2.13.1",
+]
+
+[[package]]
 name = "rustc-hash"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4495,6 +4510,8 @@ dependencies = [
 name = "ve-grib"
 version = "0.1.0"
 dependencies = [
+ "hayro-jpeg2000",
+ "rust-aec",
  "thiserror 2.0.20",
  "ve-core",
  "ve-grib",
