@@ -12,7 +12,9 @@ import UnsavedChangesDialog from "./project/UnsavedChangesDialog";
 import { mayReplaceProject, type UnsavedChoice } from "./project/saveGuard";
 import { pickProjectToOpen, pickProjectToSave } from "./project/dialogs";
 import { api, IpcError } from "./ipc";
+import SettingsDialog from "./settings/SettingsDialog";
 import type { AppInfo } from "./generated/AppInfo";
+import type { AppSettings } from "./generated/AppSettings";
 import type { ProjectSummary } from "./generated/ProjectSummary";
 import type { TileAddress } from "./generated/TileAddress";
 import type { PositionPick } from "./picking";
@@ -60,6 +62,19 @@ export default function App() {
    * (spec.md 8.5, M14).
    */
   const regionActive = useRef(false);
+  /**
+   * The application's settings, loaded once. Every key handler reads the
+   * bindings from here, so a rebind changes the key everywhere (M15).
+   */
+  const [settings, setSettings] = useState<AppSettings | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
+  useEffect(() => {
+    // A settings file that will not load costs the preferences and not the
+    // launch: the backend already falls back to the defaults, so a failure
+    // here is a failure to *ask*, and the app runs with none rather than
+    // refusing to start.
+    void api.appSettings().then(setSettings).catch(() => undefined);
+  }, []);
   const onRegionActive = useCallback((active: boolean) => {
     regionActive.current = active;
   }, []);
@@ -261,6 +276,9 @@ export default function App() {
         // Shift pastes at the original step numbers instead of moving the
         // animation to the current one (spec.md 8.5).
         void api.pasteObjects(null, step, event.shiftKey).then(setProject).catch(report);
+      } else if (key === ",") {
+        event.preventDefault();
+        setShowSettings(true);
       } else if (key === "z") {
         event.preventDefault();
         void (event.shiftKey ? api.redo() : api.undo())
@@ -318,6 +336,7 @@ export default function App() {
           onPicked={() => setPicking(null)}
           onProjectChanged={setProject}
           onRegionActive={onRegionActive}
+          settings={settings}
           onStepChange={setStep}
           onSelect={setSelection}
           onViewport={setViewport}
@@ -350,7 +369,18 @@ export default function App() {
         onAutoKey={setAutoKey}
         onChanged={setProject}
         onFramesSelected={onFramesSelected}
+        settings={settings}
       />
+
+      {showSettings && settings !== null && (
+        <SettingsDialog
+          settings={settings}
+          project={project}
+          onSettings={setSettings}
+          onProject={setProject}
+          onClose={() => setShowSettings(false)}
+        />
+      )}
 
       {exporting && (
         <ExportDialog project={project} onClose={() => setExporting(false)} />

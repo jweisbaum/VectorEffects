@@ -21,6 +21,7 @@ pub mod projects;
 pub mod protocol;
 pub mod render_pool;
 pub mod session;
+pub mod settings;
 pub mod transform;
 
 use commands::AppState;
@@ -116,6 +117,12 @@ pub fn run() -> anyhow::Result<()> {
             document::cut_objects,
             document::paste_objects,
             document::clipboard_state,
+            settings::app_settings,
+            settings::set_shortcut,
+            settings::reset_shortcuts,
+            settings::set_default_scales,
+            settings::set_macro_directory,
+            settings::set_colour_scale,
             capture::capture_region,
             capture::paste_capture,
             capture::capture_state,

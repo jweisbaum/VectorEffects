@@ -24,7 +24,9 @@ import type { Tool } from "./generated/Tool";
 import type { ToolSchema } from "./generated/ToolSchema";
 import type { DocumentTree } from "./generated/DocumentTree";
 import type { ClipboardState } from "./generated/ClipboardState";
+import type { AppSettings } from "./generated/AppSettings";
 import type { CaptureState } from "./generated/CaptureState";
+import type { Shortcut } from "./generated/Shortcut";
 import type { FrameClipboardState } from "./generated/FrameClipboardState";
 import type { RegionShape } from "./generated/RegionShape";
 import type { HistoryView } from "./generated/HistoryView";
@@ -393,6 +395,22 @@ export const api = {
   /** Pastes the captured field as a patch, at a position or where it came from. */
   pasteCapture: (lon: number | null, lat: number | null, step: number) =>
     call<ProjectSummary>("paste_capture", { lon, lat, step }),
+  /** The application's settings: shortcuts, display defaults, macros (M15). */
+  appSettings: () => call<AppSettings>("app_settings", {}),
+  /** Rebinds one shortcut. A collision or a reserved key is refused. */
+  setShortcut: (binding: Shortcut) => call<AppSettings>("set_shortcut", { binding }),
+  /** Puts every shortcut back to its default. */
+  resetShortcuts: () => call<AppSettings>("reset_shortcuts", {}),
+  /** The colour-ramp top a *new* project of each kind gets, in knots. */
+  setDefaultScales: (windKnots: number, currentKnots: number) =>
+    call<AppSettings>("set_default_scales", { windKnots, currentKnots }),
+  /** Where the macro library lives. */
+  setMacroDirectory: (directory: string) =>
+    call<AppSettings>("set_macro_directory", { directory }),
+  /** The open project's colour scale: a document write, undoable. */
+  setColourScale: (maxKnots: number) =>
+    call<ProjectSummary>("set_colour_scale", { maxKnots }),
+
   /** What the capture clipboard holds. */
   captureState: () => call<CaptureState>("capture_state", {}),
 

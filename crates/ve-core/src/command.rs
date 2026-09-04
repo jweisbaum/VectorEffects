@@ -219,6 +219,17 @@ pub enum Command {
         /// New name.
         after: String,
     },
+    /// Sets the top of the speed colour ramp (spec.md 5.3, M15).
+    ///
+    /// A document write, and undoable like any other: the scale is what the
+    /// project is drawn with, and two people opening one file should see the
+    /// same map. Tiles carry speed and not colour, so it costs no render.
+    SetColourScale {
+        /// Previous scale, if one was set.
+        before: Option<crate::project::ColourScale>,
+        /// New scale.
+        after: Option<crate::project::ColourScale>,
+    },
     /// Sets when step 0 is (spec.md 9.1).
     SetStartTime {
         /// Previous start, seconds since the epoch.
@@ -323,6 +334,7 @@ impl Command {
             Self::SetGeometry { .. } => "Edit shape".into(),
             Self::SetProperty { prop, .. } => format!("Change {prop:?}"),
             Self::SetProjectName { .. } => "Rename project".into(),
+            Self::SetColourScale { .. } => "Change the colour scale".into(),
             Self::SetStartTime { .. } => "Set start time".into(),
             Self::SetStepCount { .. } => "Change duration".into(),
         }
@@ -458,6 +470,10 @@ impl Command {
             }
             Self::SetStartTime { after, .. } => {
                 project.settings.start_unix_s = *after;
+                Ok(())
+            }
+            Self::SetColourScale { after, .. } => {
+                project.settings.colour_scale = *after;
                 Ok(())
             }
             Self::SetStepCount { after, restore, .. } => {
@@ -600,6 +616,10 @@ impl Command {
             }
             Self::SetStartTime { before, .. } => {
                 project.settings.start_unix_s = *before;
+                Ok(())
+            }
+            Self::SetColourScale { before, .. } => {
+                project.settings.colour_scale = *before;
                 Ok(())
             }
             Self::SetStepCount {

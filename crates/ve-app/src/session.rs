@@ -111,6 +111,12 @@ impl OpenProject {
 pub struct Settings {
     /// Most recently opened projects, newest first.
     pub recent_projects: Vec<PathBuf>,
+    /// Shortcuts, display defaults and the macro library (spec.md 8.6, M15).
+    ///
+    /// The file **grows** rather than being replaced: this field is absent
+    /// from one written by an older build, which then takes its defaults.
+    #[serde(default)]
+    pub app: crate::settings::AppSettings,
 }
 
 /// One object's state at the moment a drag began.
@@ -205,6 +211,8 @@ pub struct Session {
     pub frames: crate::frames::FrameClipboard,
     /// A field captured from a region, held for pasting (spec.md 8.5, M14).
     pub capture: crate::capture::CaptureClipboard,
+    /// The application's own preferences (spec.md 8.6, M15).
+    pub settings: crate::settings::AppSettings,
     /// The transform drag in progress, if any.
     pub transform: Option<TransformGesture>,
     /// Counter behind [`Session::next_gesture_id`].
@@ -217,14 +225,16 @@ impl Session {
     /// A malformed settings file is ignored rather than fatal: losing the
     /// recent list is a far better outcome than refusing to start.
     pub fn load(settings_file: &Path) -> Self {
-        let recent = std::fs::read_to_string(settings_file)
+        let stored = std::fs::read_to_string(settings_file)
             .ok()
             .and_then(|text| serde_json::from_str::<Settings>(&text).ok())
-            .map(|settings| settings.recent_projects)
             .unwrap_or_default();
         Self {
             open: None,
-            recent,
+            recent: stored.recent_projects,
+            // Normalised rather than trusted: a hand-edited file loses the
+            // lines it got wrong and keeps the rest (spec.md 8.6).
+            settings: stored.app.normalised(),
             ..Default::default()
         }
     }
@@ -233,6 +243,7 @@ impl Session {
     pub fn save_settings(&self, settings_file: &Path) -> Result<()> {
         let settings = Settings {
             recent_projects: self.recent.clone(),
+            app: self.settings.clone(),
         };
         let json = serde_json::to_string_pretty(&settings)?;
         if let Some(parent) = settings_file.parent() {

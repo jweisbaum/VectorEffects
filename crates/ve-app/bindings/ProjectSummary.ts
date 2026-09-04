@@ -53,6 +53,13 @@ start_unix_s: bigint | null,
  */
 direction_convention: string, 
 /**
+ * Knots at the top of the speed colour ramp (spec.md 5.3, M15).
+ *
+ * The project's, so two people opening one file see the same map. Tiles
+ * carry speed and not colour, so changing it costs no render.
+ */
+colour_scale_knots: number, 
+/**
  * Number of layers.
  */
 layer_count: number, 

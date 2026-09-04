@@ -16,7 +16,9 @@
 import { listen } from "@tauri-apps/api/event";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import type { AppSettings } from "../generated/AppSettings";
 import type { DocumentTree } from "../generated/DocumentTree";
+import { actionFor, chordOf } from "../settings/bindings";
 import type { InterpolationView } from "../generated/InterpolationView";
 import type { ObjectTracks } from "../generated/ObjectTracks";
 import type { ProjectSummary } from "../generated/ProjectSummary";
@@ -127,6 +129,7 @@ export default function Timeline({
   onAutoKey,
   onChanged,
   onFramesSelected,
+  settings,
 }: {
   project: ProjectSummary;
   step: number;
@@ -149,6 +152,8 @@ export default function Timeline({
    * stand down (spec.md 4.8, M20).
    */
   onFramesSelected: (active: boolean) => void;
+  /** The application's bindings table (spec.md 8.6, M15). */
+  settings: AppSettings | null;
 }) {
   const last = Math.max(0, project.step_count - 1);
   const steps = last + 1;
@@ -531,16 +536,25 @@ export default function Timeline({
         return;
       }
       if (event.metaKey || event.ctrlKey || event.altKey) return;
-      if (event.key === " ") {
+      // Every binding comes from one table (spec.md 8.6, M15), so the map's
+      // shifted arrows and the timeline's bare ones cannot collide and either
+      // can be rebound without touching this file.
+      const chord = chordOf(event);
+      const bound = chord !== null && settings ? actionFor(settings, chord) : null;
+      if (bound?.action === "play_pause") {
         event.preventDefault();
         setPlaying((on) => !on);
-      } else if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
-        // One step per press, along the ruler. Playback stops: the arrows are
+      } else if (bound?.action === "step_back" || bound?.action === "step_forward") {
+        // One step per press, along the ruler. Playback stops: the steps are
         // for looking at a particular time, and a playhead that carried on
         // moving would take the step away again.
         event.preventDefault();
         setPlaying(false);
-        const to = steppedBy(stepRef.current, event.key === "ArrowRight" ? 1 : -1, last);
+        const to = steppedBy(
+          stepRef.current,
+          bound.action === "step_forward" ? 1 : -1,
+          last,
+        );
         if (to !== stepRef.current) onStepChange(to);
       } else if (
         (event.key === "Delete" || event.key === "Backspace") &&
@@ -572,6 +586,7 @@ export default function Timeline({
     onStepChange,
     pasteFrames,
     selectedKeys.size,
+    settings,
   ]);
 
   // The app's own copy and paste stand down while a frame is selected, so one

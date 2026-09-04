@@ -1004,3 +1004,51 @@ body {
 .tl-menu button:hover { background: #1d5a7a; }
 .tl-error { color: #ff9a8b; padding: 4px 10px; font-size: 12px; }
 .tl-impact { max-height: 140px; overflow: auto; margin: 6px 0; padding-left: 20px; }
+
+/* --- Settings dialog (spec.md 8.6, M15) ------------------------------------ */
+
+.modal.settings { max-width: 34rem; max-height: 80vh; overflow-y: auto; }
+.modal.settings section { margin-bottom: 18px; }
+.modal.settings h3 {
+  margin: 0 0 4px;
+  font-size: 13px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.shortcut-rows {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 12px;
+  align-items: center;
+  margin: 8px 0;
+}
+.shortcut-row { display: contents; }
+/* The key itself, shown as a key: a button that reads like what you press. */
+.chord {
+  min-width: 5.5rem;
+  font: inherit;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: #0f1a2c;
+  color: var(--text);
+  padding: 2px 8px;
+}
+.chord.capturing { border-color: var(--accent); color: var(--accent); }
+.settings-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 6px 0;
+}
+.settings-field input[type="text"] {
+  flex: 1;
+  font: inherit;
+  background: #0f1a2c;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 2px 6px;
+}
+.modal-error { color: #ff8fb0; margin: 0 0 8px; }

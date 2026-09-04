@@ -1935,6 +1935,45 @@ fallback, through the same path, that a clone stamp and a warp already take
 (§7.8). The preview is slower on such a scene and correct; nothing can diverge,
 because the GPU never evaluates one.
 
+### 8.6 Settings and shortcuts
+
+`Cmd`-`,` opens a Settings dialog with three sections.
+
+**Shortcuts.** One bindings table, read by the palette's tooltips, the
+timeline's keys and the map's handlers alike — before it, each of those wired
+its own keys, which meant a key could be bound twice with nothing to say so and
+a rebind was not a thing the application could have. Play/pause, step back and
+forward, every tool, map pan and zoom are all rebindable. A binding that
+collides with another, **or with a key the window owns**, is refused on entry
+with a message naming what already has it: two bindings on one chord means one
+of them silently stops working, and which one would depend on the order of a
+list nobody can see. One button resets everything to the defaults.
+
+A shortcut is a bare key or a shifted one; anything with `Cmd`/`Ctrl` belongs
+to the application's own menu keys and is not offered. That is what lets the
+timeline keep the bare arrows for stepping and the map take `Shift`-arrows for
+panning: two chords, one table, no ambiguity.
+
+**Display.** The colour scale is a **project** setting (§4.1, §5.3) — two
+people opening one file should see the same map — so the dialog edits the open
+project's scale in place, as an undoable document write, and separately holds
+the default a *new* project of each kind gets. Currents run an order of
+magnitude slower than wind, so the two defaults are separate; a project made
+before the setting existed takes the default for its kind and looks exactly as
+it did. **Changing a scale costs no tile**: tiles carry speed, not colour, so
+the scene the render cache keys on is untouched.
+
+**Macros.** The library's directory, and the count and size beside a *delete
+all* (§8.7). The controls live here; the library they act on is the macro
+feature's.
+
+**The settings file grows rather than being replaced.** It sits beside the
+recent list in the config directory. A file written by an older build is
+missing fields, not wrong, so every field defaults; one that will not parse at
+all falls back to the defaults entirely. A hand-edited binding that is reserved
+or duplicated is dropped and its default comes back. Losing a preference is a
+far better outcome than not launching.
+
 ---
 
 ## 9. Timeline and animation

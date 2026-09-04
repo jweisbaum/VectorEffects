@@ -160,7 +160,18 @@ preset, a circle its circle and a lasso its freehand polygon. No new gesture,
 no new shape, no backend change at all — which is what keeps the object a shape
 fill and the seven shared-rule tests covering it unchanged.
 
-**M15 is next.**
+**M15 complete (2026-09-04): settings and shortcuts.** One bindings table,
+read by the palette's tooltips, the timeline's keys and the map's handlers
+alike — each of them used to wire its own, which is why a key could be bound
+twice with nothing to say so. A collision or a reserved key is refused on
+entry, naming what already holds it. The colour scale turns out to be a
+*project* setting rather than an application one: two people opening one file
+should see the same map, so the dialog edits the open project's in place,
+undoably, and holds separately the default a new project of each kind gets.
+A scale change costs no tile, which the acceptance test asserts by hashing the
+flattened scene before and after.
+
+**M16 is next.**
 
 **Unplanned, after M7: GRIB import** (spec §4.8, D44). A GRIB2 file becomes a
 layer — two, when it holds both wind and currents — whose lattice is sampled
@@ -544,7 +555,7 @@ M0 ─ M1 ─ M2 ─ M3 ─ M4 ══ walking skeleton complete
                     ├─ M22 ────── every grid definition the centres ship   ✓
                     ├─ M13 ────── motion vectors, linked objects        ✓
                     ├─ M14 ────── region selection, fill, copy/paste      ✓
-                    ├─ M15 ────── settings and shortcuts
+                    ├─ M15 ────── settings and shortcuts               ✓
                     ├─ M16 ────── macros                                 (needs M14, M15)
                     ├─ M17 ────── warp and liquify, two tools
                     ├─ M18 ────── image layers
@@ -1441,7 +1452,7 @@ a plain drag draws the region, and the hand tool keeps plain drag as pan
 
 ---
 
-### M15 — Application settings and shortcuts
+### M15 — Application settings and shortcuts · **complete**
 
 **Goal:** the app has a preferences surface, and the keys are rebindable.
 

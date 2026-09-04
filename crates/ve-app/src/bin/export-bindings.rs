@@ -86,6 +86,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ve_app::document::GribStepView::export_all(&cfg)?;
     ve_app::frames::FrameClipboardState::export_all(&cfg)?;
     ve_app::capture::CaptureState::export_all(&cfg)?;
+    ve_app::settings::AppSettings::export_all(&cfg)?;
+    ve_app::settings::Shortcut::export_all(&cfg)?;
+    ve_app::settings::ShortcutAction::export_all(&cfg)?;
     ve_app::capture::RegionShape::export_all(&cfg)?;
     ObjectNode::export_all(&cfg)?;
     PropertyView::export_all(&cfg)?;

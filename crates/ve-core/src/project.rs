@@ -189,9 +189,25 @@ pub struct ProjectSettings {
     /// GRIB reference time is chosen at export (spec.md 12.1).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub start_unix_s: Option<i64>,
+    /// The top of the speed colour ramp, in knots (spec.md 5.3, M15).
+    ///
+    /// Absent from an older file, which then takes the default for its kind —
+    /// exactly the scale it was drawn with before the setting existed, so no
+    /// migration is needed and no project changes appearance on open.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub colour_scale: Option<ColourScale>,
 }
 
 impl ProjectSettings {
+    /// The colour scale this project draws with.
+    ///
+    /// The default for the field kind until someone sets one, so a project
+    /// made before the setting existed looks exactly as it did.
+    pub fn scale(&self) -> ColourScale {
+        self.colour_scale
+            .unwrap_or_else(|| ColourScale::default_for(self.field_kind))
+    }
+
     /// Sensible defaults for a new project of `field_kind`.
     ///
     /// The direction convention follows the field kind: wind is conventionally
@@ -208,6 +224,7 @@ impl ProjectSettings {
             step_hours,
             step_count: step_count.clamp(1, MAX_STEPS),
             start_unix_s: None,
+            colour_scale: None,
             direction_convention: match field_kind {
                 FieldKind::Wind => DirectionConvention::From,
                 FieldKind::Current => DirectionConvention::Toward,
@@ -223,6 +240,42 @@ impl ProjectSettings {
     /// Forecast hour of `step`.
     pub fn forecast_hour(self, step: u32) -> u32 {
         step * self.step_hours.hours()
+    }
+}
+
+/// The top of the speed colour ramp, in knots (spec.md 4.1, 5.3, M15).
+///
+/// A **project** setting rather than an application one: currents run an order
+/// of magnitude slower than wind, and a scale shared across both would leave
+/// every current project drawn in the bottom of the ramp. The application's
+/// preference is the *default for new projects*; this is the open one's.
+///
+/// Knots, because that is what the legend shows and what the user types
+/// (§3.4). The tiles carry speed and not colour, so changing it costs no
+/// tile — which is the whole reason it can be a live edit at all.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ColourScale {
+    /// Knots at the top of the ramp. The bottom is always calm.
+    #[serde(with = "crate::canonical::ratio_field")]
+    pub max_knots: f64,
+}
+
+impl ColourScale {
+    /// The scale a new project of this kind gets.
+    pub fn default_for(kind: FieldKind) -> Self {
+        Self {
+            max_knots: match kind {
+                FieldKind::Wind => 60.0,
+                FieldKind::Current => 6.0,
+            },
+        }
+    }
+
+    /// Clamped to something a legend can draw.
+    pub fn clamped(self) -> Self {
+        Self {
+            max_knots: self.max_knots.clamp(1.0, 400.0),
+        }
     }
 }
 

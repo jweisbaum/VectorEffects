@@ -16,7 +16,10 @@ import type { OperatorOutline } from "../generated/OperatorOutline";
 import type { ObjectOutline } from "../generated/ObjectOutline";
 import type { TileAddress } from "../generated/TileAddress";
 import type { Tool } from "../generated/Tool";
+import type { AppSettings } from "../generated/AppSettings";
+import type { ShortcutAction } from "../generated/ShortcutAction";
 import type { ToolSchema } from "../generated/ToolSchema";
+import { actionFor, chordOf, toolChord } from "../settings/bindings";
 import type { PositionPick } from "../picking";
 import type { SelectionTransform } from "../generated/SelectionTransform";
 import type { TransformPreview } from "../generated/TransformPreview";
@@ -186,16 +189,6 @@ interface SweptEntry {
   lattice: LatticeProgress;
 }
 
-/**
- * Speed at the top of the colour ramp, in knots.
- *
- * Currents run an order of magnitude slower than wind, so sharing one scale
- * would leave every current project rendered in the bottom of the ramp.
- */
-function rampMaxKnotsFor(fieldKind: string): number {
-  return fieldKind === "current" ? 6 : 60;
-}
-
 /** Formats a latitude or longitude with a hemisphere suffix. */
 function formatDegrees(value: number, positive: string, negative: string): string {
   const suffix = value >= 0 ? positive : negative;
@@ -299,6 +292,7 @@ export default function MapView({
   onPicked,
   onProjectChanged,
   onRegionActive,
+  settings,
   onStepChange,
   onSelect,
   onViewport,
@@ -319,6 +313,12 @@ export default function MapView({
    * (spec.md 8.5, M14).
    */
   onRegionActive: (active: boolean) => void;
+  /**
+   * The application's bindings table (spec.md 8.6, M15). Null until it has
+   * loaded, in which case no shortcut fires — which is better than firing the
+   * wrong one.
+   */
+  settings: AppSettings | null;
   onStepChange: (step: number) => void;
   onSelect: (objects: number[]) => void;
   /**
@@ -635,7 +635,10 @@ export default function MapView({
     setToolPick(null);
   }, [tool]);
 
-  const rampMaxKnots = rampMaxKnotsFor(project.field_kind);
+  // The project's own scale (spec.md 5.3, M15): two people opening one file
+  // see the same map, and the application's preference is only the default a
+  // new project got.
+  const rampMaxKnots = project.colour_scale_knots;
   // The renderer works in stored units; the ramp is chosen in displayed ones.
   const rampMax = mpsFromKnots(rampMaxKnots);
   // Barbs are a wind convention and are hidden for current projects (spec.md 5.3).
@@ -1020,6 +1023,67 @@ export default function MapView({
     return () => observer.disconnect();
   }, [requestDraw]);
 
+  /**
+   * A tool's shortcut as its button should show it.
+   *
+   * From the bindings table rather than from the palette's own letter, so a
+   * rebound key appears in the tooltip — which is the half of a rebind that is
+   * otherwise forgotten (M15).
+   */
+  const chord = (tool: string) => (settings ? toolChord(settings, tool) : "unbound");
+
+  /** The actions that move the camera rather than choosing a tool. */
+  const PAN_ZOOM = new Set<ShortcutAction>([
+    "pan_left",
+    "pan_right",
+    "pan_up",
+    "pan_down",
+    "zoom_in",
+    "zoom_out",
+  ]);
+
+  /**
+   * Pans or zooms by a keystroke (spec.md 8.6, M15).
+   *
+   * A pan is a fixed fraction of the viewport rather than a fixed number of
+   * degrees, so one press covers the same amount of what you can see at every
+   * zoom. Through `requestDraw`, like every other camera change, so the
+   * overlay moves with the map rather than after it.
+   */
+  const nudgeCamera = useCallback(
+    (action: ShortcutAction) => {
+      const view = viewRef.current;
+      const camera = cameraRef.current;
+      const stepPx = 0.2;
+      if (action === "zoom_in" || action === "zoom_out") {
+        const centre = { x: view.width / 2, y: view.height / 2 };
+        cameraRef.current = zoomAbout(
+          camera,
+          view,
+          centre,
+          action === "zoom_in" ? 1.25 : 0.8,
+        );
+      } else {
+        const dLon =
+          (action === "pan_right" ? 1 : action === "pan_left" ? -1 : 0) *
+          ((view.width * stepPx) / camera.pxPerDeg);
+        const dLat =
+          (action === "pan_up" ? 1 : action === "pan_down" ? -1 : 0) *
+          ((view.height * stepPx) / camera.pxPerDeg);
+        cameraRef.current = clampCamera(
+          {
+            centerLon: normalizeLon(camera.centerLon + dLon),
+            centerLat: camera.centerLat + dLat,
+            pxPerDeg: camera.pxPerDeg,
+          },
+          view,
+        );
+      }
+      requestDraw();
+    },
+    [requestDraw],
+  );
+
   // Single-key tool shortcuts, as in every other paint application.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -1078,26 +1142,20 @@ export default function MapView({
       }
       if (event.altKey) return;
 
-      const key = event.key.toLowerCase();
-      if (key === "v") {
-        setTool(HAND);
+      // Every binding comes from one table, which the settings dialog edits
+      // and the tooltips read (spec.md 8.6, M15) — so a rebound key selects
+      // its tool and says so in the same breath, and two actions cannot
+      // quietly share a chord.
+      const chord = chordOf(event);
+      const bound = chord !== null && settings ? actionFor(settings, chord) : null;
+      if (bound?.action === "tool") {
+        event.preventDefault();
+        setTool(bound.tool as ActiveTool);
         return;
       }
-      // The two region tools, whose shortcuts are not in the backend palette
-      // because neither tool is (D54).
-      if (key === "m") {
-        setTool(SELECT);
-        return;
-      }
-      if (key === "g") {
-        setTool(FILL);
-        return;
-      }
-      // The shortcuts come from the palette, so a tool cannot ship without one
-      // and two tools cannot quietly share.
-      const chosen = palette.find((entry) => entry.shortcut === key);
-      if (chosen) {
-        setTool(chosen.tool);
+      if (bound !== null && PAN_ZOOM.has(bound.action)) {
+        event.preventDefault();
+        nudgeCamera(bound.action);
         return;
       }
 
@@ -1128,7 +1186,15 @@ export default function MapView({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [captured, onProjectChanged, palette, region, requestOverlay]);
+  }, [
+    captured,
+    nudgeCamera,
+    onProjectChanged,
+    palette,
+    region,
+    requestOverlay,
+    settings,
+  ]);
 
   // The selection's handles, so the map shows what the panels are pointing at
   // and where a drag would act.
@@ -3060,7 +3126,7 @@ export default function MapView({
             onClick={() => setTool(HAND)}
             aria-label="Hand"
             aria-pressed={tool === HAND}
-            title="Hand (V) · pan, select and transform · shift-drag for a rubber band, add cmd to reach across layers · cmd-click to add or remove one object"
+            title={`Hand (${chord("hand")}) · pan, select and transform · shift-drag for a rubber band, add cmd to reach across layers · cmd-click to add or remove one object`}
           >
             <ToolIcon tool={HAND} />
           </button>
@@ -3076,7 +3142,7 @@ export default function MapView({
             onClick={() => setTool(SELECT)}
             aria-label="Select"
             aria-pressed={tool === SELECT}
-            title="Select (M) · drag a region of the map · cmd-A selects the view, cmd-shift-A the whole map, cmd-D clears"
+            title={`Select (${chord("select")}) · drag a region of the map · cmd-A selects the view, cmd-shift-A the whole map, cmd-D clears`}
           >
             <ToolIcon tool={SELECT} />
           </button>
@@ -3085,7 +3151,7 @@ export default function MapView({
             onClick={() => setTool(FILL)}
             aria-label="Fill"
             aria-pressed={tool === FILL}
-            title="Fill (G) · fill the selected region with a vector field"
+            title={`Fill (${chord("fill")}) · fill the selected region with a vector field`}
           >
             <ToolIcon tool={FILL} />
           </button>
@@ -3096,7 +3162,7 @@ export default function MapView({
               onClick={() => setTool(entry.tool)}
               aria-label={entry.label}
               aria-pressed={tool === entry.tool}
-              title={`${entry.label} (${entry.shortcut.toUpperCase()})`}
+              title={`${entry.label} (${chord(entry.tool)})`}
             >
               <ToolIcon tool={entry.tool} />
             </button>

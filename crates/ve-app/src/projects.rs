@@ -44,6 +44,11 @@ pub struct ProjectSummary {
     pub start_unix_s: Option<i64>,
     /// `"from"` or `"toward"`: how directions are shown (spec.md 3.3).
     pub direction_convention: String,
+    /// Knots at the top of the speed colour ramp (spec.md 5.3, M15).
+    ///
+    /// The project's, so two people opening one file see the same map. Tiles
+    /// carry speed and not colour, so changing it costs no render.
+    pub colour_scale_knots: f64,
     /// Number of layers.
     pub layer_count: u32,
     /// Number of objects across all layers.
@@ -83,6 +88,7 @@ impl ProjectSummary {
                 DirectionConvention::Toward => "toward",
             }
             .to_owned(),
+            colour_scale_knots: settings.scale().max_knots,
             layer_count: open.project.layers.len() as u32,
             object_count: open.project.object_count() as u32,
             revision: open.revision,
@@ -213,7 +219,7 @@ pub fn create(
     request: NewProjectRequest,
     discard_unsaved: bool,
 ) -> Result<ProjectSummary> {
-    let settings = request.into_settings()?;
+    let mut settings = request.into_settings()?;
     let name = if request.name.trim().is_empty() {
         "Untitled".to_owned()
     } else {
@@ -222,6 +228,20 @@ pub fn create(
 
     with_session(state, |session| {
         refuse_to_discard(session, discard_unsaved)?;
+        // A new project takes the colour scale the user prefers for its kind
+        // (spec.md 8.6, M15). The scale then belongs to the project: changing
+        // the preference later leaves existing projects alone.
+        settings.colour_scale = Some(
+            ve_core::project::ColourScale {
+                max_knots: match settings.field_kind {
+                    ve_core::project::FieldKind::Wind => session.settings.default_wind_scale_knots,
+                    ve_core::project::FieldKind::Current => {
+                        session.settings.default_current_scale_knots
+                    }
+                },
+            }
+            .clamped(),
+        );
         let project = Project::new(name, settings);
         tracing::info!(
             name = %project.name,
