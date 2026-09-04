@@ -62,6 +62,19 @@ quietly met**: "no `cc` in `cargo tree`". `blake3` has carried a `cc` build
 dependency for its SIMD assembly since M3, by way of `ve-core`. Neither new
 codec adds one, which is what the criterion was for.
 
+**M22 complete (2026-09-04): every grid definition the centres ship.** Asked
+for after M21, against a directory of 1,735 sample forecast files. Almost every
+regional model runs on a projection rather than on lat/lon, and the decoder
+refused all of them by name; five grid definitions were added — rotated
+lat/lon (3.1), Mercator (3.10), polar stereographic (3.20), Lambert conformal
+(3.30) and NCEP's rotated Arakawa non-E staggered grid (3.32769) — and **all
+1,653 GRIB2 messages in the set now parse.** Each is resampled onto the span
+of the project's own lattice it covers, and components the file resolved along
+the grid's axes are rotated onto east and north at the source, which is the
+part that is silently wrong rather than loudly wrong when it is wrong at all.
+GRIB edition 1 (82 files), oversized JPEG 2000 codestreams (55) and the
+probability product templates (70) are named in M22 as deliberately not done.
+
 **M21 complete (2026-09-04): ICON's icosahedral grid imports.** Asked for
 after M12. ICON does not run on a lat/lon grid at all: a message
 (template 3.101) is a bare run of 2,949,120 values, a cell count and a UUID
@@ -479,7 +492,9 @@ M0 ─ M1 ─ M2 ─ M3 ─ M4 ══ walking skeleton complete
                     ├─ M5 ─ M6 ── tools & editing                     ✓
                     ├─ M7 ─────── timeline & animation                 ✓
                     │
-                    ├─ M12 ────── decoder: CCSDS and JPEG 2000 import
+                    ├─ M12 ────── decoder: CCSDS and JPEG 2000 import      ✓
+                    ├─ M21 ────── ICON's icosahedral grid                  ✓
+                    ├─ M22 ────── every grid definition the centres ship   ✓
                     ├─ M20 ────── GRIB frames copied between steps
                     ├─ M13 ────── motion vectors, linked objects        (needs M7)
                     ├─ M14 ────── region selection, fill, copy/paste
@@ -1034,6 +1049,64 @@ assumption.
 - All spec §13 budgets met or consciously renegotiated with a recorded reason.
 - Packaged apps launch and pass a smoke suite on clean machines.
 - Zero network traffic observed during a full feature exercise.
+
+---
+
+### M22 — Every grid the centres ship · **complete**
+
+**Goal:** a regional forecast file imports, wherever its model runs. Asked for
+after M21, from a directory of 1,735 sample files.
+
+Almost every regional model runs on a projection rather than on lat/lon, and
+the decoder refused all of them by name. Five grid definitions were added —
+rotated lat/lon (3.1), Mercator (3.10), polar stereographic (3.20), Lambert
+conformal (3.30) and NCEP's rotated Arakawa non-E staggered grid (3.32769) —
+which with 3.0 and 3.101 is **every grid definition in the sample set**: 1,653
+GRIB2 messages, all of them now parsed.
+
+**Deliverables**
+
+- `projection.rs`: the four projections, ellipsoidal (Snyder), reducing
+  exactly to spherical at zero eccentricity so code table 3.2's shapes cost
+  one code path. `Prepared` holds a projection's derived constants, because a
+  Lambert cone costs two logarithms and two powers to describe and a resample
+  evaluates it millions of times.
+- `resample.rs`: a projected grid onto the **span of the project's lattice it
+  covers**, bilinear, with a pole-enclosure test the boundary walk cannot
+  make for itself.
+- **The grid convergence**, which is the part that is easy to get silently
+  wrong: flag table 3.5 bit 5 resolves `u` and `v` along the grid's axes on
+  1,004 of the sample messages, and reading those as eastward and northward
+  is 30° of error across a Lambert CONUS grid.
+- `Scan`, one type for the sixteen scanning modes, shared with the lat/lon
+  path it was extracted from.
+
+**Acceptance — met**
+
+- Every grid definition in the sample directory parses: 902 lat/lon, 374
+  Lambert, 203 stereographic, 104 Mercator, 54 unstructured, 16 rotated.
+- Templates 3.10 and 3.32769 state a **last** grid point that the projection
+  does not consume; walking to it lands within **0.725 cells** worst case
+  across all 110 such files, and exactly on it for 3.32769.
+- The fixtures are section 3 of eight real messages, and the assertions are
+  geography: each grid covers the places its model covers and excludes the
+  ones it does not. A projection with its cone constant or hemisphere wrong
+  still produces plausible numbers; it does not put Alaska over Alaska.
+- HRRR CONUS resamples onto 0.1° in 26 ms, HRDPS continental in 77 ms
+  (`resample_cost.rs`).
+
+**Not done, and named rather than left to be discovered**
+
+- **GRIB edition 1**, 82 files. An edition, not a grid definition: different
+  sections, tables and packing. All 82 are derived duplicates whose GRIB2
+  originals are not in the set.
+- **JPEG 2000 codestreams wider than 60,000 px**, 55 files. Météo-France
+  writes AROME's codestream as a single row of 4,160,515 pixels and
+  `hayro-jpeg2000` caps a dimension at 60,000. A packing limit, not a grid
+  one — those files are on plain lat/lon grids.
+- **Product templates 4.5, 4.6, 4.9 and 4.10**, 70 files. Probability and
+  percentile products, which carry no `u`/`v` and so would not import as a
+  field even once read.
 
 ---
 
@@ -1777,6 +1850,7 @@ relitigated by accident.
 | D59 | A GRIB frame copied to another step is a step number in the layer, never a copy of the lattice | The project keeps a file's path and nothing of its samples (D44); a pasted frame that copied the grid would be a raster in the document by another route. Mapping the step to the source step gives the same picture from the same file, and because the flat scene already carries the served frame's hash, the render cache, readiness and both kernels are right by construction. It is an instruction, so unlike a message it stays where it was put, one step at a time, and D48's rule against holding a measurement forward is not touched (M20) |
 | D60 | The two compressed GRIB2 packings are decoded by crates, not by us | 5.40 is a JPEG 2000 codestream and 5.42 a CCSDS entropy coder; hand-writing either would be thousands of lines of wavelet and adaptive-coding work to no product end, and the risk is not that they are hard but that they are subtly wrong on files nobody has. `hayro-jpeg2000` (default features off, which leaves it with *no* dependencies) and `rust-aec` were both shown bit-exact against ecCodes on every real file in the reference set before being chosen, and neither pulls a `-sys` crate: invariant 5 and the three-platform build both forbid a C library, which is what ruled out OpenJPEG and libaec (M12). The three integer packings stay hand-written, since they are a bit reader and a formula |
 | D61 | An unstructured grid is resampled onto the project's grid at import, its cell positions are bundled, and only the neighbour indices are kept | Three decisions that stand together. **Resampling** rather than sampling the mesh directly, because `RasterGrid` is what the render cache, both kernels and the exporter all speak — teaching the WGSL kernel to search a point cloud would have touched everything, where resampling touches the import alone. **Bundling** the positions, because an ICON message names its grid by UUID and carries no geometry, so without them the file cannot be placed on the earth at all; fetching them is out (invariant 5) and asking the user for two more files is a poor trade against 2.4 MB of assets. **Keeping the indices, not the weights**: the search is 494 ms at 0.1° and the weights recomputed from the coordinates are ~30, so storing the weights would triple the size for nothing — 1.9 MB against 155. The value at a node is a point sample, matching the convention the evaluator and exporter already use, and `u`/`v` interpolate as components because averaging bearings turns two opposing vectors into a fast one pointing nowhere (M21, spec §4.8) |
+| D62 | Every projected grid resamples onto a **window** of the project's lattice, and grid-resolved components rotate at the source | Four decisions that stand together. **Resampling** for D61's reason: `RasterGrid` is what the render cache, both kernels and the exporter speak, and a Lambert lattice is not one. **A window** rather than the globe, because a 2.5 km regional model reaches a few percent of the earth and a global 0.1° lattice of it is 52 MB of mostly nothing; the window's nodes are the project's own nodes, so an imported regional field still lines up with what the project exports. **Rotating at the source**, because near a stereographic grid's pole the convergence turns through a full circle in a few cells and an interpolated grid-relative vector there means nothing — and because reading grid-resolved components as eastward and northward is a 30° error across a Lambert CONUS grid that looks entirely plausible on screen. **Ellipsoidal formulas throughout**, since they reduce to the spherical ones exactly at zero eccentricity, so honouring code table 3.2 costs one code path rather than two. Two departures from the octets, both forced by real files and both matching ecCodes and wgrib2: NCEP's template 3.32769 states increments in no unit that reproduces its own corners, so they are derived from the first point, the last point and the centre it also states; and the Mercator orientation field, which two NCEP blend grids fill with 200° and 295°, is ignored, their stated corners being where an unrotated grid puts them to a few parts per million (M22, spec §4.8) |
 | D49 | The modifiers are painted, and merge — except the two measured from their own anchor | They were click-placed discs, which made a swathe of intensification a row of stamps and gave them none of the merging the brush and the mask have. Painting them is the same gesture, geometry and merge rule the other swept tools already use, so it is subtraction rather than addition. The exception is the rule §6.1 already states: a merge re-expresses the new chain under the *target's* anchor, and a divergence radiates from its anchor while a twisting warp turns about it, so absorbing one would change what it paints. Intensify, rotate and a pushing warp refer to no anchor and merge freely. The edge highlight and the selection outline are the mask's, generalised: one `operator_outlines` command for every object that has no field of its own (spec §6.3, schema version 9) |
 | D48 | A step the file has no message for shows no imported field — reverses the hold half of D44 | Holding the last message forward draws a forecast for a time it was never made for, and does it most misleadingly past the end of a short file, where a six-hour file stood in for a ten-day timeline unchanged and looking like data. Found by hand. A keyframe holds because it is an instruction the user gave, and between two of them the document still means something; a message is a measurement, and between two of them the file means nothing. The consequence is that a step size that does not divide the message times hides most of the file, so "Open from GRIB" now derives the largest offered step that *divides* every message's offset rather than the largest no wider than the gap — a 4-hourly file takes hourly steps and blanks three in four, where before it took 3-hourly steps and showed one message in four (spec §4.8) |
 | D44 | A GRIB2 file imports as a layer that keeps the file's *path*, never its samples; one layer per field kind, the other kind hidden; ~~each step shows the last message at or before its forecast hour~~ — the hold rule is reversed by D48 | Invariants 1 and 2 forbid a raster in the project, and copying forecast data into every project that references it would have been the cost of relaxing them. The lattice lives in memory beside the layer and is read back on open; a missing file leaves an empty, marked layer rather than refusing the project. Hold-previous was chosen because it is the rule keyframes already follow (spec §4.5); D48 reverses it, a message not being a keyframe. Both kernels sample the lattice, so the preview and the export agree on it as they do on everything else (spec §4.8) |

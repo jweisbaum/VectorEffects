@@ -14,8 +14,10 @@ pub mod error;
 pub mod icon;
 pub mod import;
 pub mod packing;
+pub mod projection;
 #[cfg(feature = "testing")]
 pub mod reader;
+pub mod resample;
 pub mod writer;
 
 pub use error::{GribError, Result};

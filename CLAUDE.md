@@ -53,7 +53,10 @@ crates/
                FieldEvaluator trait, CpuEvaluator, GpuEvaluator (+ WGSL),
                tile pyramid, content-hashed render cache
   ve-grib/     GRIB2 writer: sections, templates, simple packing. And the
-               import decoder (`decode`, `import`): 3.0 and 3.101 grids,
+               import decoder (`decode`, `import`): every grid definition the
+               centres ship — 3.0, 3.1, 3.10, 3.20, 3.30, 3.101 and NCEP's
+               3.32769 — with `projection` holding the map maths and
+               `resample` putting a projected grid on the project's lattice.
                5.0/5.2/5.3 packing hand-written, 5.40 and 5.42 through
                pure-Rust codec crates, bitmaps. `icon` holds the bundled
                unstructured-grid definitions. `reader` is the writer's
@@ -101,6 +104,9 @@ npm run check:offline       # invariant 5
 cargo test -p ve-render parity   # GPU/CPU parity suite
 cargo test -p ve-grib            # round-trip; external decoders run in CI
 cargo bench -p ve-render         # perf budgets from spec.md 13
+cargo test -p ve-grib --release --test resample_cost -- --nocapture
+                                 # cost of putting a projected grid on the
+                                 # project's lattice
 
 # Regenerate TS bindings after changing any IPC-facing Rust type
 npm run bindings            # cargo run -p ve-app --bin export-bindings
@@ -134,7 +140,7 @@ They are specified in full in `spec.md` §3.
 | Z-order | Layer order, then object order within layer. Index 0 = bottom. |
 | Determinism | No `HashMap` iteration in any evaluation or export path. Use `Vec` or `IndexMap`. |
 | Project settings | The map takes its timeline length, direction convention, colour scale and glyph styles from `ProjectSummary`, never from constants. Nothing renders without an open project. |
-| Grid resolution | Governs the export only. It must never reach the preview path — a 0.1° project pans and zooms exactly as fast as a 1° one. **Exception**: an unstructured import is resampled onto it, since there is no other lattice to put the field on (spec §4.8). |
+| Grid resolution | Governs the export only. It must never reach the preview path — a 0.1° project pans and zooms exactly as fast as a 1° one. **Exception**: an import that is not on a lat/lon grid — unstructured or projected — is resampled onto it, since there is no other lattice to put the field on (spec §4.8). |
 | Document `f64` | Every `f64` that reaches a project file needs a `canonical::*_field` serde helper. `serde_json`'s parser is one ULP off on ~10% of values, so a raw `f64` does not round-trip. `f32` is unaffected. See `canonical.rs`. |
 
 ---
@@ -328,6 +334,47 @@ Both compressed packings are decoded by crates, not by us: `hayro-jpeg2000`
 5 and the three-platform build both forbid a C library — so check `cargo tree`
 after any version bump.
 
+### Adding a grid definition template
+
+A grid is a regular lattice in *some* plane, plus a map from that plane to the
+earth. `decode::ProjectedGrid` is that shape and `projection::Projection` is
+that map, so a new template is usually a parsing arm and nothing else:
+
+1. Add the arm to `grid_of`'s match and to `projected_of`, reading the octets
+   from the WMO table. **The octet numbers in the comments are the 1-based
+   ones; `byte(s, n - 1)` reads octet `n`.** Templates 3.1 and 3.32769 carry a
+   basic angle and its subdivisions and put everything eight octets later than
+   3.10/3.20/3.30 do.
+2. If it needs a projection nothing has yet, add the variant to `Projection`
+   and implement `forward`, `inverse` and **`convergence`** — and add it to
+   `Prepared`, or the constants are rebuilt at every one of a few million
+   nodes.
+3. Add it to `projected_grids.rs` with **section 3 of a real file**, copied
+   verbatim as hex, and assert *geography*: the places that model covers and
+   the places it does not. A projection with its cone constant, its hemisphere
+   or its orientation wrong still produces plausible numbers; what it does not
+   do is put Alaska over Alaska.
+
+**`convergence` is not optional.** Flag table 3.5 bit 5 lets a message resolve
+`u` and `v` along the grid's axes, and most regional models do. Reading those
+as eastward and northward is a 30° error across a Lambert CONUS grid that
+looks entirely plausible on screen. The rotation happens at the **source**
+nodes, before the blend — near a stereographic grid's pole the convergence
+turns through a full circle in a few cells.
+
+The sweep over a directory of real files is what says the octets are right for
+grids no fixture covers:
+
+```bash
+VE_TEST_GRID_DIR=~/grib2 cargo test -p ve-grib --release \
+    --test projected_grids -- --ignored --nocapture
+```
+
+It refuses to pass if any grid fails to parse, or if a walk to a stated last
+point misses it by more than a cell. Templates 3.10 and 3.32769 state that
+last point and nothing in the projection consumes it, which makes it the one
+free end-to-end check in the file.
+
 ### Adding an unstructured grid
 
 A GRIB message on template 3.101 names its grid by a UUID and says nothing
@@ -495,7 +542,9 @@ to the hash input is a correctness bug that shows up as stale frames.
 
 ## Testing rules
 
-- Geodesy changes need antimeridian **and** polar test cases. Both.
+- Geodesy changes need antimeridian **and** polar test cases. Both. A grid is
+  not exempt: a polar stereographic grid that contains the pole covers every
+  longitude, and a Mercator one can straddle the antimeridian.
 - Evaluation changes need the parity suite to pass — it is not optional and not
   slow enough to skip.
 - GRIB changes need round-trip plus external decode.

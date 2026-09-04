@@ -4521,6 +4521,7 @@ version = "0.1.0"
 dependencies = [
  "flate2",
  "hayro-jpeg2000",
+ "rayon",
  "rust-aec",
  "thiserror 2.0.20",
  "ve-core",

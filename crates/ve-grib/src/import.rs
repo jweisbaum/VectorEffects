@@ -16,6 +16,7 @@ use ve_core::regrid::{CellCentres, Neighbours, TargetGrid};
 
 use crate::decode::{self, Grid, Header, LatLonGrid, Message};
 use crate::error::{GribError, Result};
+use crate::resample;
 
 /// Which component of a vector field a message carries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -119,28 +120,12 @@ impl Canonical {
 /// canonical grid asking the file where each node sits.
 pub fn canonical_order(grid: &LatLonGrid, values: &[f32]) -> Vec<f32> {
     let (ni, nj) = (grid.ni as usize, grid.nj as usize);
+    let scan = grid.scan();
     let mut out = Vec::with_capacity(ni * nj);
-    let eastward = grid.i_eastward();
-    let northward = grid.j_northward();
-    let boustrophedon = grid.boustrophedon();
-
     for j in 0..nj {
         for i in 0..ni {
-            let index = if grid.j_consecutive() {
-                // Columns are consecutive: pick the column, then the row
-                // within it. Alternate columns run the other way if the
-                // boustrophedon flag is set.
-                let fi = if eastward { i } else { ni - 1 - i };
-                let reversed = northward != (boustrophedon && fi % 2 == 1);
-                let fj = if reversed { nj - 1 - j } else { j };
-                fi * nj + fj
-            } else {
-                let fj = if northward { nj - 1 - j } else { j };
-                let reversed = !eastward != (boustrophedon && fj % 2 == 1);
-                let fi = if reversed { ni - 1 - i } else { i };
-                fj * ni + fi
-            };
-            out.push(values.get(index).copied().unwrap_or(MISSING));
+            let at = scan.file_index(i, j, ni, nj);
+            out.push(values.get(at).copied().unwrap_or(MISSING));
         }
     }
     out
@@ -188,14 +173,17 @@ impl<'a> Resampling<'a> {
 /// The mean spacing of a file's grid in degrees, for choosing a project
 /// resolution (spec §4.8).
 ///
-/// A lat/lon file states it. An unstructured one does not state anything at
-/// all, so it comes from the cell count: a mesh of `n` roughly equal cells
+/// A lat/lon file states it. A projected one states its spacing in metres,
+/// which is a spacing in degrees of latitude wherever the grid sits. An
+/// unstructured one does not state anything at all, so it comes from the
+/// cell count: a mesh of `n` roughly equal cells
 /// covering the sphere has cells about `sqrt(4π/n)` radians across, which for
 /// ICON global's 2,949,120 cells is 0.118° — near enough 13 km, which is what
 /// DWD publishes.
 pub fn nominal_spacing(messages: &[Message]) -> Option<f64> {
     messages.iter().find_map(|m| match &m.header.grid {
         Grid::LatLon(grid) => Some(grid.di.min(grid.dj)),
+        Grid::Projected(grid) => Some(grid.nominal_spacing_deg()),
         Grid::Unstructured(grid) => {
             let cells = f64::from(grid.count);
             (cells > 0.0).then(|| (4.0 * std::f64::consts::PI / cells).sqrt().to_degrees())
@@ -290,12 +278,14 @@ pub fn sequences(
 
 /// Builds one frame's raster from a `u`/`v` pair.
 ///
-/// The two paths are the two kinds of grid: a lat/lon file is reordered into
-/// the canonical north-west-first layout it already implies, and an
-/// unstructured one is resampled onto the project's grid (spec §4.8). Either
-/// way what comes out is an ordinary [`RasterGrid`], which is what keeps the
-/// rest of the app — both kernels, the cache, the exporter — unaware that
-/// unstructured files exist at all.
+/// The three paths are the three kinds of grid. A lat/lon file is reordered
+/// into the canonical north-west-first layout it already implies, and keeps
+/// its own lattice: nothing is interpolated and nothing is lost. A projected
+/// one and an unstructured one have no lat/lon lattice to keep, so both are
+/// resampled onto the project's grid (spec §4.8). Either way what comes out
+/// is an ordinary [`RasterGrid`], which is what keeps the rest of the app —
+/// both kernels, the cache, the exporter — unaware that any other kind of
+/// grid exists at all.
 fn raster_of(
     u: &Message,
     v: &Message,
@@ -318,6 +308,17 @@ fn raster_of(
                 gu.dlat,
                 paired(&us, &vs),
             )
+        }
+        (Grid::Projected(pu), Grid::Projected(pv)) => {
+            if pu != pv {
+                return Err("u and v are on different projected grids".to_owned());
+            }
+            let Some(resampling) = resampling else {
+                return Err(
+                    "a projected grid needs a target resolution to resample onto".to_owned(),
+                );
+            };
+            resample::resample(pu, &u.values, &v.values, &resampling.target)
         }
         (Grid::Unstructured(mu), Grid::Unstructured(mv)) => {
             if mu != mv {

@@ -22,6 +22,7 @@
 //! Signed fields are sign-magnitude, not two's complement (see writer.rs).
 
 use crate::error::{GribError, Result};
+use crate::projection::{Earth, Projection, RotatedPole};
 use crate::writer::{ReferenceTime, from_i16_sm, from_i32_sm};
 
 /// Marks a grid node the bitmap left out.
@@ -29,6 +30,60 @@ use crate::writer::{ReferenceTime, from_i16_sm, from_i32_sm};
 /// The same sentinel `ve_core::raster` uses, restated here so this crate's
 /// output can be consumed without knowing about rasters.
 pub const MISSING: f32 = ve_core::raster::MISSING;
+
+/// Scanning mode flags: octet 72 of template 3.0, and its equivalent in
+/// every other template.
+///
+/// The same eight bits order the nodes of every grid this decoder reads, so
+/// one type walks all of them. Four of them matter, and each is a
+/// permutation of the same nodes rather than a different set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Scan(pub u8);
+
+impl Scan {
+    /// Whether consecutive points run in `+i`: west to east on a lat/lon
+    /// grid, up the plane's `x` axis on a projected one.
+    pub fn i_positive(self) -> bool {
+        self.0 & 0x80 == 0
+    }
+    /// Whether rows run in `+j`: south to north, or up the plane's `y` axis.
+    pub fn j_positive(self) -> bool {
+        self.0 & 0x40 != 0
+    }
+    /// Whether adjacent points in the file step in `j` rather than `i`.
+    pub fn j_consecutive(self) -> bool {
+        self.0 & 0x20 != 0
+    }
+    /// Whether alternate rows reverse direction.
+    pub fn boustrophedon(self) -> bool {
+        self.0 & 0x10 != 0
+    }
+
+    /// Where the file keeps the node at canonical `(i, j)`.
+    ///
+    /// Canonical is row-major, `i` increasing along the grid's first axis and
+    /// `j` running the *opposite* way to its second: north first on a lat/lon
+    /// grid, the top of the plane first on a projected one. That is the
+    /// layout `ve_core::raster` wants, and walking the canonical grid asking
+    /// the file where each node sits is what turns any of the sixteen
+    /// scanning modes into it.
+    pub fn file_index(self, i: usize, j: usize, ni: usize, nj: usize) -> usize {
+        if self.j_consecutive() {
+            // Columns are consecutive: pick the column, then the row within
+            // it. Alternate columns run the other way if the boustrophedon
+            // flag is set.
+            let fi = if self.i_positive() { i } else { ni - 1 - i };
+            let reversed = self.j_positive() != (self.boustrophedon() && fi % 2 == 1);
+            let fj = if reversed { nj - 1 - j } else { j };
+            fi * nj + fj
+        } else {
+            let fj = if self.j_positive() { nj - 1 - j } else { j };
+            let reversed = !self.i_positive() != (self.boustrophedon() && fj % 2 == 1);
+            let fi = if reversed { ni - 1 - i } else { i };
+            fj * ni + fi
+        }
+    }
+}
 
 /// A regular lat/lon grid, as the file describes it (template 3.0).
 ///
@@ -57,21 +112,25 @@ pub struct LatLonGrid {
 }
 
 impl LatLonGrid {
+    /// The scanning mode, which orders the values.
+    pub fn scan(&self) -> Scan {
+        Scan(self.scan)
+    }
     /// Whether consecutive points run west to east.
     pub fn i_eastward(&self) -> bool {
-        self.scan & 0x80 == 0
+        self.scan().i_positive()
     }
     /// Whether rows run south to north.
     pub fn j_northward(&self) -> bool {
-        self.scan & 0x40 != 0
+        self.scan().j_positive()
     }
     /// Whether adjacent points in the file step in `j` rather than `i`.
     pub fn j_consecutive(&self) -> bool {
-        self.scan & 0x20 != 0
+        self.scan().j_consecutive()
     }
     /// Whether alternate rows reverse direction.
     pub fn boustrophedon(&self) -> bool {
-        self.scan & 0x10 != 0
+        self.scan().boustrophedon()
     }
     /// Total nodes.
     pub fn point_count(&self) -> usize {
@@ -107,6 +166,113 @@ impl UnstructuredGrid {
     }
 }
 
+/// A regular lattice on a map projection, rather than on lat/lon.
+///
+/// Templates 3.10, 3.20 and 3.30 lay a grid out on the Mercator, polar
+/// stereographic and Lambert conformal planes; templates 3.1 and NCEP's
+/// 3.32769 lay one out on a sphere whose pole has been moved. All five are
+/// the same shape of thing — evenly spaced rows and columns in *some* plane —
+/// and this is that thing, with the map back to the earth attached.
+///
+/// The nodes are given in canonical order: `(i, j)` sits at
+/// `(x0 + i·dx, y0 - j·dy)`, with `j` running down the plane, whatever
+/// scanning mode the file used. That is the same convention
+/// [`Scan::file_index`] converts into.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ProjectedGrid {
+    /// Columns.
+    pub nx: u32,
+    /// Rows.
+    pub ny: u32,
+    /// Plane `x` of column 0.
+    pub x0: f64,
+    /// Plane `y` of row 0, which is the highest row in the plane.
+    pub y0: f64,
+    /// Column spacing in the plane, positive.
+    pub dx: f64,
+    /// Row spacing in the plane, positive.
+    pub dy: f64,
+    /// Scanning mode flags, which order the file's values.
+    pub scan: u8,
+    /// The earth the projection is defined on (code table 3.2).
+    pub earth: Earth,
+    /// The map between the plane and the earth.
+    pub projection: Projection,
+    /// Whether `u` and `v` are resolved along the grid's own axes rather
+    /// than along east and north (flag table 3.5, bit 5).
+    ///
+    /// Most regional models set this, and reading such a message as if it
+    /// were earth-resolved is a silent error of tens of degrees.
+    pub grid_relative: bool,
+}
+
+impl ProjectedGrid {
+    /// Total nodes.
+    pub fn point_count(&self) -> usize {
+        self.nx as usize * self.ny as usize
+    }
+
+    /// The scanning mode, which orders the values.
+    pub fn scan(&self) -> Scan {
+        Scan(self.scan)
+    }
+
+    /// The projection with its constants worked out, for evaluating in bulk.
+    ///
+    /// A resample walks millions of nodes; rebuilding a Lambert cone at each
+    /// one is most of the run. [`Self::locate`] and [`Self::position`] are
+    /// the convenient forms, for a point or two.
+    pub fn prepared(&self) -> crate::projection::Prepared {
+        self.projection.prepared(&self.earth)
+    }
+
+    /// The plane position of the node at canonical `(i, j)`.
+    pub fn node(&self, i: u32, j: u32) -> (f64, f64) {
+        (
+            self.x0 + f64::from(i) * self.dx,
+            self.y0 - f64::from(j) * self.dy,
+        )
+    }
+
+    /// Where a position on the earth falls, in fractional node indices.
+    pub fn locate(&self, lat: f64, lon: f64) -> (f64, f64) {
+        self.locate_with(&self.prepared(), lat, lon)
+    }
+
+    /// [`Self::locate`], with the projection already prepared.
+    pub fn locate_with(
+        &self,
+        prepared: &crate::projection::Prepared,
+        lat: f64,
+        lon: f64,
+    ) -> (f64, f64) {
+        let (x, y) = prepared.forward(lat, lon);
+        ((x - self.x0) / self.dx, (self.y0 - y) / self.dy)
+    }
+
+    /// Where the node at canonical `(i, j)` is on the earth.
+    pub fn position(&self, i: u32, j: u32) -> (f64, f64) {
+        let (x, y) = self.node(i, j);
+        self.projection.inverse(&self.earth, x, y)
+    }
+
+    /// The grid's spacing in degrees of latitude, which is what choosing a
+    /// project resolution compares against (spec §4.8).
+    ///
+    /// The rotated grids already state theirs in degrees. The three map
+    /// projections state metres, and a degree of latitude is a degree of
+    /// latitude wherever the grid happens to be.
+    pub fn nominal_spacing_deg(&self) -> f64 {
+        match self.projection {
+            Projection::Rotated { .. } => self.dx.min(self.dy),
+            _ => {
+                let per_degree = std::f64::consts::PI * self.earth.a / 180.0;
+                self.dx.min(self.dy) / per_degree
+            }
+        }
+    }
+}
+
 /// The grid a message's values sit on.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Grid {
@@ -115,6 +281,9 @@ pub enum Grid {
     /// An unstructured grid: the values are a bare list, and where each one
     /// sits has to come from the grid's own definition (§4.8).
     Unstructured(UnstructuredGrid),
+    /// A lattice on a map projection: the values carry their geometry too,
+    /// but only through a projection (§4.8).
+    Projected(ProjectedGrid),
 }
 
 impl Grid {
@@ -123,6 +292,7 @@ impl Grid {
         match self {
             Self::LatLon(grid) => grid.point_count(),
             Self::Unstructured(grid) => grid.count as usize,
+            Self::Projected(grid) => grid.point_count(),
         }
     }
 
@@ -130,7 +300,7 @@ impl Grid {
     pub fn lat_lon(&self) -> Option<&LatLonGrid> {
         match self {
             Self::LatLon(grid) => Some(grid),
-            Self::Unstructured(_) => None,
+            _ => None,
         }
     }
 
@@ -138,7 +308,15 @@ impl Grid {
     pub fn unstructured(&self) -> Option<&UnstructuredGrid> {
         match self {
             Self::Unstructured(grid) => Some(grid),
-            Self::LatLon(_) => None,
+            _ => None,
+        }
+    }
+
+    /// The projected lattice, if this is one.
+    pub fn projected(&self) -> Option<&ProjectedGrid> {
+        match self {
+            Self::Projected(grid) => Some(grid),
+            _ => None,
         }
     }
 }
@@ -401,8 +579,13 @@ fn sections(message: &[u8]) -> Result<Sections<'_>> {
     })
 }
 
-/// Section 3, templates 3.0 and 3.101.
-fn grid_of(s3: &[u8]) -> Result<Grid> {
+/// Section 3: which template, and then that template.
+///
+/// Public because a grid definition is the one part of a message worth
+/// reading on its own — it is a few dozen octets, it is what tells a caller
+/// whether a file can be placed on the earth at all, and it is what the
+/// grid tests assert against.
+pub fn grid_of(s3: &[u8]) -> Result<Grid> {
     // Octet 6: source of grid definition. Anything but 0 means the grid is not
     // described by a template at all.
     if byte(s3, 5)? != 0 {
@@ -413,28 +596,47 @@ fn grid_of(s3: &[u8]) -> Result<Grid> {
     if byte(s3, 10)? != 0 {
         return Err(unsupported("a thinned (quasi-regular) grid"));
     }
-    let template = u16_at(s3, 12)?;
-    if template == 101 {
-        return unstructured_of(s3).map(Grid::Unstructured);
+    match u16_at(s3, 12)? {
+        0 => lat_lon_of(s3).map(Grid::LatLon),
+        101 => unstructured_of(s3).map(Grid::Unstructured),
+        template @ (1 | 10 | 20 | 30 | 32769) => projected_of(s3, template).map(Grid::Projected),
+        40 => Err(unsupported("a Gaussian grid (template 3.40)")),
+        other => Err(unsupported(format!("grid definition template 3.{other}"))),
     }
-    if template != 0 {
-        return Err(unsupported(match template {
-            40 => "a Gaussian grid (template 3.40)".to_owned(),
-            1 => "a rotated lat/lon grid (template 3.1)".to_owned(),
-            other => format!("grid definition template 3.{other}"),
-        }));
-    }
+}
 
-    // Octets 39-46: basic angle and its subdivisions. Zero or missing means
-    // coordinates are in micro-degrees.
-    let basic = u32_at(s3, 38)?;
-    let subdivisions = u32_at(s3, 42)?;
-    let unit = if basic == 0 || basic == u32::MAX || subdivisions == 0 || subdivisions == u32::MAX {
-        1e-6
-    } else {
-        f64::from(basic) / f64::from(subdivisions)
-    };
+/// The angle unit templates 3.0, 3.1 and 3.32769 state their coordinates in.
+///
+/// Zero or missing in either field means micro-degrees, which is what every
+/// file this decoder has met uses.
+fn angle_unit(s3: &[u8], basic_at: usize) -> Result<f64> {
+    let basic = u32_at(s3, basic_at)?;
+    let subdivisions = u32_at(s3, basic_at + 4)?;
+    Ok(
+        if basic == 0 || basic == u32::MAX || subdivisions == 0 || subdivisions == u32::MAX {
+            1e-6
+        } else {
+            f64::from(basic) / f64::from(subdivisions)
+        },
+    )
+}
 
+/// Code table 3.2, octets 15-30: the earth every template but 3.101 names the
+/// same way.
+fn earth_of(s3: &[u8]) -> Result<Earth> {
+    Earth::of_code(
+        byte(s3, 14)?,
+        byte(s3, 15)?,
+        u32_at(s3, 16)?,
+        byte(s3, 20)?,
+        u32_at(s3, 21)?,
+        byte(s3, 25)?,
+        u32_at(s3, 26)?,
+    )
+}
+
+/// Octets 31-38: the two counts, checked against what section 3 declared.
+fn extent_of(s3: &[u8]) -> Result<(u32, u32)> {
     let ni = u32_at(s3, 30)?;
     let nj = u32_at(s3, 34)?;
     if ni == 0 || nj == 0 || ni == u32::MAX || nj == u32::MAX {
@@ -446,6 +648,14 @@ fn grid_of(s3: &[u8]) -> Result<Grid> {
             "grid declares {declared} points but is {ni} x {nj}"
         )));
     }
+    Ok((ni, nj))
+}
+
+/// Section 3, template 3.0.
+fn lat_lon_of(s3: &[u8]) -> Result<LatLonGrid> {
+    // Octets 39-46: basic angle and its subdivisions.
+    let unit = angle_unit(s3, 38)?;
+    let (ni, nj) = extent_of(s3)?;
 
     let la1 = f64::from(i32_sm_at(s3, 46)?) * unit;
     let lo1 = f64::from(i32_sm_at(s3, 50)?) * unit;
@@ -481,7 +691,7 @@ fn grid_of(s3: &[u8]) -> Result<Grid> {
         return Err(malformed(format!("grid latitudes {la1} to {la2}")));
     }
 
-    Ok(Grid::LatLon(LatLonGrid {
+    Ok(LatLonGrid {
         ni,
         nj,
         la1,
@@ -491,7 +701,257 @@ fn grid_of(s3: &[u8]) -> Result<Grid> {
         di,
         dj,
         scan,
-    }))
+    })
+}
+
+/// Section 3, templates 3.1, 3.10, 3.20, 3.30 and NCEP's 3.32769.
+///
+/// Every one of them says the same five things — how many rows and columns,
+/// where the first node is, how far apart the nodes are, which way the scan
+/// runs, and whether `u`/`v` are resolved along the grid — and then names a
+/// projection. What differs is the octets, and whether "where the first node
+/// is" is stated on the earth or already in the projection's own plane.
+///
+/// Octet numbers below are the 1-based WMO ones; `byte` and friends index
+/// from 0, so octet `n` is read at `n - 1`.
+fn projected_of(s3: &[u8], template: u16) -> Result<ProjectedGrid> {
+    let (nx, ny) = extent_of(s3)?;
+    let earth = earth_of(s3)?;
+
+    // Where the three map projections keep the fields the two rotated ones
+    // keep eight octets later, because those two carry a basic angle and its
+    // subdivisions and the map projections do not.
+    let (flags, scan) = match template {
+        1 | 32769 => (byte(s3, 54)?, byte(s3, 71)?),
+        10 => (byte(s3, 46)?, byte(s3, 59)?),
+        _ => (byte(s3, 46)?, byte(s3, 64)?),
+    };
+    // Flag table 3.5, bit 5: components along the grid's axes, not east and
+    // north.
+    let grid_relative = flags & 0x08 != 0;
+
+    // Each arm produces the projection, the plane position of the file's
+    // *first* node, and the plane increments.
+    let (projection, x1, y1, dx, dy) = match template {
+        1 | 32769 => rotated_of(s3, template, nx, ny, Scan(scan), &earth)?,
+        10 => {
+            // Octets 39-46: the first point, in micro-degrees; 48-51 the
+            // latitude the grid length is true at; 65-72 the increments, in
+            // millimetres.
+            let la1 = f64::from(i32_sm_at(s3, 38)?) * 1e-6;
+            let lo1 = f64::from(i32_sm_at(s3, 42)?) * 1e-6;
+            let lad = f64::from(i32_sm_at(s3, 47)?) * 1e-6;
+            let la2 = f64::from(i32_sm_at(s3, 51)?) * 1e-6;
+            let lo2 = f64::from(i32_sm_at(s3, 55)?) * 1e-6;
+            // Octets 61-64 are the angle between the i axis and the equator.
+            // Every file that sets it — NCEP's Hawaii and Puerto Rico blend
+            // grids write 200° and 295° — is a plain Mercator all the same:
+            // their stated corners agree with an unrotated grid to the width
+            // of one node and disagree wildly with a rotated one. So it is
+            // read and ignored, as ecCodes and wgrib2 both do, rather than
+            // trusted into placing the field somewhere it is not.
+            let projection = Projection::Mercator { lad, lon_ref: lo1 }.checked(&earth)?;
+            let (x1, y1) = projection.forward(&earth, la1, lo1);
+            // Octets 65-72 hold the increments in millimetres, but octet 47's
+            // bits 3 and 4 say whether they are *given*, and half of NCEP's
+            // Mercator grids say they are not. Those files mean their two
+            // corners, and their stated increment misses the far corner by a
+            // couple of cells; the ones that do set the bits mean the
+            // increment, and their corner is the approximate one. Believing
+            // whichever the file says it gave is what gets both right.
+            let (x2, y2) = projection.forward(&earth, la2, lo2);
+            let dx = span_or_given(flags & 0x20 != 0, u32_at(s3, 64)?, x1, x2, nx)?;
+            let dy = span_or_given(flags & 0x10 != 0, u32_at(s3, 68)?, y1, y2, ny)?;
+            (projection, x1, y1, dx, dy)
+        }
+        20 | 30 => {
+            // Octets 39-46 the first point, 48-51 LaD, 52-55 LoV, 56-63 the
+            // increments in millimetres, 64 the projection centre.
+            let la1 = f64::from(i32_sm_at(s3, 38)?) * 1e-6;
+            let lo1 = f64::from(i32_sm_at(s3, 42)?) * 1e-6;
+            let lad = f64::from(i32_sm_at(s3, 47)?) * 1e-6;
+            let lov = f64::from(i32_sm_at(s3, 51)?) * 1e-6;
+            let dx = f64::from(u32_at(s3, 55)?) * 1e-3;
+            let dy = f64::from(u32_at(s3, 59)?) * 1e-3;
+            let centre = byte(s3, 63)?;
+            // Flag table 3.5 again: bit 1 picks the pole the plane is
+            // tangent at, bit 2 asks for both at once.
+            if centre & 0x40 != 0 {
+                return Err(unsupported("a bi-polar projection"));
+            }
+            let north = centre & 0x80 == 0;
+            let projection = if template == 20 {
+                Projection::PolarStereographic { lov, lad, north }
+            } else {
+                // Octets 66-73: the two standard parallels, which are what
+                // fix the cone. LaD, the latitude the grid length is true
+                // at, plays no part in the projection — the increments are
+                // plane distances — and the two disagree in real files.
+                Projection::LambertConformal {
+                    lov,
+                    latin1: f64::from(i32_sm_at(s3, 65)?) * 1e-6,
+                    latin2: f64::from(i32_sm_at(s3, 69)?) * 1e-6,
+                    north,
+                }
+            }
+            .checked(&earth)?;
+            let (x1, y1) = projection.forward(&earth, la1, lo1);
+            (projection, x1, y1, dx, dy)
+        }
+        _ => unreachable!("projected_of is only called for the templates above"),
+    };
+
+    if !(dx > 0.0 && dy > 0.0) || !dx.is_finite() || !dy.is_finite() {
+        return Err(malformed(format!("grid increments {dx} x {dy}")));
+    }
+    if !x1.is_finite() || !y1.is_finite() {
+        return Err(malformed(
+            "a grid whose first point does not land on its own projection".to_owned(),
+        ));
+    }
+
+    // The file's first node is a corner; which corner is what the scan says.
+    // Canonical order starts at the low `x`, high `y` one.
+    let scan = Scan(scan);
+    let x0 = if scan.i_positive() {
+        x1
+    } else {
+        x1 - f64::from(nx - 1) * dx
+    };
+    let y0 = if scan.j_positive() {
+        y1 + f64::from(ny - 1) * dy
+    } else {
+        y1
+    };
+
+    Ok(ProjectedGrid {
+        nx,
+        ny,
+        x0,
+        y0,
+        dx,
+        dy,
+        scan: scan.0,
+        earth,
+        projection,
+        grid_relative,
+    })
+}
+
+/// An increment: the one the file stated, or the one its two corners imply.
+///
+/// The stated one is in millimetres, which is the unit the three map
+/// projections use for a plane distance.
+fn span_or_given(given: bool, stated: u32, from: f64, to: f64, count: u32) -> Result<f64> {
+    if given || count < 2 {
+        return Ok(f64::from(stated) * 1e-3);
+    }
+    let derived = (to - from).abs() / f64::from(count - 1);
+    Ok(if derived > 0.0 && derived.is_finite() {
+        derived
+    } else {
+        f64::from(stated) * 1e-3
+    })
+}
+
+/// The two rotated lat/lon templates, which name the same rotation two ways.
+///
+/// Template 3.1 is the WMO one: it states the **southern pole of the
+/// projection**, and its first and last points are already in rotated
+/// coordinates. NCEP's 3.32769 states the **centre of the grid** instead —
+/// the point rotated `(0, 0)` — and gives its first and last points as true
+/// latitudes and longitudes, which have to be rotated before they mean an
+/// index.
+///
+/// The plane here is the rotated sphere itself, measured in its own degrees,
+/// so `x` is periodic and is taken from the grid's own first meridian: a grid
+/// that straddles the rotated antimeridian then has no seam in it.
+fn rotated_of(
+    s3: &[u8],
+    template: u16,
+    nx: u32,
+    ny: u32,
+    scan: Scan,
+    earth: &Earth,
+) -> Result<(Projection, f64, f64, f64, f64)> {
+    let unit = angle_unit(s3, 38)?;
+    let la1 = f64::from(i32_sm_at(s3, 46)?) * unit;
+    let lo1 = f64::from(i32_sm_at(s3, 50)?) * unit;
+    let la2 = f64::from(i32_sm_at(s3, 55)?) * unit;
+    let lo2 = f64::from(i32_sm_at(s3, 59)?) * unit;
+
+    if template == 32769 {
+        // Octets 56-63 are the centre of the grid and 73-80 its last point,
+        // both as true coordinates.
+        let pole = RotatedPole::from_centre(la2, lo2);
+        let last_lat = f64::from(i32_sm_at(s3, 72)?) * unit;
+        let last_lon = f64::from(i32_sm_at(s3, 76)?) * unit;
+        let (x1, y1) = pole.to_rotated(la1, lo1);
+        let (x2, y2) = pole.to_rotated(last_lat, last_lon);
+        if nx < 2 || ny < 2 {
+            return Err(malformed("a rotated grid of one row or column"));
+        }
+        // The increments are *derived* from the two corners rather than read
+        // from octets 64-71, which NCEP writes in no unit this decoder can
+        // identify: for the one grid that uses this template they are 121 813
+        // where the corners say 121 833, and the corners are unambiguous —
+        // they are true coordinates, and they put the first and last nodes
+        // symmetrically about the stated centre to nine digits.
+        let dx = crate::projection::wrap180(x2 - x1).abs() / f64::from(nx - 1);
+        let dy = (y2 - y1).abs() / f64::from(ny - 1);
+        let projection = Projection::Rotated { pole, lon_ref: x1 }.checked(earth)?;
+        return Ok((projection, 0.0, y1, dx, dy));
+    }
+
+    // Template 3.1. Octets 73-84: the southern pole, and the angle of
+    // rotation about it.
+    let lat_sp = f64::from(i32_sm_at(s3, 72)?) * unit;
+    let lon_sp = f64::from(i32_sm_at(s3, 76)?) * unit;
+    let angle = f64::from(i32_sm_at(s3, 80)?) * unit;
+    if angle != 0.0 {
+        return Err(unsupported(format!(
+            "a rotated grid turned {angle}° about its own pole"
+        )));
+    }
+    if !(-90.0..=90.0).contains(&lat_sp) {
+        return Err(malformed(format!(
+            "a rotated grid whose southern pole is at latitude {lat_sp}"
+        )));
+    }
+    let pole = RotatedPole::from_south_pole(lat_sp, lon_sp);
+
+    // Octet 55, bits 3 and 4: whether the increments are given. When they are
+    // not they follow from the corners, exactly as on a plain lat/lon grid.
+    let flags = byte(s3, 54)?;
+    let dx = if flags & 0x20 != 0 {
+        f64::from(u32_at(s3, 63)?) * unit
+    } else if nx > 1 {
+        let span = (lo2 - lo1).rem_euclid(360.0);
+        let span = if scan.i_positive() {
+            span
+        } else {
+            360.0 - span
+        };
+        span / f64::from(nx - 1)
+    } else {
+        0.0
+    };
+    let dy = if flags & 0x10 != 0 {
+        f64::from(u32_at(s3, 67)?) * unit
+    } else if ny > 1 {
+        (la2 - la1).abs() / f64::from(ny - 1)
+    } else {
+        0.0
+    };
+    if !(-90.0..=90.0).contains(&la1) || !(-90.0..=90.0).contains(&la2) {
+        return Err(malformed(format!(
+            "a rotated grid spanning rotated latitudes {la1} to {la2}"
+        )));
+    }
+    // The rotated plane is measured in its own degrees, so the shape of the
+    // earth plays no part in it; it is carried along for the grid to keep.
+    let projection = Projection::Rotated { pole, lon_ref: lo1 }.checked(earth)?;
+    Ok((projection, 0.0, la1, dx, dy))
 }
 
 /// Template 3.101, the general unstructured grid.

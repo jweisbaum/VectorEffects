@@ -36,7 +36,12 @@ steps, and exports GRIB2.
 
 ### 1.4 Out of scope (v1)
 
-- Regional/sub-global grids, rotated or non-lat/lon grids.
+- Regional/sub-global, rotated or non-lat/lon grids **as the project's own
+  grid**. What a project paints on and exports is always a global regular
+  lat/lon lattice at one of the four resolutions. Reading such a grid is a
+  different matter and is in scope: §4.8's import decodes every grid
+  definition the forecast centres ship and resamples the ones that are not
+  lat/lon onto the project's lattice.
 - GRIB1, NetCDF, or any other output format.
 - Importing real forecast data *as objects*. A GRIB2 file can be imported as
   a layer (§4.8), but its samples are a lattice, not geometry: nothing traces
@@ -549,13 +554,17 @@ binding, so a scene with more than 128 MB of lattice (two global 0.1° grids)
 falls back to the CPU like a clone-stamp scene does. The render cache keys on
 the lattice's content hash and its place in the stack (§7.10).
 
-**Decoder.** Pure Rust, in `ve-grib`: regular lat/lon grids (template 3.0) in
-any scanning mode, the common product templates, and **every packing the
-forecast centres ship** — simple (5.0), complex with and without spatial
+**Decoder.** Pure Rust, in `ve-grib`: **every grid definition the forecast
+centres put a model on** — regular lat/lon (3.0), rotated lat/lon (3.1),
+Mercator (3.10), polar stereographic (3.20), Lambert conformal (3.30),
+NCEP's rotated Arakawa non-E staggered grid (3.32769) and the unstructured
+one (3.101) — in any scanning mode, the common product templates, and
+**every packing they ship** — simple (5.0), complex with and without spatial
 differencing (5.2, 5.3), JPEG 2000 (5.40) and CCSDS adaptive entropy coding
-(5.42) — with bitmaps throughout. PNG packing (5.41), Gaussian, thinned and
-rotated grids, and GRIB edition 1 are refused by name, as is a CCSDS stream
-of signed samples, which the shared 5.0 scaling has no meaning for.
+(5.42) — with bitmaps throughout. PNG packing (5.41), Gaussian and thinned
+grids, a rotated grid turned about its own pole, and GRIB edition 1 are
+refused by name, as is a CCSDS stream of signed samples, which the shared 5.0
+scaling has no meaning for.
 
 The section walking and the three integer packings are hand-written; the two
 compressed ones are `hayro-jpeg2000` and `rust-aec`. Both are pure Rust with
@@ -563,6 +572,60 @@ no C library behind them, so invariant 5 holds — no external decoder, no
 network — and the three-platform build needs nothing installed. Every one of
 them yields the same packed integers 5.0 stores in the clear, so one scaling
 formula serves all five.
+
+**Projected grids.** Almost every regional model runs on a projection rather
+than on lat/lon: HRRR and the air-quality models on Lambert conformal, the
+Alaska and arctic grids on polar stereographic, the Hawaii and Puerto Rico
+ones on Mercator, HRDPS and RAP on a sphere whose pole has been moved. Each
+is a regular lattice — evenly spaced rows and columns — but its rows are not
+parallels and its columns are not meridians, so where a node sits comes from
+inverting a projection. The formulas are Snyder's, ellipsoidal, and reduce to
+the spherical ones exactly when the eccentricity is zero, so the shape of
+earth a file names (code table 3.2) is honoured rather than assumed: four
+messages in a 1,653-message corpus are on WGS 84 and the rest are on spheres
+of four different radii — only one of which is the 6 371 229 m the app itself
+works on (§3.1).
+
+**A projected field is resampled onto the project's own grid at import**, for
+the same reason an unstructured one is: nothing downstream speaks anything
+but a lat/lon lattice. It is resampled onto **the span of that grid it
+covers**, not onto the globe — a 2.5 km regional model reaches a few percent
+of the earth, and a global 0.1° lattice of it would be 52 MB of mostly
+nothing. The window's nodes *are* the project's nodes, so an imported
+regional field lines up with what the project exports; outside it the layer
+has no value, which is what a regional grid has always meant here. The value
+at a node is a bilinear point sample of the four source nodes around it, a
+missing corner left out of the blend, exactly as `RasterGrid::sample` treats
+the lattice it produces.
+
+**Components resolved along the grid are rotated onto east and north, at the
+source.** GRIB flag table 3.5 lets a message resolve `u` and `v` along the
+grid's own axes rather than along east and north, and most regional models
+do. Reading those as eastward and northward is not a small error: it is 30°
+or more across a Lambert CONUS grid, and it looks entirely plausible on
+screen. The angle is the grid convergence — `n·(λ - λ₀)` for the conic and
+stereographic projections, the angle between the two poles' directions for a
+rotated one, zero for Mercator. Each **source** node is rotated before the
+blend, not each target node after it: near a stereographic grid's pole the
+convergence turns through a full circle in a few cells, and an interpolated
+grid-relative vector there means nothing at all.
+
+A grid that encircles a pole covers every longitude, and no walk of its
+boundary can discover that — so the pole is projected into the grid's own
+plane and the grid asked whether it holds it. Such a field comes out wrapping
+the earth and reaching the pole itself, rather than stopping at wherever the
+boundary walk happened to start.
+
+Two departures from what the octets literally say, both forced by real files
+and both noted where they are made. NCEP's template 3.32769 states
+increments in no unit that reproduces its own corners; since it also states
+its first point, its last point and its centre as true coordinates, the
+increments are derived from those instead, and the two corners then sit
+symmetrically about the stated centre to nine digits. And the Mercator
+orientation field, which two of NCEP's blend grids fill with 200° and 295°,
+is read and ignored: the corners those files state are where an unrotated
+grid puts them to a few parts per million of their own spacing. ecCodes and
+wgrib2 make the same two calls.
 
 **Unstructured grids.** Not every model runs on a lat/lon grid. ICON's is
 icosahedral: 2,949,120 cells of roughly equal area, and a message
@@ -601,7 +664,14 @@ longer matches the project's grid is dropped on open rather than trusted.
 For a file that states no spacing, the resolution a new project gets comes
 from the mesh itself: `n` roughly equal cells over the sphere are about
 `sqrt(4π/n)` radians across, which for ICON global is 0.118° and picks the
-0.1° grid.
+0.1° grid. A projected file states metres, and a metre is a fixed fraction of
+a degree of latitude wherever the grid is, so it reaches the same answer.
+
+A regional model is usually finer than the finest grid the app offers, and
+resampling it onto that grid is a real loss: a 2.5 km field on a 0.1° lattice
+keeps about one node in four. That is the price of one lattice for the whole
+app, the same price §4.8 already pays for ICON, and it is paid once at import
+rather than at every frame.
 
 A message that cannot be read is skipped and logged rather than failing the
 file; a file with no usable `u`/`v` pair is refused with the reasons.
