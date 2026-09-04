@@ -154,8 +154,13 @@ backend palette: that palette describes vector-creation tools, and one of these
 makes no object while the other makes a shape fill and borrows its bar. Fifteen
 tests over the region geometry, which is where the seam and the poles are.
 
-**The fill and the capture are the rest of M14**, and the capture is the large
-half: a coverage bit through the CPU composite, the `.vecap` container, a patch
+The **fill tool** followed in the same shape: a region already *is* one of the
+three things the shape fill draws, so a rectangle region is its rectangle
+preset, a circle its circle and a lasso its freehand polygon. No new gesture,
+no new shape, no backend change at all — which is what keeps the object a shape
+fill and the seven shared-rule tests covering it unchanged.
+
+**The capture is the rest of M14**, and the large half: a coverage bit through the CPU composite, the `.vecap` container, a patch
 object both kernels sample, and the rewording of invariants 1 and 2 that D52
 settled.
 

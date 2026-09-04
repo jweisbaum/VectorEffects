@@ -92,6 +92,7 @@ import {
   type ToolState,
 } from "./tools";
 import {
+  fillGesture,
   type Region,
   type RegionMode,
   regionFromDrag,
@@ -2070,6 +2071,26 @@ export default function MapView({
         .catch((err: unknown) =>
           void api.frontendLog("error", `placing ${picking.property} failed: ${String(err)}`),
         );
+      return;
+    }
+
+    // The fill tool turns the current region into a shape fill (spec.md 8.2,
+    // M14). One click, one object: the region already *is* one of the three
+    // things the shape fill draws, so the gesture is the shape fill's own and
+    // the object is a shape fill and nothing else.
+    if (tool === FILL) {
+      if (region === null || !schema) return;
+      const { gesture, shapeSource } = fillGesture(region);
+      const state: ToolState = {
+        // A region is map space, so what is made from it is a projected stamp
+        // (D28, D55) — which is what the px unit selects.
+        unit: "px",
+        values: {
+          ...toolState.values,
+          ShapeSource: { kind: "choice", index: shapeSource },
+        },
+      };
+      void commitGesture(gesture, state, schema, "shape_fill");
       return;
     }
 

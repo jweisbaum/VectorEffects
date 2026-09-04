@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { Region } from "./region";
 import {
+  fillGesture,
   regionBounds,
   regionContains,
   regionFromDrag,
@@ -172,5 +173,41 @@ describe("regionContains", () => {
       expect(regionContains(region, 0, lat + 4.9)).toBe(true);
       expect(regionContains(region, 0, lat + 5.1)).toBe(false);
     }
+  });
+});
+
+describe("fillGesture", () => {
+  it("makes a rectangle region the shape fill's rectangle preset", () => {
+    const { gesture, shapeSource } = fillGesture({
+      kind: "rect",
+      centre: [10, 20],
+      halfWidthDeg: 3,
+      halfHeightDeg: 2,
+    });
+    expect(shapeSource).toBe(2);
+    expect(gesture).toEqual({ kind: "extent", centre: [10, 20], rim: [13, 22] });
+  });
+
+  it("makes a circle region its circle preset, rim due north", () => {
+    // Due north keeps the two half-extents equal, which is what the backend's
+    // hypot reads back as the radius.
+    const { gesture, shapeSource } = fillGesture({
+      kind: "disc",
+      centre: [0, 45],
+      radiusDeg: 4,
+    });
+    expect(shapeSource).toBe(3);
+    expect(gesture).toEqual({ kind: "extent", centre: [0, 45], rim: [0, 49] });
+  });
+
+  it("makes a lasso its freehand polygon", () => {
+    const points: Array<[number, number]> = [
+      [0, 0],
+      [1, 0],
+      [1, 1],
+    ];
+    const { gesture, shapeSource } = fillGesture({ kind: "polygon", points });
+    expect(shapeSource).toBe(0);
+    expect(gesture).toEqual({ kind: "ring", points });
   });
 });

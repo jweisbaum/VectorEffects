@@ -204,3 +204,59 @@ export function regionContains(region: Region, lon: number, lat: number): boolea
     }
   }
 }
+
+/**
+ * The gesture and shape option that make a shape fill of a region (M14).
+ *
+ * The fill tool needs no gesture of its own and the backend needs no new
+ * shape: a region is already one of the three things the shape fill draws, so
+ * a rectangle region is its rectangle preset, a circle its circle, and a lasso
+ * its freehand polygon. That is what keeps the object a shape fill and nothing
+ * else, and the seven shared-rule tests covering it with no new case.
+ *
+ * The `rim` of an extent gesture is a point on the shape's edge, and the
+ * backend measures the drag in *map space* for a projected stamp — which is
+ * what a region is — so the offsets here are plain degrees.
+ */
+export function fillGesture(region: Region): {
+  gesture: RegionGesture;
+  /** The index `ShapeSource` must hold: 0 polygon, 2 rectangle, 3 circle. */
+  shapeSource: number;
+} {
+  switch (region.kind) {
+    case "rect":
+      return {
+        gesture: {
+          kind: "extent",
+          centre: [region.centre[0], region.centre[1]],
+          rim: [
+            region.centre[0] + region.halfWidthDeg,
+            region.centre[1] + region.halfHeightDeg,
+          ],
+        },
+        shapeSource: 2,
+      };
+    case "disc":
+      // A circle's rim is any point at the radius; due north keeps the two
+      // half-extents equal, which is what the backend's hypot then reads back
+      // as the radius.
+      return {
+        gesture: {
+          kind: "extent",
+          centre: [region.centre[0], region.centre[1]],
+          rim: [region.centre[0], region.centre[1] + region.radiusDeg],
+        },
+        shapeSource: 3,
+      };
+    case "polygon":
+      return {
+        gesture: { kind: "ring", points: region.points.map((p) => [p[0], p[1]]) },
+        shapeSource: 0,
+      };
+  }
+}
+
+/** The two gesture shapes a region can become. */
+export type RegionGesture =
+  | { kind: "extent"; centre: [number, number]; rim: [number, number] }
+  | { kind: "ring"; points: Array<[number, number]> };
