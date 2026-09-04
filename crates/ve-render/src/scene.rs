@@ -594,11 +594,15 @@ pub fn covers(object: &FlatObject, position: LonLat) -> bool {
 /// objects — at the steps the file has a message for, and at no others: a step
 /// whose time the file says nothing about has no imported field at all, and
 /// what was painted on the layer stands alone there (spec.md 4.8).
+///
+/// Which frame that is can be the user's choice rather than the file's, where
+/// a step carries an override (M20). What arrives here either way is a frame
+/// the *file* holds, so nothing below this line — the cache key, the
+/// readiness probe, either kernel — needs to know the choice was made.
 pub fn flatten(project: &Project, step: u32) -> Scene {
-    let hour = f64::from(project.settings.forecast_hour(step));
     let mut scene = Scene::default();
     for layer in project.layers.iter().filter(|l| l.visible) {
-        if let Some(frame) = layer.raster.as_ref().and_then(|s| s.frame_at(hour)) {
+        if let Some(frame) = layer.imported_frame(&project.settings, step) {
             scene.rasters.push(FlatRaster {
                 z: scene.objects.len(),
                 grid: Arc::clone(&frame.grid),

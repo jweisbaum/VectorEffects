@@ -198,6 +198,11 @@ pub struct Session {
     /// Objects held for pasting. Survives closing and opening a project, the
     /// way a system clipboard does.
     pub clipboard: ve_core::clipboard::Clipboard,
+    /// Imported frames held for pasting, with the layer they came from
+    /// (spec.md 4.8, M20). Separate from `clipboard` because the two are
+    /// different things to paste and the timeline decides which gesture the
+    /// key press was.
+    pub frames: crate::frames::FrameClipboard,
     /// The transform drag in progress, if any.
     pub transform: Option<TransformGesture>,
     /// Counter behind [`Session::next_gesture_id`].

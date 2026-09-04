@@ -10,6 +10,7 @@ pub mod document;
 pub mod edit;
 pub mod error;
 pub mod export;
+pub mod frames;
 pub mod import;
 pub mod logging;
 pub mod merge;
@@ -114,6 +115,10 @@ pub fn run() -> anyhow::Result<()> {
             document::cut_objects,
             document::paste_objects,
             document::clipboard_state,
+            frames::copy_grib_frames,
+            frames::paste_grib_frames,
+            frames::delete_grib_frames,
+            frames::frame_clipboard_state,
             document::history_view,
             document::jump_to_history,
             transform::object_outlines,

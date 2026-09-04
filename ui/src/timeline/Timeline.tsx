@@ -37,6 +37,7 @@ import {
   pointsOf,
   polyline,
 } from "./graph";
+import { markKind, runBetween } from "./frames";
 import {
   classify,
   draggedStep,
@@ -125,6 +126,7 @@ export default function Timeline({
   autoKey,
   onAutoKey,
   onChanged,
+  onFramesSelected,
 }: {
   project: ProjectSummary;
   step: number;
@@ -142,6 +144,11 @@ export default function Timeline({
   autoKey: boolean;
   onAutoKey: (on: boolean) => void;
   onChanged: (project: ProjectSummary) => void;
+  /**
+   * Whether a GRIB frame is selected here, so the app's own copy and paste
+   * stand down (spec.md 4.8, M20).
+   */
+  onFramesSelected: (active: boolean) => void;
 }) {
   const last = Math.max(0, project.step_count - 1);
   const steps = last + 1;
@@ -390,6 +397,16 @@ export default function Timeline({
 
   // --- Key selection and editing (spec.md 9.3) ---
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
+  /*
+    Selected frames of an imported layer (spec.md 4.8, M20). One layer at a
+    time: a run copied from two files would have to paste into two, and the
+    paste goes back to the layer it came from.
+  */
+  const [frameSel, setFrameSel] = useState<{
+    layer: number;
+    anchor: number;
+    steps: Set<number>;
+  } | null>(null);
   /** A key drag in progress: which keys, and how far, in steps. */
   const [keyDrag, setKeyDrag] = useState<{ ids: string[]; delta: number } | null>(null);
   const keyDragRef = useRef<{ ids: string[]; startX: number; delta: number } | null>(null);
@@ -418,6 +435,45 @@ export default function Timeline({
     return event.clientX - rect.left - LABELS_PX + el.scrollLeft;
   };
 
+  /** Click a mark to select it; shift-click extends the run from the anchor. */
+  const selectFrame = useCallback((layer: number, step: number, extend: boolean) => {
+    setSelectedKeys(new Set());
+    setFrameSel((current) => {
+      if (extend && current && current.layer === layer) {
+        return {
+          layer,
+          anchor: current.anchor,
+          steps: new Set(runBetween(current.anchor, step)),
+        };
+      }
+      return { layer, anchor: step, steps: new Set([step]) };
+    });
+  }, []);
+
+  const copyFrames = useCallback(() => {
+    if (!frameSel || frameSel.steps.size === 0) return;
+    void api
+      .copyGribFrames(frameSel.layer, [...frameSel.steps].sort((a, b) => a - b))
+      .catch((err: unknown) => setError(String(err)));
+  }, [frameSel]);
+
+  const pasteFrames = useCallback(() => {
+    void api
+      .pasteGribFrames(stepRef.current)
+      .then(onChanged)
+      .catch((err: unknown) => setError(String(err)));
+  }, [onChanged]);
+
+  const deleteFrames = useCallback(() => {
+    if (!frameSel || frameSel.steps.size === 0) return;
+    const { layer, steps } = frameSel;
+    setFrameSel(null);
+    void api
+      .deleteGribFrames(layer, [...steps].sort((a, b) => a - b))
+      .then(onChanged)
+      .catch((err: unknown) => setError(String(err)));
+  }, [frameSel, onChanged]);
+
   const deleteSelected = useCallback(() => {
     const keys = [...selectedKeys].map(parseKey);
     if (keys.length === 0) return;
@@ -440,6 +496,21 @@ export default function Timeline({
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+      // Copy and paste of imported frames, before the modifier guard below
+      // sends every other combination to the app's own handler. A selected
+      // mark is what makes this a frame gesture rather than an object one
+      // (M20); App skips its object copy while one is selected.
+      if ((event.metaKey || event.ctrlKey) && !event.altKey) {
+        const key = event.key.toLowerCase();
+        if (key === "c" && frameSel && frameSel.steps.size > 0) {
+          event.preventDefault();
+          copyFrames();
+        } else if (key === "v" && frameSel) {
+          event.preventDefault();
+          pasteFrames();
+        }
+        return;
+      }
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       if (event.key === " ") {
         event.preventDefault();
@@ -452,17 +523,43 @@ export default function Timeline({
         setPlaying(false);
         const to = steppedBy(stepRef.current, event.key === "ArrowRight" ? 1 : -1, last);
         if (to !== stepRef.current) onStepChange(to);
+      } else if (
+        (event.key === "Delete" || event.key === "Backspace") &&
+        frameSel &&
+        frameSel.steps.size > 0
+      ) {
+        // On a pasted frame this restores the file's own message; on the
+        // file's own it hides that message (spec.md 4.8, M20).
+        event.preventDefault();
+        deleteFrames();
       } else if ((event.key === "Delete" || event.key === "Backspace") && selectedKeys.size > 0) {
         event.preventDefault();
         deleteSelected();
-      } else if (event.key === "Escape" && (selectedKeys.size > 0 || menu)) {
+      } else if (event.key === "Escape" && (selectedKeys.size > 0 || menu || frameSel)) {
         setSelectedKeys(new Set());
+        setFrameSel(null);
         setMenu(null);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [deleteSelected, last, menu, onStepChange, selectedKeys.size]);
+  }, [
+    copyFrames,
+    deleteFrames,
+    deleteSelected,
+    frameSel,
+    last,
+    menu,
+    onStepChange,
+    pasteFrames,
+    selectedKeys.size,
+  ]);
+
+  // The app's own copy and paste stand down while a frame is selected, so one
+  // key press cannot both copy an object and copy a frame (M20).
+  useEffect(() => {
+    onFramesSelected(frameSel !== null && frameSel.steps.size > 0);
+  }, [frameSel, onFramesSelected]);
 
   // --- Pointer handling over the grid ---
   const onGridPointerMove = (event: React.PointerEvent) => {
@@ -763,16 +860,35 @@ export default function Timeline({
                   without this the user is left to work out from a field that
                   comes and goes which times the file actually covers.
                 */}
-                {layer.grib?.covered_steps.map((covered, s) =>
-                  covered ? (
+                {layer.grib?.steps.map((frame, s) => {
+                  // A step worth marking is one that has something to say:
+                  // the file's own message, a frame pasted onto it, or a
+                  // message the user hid. A plain gap is left blank.
+                  const kind = markKind(frame);
+                  if (kind === "none") return null;
+                  const chosen =
+                    frameSel?.layer === layer.id && frameSel.steps.has(s);
+                  const what =
+                    kind === "pasted"
+                      ? `shows the message from ${tickLabel(frame.source ?? 0)}`
+                      : kind === "hidden"
+                        ? "its message is hidden"
+                        : `a message at ${tickLabel(s)}`;
+                  return (
                     <span
                       key={s}
-                      className="tl-grib"
+                      className={`tl-grib${kind === "pasted" ? " pasted" : ""}${
+                        kind === "hidden" ? " hidden" : ""
+                      }${chosen ? " selected" : ""}`}
                       style={{ left: s * pxPerStep, width: Math.max(2, pxPerStep - 1) }}
-                      title={`${layer.name}: a message at ${tickLabel(s)}`}
+                      title={`${layer.name}: ${what}`}
+                      onPointerDown={(event) => {
+                        event.stopPropagation();
+                        selectFrame(layer.id, s, event.shiftKey);
+                      }}
                     />
-                  ) : null,
-                )}
+                  );
+                })}
               </div>
             </div>
             {layer.objects.map((object) => {

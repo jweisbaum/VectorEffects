@@ -55,6 +55,24 @@ pub struct LayerNode {
     pub grib: Option<GribLayerInfo>,
 }
 
+/// What one step of a GRIB layer shows (spec.md 4.8, M20).
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export, export_to = "GribStepView.ts")]
+pub struct GribStepView {
+    /// The file has a message of its own for this step's time.
+    pub in_file: bool,
+    /// The step whose message this one shows, when the user pasted one here.
+    ///
+    /// `null` when the step is not overridden at all — which is not the same
+    /// as being overridden to show nothing, and `hidden` is what says which.
+    pub source: Option<u32>,
+    /// The step is overridden to show no imported field, which is what a bad
+    /// message needs.
+    pub hidden: bool,
+    /// A frame reaches the map here, from the file or from a paste.
+    pub shown: bool,
+}
+
 /// What the panel says about a layer's imported field (spec.md 4.8).
 #[derive(Debug, Clone, Serialize, TS)]
 #[ts(export, export_to = "GribLayerInfo.ts")]
@@ -87,6 +105,13 @@ pub struct GribLayerInfo {
     /// not say which those were would leave the user to work it out from a
     /// field that comes and goes. The timeline marks them.
     pub covered_steps: Vec<bool>,
+    /// What each of the project's steps actually shows, after the user's
+    /// frame overrides (M20).
+    ///
+    /// One entry per step, in step order. `covered_steps` beside it is what
+    /// the *file* says; this is what the map will draw, and the timeline
+    /// needs both to tell a message from a pasted one.
+    pub steps: Vec<GribStepView>,
 }
 
 /// The whole document, for the panel.
@@ -264,6 +289,21 @@ fn tree_of(project: &Project, step: u32) -> DocumentTree {
                                     .raster
                                     .as_ref()
                                     .is_some_and(|seq| seq.frame_at(hour).is_some())
+                            })
+                            .collect(),
+                        steps: (0..project.settings.step_count)
+                            .map(|s| {
+                                let hour = f64::from(project.settings.forecast_hour(s));
+                                let over = layer.frame_override(s);
+                                GribStepView {
+                                    in_file: layer
+                                        .raster
+                                        .as_ref()
+                                        .is_some_and(|seq| seq.frame_at(hour).is_some()),
+                                    source: over.and_then(|o| o.source),
+                                    hidden: over.is_some_and(|o| o.source.is_none()),
+                                    shown: layer.imported_frame(&project.settings, s).is_some(),
+                                }
                             })
                             .collect(),
                     }),

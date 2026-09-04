@@ -77,6 +77,20 @@ pub enum Command {
         /// New band; `None` keeps every speed.
         after: Option<crate::document::SpeedRange>,
     },
+    /// Replaces which of an imported file's messages a layer's steps show
+    /// (spec.md 4.8, M20).
+    ///
+    /// The whole list rather than one entry, because a paste is one action to
+    /// the user: pasting a run of four frames is one command with one inverse,
+    /// and one undo returns all four.
+    SetFrameOverrides {
+        /// Target layer.
+        layer: crate::id::Id,
+        /// Previous overrides.
+        before: Vec<crate::document::FrameOverride>,
+        /// New overrides.
+        after: Vec<crate::document::FrameOverride>,
+    },
     /// Locks or unlocks a layer.
     SetLayerLocked {
         /// Target layer.
@@ -245,6 +259,15 @@ impl Command {
                     "Unlock layer".into()
                 }
             }
+            Self::SetFrameOverrides { before, after, .. } => {
+                let added = after.len().saturating_sub(before.len());
+                match (added, after.len() < before.len()) {
+                    (0, true) => "Restore the file's frames".into(),
+                    (0, false) => "Change pasted frames".into(),
+                    (1, _) => "Paste 1 frame".into(),
+                    (n, _) => format!("Paste {n} frames"),
+                }
+            }
             Self::MoveLayer { .. } => "Reorder layers".into(),
             Self::AddObject { object, .. } => format!("Add {}", object.name),
             Self::AddObjects { objects, .. } => match objects.len() {
@@ -304,6 +327,10 @@ impl Command {
             }
             Self::SetLayerLocked { layer, after, .. } => {
                 layer_mut(project, *layer)?.locked = *after;
+                Ok(())
+            }
+            Self::SetFrameOverrides { layer, after, .. } => {
+                layer_mut(project, *layer)?.set_frame_overrides(after.clone());
                 Ok(())
             }
             Self::MoveLayer { from, to } => move_layer(project, *from, *to),
@@ -437,6 +464,10 @@ impl Command {
             }
             Self::SetLayerLocked { layer, before, .. } => {
                 layer_mut(project, *layer)?.locked = *before;
+                Ok(())
+            }
+            Self::SetFrameOverrides { layer, before, .. } => {
+                layer_mut(project, *layer)?.set_frame_overrides(before.clone());
                 Ok(())
             }
             Self::MoveLayer { from, to } => move_layer(project, *to, *from),

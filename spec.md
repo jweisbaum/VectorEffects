@@ -510,6 +510,34 @@ nothing at hours 1 and 2; an hourly file in a 3-hourly project is read at 0, 3,
 6 and its other messages are never shown; and past the file's last message
 there is nothing, for the rest of the timeline however long it is.
 
+**A step can be told which message to show.** The rule above is right and it
+leaves the user no way to say otherwise, so a step of an imported layer can be
+given one: click a mark on the layer's timeline row, `Shift`-click a run of
+them, `Cmd`-`C`, move the playhead, `Cmd`-`V`. The run keeps its spacing —
+steps 0 to 3 pasted at 6 land on 6 to 9 — and a step past the end of the
+timeline is **dropped, not clamped**, since clamping would pile the tail of a
+run onto the last step and leave one frame where four were asked for.
+`Delete` on a pasted mark restores the file's own message there; `Delete` on
+the file's own hides it, which is what a bad message needs.
+
+**The paste goes to the layer the copy came from**, whatever layer is active:
+the clipboard entry names it, and a frame pasted into a layer reading a
+different file would be a copy of samples by another route.
+
+**What the project stores is a step number, never a sample.** Invariants 1 and
+2 stand: the frame that reaches the map is one the file already holds, so the
+flat scene's raster hash follows the choice by itself and the render cache,
+the readiness probe and both kernels are correct without knowing the feature
+exists. Two steps showing one message hash alike, so the cache holds one frame
+for the pair. An override references a *step*, and which message a step gets
+is decided by time alignment on open — so if the file at the path is replaced
+by one with nothing at the source step, the pasted step shows nothing and its
+mark is drawn empty, like a layer whose file has gone.
+
+The file's own marks are drawn solid and a pasted one as an outline, so the
+timeline still says which times the file actually covers after the gaps have
+been filled.
+
 This is deliberately *not* the hold rule a keyframe follows (§4.5), and the
 difference is what the two kinds of value are. A keyframe is an instruction the
 user gave: between two of them the document still means something, and holding

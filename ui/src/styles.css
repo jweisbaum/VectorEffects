@@ -817,7 +817,23 @@ body {
   border-radius: 2px;
   background: rgba(111, 217, 255, 0.45);
   border: 1px solid rgba(111, 217, 255, 0.75);
-  pointer-events: none;
+  cursor: pointer;
+}
+/*
+  A pasted frame is drawn as an outline and the file's own as a solid, so the
+  timeline says which times the file actually covers even after the user has
+  filled the gaps (spec.md 4.8, M20).
+*/
+.tl-grib.pasted { background: none; }
+/* A message the user hid: the file has one here and it is not being shown. */
+.tl-grib.hidden {
+  background: none;
+  border-style: dashed;
+  border-color: rgba(111, 217, 255, 0.4);
+}
+.tl-grib.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
 }
 .tl-layer-row .tl-labels { color: var(--muted); font-weight: 600; }
 .tl-object-row.selected .tl-labels { color: var(--accent); }

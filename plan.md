@@ -62,6 +62,18 @@ quietly met**: "no `cc` in `cargo tree`". `blake3` has carried a `cc` build
 dependency for its SIMD assembly since M3, by way of `ve-core`. Neither new
 codec adds one, which is what the criterion was for.
 
+**M20 complete (2026-09-04): a GRIB layer's frames copy between steps.** A
+step of an imported layer can be told which of the file's messages to show —
+click a mark, `Shift`-click a run, `Cmd`-`C`, move the playhead, `Cmd`-`V` —
+which is the choice §4.8's hold rule took away for good reason and this gives
+back as an *instruction* rather than a measurement. `Layer::frame_overrides`
+is a sorted list of step numbers and **never a sample**, so the frame served
+is one the file already holds and the render cache, readiness and both kernels
+were correct without a line changed; two steps showing one message hash alike
+and the cache holds one frame for the pair. `Delete` restores a pasted step or
+hides a file's own message. Eight acceptance tests in
+`ve-app/tests/grib_frames.rs`, nine frontend ones over the mark rules.
+
 **M22 complete (2026-09-04): every grid definition the centres ship.** Asked
 for after M21, against a directory of 1,735 sample forecast files. Almost every
 regional model runs on a projection rather than on lat/lon, and the decoder
@@ -114,7 +126,7 @@ wide, so the ring wrapped onto the same bucket repeatedly and filled two of
 the three neighbour slots with one cell. Found by a brute-force comparison at
 89.5°N, which is exactly why that test aims there.
 
-**M20 is next.**
+**M13 is next.**
 
 **Unplanned, after M7: GRIB import** (spec §4.8, D44). A GRIB2 file becomes a
 layer — two, when it holds both wind and currents — whose lattice is sampled
@@ -493,9 +505,9 @@ M0 ─ M1 ─ M2 ─ M3 ─ M4 ══ walking skeleton complete
                     ├─ M7 ─────── timeline & animation                 ✓
                     │
                     ├─ M12 ────── decoder: CCSDS and JPEG 2000 import      ✓
+                    ├─ M20 ────── GRIB frames copied between steps         ✓
                     ├─ M21 ────── ICON's icosahedral grid                  ✓
                     ├─ M22 ────── every grid definition the centres ship   ✓
-                    ├─ M20 ────── GRIB frames copied between steps
                     ├─ M13 ────── motion vectors, linked objects        (needs M7)
                     ├─ M14 ────── region selection, fill, copy/paste
                     ├─ M15 ────── settings and shortcuts
@@ -1611,7 +1623,7 @@ now. Confirmed as the intended reading (D53).
 
 ---
 
-### M20 — A GRIB layer's frames, copied between steps
+### M20 — A GRIB layer's frames, copied between steps · **complete**
 
 **Goal:** a step of an imported layer can be copied to another step of the
 same layer, without creating an object and without copying a sample.

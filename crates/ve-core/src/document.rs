@@ -347,6 +347,38 @@ pub struct Layer {
     /// re-read on open.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub speed_range: Option<SpeedRange>,
+    /// Which of the file's messages a step shows, where the user has said
+    /// (spec.md 4.8, M20).
+    ///
+    /// A forecast file rarely lines up with a timeline: a 6-hourly file in a
+    /// 3-hourly project has a message on every other step, a file ends before
+    /// the timeline does, and a message is sometimes simply bad. An override
+    /// is the choice a keyframe gives — *this* step shows *that* message — as
+    /// an instruction rather than a measurement, which is why it survives
+    /// where §4.8's hold rule was removed.
+    ///
+    /// **A step number, never a sample.** Invariants 1 and 2 stand: what is
+    /// stored is which of the file's own frames to serve, so the frame that
+    /// reaches the scene is one the file already holds and the render cache,
+    /// readiness and both kernels are right without knowing this exists.
+    ///
+    /// Sorted by step and unique in it, which [`Layer::set_frame_overrides`]
+    /// maintains, so the lookup is a binary search.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub frame_overrides: Vec<FrameOverride>,
+}
+
+/// One step's answer to "which of the file's messages does this show?".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FrameOverride {
+    /// The step whose content is being decided.
+    pub step: u32,
+    /// The step whose message it shows, or `None` to show nothing at all.
+    ///
+    /// The source is resolved against the **file**, not against another
+    /// override, so a chain of them is impossible and the frame served is
+    /// always one the file holds.
+    pub source: Option<u32>,
 }
 
 /// A band of speeds to keep from an imported field, in metres per second.
@@ -413,6 +445,7 @@ impl Layer {
             source: LayerSource::Painted,
             raster: None,
             speed_range: None,
+            frame_overrides: Vec::new(),
         }
     }
 
@@ -435,12 +468,54 @@ impl Layer {
             },
             raster: Some(raster),
             speed_range: None,
+            frame_overrides: Vec::new(),
         }
     }
 
     /// Whether the layer carries an imported field.
     pub fn is_grib(&self) -> bool {
         !self.source.is_painted()
+    }
+
+    /// The override on a step, if the user has set one.
+    pub fn frame_override(&self, step: u32) -> Option<FrameOverride> {
+        self.frame_overrides
+            .binary_search_by_key(&step, |o| o.step)
+            .ok()
+            .map(|at| self.frame_overrides[at])
+    }
+
+    /// Replaces the overrides, keeping them sorted and unique in `step`.
+    ///
+    /// Later entries win over earlier ones for the same step, which is what a
+    /// paste that lands on a step it also overrode should do.
+    pub fn set_frame_overrides(&mut self, mut overrides: Vec<FrameOverride>) {
+        overrides.sort_by_key(|o| o.step);
+        overrides.dedup_by_key(|o| o.step);
+        self.frame_overrides = overrides;
+    }
+
+    /// The imported frame a step shows, after the user's overrides.
+    ///
+    /// Three answers, in order: an override naming a source step serves the
+    /// message the **file** has at that step's time, wherever the file put
+    /// it; an override naming nothing serves nothing, which is what a bad
+    /// message needs; and an unoverridden step serves the file's own message
+    /// for its own time, or nothing (spec.md 4.8, D48).
+    pub fn imported_frame(
+        &self,
+        settings: &crate::project::ProjectSettings,
+        step: u32,
+    ) -> Option<&crate::raster::RasterFrame> {
+        let sequence = self.raster.as_deref()?;
+        let at = |s: u32| sequence.frame_at(f64::from(settings.forecast_hour(s)));
+        match self.frame_override(step) {
+            Some(FrameOverride {
+                source: Some(s), ..
+            }) => at(s),
+            Some(FrameOverride { source: None, .. }) => None,
+            None => at(step),
+        }
     }
 
     /// Finds an object's index within this layer.

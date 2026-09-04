@@ -24,6 +24,7 @@ import type { Tool } from "./generated/Tool";
 import type { ToolSchema } from "./generated/ToolSchema";
 import type { DocumentTree } from "./generated/DocumentTree";
 import type { ClipboardState } from "./generated/ClipboardState";
+import type { FrameClipboardState } from "./generated/FrameClipboardState";
 import type { HistoryView } from "./generated/HistoryView";
 import type { PropertyValue } from "./generated/PropertyValue";
 import type { PropertyView } from "./generated/PropertyView";
@@ -349,6 +350,23 @@ export const api = {
   /** `absoluteTiming` keeps the original step numbers instead of moving them. */
   pasteObjects: (layer: number | null, step: number, absoluteTiming: boolean) =>
     call<ProjectSummary>("paste_objects", { layer, step, absoluteTiming }),
+
+  /**
+   * Copies a run of an imported layer's steps (spec.md 4.8, M20). The layer
+   * travels with them: the paste goes back to it whatever layer is active.
+   */
+  copyGribFrames: (layer: number, steps: number[]) =>
+    call<FrameClipboardState>("copy_grib_frames", { layer, steps }),
+  /** Pastes the copied frames, the first landing on `at`. */
+  pasteGribFrames: (at: number) => call<ProjectSummary>("paste_grib_frames", { at }),
+  /**
+   * `Delete` on a run of steps: a pasted frame goes back to the file's own
+   * message, and the file's own message is hidden.
+   */
+  deleteGribFrames: (layer: number, steps: number[]) =>
+    call<ProjectSummary>("delete_grib_frames", { layer, steps }),
+  /** What the frame clipboard holds. */
+  frameClipboardState: () => call<FrameClipboardState>("frame_clipboard_state", {}),
   clipboardState: () => call<ClipboardState>("clipboard_state"),
 
   historyView: () => call<HistoryView>("history_view"),
