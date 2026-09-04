@@ -159,6 +159,17 @@ pub struct TrackView {
     pub motion_available: bool,
     /// Whether it is doing so.
     pub motion: bool,
+    /// Whether this track can follow another object's (spec.md 9.3, M13).
+    ///
+    /// Position and rotation only: a speed that followed another object's
+    /// speed would be a different feature, and no other property is a place
+    /// in the world for an offset to be kept in.
+    pub can_follow: bool,
+    /// The object this track follows, if it follows one. Its keys are then
+    /// dormant: the value comes from the link.
+    pub follows: Option<u64>,
+    /// That object's name, for the row.
+    pub follows_name: Option<String>,
 }
 
 /// An object's tracks, for the timeline's tree.
@@ -247,6 +258,7 @@ fn track_of(
     anim: &Animatable,
     step: u32,
     motion: ve_core::document::MotionFlags,
+    project: &ve_core::project::Project,
 ) -> Option<TrackView> {
     let spec = schema::spec_for(tool, id)?;
     let keys = anim.keys();
@@ -271,6 +283,12 @@ fn track_of(
         interpolations: interpolations_for(anim.kind()),
         keyed_here,
         interpolated_here,
+        can_follow: ve_core::follow::followable(id),
+        follows: anim.follow().map(|f| f.primary.raw()),
+        follows_name: anim
+            .follow()
+            .and_then(|f| project.object(f.primary))
+            .map(|primary| primary.name.clone()),
         motion_available: motion_track(tool, id).is_some(),
         motion: match motion_track(tool, id) {
             Some(MotionTrack::Position) => motion.position,
@@ -341,10 +359,9 @@ pub fn tracks_of(state: &AppState, object: u64, step: u32) -> Result<ObjectTrack
             .filter(|spec| !spec.creation_only)
             .filter(|spec| schema::is_live(target.tool, spec.id, choice_of))
             .filter_map(|spec| {
-                target
-                    .props
-                    .get(spec.id)
-                    .and_then(|anim| track_of(target.tool, spec.id, anim, step, target.motion))
+                target.props.get(spec.id).and_then(|anim| {
+                    track_of(target.tool, spec.id, anim, step, target.motion, project)
+                })
             })
             .collect();
         Ok(ObjectTracks {
@@ -408,6 +425,123 @@ pub fn motion_set(
             object: target.id,
             before: target.motion,
             after,
+        };
+        let (project, history) = (&mut open.project, &mut open.history);
+        history.push(project, command)?;
+        open.touch();
+        Ok(ProjectSummary::of(session.require_open()?))
+    })
+}
+
+/// Makes one object's position or rotation follow another's (spec.md 9.3,
+/// M13), or clears the link when `primary` is `null`.
+///
+/// Linking never moves anything: the offset is read from where the two
+/// objects actually are, so the derived value at the moment of linking is
+/// exactly where the follower already was.
+#[tauri::command]
+pub fn set_follow(
+    state: tauri::State<'_, AppState>,
+    object: u64,
+    property: String,
+    primary: Option<u64>,
+    step: u32,
+) -> Result<ProjectSummary> {
+    follow_set(&state, object, &property, primary, step)
+}
+
+/// Implementation of [`set_follow`].
+pub fn follow_set(
+    state: &AppState,
+    object: u64,
+    property: &str,
+    primary: Option<u64>,
+    step: u32,
+) -> Result<ProjectSummary> {
+    with_session(state, |session| {
+        let open = session.require_open()?;
+        let bad = |why: String| AppError::BadOption {
+            field: "follow",
+            value: why,
+        };
+        let id = object_id(object);
+        let target = open
+            .project
+            .object(id)
+            .ok_or(AppError::Core(ve_core::CoreError::MissingObject(object)))?;
+        let prop = schema::all_specs(target.tool)
+            .map(|spec| spec.id)
+            .find(|p| format!("{p:?}") == property)
+            .filter(|p| ve_core::follow::followable(*p))
+            .ok_or_else(|| {
+                bad(format!(
+                    "{property} is not a property that can follow another"
+                ))
+            })?;
+        let before = target
+            .props
+            .get(prop)
+            .ok_or_else(|| bad(property.to_owned()))?
+            .clone();
+
+        let mut after = before.clone();
+        match primary {
+            Some(raw) => {
+                let primary_id = object_id(raw);
+                if open.project.object(primary_id).is_none() {
+                    return Err(AppError::Core(ve_core::CoreError::MissingObject(raw)));
+                }
+                // A cycle has no meaning — every object in it would be defined
+                // by the others — and a user who made one by accident would
+                // see a set of objects stop responding with nothing to point
+                // at. Refused here rather than tolerated at resolution.
+                if ve_core::follow::would_cycle(&open.project, id, primary_id, prop) {
+                    return Err(bad(
+                        "that would make a loop: the object you picked already follows this one"
+                            .to_owned(),
+                    ));
+                }
+                let offset = ve_core::follow::offset_at(&open.project, id, primary_id, prop, step)
+                    .ok_or_else(|| bad("neither object is anywhere at this step".to_owned()))?;
+                after.set_follow(Some(ve_core::keyframe::Follow {
+                    primary: primary_id,
+                    offset,
+                }));
+            }
+            None => {
+                if before.follow().is_none() {
+                    return Ok(ProjectSummary::of(open));
+                }
+                // Unlinking wakes the follower's own keys, which may say it is
+                // somewhere else entirely. Writing the derived value at the
+                // current step keeps it where it is (D42): a key is the only
+                // write that shows once a property has keys at all.
+                let derived = ve_core::follow::resolve(&open.project, step).of(id);
+                let held = match prop {
+                    PropId::Position => derived.position.map(ve_core::PropValue::LonLat),
+                    _ => derived
+                        .rotation
+                        .map(|d| ve_core::PropValue::Angle(ve_core::angle::Angle::new(d))),
+                };
+                after.set_follow(None);
+                if let Some(value) = held {
+                    // `true` for auto-key: the value has to land as a *key*
+                    // whether or not auto-key is on, because a base write is
+                    // invisible once the property has keys of its own and
+                    // those are exactly what unlinking wakes up.
+                    after = written(&after, step, true, value);
+                    after.set_follow(None);
+                }
+            }
+        }
+        if after == before {
+            return Ok(ProjectSummary::of(open));
+        }
+        let command = Command::SetFollow {
+            object: id,
+            prop,
+            before: Box::new(before),
+            after: Box::new(after),
         };
         let (project, history) = (&mut open.project, &mut open.history);
         history.push(project, command)?;

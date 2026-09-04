@@ -1248,6 +1248,18 @@ mod tests {
                 lon: HOSTILE[2],
                 lat: 45.123_456_789_012_34,
             }));
+        // A follow offset is two more f64s that reach the file (spec.md 9.3).
+        object
+            .props
+            .get_mut(PropId::Position)
+            .expect("present")
+            .set_follow(Some(crate::keyframe::Follow {
+                primary: crate::id::Id::from_raw(7),
+                offset: crate::keyframe::FollowOffset::Position {
+                    distance_m: HOSTILE[0],
+                    bearing_deg: HOSTILE[2].abs(),
+                },
+            }));
 
         let mut rect = Object::new(ToolKind::ShapeFill, "rect", 24);
         rect.geometry = Geometry::Rect {

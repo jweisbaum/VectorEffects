@@ -852,6 +852,26 @@ body {
 }
 .tl-motion:hover { opacity: 1; }
 .tl-motion.on { color: var(--accent); opacity: 1; }
+/*
+  The follow handle on a track row (spec.md 9.3, M13). Dim until the track is
+  following something, and the whole row lights while a drag is looking for a
+  row of the same property to land on.
+*/
+.tl-follow {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: grab;
+  font-size: 11px;
+  line-height: 1;
+  opacity: 0.45;
+  padding: 0 2px;
+}
+.tl-follow:hover { opacity: 1; }
+.tl-follow.on { color: var(--accent); cursor: pointer; opacity: 1; }
+.tl-row.tl-track.link-target { outline: 1px dashed var(--accent); outline-offset: -1px; }
+/* A followed track's keys are dormant: the value comes from the link. */
+.tl-row.tl-track.following .tl-key { opacity: 0.35; }
 .tl-layer-row .tl-labels { color: var(--muted); font-weight: 600; }
 .tl-object-row.selected .tl-labels { color: var(--accent); }
 .tl-disclose {

@@ -15,6 +15,8 @@ use ve_core::schema::{PropId, ToolKind};
 use ve_core::vector::Uv;
 use ve_core::{EARTH_RADIUS_M, LonLat, PropValue};
 
+use ve_core::follow::{Derived, Resolved};
+
 use crate::aeqd::{Frame, Local, Space};
 use crate::sdf::Shape;
 
@@ -599,11 +601,26 @@ fn modifier_of(object: &Object, step: u32) -> Option<Modifier> {
 
 /// Flattens one object for a time step, or `None` if it contributes nothing.
 pub fn flatten_object(object: &Object, step: u32) -> Option<FlatObject> {
+    flatten_object_at(object, step, Derived::default())
+}
+
+/// [`flatten_object`], with the anchor and rotation a link derives
+/// (spec.md 9.3, M13).
+///
+/// A follower's `position` or `rotation_deg` is not its own, and every caller
+/// that asks where an object *is* — the field, the map's outlines, hit
+/// testing — has to ask the same question. `Derived::default()` is "follows
+/// nothing", which is what a freshly drawn object always is.
+pub fn flatten_object_at(object: &Object, step: u32, derived: Derived) -> Option<FlatObject> {
     if !object.is_active_at(step) {
         return None;
     }
-    let anchor = position(object, PropId::Position, step)?;
-    let rotation = bearing(object, PropId::RotationDeg, step).map_or(0.0, |a| a.degrees());
+    let anchor = derived
+        .position
+        .or_else(|| position(object, PropId::Position, step))?;
+    let rotation = derived
+        .rotation
+        .unwrap_or_else(|| bearing(object, PropId::RotationDeg, step).map_or(0.0, |a| a.degrees()));
     let scale_pct = number(object, PropId::ScalePct, step).unwrap_or(100.0);
     // Space 1 is the map-space stamp. Tools that declare no `StampSpace` read
     // 0 and stay on the ground, which is what every object was before the
@@ -685,7 +702,46 @@ pub fn covers(object: &FlatObject, position: LonLat) -> bool {
 /// `step + 1`, one-sided at the ends, never a second interpolation of the
 /// keys. A held segment contributes nothing — a value that jumps is a
 /// teleport — and so does a property with no keys.
-pub fn motion_of(object: &Object, step: u32, step_hours: u32, last_step: u32) -> Motion {
+/// A project's links resolved at the three steps a velocity needs.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Links {
+    /// At the step being flattened.
+    pub at: Resolved,
+    /// At the step before it.
+    pub before: Resolved,
+    /// And the one after.
+    pub after: Resolved,
+}
+
+impl Links {
+    /// Resolves a project's links at a step and at its two neighbours.
+    ///
+    /// Three passes rather than one because a follower's *velocity* is the
+    /// velocity of the value it derives, not of the keys it is ignoring. Each
+    /// costs one walk of the objects and returns immediately when nothing
+    /// follows anything, which is every project until someone makes a link.
+    pub fn resolve(project: &Project, step: u32) -> Self {
+        let last = project.settings.last_step();
+        Self {
+            at: ve_core::follow::resolve(project, step),
+            before: ve_core::follow::resolve(project, step.saturating_sub(1)),
+            after: ve_core::follow::resolve(project, (step + 1).min(last)),
+        }
+    }
+
+    /// Whether nothing in the project follows anything.
+    pub fn is_empty(&self) -> bool {
+        self.at.is_empty() && self.before.is_empty() && self.after.is_empty()
+    }
+}
+
+pub fn motion_of(
+    object: &Object,
+    step: u32,
+    step_hours: u32,
+    last_step: u32,
+    links: &Links,
+) -> Motion {
     let flags = object.motion;
     if !flags.any() || step_hours == 0 {
         return Motion::default();
@@ -699,19 +755,35 @@ pub fn motion_of(object: &Object, step: u32, step_hours: u32, last_step: u32) ->
     }
     let dt = f64::from(after - before) * f64::from(step_hours) * 3600.0;
 
+    // A followed property's own keys are dormant, so "does it hold?" is a
+    // question about the primary and not about them: the derived values speak
+    // for themselves, and a primary that stands still differences to nothing.
     let animated = |id: PropId| -> bool {
-        object
-            .props
-            .get(id)
-            .is_some_and(|a| !a.holds_across(before, after))
+        ve_core::follow::follow_of(object, id).is_some()
+            || object
+                .props
+                .get(id)
+                .is_some_and(|a| !a.holds_across(before, after))
+    };
+    let anchor_at = |s: u32, resolved: &Resolved| -> Option<LonLat> {
+        resolved
+            .of(object.id)
+            .position
+            .or_else(|| position(object, PropId::Position, s))
+    };
+    let turn_at = |s: u32, resolved: &Resolved| -> Option<f64> {
+        resolved
+            .of(object.id)
+            .rotation
+            .or_else(|| bearing(object, PropId::RotationDeg, s).map(|a| a.degrees()))
     };
 
     let mut omega = [0.0f64; 3];
     if flags.position
         && animated(PropId::Position)
         && let (Some(from), Some(to)) = (
-            position(object, PropId::Position, before),
-            position(object, PropId::Position, after),
+            anchor_at(before, &links.before),
+            anchor_at(after, &links.after),
         )
     {
         omega = add(omega, translation_omega(from, to, dt));
@@ -719,15 +791,15 @@ pub fn motion_of(object: &Object, step: u32, step_hours: u32, last_step: u32) ->
     if flags.rotation
         && animated(PropId::RotationDeg)
         && let (Some(from), Some(to), Some(anchor)) = (
-            bearing(object, PropId::RotationDeg, before),
-            bearing(object, PropId::RotationDeg, after),
-            position(object, PropId::Position, step),
+            turn_at(before, &links.before),
+            turn_at(after, &links.after),
+            anchor_at(step, &links.at),
         )
     {
         // A bearing increases clockwise, and a clockwise turn seen from
         // outside the sphere is a *negative* rotation about the outward
         // normal by the right-hand rule.
-        let rate = -shortest_arc(from.degrees(), to.degrees()).to_radians() / dt;
+        let rate = -shortest_arc(from, to).to_radians() / dt;
         let axis = unit_vector(anchor);
         omega = add(omega, [axis[0] * rate, axis[1] * rate, axis[2] * rate]);
     }
@@ -789,6 +861,10 @@ fn translation_omega(from: LonLat, to: LonLat, dt: f64) -> [f64; 3] {
 /// the *file* holds, so nothing below this line — the cache key, the
 /// readiness probe, either kernel — needs to know the choice was made.
 pub fn flatten(project: &Project, step: u32) -> Scene {
+    // Links are resolved once for the whole project, in dependency order: a
+    // follower needs its primary placed first, and its primary may follow
+    // something in turn (spec.md 9.3).
+    let links = Links::resolve(project, step);
     let mut scene = Scene::default();
     for layer in project.layers.iter().filter(|l| l.visible) {
         if let Some(frame) = layer.imported_frame(&project.settings, step) {
@@ -803,8 +879,8 @@ pub fn flatten(project: &Project, step: u32) -> Scene {
         scene
             .objects
             .extend(layer.objects.iter().filter_map(|object| {
-                let mut flat = flatten_object(object, step)?;
-                flat.motion = motion_of(object, step, hours, last);
+                let mut flat = flatten_object_at(object, step, links.at.of(object.id))?;
+                flat.motion = motion_of(object, step, hours, last, &links);
                 Some(flat)
             }));
     }

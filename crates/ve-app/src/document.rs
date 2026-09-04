@@ -772,16 +772,77 @@ pub fn remove_object(state: tauri::State<'_, AppState>, object: u64) -> Result<P
 }
 
 /// Implementation of [`remove_object`].
+///
+/// An object that others follow is deleted with them unlinked first, in the
+/// same history entry: the followers keep where they stood rather than
+/// snapping back to the dormant keys underneath (spec.md 9.3, M13). One undo
+/// puts the object back and re-links them.
 pub fn object_remove(state: &AppState, object: u64) -> Result<ProjectSummary> {
     apply(state, |project| {
         let id = object_id(object);
         let (layer_index, index) = project.locate(id).ok_or_else(|| missing_object(object))?;
-        Ok(Command::RemoveObject {
+        let remove = Command::RemoveObject {
             layer: project.layers[layer_index].id,
             index,
             object: Box::new(project.layers[layer_index].objects[index].clone()),
+        };
+        let mut commands = unlink_followers_of(project, id);
+        if commands.is_empty() {
+            return Ok(remove);
+        }
+        commands.push(remove);
+        Ok(Command::Batch {
+            label: "Delete object".to_owned(),
+            commands,
         })
     })
+}
+
+/// The commands that free every follower of `primary`, holding each where it
+/// stands.
+///
+/// The step used is 0: a follower's dormant keys are woken by the unlink, and
+/// whichever step the value is written at, the rest of its own animation
+/// resumes from there. Step 0 is the one step every project has.
+fn unlink_followers_of(project: &Project, primary: ve_core::Id) -> Vec<Command> {
+    use ve_core::follow;
+    let resolved = follow::resolve(project, 0);
+    let mut out = Vec::new();
+    for layer in &project.layers {
+        for object in &layer.objects {
+            for prop in [PropId::Position, PropId::RotationDeg] {
+                let Some(link) = follow::follow_of(object, prop) else {
+                    continue;
+                };
+                if link.primary != primary {
+                    continue;
+                }
+                let Some(before) = object.props.get(prop) else {
+                    continue;
+                };
+                let derived = resolved.of(object.id);
+                let held = match prop {
+                    PropId::Position => derived.position.map(ve_core::PropValue::LonLat),
+                    _ => derived
+                        .rotation
+                        .map(|d| ve_core::PropValue::Angle(ve_core::angle::Angle::new(d))),
+                };
+                let mut after = before.clone();
+                after.set_follow(None);
+                if let Some(value) = held {
+                    after = crate::animation::written(&after, 0, true, value);
+                    after.set_follow(None);
+                }
+                out.push(Command::SetFollow {
+                    object: object.id,
+                    prop,
+                    before: Box::new(before.clone()),
+                    after: Box::new(after),
+                });
+            }
+        }
+    }
+    out
 }
 
 /// Moves an object to a position in a layer. Index 0 is the bottom.
@@ -889,13 +950,18 @@ pub fn hit_test(state: &AppState, lon: f64, lat: f64, step: u32) -> Result<Optio
     let position = LonLat::new(lon, lat)?;
     with_session(state, |session| {
         let project = &session.require_open()?.project;
+        let links = ve_core::follow::resolve(project, step);
 
         for layer in project.layers.iter().rev() {
             if !layer.visible || layer.locked {
                 continue;
             }
             for object in layer.objects.iter().rev() {
-                let Some(flat) = ve_render::scene::flatten_object(object, step) else {
+                // A follower is where its link puts it, not where its dormant
+                // keys say (spec.md 9.3): picking has to agree with drawing.
+                let Some(flat) =
+                    ve_render::scene::flatten_object_at(object, step, links.of(object.id))
+                else {
                     continue;
                 };
                 if ve_render::scene::covers(&flat, position) {

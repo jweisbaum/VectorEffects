@@ -156,6 +156,22 @@ pub enum Command {
         /// Layer and index after the move.
         to: (crate::id::Id, usize),
     },
+    /// Links a property to another object's, or unlinks it (spec.md 9.3, M13).
+    ///
+    /// Carries the whole `Animatable` on each side rather than just the link,
+    /// because unlinking does two things at once: it clears the link *and*
+    /// writes the derived value at the current step so nothing jumps (D42).
+    /// One command, one inverse.
+    SetFollow {
+        /// Target object.
+        object: crate::id::Id,
+        /// Which property.
+        prop: PropId,
+        /// Previous value, keys and link.
+        before: Box<Animatable>,
+        /// New value, keys and link.
+        after: Box<Animatable>,
+    },
     /// Turns one of an object's own movements into the field it paints
     /// (spec.md 9.3, M13).
     SetMotion {
@@ -287,6 +303,13 @@ impl Command {
             Self::RemoveObject { object, .. } => format!("Delete {}", object.name),
             Self::RenameObject { .. } => "Rename object".into(),
             Self::MoveObject { .. } => "Move object".into(),
+            Self::SetFollow { after, .. } => {
+                if after.follow().is_some() {
+                    "Follow another object".into()
+                } else {
+                    "Stop following".into()
+                }
+            }
             Self::SetMotion { after, before, .. } => {
                 if after.any() && !before.any() {
                     "Add motion to the field".into()
@@ -400,6 +423,17 @@ impl Command {
             }
             Self::SetMotion { object, after, .. } => {
                 object_mut(project, *object)?.motion = *after;
+                Ok(())
+            }
+            Self::SetFollow {
+                object,
+                prop,
+                after,
+                ..
+            } => {
+                object_mut(project, *object)?
+                    .props
+                    .insert(*prop, (**after).clone());
                 Ok(())
             }
             Self::SetGeometry { object, after, .. } => {
@@ -531,6 +565,17 @@ impl Command {
             }
             Self::SetMotion { object, before, .. } => {
                 object_mut(project, *object)?.motion = *before;
+                Ok(())
+            }
+            Self::SetFollow {
+                object,
+                prop,
+                before,
+                ..
+            } => {
+                object_mut(project, *object)?
+                    .props
+                    .insert(*prop, (**before).clone());
                 Ok(())
             }
             Self::SetGeometry { object, before, .. } => {

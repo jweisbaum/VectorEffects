@@ -407,6 +407,15 @@ export default function Timeline({
     anchor: number;
     steps: Set<number>;
   } | null>(null);
+  /*
+    A `Cmd`-drag from one object's position or rotation row to another's makes
+    the first follow the second (spec.md 9.3, M13). Held here while the drag
+    is in flight so the rows can say which of them would take the drop.
+  */
+  const [linkDrag, setLinkDrag] = useState<{
+    object: number;
+    property: string;
+  } | null>(null);
   /** A key drag in progress: which keys, and how far, in steps. */
   const [keyDrag, setKeyDrag] = useState<{ ids: string[]; delta: number } | null>(null);
   const keyDragRef = useRef<{ ids: string[]; startX: number; delta: number } | null>(null);
@@ -434,6 +443,16 @@ export default function Timeline({
     const rect = el.getBoundingClientRect();
     return event.clientX - rect.left - LABELS_PX + el.scrollLeft;
   };
+
+  const linkTo = useCallback(
+    (follower: number, property: string, primary: number | null) => {
+      void api
+        .setFollow(follower, property, primary, stepRef.current)
+        .then(onChanged)
+        .catch((err: unknown) => setError(String(err)));
+    },
+    [onChanged],
+  );
 
   /** Click a mark to select it; shift-click extends the run from the anchor. */
   const selectFrame = useCallback((layer: number, step: number, extend: boolean) => {
@@ -991,8 +1010,27 @@ export default function Timeline({
                       return (
                         <Fragment key={track.property}>
                         <div
-                          className={`tl-row tl-track${track.interpolated_here ? " interpolated" : ""}`}
+                          className={`tl-row tl-track${track.interpolated_here ? " interpolated" : ""}${
+                            linkDrag &&
+                            linkDrag.property === track.property &&
+                            linkDrag.object !== object.id
+                              ? " link-target"
+                              : ""
+                          }${track.follows !== null ? " following" : ""}`}
                           data-track={`${object.id}:${row}`}
+                          onPointerUp={() => {
+                            // A drop on the *same* property of another object
+                            // is the only one that means anything: a link is
+                            // between two of the same kind of value.
+                            if (
+                              linkDrag &&
+                              linkDrag.property === track.property &&
+                              linkDrag.object !== object.id
+                            ) {
+                              linkTo(linkDrag.object, linkDrag.property, object.id);
+                            }
+                            setLinkDrag(null);
+                          }}
                         >
                           <div className="tl-labels tl-track-label">
                             {graphable(track.base) ? (
@@ -1033,6 +1071,41 @@ export default function Timeline({
                                 ⇢
                               </button>
                             )}
+                            {/*
+                              Following: the glyph says which object, and
+                              clicking it unlinks — which holds the value
+                              where it stands rather than snapping back to the
+                              dormant keys underneath (spec.md 9.3, D42).
+                            */}
+                            {track.can_follow &&
+                              (track.follows !== null ? (
+                                <button
+                                  className="tl-follow on"
+                                  title={`Following ${track.follows_name ?? "another object"} — click to unlink`}
+                                  onClick={() => linkTo(object.id, track.property, null)}
+                                >
+                                  ⛓
+                                </button>
+                              ) : (
+                                <button
+                                  className="tl-follow"
+                                  title={`Drag onto another object's ${track.label.toLowerCase()} row to follow it`}
+                                  onPointerDown={(event) => {
+                                    event.preventDefault();
+                                    setLinkDrag({
+                                      object: object.id,
+                                      property: track.property,
+                                    });
+                                    const done = () => {
+                                      setLinkDrag(null);
+                                      window.removeEventListener("pointerup", done);
+                                    };
+                                    window.addEventListener("pointerup", done);
+                                  }}
+                                >
+                                  ⛓
+                                </button>
+                              ))}
                             {track.interpolated_here && (
                               <span className="muted" title="Interpolated between keys at this step">
                                 ~

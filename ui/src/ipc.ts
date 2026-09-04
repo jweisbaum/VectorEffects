@@ -373,6 +373,14 @@ export const api = {
   setMotion: (object: number, property: string, on: boolean) =>
     call<ProjectSummary>("set_motion", { object, property, on }),
 
+  /**
+   * Makes one object's position or rotation follow another's, or clears the
+   * link when `primary` is null (spec.md 9.3, M13). Linking never moves
+   * anything: the offset is read from where the two objects already are.
+   */
+  setFollow: (object: number, property: string, primary: number | null, step: number) =>
+    call<ProjectSummary>("set_follow", { object, property, primary, step }),
+
   /** What the frame clipboard holds. */
   frameClipboardState: () => call<FrameClipboardState>("frame_clipboard_state", {}),
   clipboardState: () => call<ClipboardState>("clipboard_state"),

@@ -1304,3 +1304,166 @@ fn a_choice_offers_no_graph() {
     assert!(samples.series.is_empty());
     assert_eq!(samples.label, "Fill");
 }
+
+// --- Linked objects (spec.md 9.3, M13) ---------------------------------------
+
+/// Where an object actually is at a step, links resolved.
+fn placed(state: &AppState, object: u64, step: u32) -> LonLat {
+    let project = document_of(state);
+    let id = ve_core::Id::from_raw(object);
+    ve_core::follow::resolve(&project, step)
+        .of(id)
+        .position
+        .unwrap_or_else(|| {
+            let found = project.object(id).expect("object");
+            found
+                .props
+                .value_at(found.tool, PropId::Position, step)
+                .and_then(ve_core::PropValue::as_lonlat)
+                .expect("a position")
+        })
+}
+
+/// Unlinking leaves the follower where it was, rather than snapping it back to
+/// the dormant keys underneath (D42).
+#[test]
+fn unlinking_holds_the_follower_where_it_stood() {
+    let (_root, app) = project("unlink");
+    let primary = circle(&app, 0.0, 45.0);
+    let follower = circle(&app, 4.0, 45.0);
+
+    // The primary travels east; the follower is carried along.
+    animation::key_at(
+        &app,
+        primary,
+        "Position",
+        0,
+        Some(PropertyValue::Position {
+            lon: 0.0,
+            lat: 45.0,
+        }),
+    )
+    .expect("key");
+    animation::key_at(
+        &app,
+        primary,
+        "Position",
+        10,
+        Some(PropertyValue::Position {
+            lon: 30.0,
+            lat: 45.0,
+        }),
+    )
+    .expect("key");
+    animation::follow_set(&app, follower, "Position", Some(primary), 0).expect("link");
+
+    let carried = placed(&app, follower, 5);
+    assert!(
+        carried.lon > 10.0,
+        "the follower should have been carried east, got {carried:?}"
+    );
+
+    animation::follow_set(&app, follower, "Position", None, 5).expect("unlink");
+    let held = placed(&app, follower, 5);
+    assert!(
+        carried.distance_m(held) < 1.0,
+        "unlinking moved the follower from {carried:?} to {held:?}"
+    );
+
+    // And it is its own object again: step 9 no longer tracks the primary.
+    assert!(
+        placed(&app, follower, 9).distance_m(placed(&app, follower, 5)) < 1.0,
+        "an unlinked follower should stay where it was put"
+    );
+}
+
+/// Deleting the primary frees its followers where they stand, in one history
+/// entry, and one undo puts the whole arrangement back.
+#[test]
+fn deleting_a_primary_frees_its_followers() {
+    let (_root, app) = project("delete-primary");
+    let primary = circle(&app, 0.0, 0.0);
+    let follower = circle(&app, 5.0, 0.0);
+    animation::follow_set(&app, follower, "Position", Some(primary), 0).expect("link");
+    let before = placed(&app, follower, 0);
+
+    document::object_remove(&app, primary).expect("delete");
+    let after = placed(&app, follower, 0);
+    assert!(
+        before.distance_m(after) < 1.0,
+        "the follower moved from {before:?} to {after:?} when its primary went"
+    );
+    assert!(
+        document_of(&app)
+            .object(ve_core::Id::from_raw(follower))
+            .expect("follower")
+            .props
+            .get(PropId::Position)
+            .expect("position")
+            .follow()
+            .is_none(),
+        "the link should be gone, not dangling"
+    );
+
+    // One undo brings the primary back and re-links the follower.
+    edit::undo_for_test(&app).expect("undo");
+    assert!(
+        document_of(&app)
+            .object(ve_core::Id::from_raw(primary))
+            .is_some(),
+        "undo restores the primary"
+    );
+    assert!(
+        document_of(&app)
+            .object(ve_core::Id::from_raw(follower))
+            .expect("follower")
+            .props
+            .get(PropId::Position)
+            .expect("position")
+            .follow()
+            .is_some(),
+        "undo restores the link"
+    );
+}
+
+/// A loop is refused at the command, with a message rather than a panic.
+#[test]
+fn a_link_that_would_loop_is_refused() {
+    let (_root, app) = project("loop");
+    let a = circle(&app, 0.0, 0.0);
+    let b = circle(&app, 5.0, 0.0);
+    animation::follow_set(&app, b, "Position", Some(a), 0).expect("link");
+    let refused = animation::follow_set(&app, a, "Position", Some(b), 0);
+    assert!(refused.is_err(), "A following B closes the loop");
+    assert!(
+        animation::follow_set(&app, a, "Position", Some(a), 0).is_err(),
+        "an object cannot follow itself"
+    );
+    // The refusal changed nothing.
+    assert!(
+        document_of(&app)
+            .object(ve_core::Id::from_raw(a))
+            .expect("a")
+            .props
+            .get(PropId::Position)
+            .expect("position")
+            .follow()
+            .is_none()
+    );
+}
+
+/// Only position and rotation can follow; every other property is refused.
+#[test]
+fn only_position_and_rotation_can_follow() {
+    let (_root, app) = project("followable");
+    let a = circle(&app, 0.0, 0.0);
+    let b = circle(&app, 5.0, 0.0);
+    assert!(animation::follow_set(&app, b, "Position", Some(a), 0).is_ok());
+    assert!(animation::follow_set(&app, b, "RotationDeg", Some(a), 0).is_ok());
+    for property in ["Speed", "Feather", "DiameterKm"] {
+        assert!(
+            animation::follow_set(&app, b, property, Some(a), 0).is_err(),
+            "{property} should not be able to follow another object"
+        );
+    }
+}

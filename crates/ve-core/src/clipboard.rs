@@ -71,12 +71,39 @@ impl Clipboard {
         last_step: u32,
         nudge: bool,
     ) -> Vec<Object> {
+        // Fresh ids first, so a link inside the copied set can be remapped
+        // onto the copies rather than left pointing at the originals.
+        let ids: Vec<Id> = self.objects.iter().map(|_| Id::new()).collect();
+        let remap: std::collections::BTreeMap<Id, Id> = self
+            .objects
+            .iter()
+            .zip(&ids)
+            .map(|(source, &fresh)| (source.id, fresh))
+            .collect();
+
         self.objects
             .iter()
-            .map(|source| {
+            .zip(&ids)
+            .map(|(source, &fresh)| {
                 let mut copy = source.clone();
-                copy.id = Id::new();
+                copy.id = fresh;
                 copy.name = format!("{} copy", source.name);
+
+                // A copied pair keeps its link, remapped onto the copies; a
+                // follower copied without its primary stands alone, because a
+                // link to an object the paste did not bring is a link to
+                // whatever happens to be there (spec.md 9.3, M13).
+                for (_, animatable) in copy.props.iter_mut() {
+                    if let Some(mut follow) = animatable.follow() {
+                        match remap.get(&follow.primary) {
+                            Some(&fresh_primary) => {
+                                follow.primary = fresh_primary;
+                                animatable.set_follow(Some(follow));
+                            }
+                            None => animatable.set_follow(None),
+                        }
+                    }
+                }
 
                 if timing == PasteTiming::Relative {
                     let delta = i64::from(step) - i64::from(copy.active_range.start);

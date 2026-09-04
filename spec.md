@@ -1943,6 +1943,40 @@ copied. The velocity is part of the flat object, so the render cache keys on it
 by construction (§7.10). The gesture preview shows no motion — a fresh stroke
 has no keys — and the tiles do.
 
+**Objects that follow objects.** `Cmd`-drag from one object's `position` or
+`rotation_deg` row onto the same row of another, and the first **follows** the
+second. Those two properties only: a speed that followed another object's speed
+would be a different feature, and no other property is a place in the world for
+an offset to be kept in. A drop on another property, on any other row, or on
+itself is refused. The row then shows a link glyph and the primary's name;
+clicking it unlinks.
+
+**A follower is a rigid part of its primary.** At link time the offset is read
+from where the two objects already are — so linking never moves anything — and
+a position link stores it as a distance and a bearing **measured against the
+primary's own rotation**. At every step the follower's anchor is the primary's,
+moved that distance along that bearing turned by the primary's rotation, so a
+follower orbits a turning primary rather than sliding beside it. A rotation
+link keeps the difference of the two rotations. The primary's motion therefore
+propagates: a follower with **motion** on takes its velocity from the value it
+derives, not from the keys it is ignoring.
+
+The follower's own keys are **kept but dormant**, greyed on the track.
+Unlinking wakes them and, so nothing jumps, writes the derived value at the
+current step under §4.5's rule — a base write would be invisible once a
+property has keys, and those are exactly what unlinking brings back. Deleting
+the primary frees its followers the same way, in the same history entry, so one
+undo puts the whole arrangement back; a follower copied without its primary
+stands alone, and a pair copied together keeps its link between the copies.
+
+**A cycle is refused when it is made.** A loop has no meaning — every object in
+it would be defined by the others — and a user who made one by accident would
+see a set of objects stop responding with nothing to point at. Chains resolve
+in dependency order, once per step for the whole project, so the field, the
+map's outlines and hit testing all place a follower in the same place. A link
+to an object that is no longer there is inert rather than fatal: the property
+falls back to the follower's own keys.
+
 ### 9.4 Playback
 
 - Play, pause, stop, and loop. Playback advances one **time step** per display

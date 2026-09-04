@@ -48,4 +48,21 @@ motion_available: boolean,
 /**
  * Whether it is doing so.
  */
-motion: boolean, };
+motion: boolean, 
+/**
+ * Whether this track can follow another object's (spec.md 9.3, M13).
+ *
+ * Position and rotation only: a speed that followed another object's
+ * speed would be a different feature, and no other property is a place
+ * in the world for an offset to be kept in.
+ */
+can_follow: boolean, 
+/**
+ * The object this track follows, if it follows one. Its keys are then
+ * dormant: the value comes from the link.
+ */
+follows: bigint | null, 
+/**
+ * That object's name, for the row.
+ */
+follows_name: string | null, };

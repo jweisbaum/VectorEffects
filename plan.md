@@ -136,7 +136,17 @@ bearing applied uniformly" is not. Five hand-computed acceptance tests, and the
 fidelity suite generates motion on a third of its objects: the real GPU agrees
 with the CPU to 0.005 m/s and 0.018° over 30,657 samples.
 
-**The linked objects half of M13 is next**, then M14.
+**M13, second half, complete (2026-09-04): objects that follow objects.** A
+follower keeps its offset **in the primary's frame**, so a turning primary
+carries it round rather than sliding it sideways; its own keys are kept and go
+dormant beneath the link, and unlinking wakes them while holding the value
+where it stands (D42). Links resolve once per step for the whole project, in
+dependency order, so the field, the map's outlines and hit testing agree about
+where a follower is. A cycle is refused when it is made; a link to an object
+that is gone is inert; deleting a primary frees its followers in the same
+history entry. Six model tests and four end-to-end ones.
+
+**M14 is next.**
 
 **Unplanned, after M7: GRIB import** (spec §4.8, D44). A GRIB2 file becomes a
 layer — two, when it holds both wind and currents — whose lattice is sampled
@@ -518,7 +528,7 @@ M0 ─ M1 ─ M2 ─ M3 ─ M4 ══ walking skeleton complete
                     ├─ M20 ────── GRIB frames copied between steps         ✓
                     ├─ M21 ────── ICON's icosahedral grid                  ✓
                     ├─ M22 ────── every grid definition the centres ship   ✓
-                    ├─ M13 ────── motion vectors, linked objects        (needs M7)
+                    ├─ M13 ────── motion vectors, linked objects        ✓
                     ├─ M14 ────── region selection, fill, copy/paste
                     ├─ M15 ────── settings and shortcuts
                     ├─ M16 ────── macros                                 (needs M14, M15)
@@ -1237,7 +1247,7 @@ on 0.15° files is the second, and is measured rather than assumed.
 
 ---
 
-### M13 — Motion in the field, and objects that follow
+### M13 — Motion in the field, and objects that follow · **complete**
 
 **Goal:** an object that moves can put its own motion into the wind, and an
 object can be tied to another so it moves with it.

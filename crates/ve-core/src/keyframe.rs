@@ -24,6 +24,47 @@ pub struct Keyframe {
     pub interp: Interpolation,
 }
 
+/// What a followed property keeps of its own place beside the object it
+/// follows (spec.md 9.3, M13).
+///
+/// A follower is a **rigid part of** its primary: it keeps its offset in the
+/// primary's own frame, so it orbits a turning primary rather than sliding
+/// beside it. That is why a position link stores a bearing measured against
+/// the primary's rotation and not a true one.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum FollowOffset {
+    /// A position: where the follower sits in the primary's frame.
+    Position {
+        /// Ground distance from the primary's anchor.
+        #[serde(with = "crate::canonical::metres_field")]
+        distance_m: f64,
+        /// Bearing from the primary's anchor, **less** the primary's own
+        /// rotation, so the offset turns with it.
+        #[serde(with = "crate::canonical::degrees_field")]
+        bearing_deg: f64,
+    },
+    /// A rotation: how much the follower is turned from its primary.
+    Rotation {
+        /// The follower's rotation less the primary's.
+        #[serde(with = "crate::canonical::degrees_field")]
+        delta_deg: f64,
+    },
+}
+
+/// A property whose value is derived from another object's (spec.md 9.3, M13).
+///
+/// The follower's own keys are kept and go dormant: unlinking brings them
+/// back, so a link is a reversible statement about one property and never a
+/// destructive edit.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Follow {
+    /// The object this one follows.
+    pub primary: crate::id::Id,
+    /// What is held constant between the two.
+    pub offset: FollowOffset,
+}
+
 /// Serialised form. Kept separate so deserialisation can re-establish the
 /// sorted-and-unique invariant on data that may have been hand-edited.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -31,6 +72,8 @@ struct AnimatableRepr {
     base: PropValue,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     keys: Vec<Keyframe>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    follow: Option<Follow>,
 }
 
 /// A property value that may vary across time steps.
@@ -42,6 +85,7 @@ struct AnimatableRepr {
 pub struct Animatable {
     base: PropValue,
     keys: Vec<Keyframe>,
+    follow: Option<Follow>,
 }
 
 impl From<AnimatableRepr> for Animatable {
@@ -49,6 +93,7 @@ impl From<AnimatableRepr> for Animatable {
         let mut anim = Self {
             base: repr.base,
             keys: repr.keys,
+            follow: repr.follow,
         };
         // A hand-edited or corrupt file may carry unsorted or duplicated keys.
         // Normalising here means no other code has to defend against it.
@@ -63,6 +108,7 @@ impl From<Animatable> for AnimatableRepr {
         Self {
             base: anim.base,
             keys: anim.keys,
+            follow: anim.follow,
         }
     }
 }
@@ -73,7 +119,19 @@ impl Animatable {
         Self {
             base: base.canonical(),
             keys: Vec::new(),
+            follow: None,
         }
+    }
+
+    /// What this property follows, if it follows anything.
+    pub fn follow(&self) -> Option<Follow> {
+        self.follow
+    }
+
+    /// Sets or clears the link. The keys are left alone: they go dormant
+    /// while a link stands and come back when it is cleared.
+    pub fn set_follow(&mut self, follow: Option<Follow>) {
+        self.follow = follow;
     }
 
     /// The value used when no keyframes exist.

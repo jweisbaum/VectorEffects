@@ -126,6 +126,7 @@ pub fn run() -> anyhow::Result<()> {
             animation::track_samples,
             animation::set_keyframe,
             animation::set_motion,
+            animation::set_follow,
             animation::remove_keyframe,
             animation::move_keyframe,
             animation::set_interpolation,

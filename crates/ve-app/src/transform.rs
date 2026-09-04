@@ -27,7 +27,7 @@ use ve_core::schema::PropId;
 use crate::create::Tool;
 use ve_core::{LonLat, PropValue};
 use ve_render::aeqd::{Frame, Local, Space};
-use ve_render::scene::flatten_object;
+use ve_render::scene::flatten_object_at;
 use ve_render::sdf::Shape;
 
 use crate::commands::AppState;
@@ -410,6 +410,9 @@ pub fn outlines_at(
     let wanted = tool.map(Tool::kind);
     with_session(state, |session| {
         let project = &session.require_open()?.project;
+        // A follower is where its link puts it, not where its dormant keys
+        // say (spec.md 9.3): the outline has to agree with the field.
+        let links = ve_core::follow::resolve(project, step);
         let mut out = Vec::new();
         for layer in &project.layers {
             if !layer.visible {
@@ -419,7 +422,7 @@ pub fn outlines_at(
                 if Some(object.tool) != wanted && !objects.contains(&object.id.raw()) {
                     continue;
                 }
-                let Some(flat) = flatten_object(object, step) else {
+                let Some(flat) = flatten_object_at(object, step, links.of(object.id)) else {
                     continue;
                 };
                 out.push(OperatorOutline {
@@ -577,14 +580,16 @@ fn baseline_of(
     objects: &[u64],
     step: u32,
 ) -> Option<Baseline> {
+    let links = ve_core::follow::resolve(project, step);
     let mut items = Vec::new();
     for raw in objects {
         let Some(object) = project.object(object_id(*raw)) else {
             continue;
         };
         // No flat object means it is outside its lifetime or covers nothing,
-        // and there is nothing to put a handle on.
-        let Some(flat) = flatten_object(object, step) else {
+        // and there is nothing to put a handle on. A follower's handles go
+        // where its link puts it (spec.md 9.3).
+        let Some(flat) = flatten_object_at(object, step, links.of(object.id)) else {
             continue;
         };
         // The stored properties, keys and all, so a drag can write *into* an
@@ -1023,6 +1028,7 @@ pub fn region_objects(
         let project = &session.require_open()?.project;
         let wanted = layer.map(object_id);
 
+        let links = ve_core::follow::resolve(project, step);
         let mut found = Vec::new();
         for candidate in &project.layers {
             if !candidate.visible || candidate.locked {
@@ -1032,7 +1038,7 @@ pub fn region_objects(
                 continue;
             }
             for object in &candidate.objects {
-                let Some(flat) = flatten_object(object, step) else {
+                let Some(flat) = flatten_object_at(object, step, links.of(object.id)) else {
                     continue;
                 };
                 // Distance from the anchor to the nearest point of the
