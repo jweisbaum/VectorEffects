@@ -18,7 +18,7 @@
 
 import type { ReactElement } from "react";
 
-import { HAND, type ActiveTool } from "./tools";
+import { FILL, HAND, SELECT, type ActiveTool } from "./tools";
 
 /** One icon: the geometry inside a `0 0 24 24` box. */
 type Icon = readonly ReactElement[];
@@ -52,6 +52,21 @@ function line(d: string, key: string, filled = false): ReactElement {
  * exhaustively. A fallback would have shipped a blank button instead.
  */
 const ICONS: Record<ActiveTool, Icon> = {
+  // The select tool: a dashed marquee, the shape every paint application
+  // draws for "an area, not a thing".
+  [SELECT]: [
+    line("M4 7V5a1 1 0 0 1 1-1h2", "corner-nw"),
+    line("M17 4h2a1 1 0 0 1 1 1v2", "corner-ne"),
+    line("M20 17v2a1 1 0 0 1-1 1h-2", "corner-se"),
+    line("M7 20H5a1 1 0 0 1-1-1v-2", "corner-sw"),
+    line("M10 4h4M10 20h4M4 10v4M20 10v4", "dashes"),
+  ],
+  // The fill tool: a bucket tipped over what it fills.
+  [FILL]: [
+    line("M11 4 4 11a2 2 0 0 0 0 3l5 5a2 2 0 0 0 3 0l7-7z", "bucket"),
+    line("M5.2 10.4h13.2", "rim"),
+    line("M20 15c1.2 1.6 1.8 2.6 1.8 3.4A1.8 1.8 0 0 1 18.2 18.4c0-.8.6-1.8 1.8-3.4z", "drip"),
+  ],
   // The hand that pans, with the thumb and three fingers a hand icon needs to
   // read as one at 18 pixels.
   [HAND]: [

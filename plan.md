@@ -146,7 +146,18 @@ where a follower is. A cycle is refused when it is made; a link to an object
 that is gone is inert; deleting a primary frees its followers in the same
 history entry. Six model tests and four end-to-end ones.
 
-**M14 is next.**
+**M14, the region, complete (2026-09-04).** The select tool draws a region of
+*ground* — rectangle, centre-out circle or lasso — in map space, as session
+state rather than document or history, with `Cmd`-`A`, `Cmd`-`Shift`-`A` and
+`Cmd`-`D` bound for the first time. Neither it nor the fill tool is in the
+backend palette: that palette describes vector-creation tools, and one of these
+makes no object while the other makes a shape fill and borrows its bar. Fifteen
+tests over the region geometry, which is where the seam and the poles are.
+
+**The fill and the capture are the rest of M14**, and the capture is the large
+half: a coverage bit through the CPU composite, the `.vecap` container, a patch
+object both kernels sample, and the rewording of invariants 1 and 2 that D52
+settled.
 
 **Unplanned, after M7: GRIB import** (spec §4.8, D44). A GRIB2 file becomes a
 layer — two, when it holds both wind and currents — whose lattice is sampled

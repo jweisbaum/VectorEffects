@@ -1804,6 +1804,38 @@ front of every pan.
 - **Selection changes are not undo history entries** (standard editor
   convention).
 
+**Selecting ground, not objects.** The **select tool** (`M`, the marquee's
+conventional key) draws a *region*: an area of the map, which is a different
+thing from a set of objects and coexists with one. In it a plain drag draws
+the region — the select tool is a tool like the brush, and the hand tool is
+where a plain drag still pans (§8.1) — in one of three shapes from its bar:
+rectangle, circle dragged from the centre as the shape fill's presets are, and
+freehand lasso, closed on release.
+
+A region is **in map space**. It is drawn on the map, `Cmd`-`A` means "the
+view" and that is only meaningful as a map rectangle, and a circle dragged on
+screen should be round on screen at every latitude. So anything built from a
+region takes `stamp_space: projected`, exactly as a px-sized stamp does
+(§3.5) — a region is not a ground shape that happens to be drawn.
+
+It is **session state: not document, not history.** Pointing is not an edit.
+It is drawn as a marching-ants outline on the overlay, in a colour used for
+nothing else, so it cannot be mistaken for a selected object's edge.
+`Cmd`-`A` enters the select tool with the view selected, `Cmd`-`Shift`-`A`
+with the whole map, and `Cmd`-`D` or the bar's **Deselect** clears it. None of
+those three keys was bound before.
+
+The **fill tool** (`G`, the paint bucket's key) acts on the current region: a
+click makes a **shape fill** whose geometry is the region's shape. Its bar is
+the shape fill's own and the object it makes is a shape fill and nothing else,
+so §6.1's shared rules cover it with no new case. With no region it is inert
+and says so.
+
+Neither tool appears in the palette §6.2 describes, and deliberately: that
+palette describes vector-creation tools, every entry of which maps to a kind
+an object can be made of. The select tool makes no object at all, and the fill
+tool makes somebody else's.
+
 ### 8.3 Objects are pinned to the earth
 
 During pan and zoom, every object stays locked to its geographic position and

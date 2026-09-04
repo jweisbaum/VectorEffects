@@ -14,7 +14,7 @@
 import { describe, expect, it } from "vitest";
 
 import { ICON_TOOLS, iconFor } from "./ToolIcon";
-import { HAND } from "./tools";
+import { FILL, HAND, SELECT } from "./tools";
 
 /** The attributes a `<path>` in the set carries. */
 interface PathProps {
@@ -36,12 +36,13 @@ function paths(tool: (typeof ICON_TOOLS)[number]): string[] {
 
 describe("the icon set", () => {
   /**
-   * Eleven: the hand, the six tools of spec 6.2, and the four modifiers of 6.3.
+   * Thirteen: the hand, the two region tools of 8.2, the six tools of spec
+   * 6.2, and the four modifiers of 6.3.
    * Named rather than counted against the palette, because the palette arrives
    * over IPC and a test that compared the two would only be comparing the
    * frontend to itself.
    */
-  it("covers the hand and every tool", () => {
+  it("covers the hand, the two region tools and every drawing tool", () => {
     expect([...ICON_TOOLS].sort()).toEqual(
       [
         "brush",
@@ -55,6 +56,8 @@ describe("the icon set", () => {
         "shape_fill",
         "turn",
         "warp",
+        SELECT,
+        FILL,
       ].sort(),
     );
   });

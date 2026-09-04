@@ -78,16 +78,28 @@ import {
   type ActiveTool,
   cloneSourceCamera,
   defaultState,
+  drawsObjects,
+  FILL,
   liveOptions,
   footprintOf,
   gestureKind,
   HAND,
   newObject,
+  SELECT,
   positionOf,
   previewField,
   sampled,
   type ToolState,
 } from "./tools";
+import {
+  type Region,
+  type RegionMode,
+  regionFromDrag,
+  regionFromLasso,
+  regionOfView,
+  regionRing,
+  wholeMap,
+} from "./region";
 import { MapRenderer, type OperatorPreview, type RenderState } from "./renderer";
 import { uniqueTiles } from "../timeline/playback";
 import { TileCache } from "./tiles";
@@ -434,6 +446,17 @@ export default function MapView({
   onViewportRef.current = onViewport;
   const [pending, setPending] = useState(0);
   const [tool, setTool] = useState<ActiveTool>(HAND);
+  /*
+    The selected region, and how the select tool draws one (spec.md 8.2, M14).
+    Session state: not document, not history — a region is a way of pointing,
+    and pointing is not an edit.
+  */
+  const [region, setRegion] = useState<Region | null>(null);
+  const [regionMode, setRegionMode] = useState<RegionMode>("rect");
+  /** The region drag in flight, in geographic degrees. */
+  const regionDrag = useRef<{ from: [number, number]; points: Array<[number, number]> } | null>(
+    null,
+  );
   /**
    * The tool catalogue, as the backend describes it.
    *
@@ -555,7 +578,14 @@ export default function MapView({
   } | null>(null);
 
   /** The active tool's description, or null while the hand tool is chosen. */
-  const schema = palette.find((entry) => entry.tool === tool) ?? null;
+  // The schema is a *drawing* tool's. The fill tool borrows the shape fill's,
+  // because the object it makes is a shape fill and nothing else (M14).
+  const schemaTool: Tool | null = drawsObjects(tool)
+    ? tool
+    : tool === FILL
+      ? "shape_fill"
+      : null;
+  const schema = palette.find((entry) => entry.tool === schemaTool) ?? null;
 
   /**
    * What the active tool is set to.
@@ -979,14 +1009,50 @@ export default function MapView({
   // Single-key tool shortcuts, as in every other paint application.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.metaKey || event.ctrlKey || event.altKey) return;
       const target = event.target as HTMLElement | null;
       // Never steal a keystroke from a field the user is typing in.
       if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
 
+      // Region selection (spec.md 8.2, M14). `Cmd`-`A` enters the select tool
+      // with the view selected and `Cmd`-`Shift`-`A` the whole map, so the
+      // key that means "select everything" everywhere else means it here too;
+      // `Cmd`-`D` clears. None of the three was bound before.
+      if ((event.metaKey || event.ctrlKey) && !event.altKey) {
+        const key = event.key.toLowerCase();
+        if (key === "a") {
+          event.preventDefault();
+          setTool(SELECT);
+          setRegion(
+            event.shiftKey
+              ? wholeMap()
+              : regionOfView(cameraRef.current, viewRef.current.width, viewRef.current.height),
+          );
+          requestOverlay();
+          return;
+        }
+        if (key === "d") {
+          event.preventDefault();
+          setRegion(null);
+          requestOverlay();
+          return;
+        }
+        return;
+      }
+      if (event.altKey) return;
+
       const key = event.key.toLowerCase();
       if (key === "v") {
         setTool(HAND);
+        return;
+      }
+      // The two region tools, whose shortcuts are not in the backend palette
+      // because neither tool is (D54).
+      if (key === "m") {
+        setTool(SELECT);
+        return;
+      }
+      if (key === "g") {
+        setTool(FILL);
         return;
       }
       // The shortcuts come from the palette, so a tool cannot ship without one
@@ -1014,12 +1080,17 @@ export default function MapView({
           abandonRef.current();
           return;
         }
+        if (regionDrag.current) {
+          regionDrag.current = null;
+          requestOverlay();
+          return;
+        }
         setTool(HAND);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [palette]);
+  }, [palette, requestOverlay]);
 
   // The selection's handles, so the map shows what the panels are pointing at
   // and where a drag would act.
@@ -1067,7 +1138,7 @@ export default function MapView({
   // Plus the selection, so a selected operator is outlined whatever tool is in
   // hand. Nothing else: the answer is bounded by one tool's objects rather than
   // by the size of the project.
-  const hoverTool = tool !== HAND && HOVER_TOOLS.has(tool) ? tool : null;
+  const hoverTool = drawsObjects(tool) && HOVER_TOOLS.has(tool) ? tool : null;
   useEffect(() => {
     if (hoverTool === null && selection.length === 0) {
       setOutlineList([]);
@@ -1533,6 +1604,42 @@ export default function MapView({
       }
     }
 
+    // The selected region, and the one being drawn (spec.md 8.2, M14). Drawn
+    // as marching ants — the outline every paint application uses for "an
+    // area, not a thing" — in a colour used for nothing else here, so a region
+    // cannot be mistaken for a selected object's edge.
+    const shaping = regionDrag.current;
+    const shown: Region | null = shaping
+      ? regionMode === "lasso"
+        ? regionFromLasso(shaping.points)
+        : regionFromDrag(
+            regionMode,
+            shaping.from,
+            shaping.points[shaping.points.length - 1] ?? shaping.from,
+          )
+      : region;
+    if (shown) {
+      const ring = regionRing(shown).map((p) =>
+        toScreen(camera, view, { lon: p[0], lat: p[1] }),
+      );
+      const first = ring[0];
+      if (first) {
+        context.save();
+        context.beginPath();
+        context.moveTo(first.x, first.y);
+        for (const at of ring.slice(1)) context.lineTo(at.x, at.y);
+        context.closePath();
+        context.fillStyle = "rgba(140, 255, 190, 0.08)";
+        context.fill();
+        context.strokeStyle = "rgba(150, 255, 200, 0.95)";
+        context.lineWidth = Math.max(1, dpr);
+        context.setLineDash([6 * dpr, 4 * dpr]);
+        context.stroke();
+        context.setLineDash([]);
+        context.restore();
+      }
+    }
+
     // The rubber band, drawn as it is dragged.
     const band = marquee.current;
     if (band) {
@@ -1640,8 +1747,11 @@ export default function MapView({
     // visible: the field fades calm out entirely, but a preview the user cannot
     // see is not a preview.
     const drawing = gestureRef.current;
-    const inProgress = drawing === null ? null : footprintOf(tool, toolState, drawing, camera);
-    const field = previewField(tool, toolState, inProgress);
+    const inProgress =
+      drawing === null || schemaTool === null
+        ? null
+        : footprintOf(schemaTool, toolState, drawing, camera);
+    const field = previewField(schemaTool ?? "brush", toolState, inProgress);
     const paint = rampCss(mpsFromKnots(field.knots), rampMax, PREVIEW_MIN_ALPHA);
 
     // What the overlay draws is the tool's preview kind, decided in one place
@@ -1671,7 +1781,10 @@ export default function MapView({
     // point, so a single click produces nothing to show (spec.md 6.2).
     if (cursor && schema.hover && !toolPick && plan.nib) {
       const geo = unproject(camera, view, cursor);
-      const hovered = footprintOf(tool, toolState, hoverGesture(schema, toolState, geo), camera);
+      const hovered =
+        schemaTool === null
+          ? null
+          : footprintOf(schemaTool, toolState, hoverGesture(schema, toolState, geo), camera);
       if (hovered) {
         const tip = new Path2D();
         buildFootprintPath(tip, camera, view, hovered);
@@ -1680,7 +1793,7 @@ export default function MapView({
           context.fill(tip);
         }
         if (showGlyphs && schema.preview === "field") {
-          const hoverField = previewField(tool, toolState, hovered);
+          const hoverField = previewField(schemaTool ?? "brush", toolState, hovered);
           const head = footprintHead(hovered);
           if (head) drawGlyphs(context, [head], hoverField.knots, hoverField.azimuthAt, dpr);
         }
@@ -1707,6 +1820,8 @@ export default function MapView({
     outlineList,
     drawEdgeBand,
     selection,
+    region,
+    regionMode,
   ]);
 
   useEffect(() => {
@@ -1733,8 +1848,8 @@ export default function MapView({
       const kind = schema?.preview;
       const operates = kind === "mask" || kind === "clone";
       const footprint =
-        drawing && operates && tool !== HAND
-          ? footprintOf(tool, toolState, finished(drawing), cameraRef.current)
+        drawing && operates && schemaTool !== null
+          ? footprintOf(schemaTool, toolState, finished(drawing), cameraRef.current)
           : null;
 
       if (!footprint || !drawing || !operates) {
@@ -1958,7 +2073,18 @@ export default function MapView({
       return;
     }
 
-    if (tool !== HAND && schema) {
+    // The select tool draws a region of ground rather than an object
+    // (spec.md 8.2, M14). A plain drag draws it, because the select tool is a
+    // tool like the brush and the hand tool is where plain drag still pans
+    // (D26).
+    if (tool === SELECT) {
+      const geo = unproject(cameraRef.current, viewRef.current, point);
+      regionDrag.current = { from: [geo.lon, geo.lat], points: [[geo.lon, geo.lat]] };
+      requestOverlay();
+      return;
+    }
+
+    if (drawsObjects(tool) && schema) {
       const geo = unproject(cameraRef.current, viewRef.current, point);
 
       // While a pick is armed the click places that option rather than drawing
@@ -2127,6 +2253,24 @@ export default function MapView({
   const onPointerMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
     const point = toDevice(event);
     cursorRef.current = point;
+
+    // A region being drawn follows the pointer. The lasso keeps every
+    // coalesced position — a fast curve loses its corners otherwise, the same
+    // reason a stroke reads them — and the other two need only the latest.
+    const shaping = regionDrag.current;
+    if (shaping) {
+      const native = event.nativeEvent;
+      const samples =
+        typeof native.getCoalescedEvents === "function"
+          ? native.getCoalescedEvents()
+          : [native];
+      for (const sample of samples) {
+        const geo = unproject(cameraRef.current, viewRef.current, toDevice(sample));
+        shaping.points.push([geo.lon, geo.lat]);
+      }
+      requestOverlay();
+      return;
+    }
 
     // A warp being pulled follows the pointer; nothing else does while it is.
     if (pushDrag.current) {
@@ -2372,7 +2516,7 @@ export default function MapView({
     if (isComplete(drawing, cameraRef.current.pxPerDeg)) {
       // The commit takes the live operation over as a held one, so the map
       // never stops showing the erasure between the release and the tiles.
-      void commitGesture(finished(drawing), toolState, schema, tool);
+      if (schemaTool) void commitGesture(finished(drawing), toolState, schema, schemaTool);
     }
     // ...and once it has, the live one is done with either way.
     if (refreshOperator(null)) requestDraw();
@@ -2425,7 +2569,7 @@ export default function MapView({
       const outcome = press(kind, current, at, onFirstVertex);
       switch (outcome.act) {
         case "commit":
-          void commitGesture(outcome.gesture, toolState, schema, tool);
+          if (schemaTool) void commitGesture(outcome.gesture, toolState, schema, schemaTool);
           return;
         case "close":
           finishGesture();
@@ -2444,6 +2588,21 @@ export default function MapView({
   const endDrag = (event: React.PointerEvent<HTMLCanvasElement>) => {
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    // A region closes on release: a lasso becomes its own polygon, the other
+    // two the shape the drag described. A drag too small to be a region is a
+    // click, and a click on empty map clears the selection.
+    const drawn = regionDrag.current;
+    if (drawn) {
+      regionDrag.current = null;
+      const last = drawn.points[drawn.points.length - 1] ?? drawn.from;
+      setRegion(
+        regionMode === "lasso"
+          ? regionFromLasso(drawn.points)
+          : regionFromDrag(regionMode, drawn.from, last),
+      );
+      requestOverlay();
+      return;
     }
     // Finish a warp's pull: one write, at the step being viewed and through the
     // same path every other property edit takes — so it keys the current step
@@ -2847,6 +3006,31 @@ export default function MapView({
           >
             <ToolIcon tool={HAND} />
           </button>
+          {/*
+            The two tools that act on a *region* rather than on objects
+            (spec.md 8.2, M14). Not in the backend's palette: it describes
+            vector-creation tools, and neither of these is one — the select
+            tool makes no object at all, and the fill tool makes a shape fill,
+            whose bar it borrows.
+          */}
+          <button
+            className={tool === SELECT ? "icon active" : "icon"}
+            onClick={() => setTool(SELECT)}
+            aria-label="Select"
+            aria-pressed={tool === SELECT}
+            title="Select (M) · drag a region of the map · cmd-A selects the view, cmd-shift-A the whole map, cmd-D clears"
+          >
+            <ToolIcon tool={SELECT} />
+          </button>
+          <button
+            className={tool === FILL ? "icon active" : "icon"}
+            onClick={() => setTool(FILL)}
+            aria-label="Fill"
+            aria-pressed={tool === FILL}
+            title="Fill (G) · fill the selected region with a vector field"
+          >
+            <ToolIcon tool={FILL} />
+          </button>
           {palette.map((entry) => (
             <button
               key={entry.tool}
@@ -2861,7 +3045,46 @@ export default function MapView({
           ))}
         </div>
 
-        {schema && (
+        {/*
+          The select tool's bar. Bespoke rather than schema-driven, and
+          deliberately: the schema describes an *object's* properties, and a
+          region has no object for one to live on. Three modes and a way to
+          clear, which is the whole of what a region can be told.
+        */}
+        {tool === SELECT && (
+          <div className="tool-options" role="group" aria-label="Select options">
+            <label>
+              Shape
+              <select
+                value={regionMode}
+                onChange={(event) => setRegionMode(event.target.value as RegionMode)}
+                title="Rectangle and lasso are drawn corner to corner and freehand; a circle is dragged out from its centre"
+              >
+                <option value="rect">Rectangle</option>
+                <option value="circle">Circle</option>
+                <option value="lasso">Lasso</option>
+              </select>
+            </label>
+            <button
+              disabled={region === null}
+              onClick={() => {
+                setRegion(null);
+                requestOverlay();
+              }}
+              title="Clear the selected region (cmd-D)"
+            >
+              Deselect
+            </button>
+          </div>
+        )}
+
+        {tool === FILL && region === null && (
+          <div className="tool-options" role="group" aria-label="Fill options">
+            <span className="muted">Select a region first — the fill takes its shape.</span>
+          </div>
+        )}
+
+        {schema && (tool !== FILL || region !== null) && (
           <ToolOptions
             schema={schema}
             state={toolState}

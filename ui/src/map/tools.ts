@@ -32,8 +32,35 @@ import {
 /** The hand tool, which draws nothing and is not in the palette. */
 export const HAND = "hand" as const;
 
-/** What a pointer drag does: pan and select, or draw with one of the tools. */
-export type ActiveTool = typeof HAND | Tool;
+/**
+ * The select tool: it draws a *region* of ground rather than an object
+ * (spec.md 8.2, M14).
+ *
+ * Not in the backend's palette, and deliberately: the palette describes
+ * vector-creation tools, and every entry in it maps to a `ToolKind` an object
+ * can be made of. A region is a way of pointing, so it has no properties for
+ * a schema to describe and no object for them to live on.
+ */
+export const SELECT = "select" as const;
+
+/**
+ * The fill tool: it turns the current region into a shape fill.
+ *
+ * Frontend-only for the same reason, but its *bar* is the shape fill's own,
+ * fetched from the palette like any other — the object it makes is a shape
+ * fill and nothing else, so the seven shared-rule tests cover it with no new
+ * case (M14).
+ */
+export const FILL = "fill" as const;
+
+/** What a pointer drag does: pan and select, draw a region, or draw with one
+ * of the tools. */
+export type ActiveTool = typeof HAND | typeof SELECT | typeof FILL | Tool;
+
+/** Whether a tool draws or edits objects rather than pointing at ground. */
+export function drawsObjects(tool: ActiveTool): tool is Tool {
+  return tool !== HAND && tool !== SELECT && tool !== FILL;
+}
 
 /** The options a tool is holding, keyed by property id. */
 export type ToolValues = Record<string, PropertyValue>;
