@@ -1,9 +1,9 @@
-//! Stable identifiers for documents, layers, objects, and route nodes.
+//! Stable identifiers for documents, layers and objects.
 //!
 //! Ids are opaque `u64`s allocated from a per-process counter. They are stable
-//! across every edit short of deletion, which is what route-leg identity depends
-//! on (spec.md 11.6): a leg is keyed by `(parent_node_id, child_node_id)`, so
-//! moving a node must not change its id.
+//! across every edit short of deletion, which is what lets a keyframe, a
+//! history entry and a render snapshot all refer to the same object without
+//! holding it: moving or renaming one must not change its id.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 

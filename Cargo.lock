@@ -4498,7 +4498,6 @@ dependencies = [
  "ts-rs",
  "ve-core",
  "ve-grib",
- "ve-polar",
  "ve-render",
 ]
 
@@ -4526,14 +4525,6 @@ dependencies = [
  "thiserror 2.0.20",
  "ve-core",
  "ve-grib",
-]
-
-[[package]]
-name = "ve-polar"
-version = "0.1.0"
-dependencies = [
- "thiserror 2.0.20",
- "ve-core",
 ]
 
 [[package]]

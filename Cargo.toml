@@ -4,7 +4,6 @@ members = [
     "crates/ve-core",
     "crates/ve-render",
     "crates/ve-grib",
-    "crates/ve-polar",
     "crates/ve-app",
     "tools/basemap-builder",
     "tools/icon-grid-builder",
@@ -20,7 +19,6 @@ repository = "https://github.com/jweisbaum/VectorEffects"
 [workspace.dependencies]
 ve-core = { path = "crates/ve-core" }
 ve-grib = { path = "crates/ve-grib" }
-ve-polar = { path = "crates/ve-polar" }
 ve-render = { path = "crates/ve-render" }
 
 anyhow = "1"

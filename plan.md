@@ -10,7 +10,7 @@ and export.
 
 **The plan after M7 was replaced on 2026-09-04.** M7 is closed as delivered,
 and the hand-verification pass it left open is no longer a gate on anything.
-The measurement tools (M8), the routes (M9) and hardening (M10) stand but move
+The measurement tools (M8) and hardening (M10) stand but move
 behind a new run of milestones, **M12–M19**, written from a feature request of
 that date: a decoder for the forecast files the import still refuses (M12);
 copying a GRIB layer's frames between steps (M20, added 2026-09-04 and
@@ -483,8 +483,8 @@ The two riskiest components are front-loaded deliberately:
   refuses to open makes everything else worthless, so it gets validated against
   external decoders before any breadth work begins.
 
-Tool breadth (M6), timeline (M7), and route solving (M9) are comparatively
-low-risk once the spine holds — and M6 and M7 bore that out.
+Tool breadth (M6) and the timeline (M7) are comparatively low-risk once the
+spine holds — and both bore that out.
 
 ```
 M0 ─ M1 ─ M2 ─ M3 ─ M4 ══ walking skeleton complete
@@ -505,7 +505,6 @@ M0 ─ M1 ─ M2 ─ M3 ─ M4 ══ walking skeleton complete
                     ├─ M19 ────── export precision
                     ├─ M11 ────── projections                            (M14, M18 lean on it)
                     ├─ M8 ─────── measurement
-                    └─ M9 ─────── sailboat routes                        (needs M6 curve tool)
                                         │
                                        M10 ── hardening & release
 ```
@@ -521,8 +520,7 @@ in, so both precede it. M17, M18 and M19 are independent of each other and of
 the rest. M11 comes before M8 because M14's map-space regions and M18's image
 quads are the last two things that will assume equirectangular, and it is
 better to find out what they cost under a curved projection with those fresh
-than after M8 has added a third. M9 keeps its dependency on M6; M10 is last as
-always.
+than after M8 has added a third. M10 is last as always.
 
 ---
 
@@ -980,53 +978,6 @@ for a dedicated invalidation test suite.
 
 ---
 
-### M9 — Sailboat route definition
-
-**Goal:** spec §11, complete. Depends on M6's curve tool.
-
-**Deliverables**
-
-- Polar parsing (CSV / `.pol`), bilinear interpolation, embedding in the project.
-- Two or three bundled sample polars.
-- Route mode state machine and its map interaction layer.
-- Reachability disc computation and click rejection outside it.
-- Route tree editing: add, move, delete nodes and branches; post-solve editing.
-  Node `Id`s must be stable across every edit short of deletion — leg identity
-  depends on it (spec §11.6).
-- Polar inversion with the documented selection strategy (spec §11.4), behind a
-  named-enum strategy interface.
-- Generation of tagged curve objects into an auto-created `Routes` layer.
-- **Merge-on-re-solve machinery** (spec §11.6): per-property user-modified
-  flags, the solver-owned / user-owned split, leg identity keyed on
-  `(parent_node_id, child_node_id)`, and "detach from route."
-- `max_tws` defaulting to the polar's own maximum TWS, displayed in the route
-  panel and user-adjustable.
-- Conflict detection and a route report, including solver-owned overwrites and
-  legs solved above 35 kt.
-- Infeasible-leg flagging.
-
-**Acceptance**
-
-- Round-trip test: define a 3-branch tree, solve, export the GRIB, then run a
-  simple built-in forward simulation using the same polar and confirm every
-  defined route is achievable within the safety margin. **This is the feature's
-  real acceptance test** — everything else is UI around it.
-- Clicking outside the reachability disc is rejected with an explanatory
-  message.
-- Re-solving is idempotent. Specifically: edit `width_km` on a leg's object,
-  move that leg's child node, re-solve — the width survives and the wind is
-  recomputed. Then delete a different node and confirm only its own legs'
-  objects are removed.
-- The feature is entirely absent in current projects.
-
-**Risks:** the polar inversion is under-determined and the chosen selection rule
-is a judgement call. The forward-simulation acceptance test is what keeps it
-honest. The merge behaviour is the second risk — it is safe only as long as node
-`Id` stability holds, so that is worth an explicit test rather than an
-assumption.
-
----
-
 ### M10 — Hardening and release
 
 **Goal:** shippable.
@@ -1041,8 +992,7 @@ assumption.
   AppImage/deb.
 - Offline verification test: run the packaged app with the network disabled and
   confirm every feature works.
-- User documentation and 3–4 sample projects, including one demonstrating the
-  route feature.
+- User documentation and 3–4 sample projects.
 
 **Acceptance**
 
@@ -1784,7 +1734,6 @@ sequence.
 | Geodesy | Comparison against reference values, with deliberate antimeridian and polar cases. |
 | Evaluation | GPU/CPU parity on randomised scenes; golden raster snapshots at 1° for regression. |
 | GRIB | Self-round-trip via the in-test reader; external decode by `wgrib2`/ecCodes in CI; committed byte-level golden files. |
-| Routes | Forward simulation against the same polar. |
 | Frontend | Component tests for the timeline and layer panel; Playwright smoke over the packaged app. |
 | Captures (M14, M16) | Hand-computed fields through capture → container → insert; the container round-trips byte-identically; undefined and zero asserted distinct through both kernels and an export. |
 | Decoder (M12) | ecCodes-repacked fixtures with known values; the full sample set as an ignored test keyed on the directory. |
@@ -1859,8 +1808,7 @@ relitigated by accident.
 | D47 | A tool that paints a single vector can take it off the map | Aiming a wind by typing two numbers is guesswork next to pointing at one that is already there. The eyedropper is declared in the schema — two property names and the conditions that make them meaningful — so the option bar renders it generically and it is inert exactly where what it writes is: a gradient has two speeds and two bearings and no single answer, and a curve in `relative_to_path` holds an offset rather than a direction. Sampled through the evaluator rather than decoded from the tile under the cursor, so the number that lands in the document is the field's own and not the map's 16-bit quantisation of it; only visible layers contribute, which is what the map is showing anyway (spec §6.1) |
 | D12 | `edge_mode` defaults to `Blend` | Identical to `Replace` over calm areas, so the default only governs soft edges over existing data — where fading to calm is never wanted (spec §7.4) |
 | D13 | Reducing `step_count` deletes keyframes, behind a quantified confirmation | Keeps the document free of invisible state; the confirmation carries the cost (spec §4.1) |
-| D14 | `max_tws` defaults to the polar's own maximum TWS | Uses all real data, never extrapolates past the table; the min-TWS solver means a high cap doesn't generally strengthen fields (spec §11.3) |
-| D15 | Route objects are editable, with merge on re-solve | Leg identity is the node-`Id` pair, so topology changes never misattribute edits — this is what makes merge safe rather than fragile (spec §11.6) |
+| ~~D14, D15~~ | **Withdrawn with the sailboat route feature.** Both settled how a route solver should behave — the `max_tws` default and merge-on-re-solve — and neither survives the feature's removal. The row stays so the numbering around it does not shift |
 | D16 | Both arrow and barb glyphs ship in v1 | Barbs are the sailing audience's native idiom; the colour ramp still carries unquantised speed, so barbs never become the only reference (spec §5.3) |
 | D18 | The view is a proxy: preview fidelity is perceptual, not numerical | No preview pixel can reach an export, so requiring 1e-3 m/s agreement between backends bought nothing and would have forbidden fast approximate trigonometry and coarse-lattice preview evaluation. Tolerance is now set where a difference would be seen: max(0.25 m/s, 2%) and 2° (spec §7.9) |
 | D22 | The GPU declines clone-stamp scenes rather than approximating them | A clone stamp reads the composite beneath itself, which needs recursion; a compute shader has none. Declining routes the scene to the CPU, which is the same fallback that covers a machine with no GPU |

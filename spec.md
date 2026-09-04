@@ -69,7 +69,8 @@ is a design regression, not a trade-off.
    coarsely and interpolate (§7.7).
 4. **Export is deterministic.** The same project exported twice on any two
    machines produces byte-identical GRIB2 output.
-5. **Zero runtime network access.** Basemap, polars, and all assets are bundled.
+5. **Zero runtime network access.** The basemap and every other asset are
+   bundled.
 6. **Interaction stays fast; export is allowed to be slow.** Never trade frame
    rate for export throughput.
 
@@ -170,8 +171,8 @@ flow direction in one mode and a relative offset in another (the curve's
 
 **Speed is stored in m/s and shown in knots, always.** m/s is what GRIB2
 encodes, so it is what the document holds and what the evaluator works in.
-Knots is what this tool's audience reads: a sailing forecast, a boat polar and a
-wind barb are all in knots, and a barb is *defined* in 5-knot increments. An
+Knots is what this tool's audience reads: a sailing forecast and a wind barb
+are both in knots, and a barb is *defined* in 5-knot increments. An
 earlier draft made the display unit a project setting; that bought nothing —
 nobody wants half their speeds in km/h — and cost a branch at every display site
 plus a field in the file format. Conversion happens at the UI boundary and
@@ -305,8 +306,6 @@ Project {
     settings: ProjectSettings,
     layers: Vec<Layer>,          // index 0 = bottom-most
     annotations: Annotations,    // measurement overlays (§8) — never affect the field
-    polars: Vec<Polar>,          // embedded boat polars (wind projects)
-    routes: Option<RouteTree>,   // sailboat route feature (§10)
     view: ViewState,             // last camera + current time step; UI convenience
 }
 
@@ -398,7 +397,6 @@ Single-file container, extension `.veproj`. A ZIP archive (deflate):
 
 ```
 project.json          canonical JSON, stable key order, pretty-printed
-polars/<id>.csv       embedded boat polars, verbatim as imported
 META-INF/version      schema_version, for fast pre-parse rejection
 ```
 
@@ -1797,7 +1795,7 @@ Command-pattern undo/redo with explicit inverses.
   user did.
 - Everything mutating is undoable: object creation, edits, deletion, layer
   reorder/rename/visibility, keyframe add/move/delete/retype, active-range
-  changes, route-tree edits.
+  changes.
 - The history panel lists entries and supports jumping to any point.
 
 ### 8.5 Copy and paste
@@ -1962,139 +1960,22 @@ measurements."
 
 ---
 
-## 11. Sailboat route definition (wind projects only)
+## 11. Sailboat route definition — *withdrawn*
 
-### 11.1 Purpose
+This section specified a sailboat route feature: bundled boat polars, a
+route tree drawn on the map, and a solver that inverted the polar to find
+the wind each leg needed. It was withdrawn before any of it was built.
 
-Produce a GRIB in which a small, known set of sailing routes is viable — the
-inverse of routing. Instead of "given wind, find the route," this is "given the
-routes, synthesise wind that makes them work," so a routing engine can be tested
-against a known-correct answer.
+The app makes forecast fields; what a routing engine then does with one is
+that engine's business, and building a solver here meant owning a polar
+format, an under-determined inversion, and a merge-on-re-solve model for
+objects the user could also edit by hand — a second product inside the
+first.
 
-The menu entry is hidden for current projects.
-
-### 11.2 Boat polars
-
-A polar is a table of boat speed (kt) indexed by true wind angle (0–180°) and
-true wind speed (0–40 kt), bilinearly interpolated.
-
-- Import from CSV / `.pol` (the common ORC-style tab- or semicolon-separated
-  grid: first row TWS, first column TWA).
-- Two or three sample polars ship with the app so the feature works out of the
-  box, offline.
-- Imported polars are embedded in the project file (§4.7), so a project is
-  portable without its source files.
-
-### 11.3 Mode flow
-
-A guided, modal state machine. The map switches to route-editing interaction;
-painting tools are unavailable inside the mode.
-
-1. **Enter mode.**
-2. **Select a polar** from the embedded list or import one.
-3. **Set departure:** choose the departure time step, then click the departure
-   location. This creates the root node.
-4. **Step forward.** For each subsequent time step, every node from the previous
-   step is a candidate parent. The user selects a parent and clicks to add a
-   child. Unlimited children per parent.
-   - A **reachability disc** is drawn around the selected parent: a geodesic
-     circle of radius `max_boat_speed(polar, ≤ max_tws) × step_hours`. Clicks
-     outside it are rejected with an explanation.
-   - `max_tws` caps how strong a wind the app is willing to invent. **It
-     defaults to the selected polar's own maximum defined TWS**, so the solver
-     uses every row of real data available and never extrapolates beyond the
-     table. It is user-adjustable (5–60 kt) and the effective value is displayed
-     in the route panel.
-   - Because the solver already selects the *minimum* wind that satisfies each
-     leg (§11.4), a high cap does not produce generally stronger fields — it
-     only makes aggressive legs feasible that would otherwise be flagged. Legs
-     solved above 35 kt are noted in the route report as a heads-up, without
-     blocking.
-5. **Finish adding routes.** Explicit button. The tree is then solved.
-
-Nodes and edges remain editable after solving; re-solving is idempotent.
-
-### 11.4 Solving
-
-For each leg (parent → child at consecutive steps):
-
-1. Required course = initial great-circle bearing parent→child. Required boat
-   speed = geodesic distance / `step_hours`.
-2. Apply a safety margin: the solved wind must yield ≥ `required_speed × 1.05`.
-3. **Invert the polar.** The problem is under-determined — a family of
-   `(TWD, TWS)` pairs satisfies any achievable speed. Resolve it with an
-   explicit, documented selection rule:
-   - Restrict TWA to `[35°, 170°]` (out of the no-go zone, off a dead run).
-   - Among feasible solutions choose **minimum TWS** — the least extreme wind
-     that does the job.
-   - Break ties toward a TWA of 90° (beam reach), the most forgiving point of
-     sail for a routing engine to reproduce.
-   - The selection strategy is a named enum so alternatives can be added later.
-4. If no feasible solution exists (the leg is unreachable within `max_tws`), the
-   leg is flagged in the UI and skipped rather than silently approximated.
-
-### 11.5 Generated objects
-
-Each solved leg produces a **curve-tool object** in a dedicated, auto-created
-layer named `Routes`:
-
-- Geometry: the leg's great-circle path.
-- `width_km`: user setting, default 200 km corridor.
-- `speed` and `direction` from the solved wind, with generous `feather`.
-- `active_range` set to that leg's single time step.
-
-Generated objects are **ordinary, fully editable objects**. They are not locked.
-They carry a route-link tag recording which leg produced them, which drives the
-merge behaviour below.
-
-### 11.6 Re-solving and merge rules
-
-Re-solving preserves the user's manual edits. Two mechanisms make this
-predictable rather than fragile.
-
-**Leg identity is structural, not positional.** A leg is identified by the pair
-`(parent_node_id, child_node_id)`. Route-tree node `Id`s are stable across every
-edit that does not delete the node — including moving it. So:
-
-| Tree change | Effect on the leg's object |
-|---|---|
-| Node moved | Identity preserved; solver-owned properties recomputed, user edits kept |
-| Node added | New object created with defaults |
-| Node deleted | Its legs' objects are deleted, with a confirmation naming any that carry user edits |
-| Polar changed | All identities preserved; all solver-owned properties recomputed |
-
-This is what defuses the usual fragility of merge-on-regenerate: topology changes
-never silently reassign one leg's edits to a different leg, because identity was
-never derived from ordering or position in the first place.
-
-**Property ownership is explicit.** Each route-generated object tracks a
-per-property user-modified flag, set the first time the user changes that
-property.
-
-| Ownership | Properties | On re-solve |
-|---|---|---|
-| Solver-owned | `speed`, `direction`, geometry (the leg path), `active_range` | Always recomputed |
-| User-owned | `width_km`, `feather`, `edge_mode`, `name`, `enabled` | Preserved once modified; otherwise follow the solver's default |
-
-If the user manually edited a solver-owned property, re-solving overwrites it and
-lists the overwrites in the route report — a notice, not a prompt.
-
-**Escape hatch.** "Detach from route" (per object, or for the whole `Routes`
-layer) drops the route-link tag. Detached objects become entirely ordinary and
-are never touched by re-solving again. This is the path for a user who wants to
-hand-tune a wind field that started from a solved route.
-
-### 11.7 Conflicts
-
-Two legs at the same time step whose corridors overlap with materially different
-solved winds are a genuine conflict. The app:
-
-- Detects overlaps and flags them in a route report.
-- Resolves by z-order (later leg wins), the same rule as everywhere else.
-- Reports affected legs so the user can widen the time step, move a node, or
-  accept the overlap.
-
----
+**The number is retired rather than reused.** Thirty-odd references to §12
+through §15 are spread through the code's doc comments, and renumbering to
+close a gap would risk pointing several of them somewhere wrong for no
+gain. There is no §11.
 
 ## 12. GRIB2 export
 
@@ -2248,6 +2129,4 @@ their reasoning so they are not reopened by accident.
 |---|---|---|---|
 | Q1 | Feather over existing data — fade to calm, or blend? | **`Blend` by default**, `Replace` available per object. The two are identical over calm areas, so the default only governs the case `Replace` handles badly. | §7.4 |
 | Q2 | Keyframes beyond a reduced `step_count`? | **Deleted, behind a confirmation** stating the exact count and affected objects. No invisible state. | §4.1 |
-| Q3 | Default `max_tws` for route solving? | **The polar's own maximum defined TWS.** Uses all real data, never extrapolates. Adjustable; legs above 35 kt noted in the report. | §11.3 |
-| Q4 | Are route-generated objects editable? | **Fully editable, with merge on re-solve.** Leg identity is the node-`Id` pair; property ownership is explicit; "detach from route" is the escape hatch. | §11.6 |
 | Q5 | Arrows or wind barbs? | **Both ship in v1**, switchable. Barbs are wind-only. The colour ramp always carries unquantised speed regardless. | §5.3 |

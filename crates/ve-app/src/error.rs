@@ -23,10 +23,6 @@ pub enum AppError {
     #[error(transparent)]
     Grib(#[from] ve_grib::GribError),
 
-    /// A polar parsing or route solving failure.
-    #[error(transparent)]
-    Polar(#[from] ve_polar::PolarError),
-
     /// Filesystem access failed.
     #[error("i/o failed: {0}")]
     Io(#[from] std::io::Error),
@@ -80,7 +76,6 @@ impl AppError {
             Self::Core(_) => "core",
             Self::Render(_) => "render",
             Self::Grib(_) => "grib",
-            Self::Polar(_) => "polar",
             Self::Io(_) => "io",
             Self::Settings(_) => "settings",
             Self::NoProjectOpen => "no-project",

@@ -4,8 +4,8 @@
 //!
 //! m/s is what GRIB2 encodes, so it is what the document holds and what the
 //! evaluator works in. Knots is what the audience for this tool reads: a
-//! sailing forecast, a boat polar, and a wind barb are all in knots, and a barb
-//! is *defined* in 5-knot increments.
+//! sailing forecast and a wind barb are both in knots, and a barb is
+//! *defined* in 5-knot increments.
 //!
 //! The unit is not configurable. An earlier draft made it a project setting,
 //! which bought nothing — nobody wants half their speeds in km/h — and cost a

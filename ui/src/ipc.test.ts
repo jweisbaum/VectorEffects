@@ -16,9 +16,9 @@ describe("isErrorPayload", () => {
 
 describe("IpcError", () => {
   it("carries the machine-readable kind alongside the message", () => {
-    const err = new IpcError({ kind: "polar", message: "leg infeasible" });
-    expect(err.kind).toBe("polar");
-    expect(err.message).toBe("leg infeasible");
+    const err = new IpcError({ kind: "grib", message: "no wind field" });
+    expect(err.kind).toBe("grib");
+    expect(err.message).toBe("no wind field");
     expect(err).toBeInstanceOf(Error);
   });
 });

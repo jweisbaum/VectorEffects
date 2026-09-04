@@ -23,8 +23,8 @@ pub const MAX_STEPS: u32 = 240;
 
 /// Whether a project describes wind or ocean current.
 ///
-/// Fixed at creation: it selects the GRIB discipline, parameter numbers, and
-/// level encoding, and gates the sailboat route feature.
+/// Fixed at creation: it selects the GRIB discipline, parameter numbers and
+/// level encoding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FieldKind {
@@ -258,12 +258,6 @@ impl Default for ViewState {
 #[non_exhaustive]
 pub struct Annotations {}
 
-/// Sailboat route data (spec.md 11). Populated in M9.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-#[non_exhaustive]
-pub struct RouteData {}
-
 /// A complete project.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Project {
@@ -291,9 +285,6 @@ pub struct Project {
     /// Measurement overlays.
     #[serde(default)]
     pub annotations: Annotations,
-    /// Route data, for wind projects.
-    #[serde(default)]
-    pub routes: RouteData,
     /// Camera and playhead.
     #[serde(default)]
     pub view: ViewState,
@@ -309,7 +300,6 @@ impl Project {
             settings,
             layers: vec![Layer::new("Layer 1")],
             annotations: Annotations::default(),
-            routes: RouteData::default(),
             view: ViewState::default(),
             regrid: std::collections::BTreeMap::new(),
         }

@@ -61,20 +61,19 @@ crates/
                pure-Rust codec crates, bitmaps. `icon` holds the bundled
                unstructured-grid definitions. `reader` is the writer's
                test-only verifier.
-  ve-polar/    Boat polars, polar inversion, route tree, route solving
   ve-app/      Tauri app: IPC commands, app state, background workers,
                custom URI scheme, autosave
 ui/            React + TypeScript + Vite frontend (npm workspace member)
                  project/  start screen, native dialogs, display formatting
                  map/      camera, tiles, WebGL renderer, shaders
-assets/        Natural Earth source data, sample polars, GRIB templates
+assets/        Natural Earth source data, GRIB templates
 tools/         Asset converters and the offline invariant check
 package.json   Root npm workspace: owns the Tauri CLI and every script
 ```
 
 **Dependency direction:** `ve-app` → everything; `ve-render` → `ve-core`;
-`ve-polar` → `ve-core`; `ve-grib` → `ve-core`. Never the reverse, and
-`ve-core` depends on none of them.
+`ve-grib` → `ve-core`. Never the reverse, and `ve-core` depends on none of
+them.
 
 ---
 
