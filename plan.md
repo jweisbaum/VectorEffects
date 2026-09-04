@@ -2,13 +2,165 @@
 
 **Companion to** `spec.md`. Section references below point into it.
 
-**Status:** M0 through M5 complete and verified; M6 and M7 complete and
-verified by test (2026-09-03). **The walking skeleton is closed**: a new project, a painted
-stroke, and a GRIB2 file that ecCodes parses and whose values decode to exactly
-what was painted. **The tool catalogue is complete**: all six tools of spec §6.2
-draw, evaluate, save and export.
+**Status:** M0 through M7 complete and verified by test (2026-09-03). **The
+walking skeleton is closed**: a new project, a painted stroke, and a GRIB2 file
+that ecCodes parses and whose values decode to exactly what was painted. **The
+tool catalogue is complete**: all six tools of spec §6.2 draw, evaluate, save
+and export.
 
-**M8 is next.**
+**The plan after M7 was replaced on 2026-09-04.** M7 is closed as delivered,
+and the hand-verification pass it left open is no longer a gate on anything.
+The measurement tools (M8), the routes (M9) and hardening (M10) stand but move
+behind a new run of milestones, **M12–M19**, written from a feature request of
+that date: a decoder for the forecast files the import still refuses (M12);
+copying a GRIB layer's frames between steps (M20, added 2026-09-04 and
+sequenced with it); motion vectors from an object's own movement, and one object following another
+(M13); a region-selection tool with fill and copy/paste (M14); application
+settings with rebindable shortcuts and colour scales (M15); macros — captured
+fields kept across projects and re-inserted (M16); the warp and liquify split
+(M17); image layers (M18); and an export precision option (M19). Map
+projections (M11) are pulled forward into the same run. The seven questions
+the re-plan raised — one of them touching invariants 1 and 2 — were put to the
+user the same day and are settled: D52–D58 in §5, and §6 records them.
+
+**M12 is next.**
+
+**Unplanned, after M7: GRIB import** (spec §4.8, D44). A GRIB2 file becomes a
+layer — two, when it holds both wind and currents — whose lattice is sampled
+by both kernels beneath the layer's own objects. The project keeps the path
+and nothing else. The decoder is new and hand-written: template 3.0 in every
+scanning mode, 4.0/4.1/4.2/4.8/4.11/4.12/4.15, 5.0/5.2/5.3, bitmaps; JPEG 2000
+is refused by name with the repacking command. Measured on the dense tile
+with a global 0.25° lattice beneath it: 37.9 ms standard on the CPU against
+31.4 without, 3.98 ms exact on the GPU against 3.83. The fidelity suite now
+generates raster scenes and finds a worst error of 0.0015 m/s and 0.042°
+over 30,662 samples. The GPU device now asks for six storage buffers per
+stage rather than downlevel's four; an adapter without them falls back to the
+CPU as one without a GPU does. Also **Open from GRIB** on the start screen, which derives a project's
+settings from a file (spec §4.8) and imports it. Found by hand afterwards:
+the object list showed "empty" under a GRIB layer, whose field *is* its
+content; and the visibility toggle's two ring glyphs did not read as one, so
+it is an eye now. **Not verified by hand**: no real forecast file has been
+imported in the running app, only files the writer produced.
+
+**Unplanned, after M7: the tracks say what happens between the keys** (spec
+§9.3). A dot on every step a segment interpolates through, so a moving segment
+is distinguishable from a held one without reading the easing off a
+right-click menu; and a per-track value graph behind a disclosure, drawn on
+the ruler's scale under its track. The graph's samples come from the model
+(`track_samples`) rather than from a second interpolation in the frontend —
+the easings, the shortest arc and the great circle stay in one place — and the
+frontend converts them the way the inspector does, in knots and in the
+project's direction convention, unwrapping a degree series so a turn across
+the seam draws as the short arc it is. **Not verified by hand**: the graph has
+been tested as arithmetic and as samples, not looked at in the running app.
+
+**More from the running app.** The pink edge was drawn by *stroking* the
+footprint, which is a union of stamps that `Path2D` cannot union — so it traced
+every stamp's circle and left a chain of rings. It is a band now: grow the
+footprint by half the band's width, knock out a copy shrunk by the same, and
+what remains is the union's boundary exactly, centred on it. Reported again
+afterwards as "too small, inset from the perimeter", which was a second bug and
+an older one: the conversion from a backend outline to a footprint *halved* the
+radius, so every outline — the drag preview's included, since M6 — was drawn at
+half the size of the object it outlined. `radius_km` is a radius. It has its own
+function and its own test now (`footprintOfOutline`). The brush hovers too, and the outline request is
+bounded by the tool in hand rather than by the project. The warp is **pulled**
+— shift-drag grabs the one under the pointer and drags its field where it
+should go — which replaced its distance and bearing with a `push_to` position,
+so both ends of the push are keyframable, and made it unmergeable in both
+modes, since both are now measured from the anchor. A GRIB layer takes a
+**speed band**, applied in both kernels where a missing sample is applied, so a
+forecast can be read one band at a time. And every numeric field in the app now
+goes through one component: the old ones could not be *cleared*, because an
+empty box parsed as `NaN`, committed a fallback and refilled under the cursor —
+a size of 500 could be edited in the middle but never replaced.
+
+**Also from the running app: the timeline says nothing about coverage, the
+modifiers were stamps, and the mask's icon was an eraser.** A GRIB layer's row
+now marks the steps its file has a message for, which is the other half of
+D48 — a field that comes and goes needs the timeline to say why. `←` and `→`
+step the playhead (clamped, where playback loops), beside the `Space` that
+already played and stopped. The four modifiers are painted rather than
+click-placed, so a swathe can be treated in one gesture and two strokes of one
+merge like two of a brush — except the two whose field is measured from their
+own anchor, which cannot absorb another without moving the centre they
+radiate from or turn about, the same rule that keeps two clone strokes apart.
+Their edges highlight in pink under the pointer as a mask's do, from one
+`operator_outlines` command that covers both. Migration to schema version 9
+turns an existing modifier stamp into the one-point stroke it would have been.
+
+**Found by hand, after the GRIB import: an imported field outstayed its
+file** (spec §4.8, D48). Every step past the last message showed that message,
+unchanged — a six-hour file standing in for a whole timeline and looking like
+data. A step the file has no message for now shows no imported field at all.
+The rule this replaces was chosen for consistency with keyframes, which was the
+wrong analogy: a keyframe is an instruction and holds; a message is a
+measurement and does not. `frame_at` returns an `Option` now, which is what
+made the change small — the two callers either have a lattice for this step or
+have nothing to composite.
+
+**Unplanned, after M7: the mask, and taking a vector off the map** (spec §6.1,
+§6.2, D46). The eraser is the **mask**, renamed through the document with a
+migration, since the tool's name is stored on every object it drew. It gains
+`invert`, which turns its coverage inside out — cull included, which is the
+whole of the implementation subtlety: the spherical cap that makes every other
+object cheap by rejecting a distant cell has to *accept* it here. A mask and
+its inverse are exact complements, asserted through the field, which is the
+only place a coverage weight is observable. Its edge is drawn on the map now,
+selected or under the pointer — a mask paints calm and had nothing to show
+where it was — and the hit test is `isPointInStroke` against the very path the
+overlay draws, so what highlights is what covers.
+
+And the **eyedropper**: on the brush, the shape fill and the curve, where the
+tool paints a single vector, a click takes the speed and direction from the
+field itself. Declared in the schema like everything else a tool offers, so the
+option bar renders it from a description rather than from a case per tool, and
+it is inert wherever either property it writes is — in a gradient mode, or on a
+curve aiming relative to its own path. That last mode's `absolute` is now
+`constant`, the name every other tool uses for the same thing. **Not verified by
+hand**: none of this has been used in the running app.
+
+**Unplanned, after M7: the field modifiers** (spec §6.3, D45). Four tools that
+change the field beneath them instead of adding one — intensify/reduce,
+diverge/converge, rotate flow, and warp/liquify — each a click-placed disc with
+the common placement, an amount, and a feather, animatable like everything
+else. They cost one branch in each compositing loop, because the loop already
+held exactly "everything below this object" at the moment it applied one: the
+guarantee the clone stamp was built on. The warp is the exception that reads
+elsewhere, so it inherits the clone stamp's recursion, its depth cap and its
+exclusion from the GPU. The evaluation is asserted against hand-computed
+vectors — 20 m/s east plus 100% outward at a cell due north of the anchor is
+28.28 m/s on 045 — rather than against what the evaluator happens to produce.
+Fidelity after: worst speed error 0.0030 m/s and direction 0.019°, against
+0.25 and 2°; before the modifiers it was 0.0009 and 0.004°, and the difference
+is the anchor-relative term D38 had removed. **Not verified by hand**: no
+modifier has been placed in the running app.
+
+**A pre-existing gap the new coverage found.** Adding modifiers to the fidelity
+suite's generator shifted its random stream, and the new scenes caught a
+disagreement that had nothing to do with them: at the edge of an imported grid
+the CPU allows a millionth of a cell of slack and the shader a thousandth, so
+a sample in between reads the edge row on one backend and calm on the other.
+The band is a few hundred metres wide at the edge of a 2° grid and the
+generator aims half a cell outside the grid deliberately, so it was only a
+matter of which seed. The suite now exempts that band and says so, like the
+path-tangent tie it already exempts; the slacks themselves cannot be equalised,
+since the shader's exists to absorb `f32` index error the CPU does not have.
+
+**Also found by hand: the eraser trailed rings.** Its gesture outlined the
+swept region, and a footprint is a union of stamps that `Path2D` cannot union
+— so stroking one traced every stamp's own circle and a drag left a chain of
+overlapping rings behind the pointer. The eraser now draws nothing but its
+nib, the stamp under the pointer, held through the drag; the mask the map is
+already drawn through is the whole of the preview (D37). The clone stamp had
+the same bug and takes the same fix — the map shows what either operator does,
+and an outline over that is redundant as well as wrong. The rule is one
+function, `overlayPlan`, rather than a condition per tool at the call site. Raised at the same time and **declined**: making the
+eraser destructive. Objects are parametric — a circle has no representation
+for "with a bite out of it", and a stroke could be cut only to within its own
+width — so the erase object stands as spec §6.2 and §7.4 have it, and D37 with
+it.
 
 **M7 complete.** Keyframe editing end to end, a render pool that works ahead
 of the playhead, a readiness strip with the distinct stale state, and the
@@ -241,23 +393,43 @@ The two riskiest components are front-loaded deliberately:
   external decoders before any breadth work begins.
 
 Tool breadth (M6), timeline (M7), and route solving (M9) are comparatively
-low-risk once the spine holds.
+low-risk once the spine holds — and M6 and M7 bore that out.
 
 ```
 M0 ─ M1 ─ M2 ─ M3 ─ M4 ══ walking skeleton complete
                     │
-                    ├─ M5 ─ M6 ── tools & editing
-                    ├─ M7 ─────── timeline & animation
+                    ├─ M5 ─ M6 ── tools & editing                     ✓
+                    ├─ M7 ─────── timeline & animation                 ✓
+                    │
+                    ├─ M12 ────── decoder: CCSDS and JPEG 2000 import
+                    ├─ M20 ────── GRIB frames copied between steps
+                    ├─ M13 ────── motion vectors, linked objects        (needs M7)
+                    ├─ M14 ────── region selection, fill, copy/paste
+                    ├─ M15 ────── settings and shortcuts
+                    ├─ M16 ────── macros                                 (needs M14, M15)
+                    ├─ M17 ────── warp and liquify, two tools
+                    ├─ M18 ────── image layers
+                    ├─ M19 ────── export precision
+                    ├─ M11 ────── projections                            (M14, M18 lean on it)
                     ├─ M8 ─────── measurement
-                    └─ M9 ─────── sailboat routes   (needs M6 curve tool)
+                    └─ M9 ─────── sailboat routes                        (needs M6 curve tool)
                                         │
                                        M10 ── hardening & release
 ```
 
-M5–M8 are largely parallelisable once M4 lands. M9 depends on the curve tool
-from M6. M11 (projections) is independent of all of it and deliberately last:
-it touches only the view, and is best attempted once the editing surface has
-stopped changing shape.
+**The order of M12–M19 is dependency first, then risk.** M12 is small, fully
+specified by ten files on disk, and lets a real forecast be imported by hand
+for the first time, so it goes first, and M20 — a GRIB layer's frames copied
+between steps — follows it because it is the other thing a real forecast
+file needs and touches the same code. M13 is model and kernel work with no UI
+prerequisite. M14 builds the region gesture, the coverage bit and the capture
+container that M16 needs, and M15 the settings surface M16's library lives
+in, so both precede it. M17, M18 and M19 are independent of each other and of
+the rest. M11 comes before M8 because M14's map-space regions and M18's image
+quads are the last two things that will assume equirectangular, and it is
+better to find out what they cost under a curved projection with those fresh
+than after M8 has added a third. M9 keeps its dependency on M6; M10 is last as
+always.
 
 ---
 
@@ -846,6 +1018,555 @@ iterative inverse must be fast and must converge everywhere — including at the
 poles and at the projection's own edge cases, where these formulations tend to
 be least well behaved.
 
+**Pulled forward, and one more question.** M11 now runs after M19 rather than
+last (§1). `stamp_space: projected` is *defined* as equirectangular map space
+(spec §7.2), and M14's regions and every px-sized stamp live in it; under a
+Mercator view a shape that is round on screen is not round in that space. The
+cheapest rule is that the stored space stays equirectangular and a px size or
+a region is converted through the *view's* projection at creation, as px is
+converted to km today (D9) — a shape drawn round on a Mercator screen is stored
+as the equirectangular shape that occupies the same ground. M11 must state
+this rule, or its replacement, before the first curved projection ships.
+
+
+---
+
+### M12 — Every packing the forecast centres ship
+
+**Goal:** every file in the reference set imports, with no C library.
+
+**What the reference set needs.** The ten sample files in
+`/Users/jon/temp_test_gribs` — GFS, GEFS, NCEP's two AI models, ECMWF
+deterministic and ensemble, AIFS, ARPEGE, GEM deterministic and ensemble — are
+all regular lat/lon (template 3.0), 10 m `u`/`v` on product templates 4.0 and
+4.1, without bitmaps. They differ only in packing:
+
+| Packing | Template | Files | Today |
+|---|---|---|---|
+| Complex with spatial differencing | 5.3 | GFS, GEFS, AI-GFS, AI-GEFS | decodes |
+| CCSDS adaptive entropy coding | 5.42 | ECMWF ×2, AIFS, ARPEGE | refused as "template 5.42" |
+| JPEG 2000 | 5.40 | GEM ×2 (0.15°, scanning mode 64; 0.5°) | refused by name |
+
+So the work is two packings, under one constraint: invariant 5 and the build.
+Pure Rust only, no `-sys` crate and no `cc` build script, so every target the
+app builds for gets the decoder with nothing installed.
+
+**Deliverables**
+
+- **Template 5.42.** `rust-aec` (MIT, pure Rust, written for GRIB2 5.42 —
+  `flags_from_grib2_ccsds_flags` maps octet 22 directly) or `oxiarc-szip`
+  (Apache-2.0). The output is the packed integers; the 5.0 formula
+  `packing.rs` already applies does the rest. Samples are `ceil(bits / 8)`
+  bytes each, big-endian, per the template.
+- **Template 5.40.** A pure-Rust JPEG 2000 decoder on the raw codestream —
+  GRIB carries J2K with no JP2 wrapper — one component, the reversible 5/3
+  wavelet, precision equal to the bits per value. Candidates:
+  `hayro-jpeg2000` (Apache/MIT, MSRV 1.92, the best maintained; its default
+  features pull `image` and `moxcms` and are switched off), `pure_jpeg2k`
+  (lossless Part 1, integer output), `dicom-toolkit-jpeg2000` (native bit
+  depth). **The choice is a spike, not a decision:** `hayro` is image-oriented
+  and normalises components towards a colour space, so integer-exact recovery
+  of a 16-bit component has to be shown against ecCodes on the GEM files
+  before it is picked, with `pure_jpeg2k` the fallback. Whichever is chosen,
+  `cargo tree` and its `unsafe` count are read, because it runs on every
+  imported file.
+- The two deferred lines in spec §4.8 and §14 ("JPEG 2000 … needs a decoder
+  the project does not carry") are struck, with the "repack it with ecCodes"
+  message.
+- **Fixtures, small.** Not the 17 MB sample set. The writer's own output
+  re-packed by ecCodes — `grib_set -s packingType=grid_jpeg` and
+  `grid_ccsds`, each with and without a bitmap — is a few kB per message and
+  its values are known because the writer wrote them. The full sample set
+  runs as an `#[ignore]` test keyed on the directory's presence, against
+  `grib_get_data`.
+- **Export is untouched.** Template 5.0 simple packing only (spec §12.3). This
+  milestone changes the reader and nothing else.
+
+**Acceptance**
+
+- All ten sample files import, and every decoded value matches ecCodes to
+  within the packing's own step (`2^E · 10^−D`); `u` and `v` at ten spot
+  cells — both poles and the seam among them — match `grib_get -l`.
+- A 0.15° GEM message (2,882,400 values) decodes in under a second in
+  release, measured: a pure-Rust JPEG 2000 decoder may be an order slower than
+  OpenJPEG, and a file has one message per component per step.
+- `cargo tree` shows no `-sys` crate and no `cc`.
+- A bitmapped 5.42 and 5.40 message each decode with the bitmap honoured.
+
+**Risks:** decoder maturity. A 16-bit single-component reversible codestream
+is a corner the PDF-oriented crates may never have been run on; the spike
+exists to find that out in an afternoon rather than a milestone. Decode time
+on 0.15° files is the second, and is measured rather than assumed.
+
+---
+
+### M13 — Motion in the field, and objects that follow
+
+**Goal:** an object that moves can put its own motion into the wind, and an
+object can be tied to another so it moves with it.
+
+Both are model work of spec §9.3's kind. Only the first reaches the kernels.
+
+**Motion vectors.**
+
+- On the brush, circle, shape fill, clone stamp and curve — the tools that
+  paint a vector — the `position`, `rotation_deg` and `scale_pct` rows in the
+  timeline each carry a checkbox, **motion**. While it is on, the object's own
+  movement between steps is added to the vector it paints. A stroke
+  travelling east at 15 m/s adds 15 m/s eastward to whatever it paints, so a
+  tailwind strengthens, a headwind weakens and a crosswind turns — one vector
+  addition per cell, in the cell's own east/north frame, which is what makes
+  all three cases the same rule and the addition correct at every relative
+  angle.
+- Stored as three booleans on the object (`motion: {position, rotation,
+  scale}`, `#[serde(default)]`, no migration). The checkbox sits on the track
+  row because the track is where the movement is, one per row and not one
+  per object (D57), so a spinning object can add its spin without its travel.
+- **The velocity is taken from the track the field already uses.** At step
+  `k` it is the central difference of the property's sampled value at `k−1`
+  and `k+1` over `2·Δt`, one-sided at the ends, `Δt` from `step_hours` — read
+  from the same `track_samples` the graph draws, never a second
+  interpolation. A `Step` segment contributes nothing: a value that jumps is
+  a teleport, and a 500 km jump in an hour is not a 140 m/s wind. A property
+  with no keys has no motion.
+- **A translation and a rotation are each one angular velocity.** A position
+  segment is a great-circle slerp — a rotation of the sphere — so the
+  translation velocity at every cell of the footprint is exactly `Ω × p` for
+  one 3-vector `Ω`; a rotation about the anchor is `ω·â` for the anchor's unit
+  vector. Both sum into one `[f32; 3]` in the flat object, and a cell's
+  velocity is a cross product and a projection to east/north. That is exact
+  everywhere, poles and seam included, where "the anchor's speed and bearing,
+  applied uniformly" would be wrong by the frame's own drift a few thousand
+  km out (CLAUDE.md, directions). Scale adds a radial velocity of `ṡ/s · r`
+  along the frame's radial bearing, which the modifiers already compute: one
+  more `f32`.
+- Both kernels add it to the object's own vector *before* feather and edge
+  mode, so the edge fades the sum; the clone stamp adds it to the cloned
+  sample. The recipe applies in full: `FlatObject` and the WGSL struct,
+  `CpuEvaluator`, the kernel, the fidelity generator (keyed positions across
+  the pole and the seam, keyed rotations), the cache hash — the velocity is in
+  the flat object, so the hash follows.
+- The gesture preview shows no motion (a fresh stroke has no keys); the tiles
+  do.
+
+**Linked objects.**
+
+- In the timeline, `Cmd`-drag from the `position` or `rotation_deg` row of one
+  object and drop it on the same row of another: the first now **follows** the
+  second. Those two properties only; a drop on another property, on any other
+  row or on itself is refused, and the cursor says so. The row then shows a
+  link glyph and the primary's name, with an unlink button; `Cmd`-clicking the
+  glyph unlinks too.
+- **A follower keeps its offset in the primary's frame.** At link time the
+  follower's position is recorded as a distance and a bearing from the
+  primary's anchor, relative to the primary's rotation; a rotation link records
+  the difference of the two rotations. At every step the follower's value is
+  derived: the primary's position moved that distance along that bearing
+  turned by the primary's rotation, so a follower orbits a turning primary as a
+  rigid part of it. The primary's motion therefore propagates: a follower with
+  `motion` on takes its velocity from the derived track.
+- The follower's own keys for the property are kept but dormant (greyed on the
+  track). Unlinking reactivates them and, so nothing jumps, writes the derived
+  value at the current step under D42's rule. Deleting the primary, or pasting
+  the follower without it, unlinks the same way. A cycle is refused at the
+  command; chains resolve in dependency order when a step is flattened. Link
+  and unlink are history entries.
+- Model: `Animatable<T>` gains `follow: Option<Follow>` (`primary: Id`, the
+  offset), resolved in `ve-core` when a property is sampled, so the kernels
+  never see it. Serde default covers old files; no migration.
+
+**Acceptance**
+
+- An eastward 20 m/s stroke on the equator, keyed 300 km east over one 3-hour
+  step (27.8 m/s), reads 47.8 m/s east with motion on and 20 without; the
+  same stroke painted westward reads 7.8 m/s *east*; painted northward it
+  reads 34.2 m/s on 054°. Hand-computed, not read off the evaluator.
+- A circle turning 30° per 3-hour step adds 9.7 m/s at 200 km from its
+  anchor, tangential and clockwise, the same on both backends at cells due
+  north and due east of the anchor and across the seam.
+- A `Step` segment adds nothing, an unkeyed property adds nothing, and a
+  document with every `motion` off exports byte-identically to before.
+- The fidelity suite's motion scenes sit inside the standing tolerances.
+- A follower linked 500 km east of a primary at 45°N stays 500 km from it on
+  the primary's bearing through a primary that travels 3,000 km and turns 90°;
+  unlinking at step 5 leaves it where it was at step 5; a cycle is refused;
+  deleting the primary leaves the follower where it stood.
+
+---
+
+### M14 — Region selection, fill, copy and paste
+
+**Goal:** a region of the map can be selected, filled with a vector, and
+copied as a field.
+
+This is not the object selection §8.2 has — that picks *objects*; this picks
+*ground*. The two coexist: the select tool is a tool like the brush, so in it
+a plain drag draws the region, and the hand tool keeps plain drag as pan
+(D26).
+
+**Deliverables**
+
+- **Select tool** (`M`, the marquee's conventional key; the unbuilt measure
+  tool moves to `T`, D54). Three modes on its bar: rectangle, circle
+  (dragged from the centre, as the shape fill's presets are, D33) and lasso
+  (freehand, closed on release). A region is a `Shape` — rect, disc, polygon —
+  **in map space**: it is drawn on the map, `Cmd`-`A`'s "the view" is only
+  meaningful as a map rectangle, and `Cmd`-`Shift`-`A`'s "the map" is the
+  rectangle that spans it. So anything made from a region takes `stamp_space:
+  projected`, exactly as a px-sized stamp does (D28, D55).
+- The region is session state: not document, not history. It is drawn as a
+  moving outline on the overlay (through `requestOverlay`, like every other
+  camera-positioned thing). **Deselect** on the bar and `Cmd`-`D` clear it;
+  `Cmd`-`A` enters the select tool with the view selected; `Cmd`-`Shift`-`A`
+  the whole map. Neither key is bound today. With a region active, `Cmd`-`C`
+  copies the region; with objects selected and no region, it copies the
+  objects as it does now.
+- **Fill tool** (`G`, the paint bucket's key). It acts on the current region:
+  a click creates a **shape fill** whose geometry is the region's shape. The
+  options are the shape fill's own — constant speed and direction with the
+  eyedropper (D47), gradient with its two speeds and two directions, and the
+  aimed modes `TowardPoint` and `AwayFromPoint` — so the bar is the shape
+  fill's bar and the object is a shape fill: the seven shared-rule tests cover
+  it with no new case. With no region the tool is inert and the bar says so.
+- **Copy and paste of a region.** `Cmd`-`C` captures the visible composite
+  inside the region at the current step — speed and direction per cell on the
+  project's grid lattice, over the region's bounding box — and `Cmd`-`V`
+  creates a **patch**: an object whose geometry is the region's shape and
+  whose field is the captured samples, pasted at the original place with the
+  small offset objects get (§8.5) or, with the pointer over the map, under
+  it. It moves, rotates, scales, keys, hovers, feathers and edge-modes like
+  any object, and takes M13's motion. **Zero and undefined are distinct**: a
+  cell no object or raster wrote, or one a mask removed, is undefined, and an
+  undefined cell writes nothing when the patch is composited, so what is
+  beneath shows through (D58). This needs a coverage bit per cell in the CPU
+  composite, which the capture reads; the capture is evaluated with
+  `CpuEvaluator`, like an export, in a worker.
+- **Where the samples live** (D52). A patch is a raster, and invariants 1 and
+  2 as written forbid one in the project; the user has decided to reword
+  them. The `.veproj` ZIP gains a `captures/<hash>.vecap` binary entry, the
+  JSON keeps the hash and nothing else, and a *rendered* raster — a cache
+  product, reproducible from the objects — stays forbidden while a
+  *captured* one — user content, not reproducible once its sources change —
+  travels with the project as an entry, never as JSON. **The rewording of
+  invariants 1 and 2 in spec §1.5 and CLAUDE.md lands in the commit that
+  first writes an entry**, not before: until then the invariants as written
+  still hold. M16 uses the same entry format.
+- **The `.vecap` container.** A header (magic, version, field kind, lattice
+  spacing, extent in the region's frame, frame count, seconds per frame,
+  whether it moves), the region `Shape`, then per frame an offset and the
+  `u`/`v` pairs as `f32` with NaN for undefined, compressed with `lz4_flex`
+  (pure Rust) — chosen for decode speed, since it is read on open. One frame
+  for a patch, many for a macro.
+- **Both kernels sample a patch** through the raster sampler the GRIB layers
+  use (`RasterGrid::sample`, `sample_raster`), in the object's frame rather
+  than lat/lon — the transform is the frame's, the sampler is shared, so GPU
+  support arrives as the raster layers' did. The cache hash takes the
+  capture's hash and the frame.
+
+**Acceptance**
+
+- A circle region is round on the map at 0°, 45° and 70°, and `Cmd`-`A`'s
+  region has the viewport's corners.
+- Fill on a lasso makes a shape fill whose footprint is the lasso's polygon
+  exactly, and it passes the catalogue's shared-rule tests unchanged.
+- A region over a 20 m/s eastward stroke and open water, pasted 1,000 km away
+  over another field, reads 20 m/s east where the stroke was and that other
+  field where the water was — zero and undefined stay distinct through the
+  container, both kernels and an export.
+- A patch round-trips through save and load byte-identically, entry included;
+  both kernels agree on it within §7.9.
+- `Cmd`-`D` clears; with objects selected and no region, `Cmd`-`C` still
+  copies objects.
+
+---
+
+### M15 — Application settings and shortcuts
+
+**Goal:** the app has a preferences surface, and the keys are rebindable.
+
+**Deliverables**
+
+- A settings file in the config directory — `paths.rs` has the directory and
+  `session::Settings` already holds the recent list there, tolerant of a
+  broken file; it grows rather than being replaced — and a Settings dialog on
+  `Cmd`-`,` with three sections: Shortcuts, Macros (filled by M16), Display.
+- **Shortcuts.** One bindings table, read by the palette's tooltips, the
+  timeline's keys and the map's handlers alike; today `Space`, the arrows and
+  the palette keys are wired by hand in `Timeline.tsx` and `MapView.tsx`, and
+  they move to it. Rebindable: play/pause, step left and right, every tool,
+  map pan (`Shift`-arrows by default, since the bare arrows are the
+  timeline's) and zoom in and out. A binding that collides with another, or
+  with a reserved key the webview or the OS owns, is refused on entry; reset
+  to defaults is one button.
+- **Legend colour scales.** The scale is a project setting (it reaches the
+  map through `ProjectSummary`, spec §4.1), so Display offers the default for
+  *new* projects and edits the *open* project's scale in place — a document
+  write, undoable. A few bundled ramps plus editable stops, in knots per field
+  kind. Tiles carry speed, not colour, so a scale change costs no tile.
+- **Macros:** the library's directory (a picker; default under the app data
+  directory) and **Delete all macros**, with the library's count and size
+  beside it. The controls land here; the library they act on is M16's.
+
+**Acceptance**
+
+- A rebound tool key selects the tool and appears in its tooltip; a colliding
+  binding is refused; settings survive a restart and a broken file falls back
+  to defaults.
+- A colour-scale edit changes the legend and the map without a tile being
+  re-rendered, measured by the cache's entry count.
+
+---
+
+### M16 — Macros
+
+**Goal:** a region of the field, over a run of frames, can be captured under a
+name, kept across projects, and put back down anywhere.
+
+Two tools and a library.
+
+**The library.** A directory (M15's setting) of `.vemacro` files, one per
+macro: M14's `.vecap` container with a name, a creation time and the source
+project's field kind and step size. Listed by the insert tool and by the
+settings dialog — name, frames, duration, size — and deleted one at a time or
+all at once. Nothing in it is project data. A project that uses a macro
+carries its own copy of the frames (M14's decision), so clearing the library
+breaks nothing already inserted.
+
+**Capture tool** (`K`). Options: region mode — rectangle, circle, lasso, the
+select tool's own gestures — and **Static / Record movement**. The flow, as
+requested:
+
+1. At any step, draw the region and press **Start capture** on the bar. The
+   timeline enters **capture mode**: only clicking the ruler and `←`/`→` move
+   the playhead; play, key drags, range bars, box-select, the inspector's
+   writes and every map tool are disabled; **Cancel** and **Finish** appear in
+   the transport. The region cannot be redrawn, reshaped or deselected while
+   capturing. `Esc` cancels.
+2. At each frame the region may be dragged. **Each frame holds its own
+   position**, initialised to where the region was drawn: moving it at frame
+   3 moves frame 3 and no other. These positions are capture state — not
+   keyframes, not the document, not history — and the timeline draws none of
+   them as keys.
+3. **Finish** asks for a name and bakes: for each frame, the visible composite
+   inside that frame's region is evaluated with `CpuEvaluator` at the
+   project's grid spacing, undefined kept distinct from calm (M14's coverage
+   bit), in a worker with progress and cancel, like an export. **Record
+   movement** also stores each frame's displacement from the first, in the
+   region's frame. **Static** stores none: every frame is written as if at
+   the first frame's place, so a region dragged to follow a moving system
+   yields a macro of that system standing still. Then the region is
+   deselected, the timeline re-enabled, and **no object is created**.
+
+**Insert tool** (`N`). The bar lists the library; pick one, click the map, and
+a **macro object** lands with its region centred on the click. It is a
+creation object with a field: `ToolKind::Macro`, geometry the captured
+region's shape, the common properties, `edge_mode`, `feather`, hover and
+selection outline on the region's edge, keyable position, rotation and
+scale, and M13's motion checkbox. Its field at a step is the capture's frame,
+sampled through M14's patch sampler in the object's frame and shifted by that
+frame's recorded displacement when the capture moved — motion is relative, so
+it begins wherever the click put it. The object holds a copy of the frames in
+the project (`captures/` entry, by hash; two inserts of one macro share one
+entry).
+
+**Time.** Frame `f` is at macro time `f·Δt_m`; the object's step `s` is at
+`(s − start)·Δt_p`. Equal steps map one to one. When they differ, the
+object's `resample` option decides: **hold** (the frame at or before the
+step's time — a macro is a thing the user placed and holds like a keyframe;
+D48 is about a measurement and does not apply) or **interpolate** (blend the
+two nearest frames, `u`/`v` linearly, undefined where either is; the
+displacement likewise). Steps past the last frame show nothing unless `loop`
+is set. The bar says what will happen before the click — "3-hourly capture,
+hourly project: two steps in three interpolated" — and the option is per
+object afterwards, so the temporal steps are always consistent by
+construction rather than by the user's arithmetic.
+
+**Kinds.** A wind macro in a current project, or the reverse, is allowed, as
+showing a GRIB layer of the other kind is (spec §4.8); the list marks the kind.
+
+**Acceptance**
+
+- A moving 3-step stroke captured **static** with the region dragged to follow
+  it inserts as three frames of the same stroke standing still; captured with
+  **record movement** and the region left alone, the insert moves as the
+  original did. Both checked against the stroke's known field.
+- Zero and undefined: a capture over a stroke and open water, inserted over
+  another field, shows that field where the water was.
+- In capture mode `Space` does not play, a key drag is refused and the
+  inspector is read-only; cancel restores everything and writes nothing;
+  finish creates no object and exactly one library file.
+- A 6-hourly capture in a 3-hourly project holds or interpolates per the
+  option, with one interpolated cell computed by hand; an hourly capture in a
+  6-hourly project reads every sixth frame.
+- The macro object passes the catalogue's shared-rule tests, and both kernels
+  agree on it.
+- Across projects: capture in A, open B, insert; delete all in settings; B
+  still renders.
+- Capturing a 2,000 × 2,000 km region at 0.25° over 40 steps completes in a
+  measured time with the map interactive throughout.
+
+**Risks:** a capture is an export-shaped job, as slow as the region times the
+steps, so it runs off the UI thread with a size estimate like the export's.
+Capture mode is a cross-cutting lockout: it is one flag in the session that
+every *backend* write path checks, not a set of disabled controls in the UI —
+a control that was missed is a write during capture.
+
+---
+
+### M17 — Warp and liquify, two tools
+
+Today there is one tool, `Warp`, with `warp_mode: Push | Twist` (D50): a
+painted footprint whose whole field is read from one displaced position. The
+request is two tools, each doing one thing well (D56).
+
+- **Warp** (`W`) keeps the pull and the twist — the operations on a *placed*
+  region: shift-drag the field from the anchor to `push_to`, or turn it about
+  the anchor. Refinements: the pull's line reads out its length in km; the
+  twist gets a rotate handle on the pink edge rather than a number; the
+  displacement fades by the feather as it does now.
+- **Liquify** (`L`) is the painted smear — the forward warp of a paint
+  program. A stroke of stamps where **each stamp carries the pointer's own
+  movement**, so the field is dragged along the stroke rather than moved as
+  one block. At a cell the displacement is the feathered sum of the deltas of
+  the stamps that cover it, and the read position is the cell minus that. The
+  chain therefore carries a delta per point — a new `Geometry` variant, through
+  the geometry recipe in full: `sdf.rs`, `gpu.rs`, `evaluate.wgsl`, the
+  fidelity generator, the cache hash. Options: size, feather and `strength`
+  (the fraction of the pointer's movement applied, 0–1). It reads elsewhere,
+  so it declines the GPU as the warp does (one line in `gpu::supports` and a
+  test), and it merges with nothing — its deltas are its own.
+- Migration: `ToolKind::Warp` stands for existing objects and `Liquify` is
+  new, so `SCHEMA_VERSION` moves only if `warp_mode` changes — it does not. A
+  palette entry, an icon, a catalogue entry, hover as the footprint outline,
+  and the operate-on-the-map preview (D37): the drawn map is shifted through
+  the accumulated displacement under the stroke, a screen-space approximation
+  held until the tiles land.
+
+**Acceptance:** a liquify stroke east over a northward field reads the field
+from west of each cell; a straight stroke displaces by `strength × length` on
+its centreline and by nothing at the feather's rim, hand-computed; the GPU
+decline is tested; a schema-10 warp opens unchanged; both tools pass the
+shared-rule tests.
+
+---
+
+### M18 — Image layers
+
+**Goal:** a georeferenced image shows under the field.
+
+- `LayerSource::Image { path, placement }`, display only: never composited,
+  never exported, no field of its own. The project keeps the path and the
+  placement, never pixels — invariant 2, as for a GRIB.
+- **Georeferenced on import** when the file says where it is: GeoTIFF (the
+  `tiff` crate; `ModelTiepoint` and `ModelPixelScale`; geographic coordinates
+  only — a projected CRS is refused by name, since reprojecting a raster is
+  M11-shaped work), or PNG and JPEG with a world file beside them.
+  **Georeferenced by hand** otherwise: the image lands centred on the view and
+  the user drags two control points (translate and scale, north-up) or three
+  (affine) from pixels to places on the map. The placement is a map-space
+  affine, editable and undoable like any property. Opacity per layer.
+- Rendering: decoded in Rust (`png`, `jpeg-decoder`, `tiff` — all pure
+  Rust), served through the custom URI scheme as a texture capped to the GPU's
+  maximum size and downsampled beyond it (the file is never modified), drawn
+  as a textured quad between the basemap and the field tiles, wrapping in
+  longitude. Under M11's curved projections the quad subdivides as the tiles
+  do.
+- No bars, no messages on the timeline: an image is static.
+
+**Acceptance:** a GeoTIFF of known extent lands with its corners at the right
+lon/lat, including a 0–360° image across the antimeridian; a hand-placed
+image's control points survive save and load; a project with an image layer
+exports byte-identically to the same project without it; the `.veproj`
+contains no pixel data.
+
+---
+
+### M19 — Export precision
+
+The request reads "export GRIBs as float16". GRIB2 has no 16-bit float
+representation — template 5.4 (IEEE) offers 32, 64 and 128 bits — and the
+export stays simple packing, template 5.0, as required. **The export already
+packs 16 bits per value** (spec §12.3): a wind between −60 and 60 m/s to about
+0.002 m/s. So this milestone makes precision a *choice*, and visible: the
+export dialog gains **bits per value** (8, 12, 16, 24; default 16) with the
+resolution it implies in knots and the file size beside it — 8 bits halves the
+file at steps of about half a knot. Golden fixtures at each width; ecCodes
+decodes each within `2^E`; byte-identical across the three CI platforms as
+now. Confirmed as the intended reading (D53).
+
+---
+
+### M20 — A GRIB layer's frames, copied between steps
+
+**Goal:** a step of an imported layer can be copied to another step of the
+same layer, without creating an object and without copying a sample.
+
+A forecast file rarely lines up with a timeline: a 6-hourly file in a
+3-hourly project shows a message on every other step and nothing between
+(spec §4.8, D48), a file ends before the timeline does, and a message is
+sometimes simply bad. Today the only answers are another file or the hold
+rule D48 removed for good reason. This gives the user the choice a keyframe
+gives — *this* step shows *that* message — as an instruction rather than a
+measurement.
+
+**Deliverables**
+
+- **The model.** `Layer` gains `frame_overrides`, a sorted `Vec<(step,
+  Option<step>)>` — `#[serde(default)]`, no migration — mapping a step to the
+  step whose message it shows, or to nothing. `RasterSequence::frame_at`
+  consults it first: an overridden step returns the source step's frame,
+  wherever the file put it; `None` hides the file's own message at that step.
+  Everything else is untouched — the frame served is one the file already
+  holds, so the flat scene's raster hash follows the choice and the render
+  cache, readiness and both kernels are correct without a line changed
+  (D59). **The project stores a step number, never a sample**: invariants 1
+  and 2 stand as written, and `Layer::raster` stays `#[serde(skip)]`.
+- **The gesture, in the timeline.** The GRIB layer's row already marks the
+  steps its file has a message for (spec §9.2). Those marks become
+  selectable: click one, `Shift`-click a run of them, `Cmd`-`C`, move the
+  playhead, `Cmd`-`V`. A run keeps its spacing — steps 0 to 3 pasted at 6 land
+  on 6 to 9. **The paste goes to the layer the copy came from**, whatever
+  layer is active: the clipboard entry names it, and a GRIB frame pasted into
+  another layer or into a project with a different file would be a copy of
+  samples by another route. A step past the end of the timeline is dropped
+  from the paste, not clamped.
+- **A pasted mark is drawn as one** — the file's own marks stay solid, an
+  override is an outline with the source step in its tooltip — and `Delete`
+  on it restores the file's own message at that step, or the gap. `Delete` on
+  a file's own mark hides that message at that step: the same override with
+  `None`, which is what a bad message needs and costs nothing extra.
+- Every change is a `Command` with an inverse, coalesced per paste, so one
+  undo returns a run. The layer's speed band and visibility apply to a pasted
+  frame as they do to any other.
+- **The file may change under it.** Overrides reference steps, and a step's
+  message is decided by time alignment on open (spec §4.8), so if the file at
+  the path is replaced by one that has no message at a source step, the
+  pasted step shows nothing and its mark is drawn empty, like a layer whose
+  file has gone. The user's objects and the other overrides are unaffected.
+- Precedence with M14: `Cmd`-`C` copies a frame when the timeline holds the
+  focus and a mark is selected; the map's region and the object selection are
+  untouched by it.
+
+**Acceptance**
+
+- A 6-hourly file in a 3-hourly project: copy step 0 to step 3, and step 3
+  samples exactly what step 0 does at ten spot cells on both backends; the
+  cache holds one frame for the two steps, since they hash alike.
+- Copy steps 0 to 2 and paste at 4: steps 4, 5 and 6 show 0, 1 and 2; paste
+  at the last step drops the two that fall off the end; one undo returns all
+  three.
+- An override on a step the file has a message for shows the pasted frame
+  until `Delete` restores the file's own; `Delete` on a file mark hides it and
+  the layer's painted objects stand alone there.
+- Save and load round-trips the overrides byte-identically and the `.veproj`
+  gains no sample data; the file replaced by one lacking the source message
+  leaves the pasted step empty and marked.
+- Pasting with another layer active still lands on the source layer, and the
+  paste creates no object in any layer.
+
+**Risks:** small. The one trap is a paste that copies the lattice rather than
+the step number — a `RasterGrid` in the document — which the round-trip test
+and invariant 2 forbid together.
 
 ---
 
@@ -859,6 +1580,9 @@ be least well behaved.
 | GRIB | Self-round-trip via the in-test reader; external decode by `wgrib2`/ecCodes in CI; committed byte-level golden files. |
 | Routes | Forward simulation against the same polar. |
 | Frontend | Component tests for the timeline and layer panel; Playwright smoke over the packaged app. |
+| Captures (M14, M16) | Hand-computed fields through capture → container → insert; the container round-trips byte-identically; undefined and zero asserted distinct through both kernels and an export. |
+| Decoder (M12) | ecCodes-repacked fixtures with known values; the full sample set as an ignored test keyed on the directory. |
+| GRIB frame overrides (M20) | Spot-cell equality of the pasted step with its source on both backends; round-trip with no sample data in the file; undo of a run. |
 | Performance | Criterion benchmarks in CI with regression thresholds on the spec §13 budgets. |
 
 **A test that must exist from M0:** an assertion that the app makes no outbound
@@ -880,6 +1604,11 @@ font or a map style from a CDN.
 | Property system too rigid for later tools | Painful retrofit across all tools | Prototype the "add a property" path in M1 before the design is locked |
 | wgpu unavailable on a user's machine | App unusable | CPU fallback exists from M3, is exercised in CI, and is user-forceable |
 | Natural Earth asset size bloats the bundle | Slow install | Build-time conversion to a compact binary; measure the delta in M2 |
+| Pure-Rust JPEG 2000 decoder immature or slow (M12) | GEM files still refused, or seconds per message | Spike against ecCodes on the GEM files before choosing; a named fallback crate; decode time measured |
+| Motion vector mis-signed or mis-framed (M13) | Silently wrong GRIBs — the same class as an inverted direction convention | Hand-computed acceptance vectors; both backends; M4's independent-viewer check repeated with a moving object |
+| Captured rasters in the project (M14, M16) | Invariants 1 and 2 change; a project can grow large | Settled as D52; compressed entries shared by hash; a size shown at capture as the export shows one |
+| Capture-mode lockout leaks (M16) | A write during capture corrupts the document or the capture | One session flag checked by every backend write path, not disabled controls in the UI |
+| Rebound shortcuts collide with keys the webview or OS owns (M15) | A key silently does nothing | A reserved-key list; collisions refused on entry; reset to defaults |
 
 ---
 
@@ -900,7 +1629,23 @@ relitigated by accident.
 | D8 | Grid resolution, field kind, step size immutable after creation | Changing them would invalidate every object's grid relationship |
 | D9 | px sizes resolve to km at creation | Objects must stay pinned to the earth under zoom (spec §3.5) |
 | D10 | One gesture = one object; options freeze at creation | Directly from the requirement that changing a tool option produces a new object |
-| D11 | GRIB reader lives only in tests | Invariant 5 — no runtime dependency on ecCodes or any external decoder |
+| D11 | ~~GRIB reader lives only in tests~~ — superseded by D44. The writer's *verifier* stays test-only | Invariant 5 — no runtime dependency on ecCodes or any external decoder. The decoder that shipped with D44 is hand-written Rust and depends on nothing, which is what the rule was protecting |
+| D50 | A warp is pulled to a place, not typed as a distance and a bearing | Aiming a liquify by typing two numbers is guesswork, and the numbers cannot be keyframed into anything meaningful — an animated bearing sweeps the field round the compass. A `push_to` position makes the gesture the tool is named for possible (shift-drag grabs the warp under the pointer and drags its field where it goes) and makes both ends of the push ordinary animatable positions, so a warp that travels is two keyframed points. `PushTo` is its own property id and not a share of `Target`, which is what an *aimed direction mode* points at: two positions answering different questions (compare D30's `brush_shape`). The cost is that a push is now measured from the anchor like a twist, so a warp merges in neither mode (spec §6.3, schema version 10) |
+| D51 | Every numeric field is one component, and can be cleared | `value={n}` with `onChange={commit(Number(raw) \|\| fallback)}` cannot be emptied: the empty string parses as `NaN`, the fallback is committed, and the box refills under the cursor before the next key arrives — so a size of 500 could be edited in the middle but never replaced, and a minimum of 1 turned an attempt to type 40 into 1 and then 14. The field keeps a *draft* while it is being edited and commits only what parses; bounds are applied when it is left, not as it is typed, since a bound applied mid-entry is the same trap in another costume. Found by hand, across the tool bar, the inspector, the timeline and both dialogs |
+| D52 | A captured field travels inside the `.veproj` as a compressed binary entry, referenced by hash; invariants 1 and 2 are reworded to forbid a *rendered* raster and admit a *captured* one | A pasted patch and an inserted macro are rasters, and the alternative — keeping them only in the macro library and referencing them by path, D44's rule for a GRIB — makes every pasted patch in every project go blank when the library is cleared, which the user will do from a settings button. A rendered raster is a cache product, reproducible from the objects, and stays forbidden; a captured one is user content that cannot be reproduced once its sources change, which is the property that made a GRIB's samples worth not copying and a capture's worth keeping. Never in the JSON; the wording changes in spec §1.5 and CLAUDE.md in the commit that first writes an entry (M14, M16). Settled with the user 2026-09-04 |
+| D53 | "Export as float16" is a bits-per-value option under simple packing | GRIB2 has no 16-bit float template (5.4 offers 32, 64 and 128) and the export already packs 16 bits per value; what the request wanted is the precision as a visible choice against the file size. Template 5.0 stays the only packing written (M19). Settled with the user 2026-09-04 |
+| D54 | New palette defaults: select `M`, fill `G`, capture `K`, insert `N`, liquify `L`; measure moves from `M` to `T` | `M` is the marquee's key in every paint program, and the measure tool has no code yet so moving it costs nothing. All rebindable after M15, so only the defaults were at stake (M14–M17). Settled with the user 2026-09-04 |
+| D55 | A region is a map-space shape | It is drawn on the map, and `Cmd`-`A` selects the *view*, which is only a rectangle there; a circle region is round on screen at every latitude. What a region makes — a fill, a patch, a macro's footprint — therefore takes `stamp_space: projected`, exactly as a px-sized stamp does (D28). A geodesic region would be D28's ellipse in reverse (M14). Settled with the user 2026-09-04 |
+| D56 | Warp keeps the placed pull and twist; liquify is the painted smear | The two are different gestures on different geometry: a warp moves a placed region's field as one block, a liquify drags the field along a stroke with each stamp carrying the pointer's own movement. Splitting `warp_mode` into two tools by rename would have left the smear unbuilt (M17). Settled with the user 2026-09-04 |
+| D57 | The motion checkbox is per track row — position, rotation, scale — not per object | A rotating system that also travels may want its spin in the field and not its translation, or the reverse; one switch per object cannot say which. Three booleans, each beside the track it reads (M13). Settled with the user 2026-09-04 |
+| D58 | A cell a mask removed is *undefined* in a capture, not calm | The mask exists to let what is beneath show through; a capture that turned that into a real zero would overwrite whatever lies beneath the paste. Undefined writes nothing when composited, so the paste is transparent exactly where the source was (M14, M16). Settled with the user 2026-09-04 |
+| D59 | A GRIB frame copied to another step is a step number in the layer, never a copy of the lattice | The project keeps a file's path and nothing of its samples (D44); a pasted frame that copied the grid would be a raster in the document by another route. Mapping the step to the source step gives the same picture from the same file, and because the flat scene already carries the served frame's hash, the render cache, readiness and both kernels are right by construction. It is an instruction, so unlike a message it stays where it was put, one step at a time, and D48's rule against holding a measurement forward is not touched (M20) |
+| D49 | The modifiers are painted, and merge — except the two measured from their own anchor | They were click-placed discs, which made a swathe of intensification a row of stamps and gave them none of the merging the brush and the mask have. Painting them is the same gesture, geometry and merge rule the other swept tools already use, so it is subtraction rather than addition. The exception is the rule §6.1 already states: a merge re-expresses the new chain under the *target's* anchor, and a divergence radiates from its anchor while a twisting warp turns about it, so absorbing one would change what it paints. Intensify, rotate and a pushing warp refer to no anchor and merge freely. The edge highlight and the selection outline are the mask's, generalised: one `operator_outlines` command for every object that has no field of its own (spec §6.3, schema version 9) |
+| D48 | A step the file has no message for shows no imported field — reverses the hold half of D44 | Holding the last message forward draws a forecast for a time it was never made for, and does it most misleadingly past the end of a short file, where a six-hour file stood in for a ten-day timeline unchanged and looking like data. Found by hand. A keyframe holds because it is an instruction the user gave, and between two of them the document still means something; a message is a measurement, and between two of them the file means nothing. The consequence is that a step size that does not divide the message times hides most of the file, so "Open from GRIB" now derives the largest offered step that *divides* every message's offset rather than the largest no wider than the gap — a 4-hourly file takes hourly steps and blanks three in four, where before it took 3-hourly steps and showed one message in four (spec §4.8) |
+| D44 | A GRIB2 file imports as a layer that keeps the file's *path*, never its samples; one layer per field kind, the other kind hidden; ~~each step shows the last message at or before its forecast hour~~ — the hold rule is reversed by D48 | Invariants 1 and 2 forbid a raster in the project, and copying forecast data into every project that references it would have been the cost of relaxing them. The lattice lives in memory beside the layer and is read back on open; a missing file leaves an empty, marked layer rather than refusing the project. Hold-previous was chosen because it is the rule keyframes already follow (spec §4.5); D48 reverses it, a message not being a keyframe. Both kernels sample the lattice, so the preview and the export agree on it as they do on everything else (spec §4.8) |
+| D45 | Four modifier tools that read the composite beneath them, transform it and write it back — and a warp that reads it at a displaced position | The field-shaping D38 removed comes back as objects rather than as properties. What made `divergence` and `curl` bad was that they were per-tool properties that changed a vector after that object's own direction mode had produced it, from an anchor nothing showed: invisible, and impossible to reason about across a stack. A modifier is placed, sized, feathered, z-ordered and named for what it does, and it acts on the composite. It follows that it has no `edge_mode` (nothing to replace with), no speed and no direction of its own, and no colour to preview as — its footprint outline is the honest preview. The compositing loop already held "everything below this object" at the moment each object is applied, so three of the four are a branch in one loop on each backend; the warp reads elsewhere and takes the clone stamp's recursion, its depth cap, and its exclusion from the GPU. Measured: the fidelity suite's worst speed error went from 0.0009 m/s to 0.0030 and direction from 0.004° to 0.019°, against budgets of 0.25 and 2° — the anchor-relative term is back, bounded to the modifier's own footprint (spec §6.3, §7.5, §7.6, §7.8) |
+| D46 | The eraser is the mask, and gains `invert` | The tool was named for the gesture and not for what it makes: a first-class object that decides where the field beneath it shows. `invert` is what makes that plain — cover everything *but* the footprint, which is how a global flow is confined to a basin rather than cut out of one — and it is the mask's alone. On a tool with a direction it would be unsafe: an inverted object is evaluated at every cell on the globe including its own antipode, where the bearing from its anchor is ill-conditioned and two backends legitimately disagree; a mask writes calm and has no direction to disagree about. The rename is a migration, because the tool is stored on every object it drew (schema version 8), and object *names* are left alone: "Erase 3" was the user's. The edge is drawn on the map because a mask is otherwise invisible — selected, or pink under the pointer with the tool in hand (spec §6.2) |
+| D47 | A tool that paints a single vector can take it off the map | Aiming a wind by typing two numbers is guesswork next to pointing at one that is already there. The eyedropper is declared in the schema — two property names and the conditions that make them meaningful — so the option bar renders it generically and it is inert exactly where what it writes is: a gradient has two speeds and two bearings and no single answer, and a curve in `relative_to_path` holds an offset rather than a direction. Sampled through the evaluator rather than decoded from the tile under the cursor, so the number that lands in the document is the field's own and not the map's 16-bit quantisation of it; only visible layers contribute, which is what the map is showing anyway (spec §6.1) |
 | D12 | `edge_mode` defaults to `Blend` | Identical to `Replace` over calm areas, so the default only governs soft edges over existing data — where fading to calm is never wanted (spec §7.4) |
 | D13 | Reducing `step_count` deletes keyframes, behind a quantified confirmation | Keeps the document free of invisible state; the confirmation carries the cost (spec §4.1) |
 | D14 | `max_tws` defaults to the polar's own maximum TWS | Uses all real data, never extrapolates past the table; the min-TWS solver means a high cap doesn't generally strengthen fields (spec §11.3) |
@@ -938,10 +1683,10 @@ relitigated by accident.
 
 ## 6. What to settle before coding starts
 
-The specification questions are all resolved (spec §15, decisions D12–D17
-above). Two logistical items remain:
+The original questions are resolved (spec §15, D12–D17). The re-plan of
+2026-09-04 raised seven more, and all seven were settled with the user the
+same day: D52–D58 in §5. The one that changes an invariant — captured fields
+inside the project, D52 — takes effect in the commit that first writes a
+capture entry, and until then invariants 1 and 2 stand as written.
 
-- Confirm the Tauri 2 + React + Vite offline bundling story on all three
-  platforms in the first days of M0, since it gates everything.
-- Decide whether M5–M8 run in parallel (needs more than one contributor) or
-  strictly in sequence; the plan is written so either works.
+Nothing blocks M12.
