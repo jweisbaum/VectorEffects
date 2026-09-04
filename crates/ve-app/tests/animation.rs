@@ -511,7 +511,8 @@ fn an_auto_keyed_write_keys_the_current_step_only() {
         "Speed",
         PropertyValue::Number { value: 40.0 },
         None,
-        Some(5),
+        5,
+        true,
     )
     .expect("auto-key");
 
@@ -525,11 +526,11 @@ fn an_auto_keyed_write_keys_the_current_step_only() {
     );
 }
 
-/// Without auto-key, the same write changes the base — which, once a property
-/// has keys, is not what any step shows. That is the reason auto-key exists,
-/// and the reason the two are different calls.
+/// Without auto-key, the same write to a property that *has* keys still lands
+/// on the current step: once a key exists the base is not what any step shows,
+/// so writing it would be an edit with no visible effect (spec 9.3, D42).
 #[test]
-fn a_plain_write_to_a_keyed_property_changes_only_the_base() {
+fn a_plain_write_to_a_keyed_property_never_touches_the_base() {
     let (_root, state) = project("base");
     let id = circle(&state, 0.0, 0.0);
     key(
@@ -539,17 +540,20 @@ fn a_plain_write_to_a_keyed_property_changes_only_the_base() {
         2,
         PropertyValue::Number { value: 10.0 },
     );
-
+    // `set_property` is the step-0, auto-key-off write.
     document::set_property(&state, id, "Speed", PropertyValue::Number { value: 40.0 })
         .expect("write");
+    assert_eq!(keys_of(&state, id, PropId::Speed), vec![0, 2]);
+    assert_eq!(value_at(&state, id, PropId::Speed, 0).as_f32(), Some(40.0));
     assert_eq!(value_at(&state, id, PropId::Speed, 2).as_f32(), Some(10.0));
-    let tracks = animation::tracks_of(&state, id, 2).expect("tracks");
-    let speed = tracks
+    let speed = animation::tracks_of(&state, id, 2)
+        .expect("tracks")
         .tracks
-        .iter()
+        .into_iter()
         .find(|t| t.property == "Speed")
         .unwrap();
-    assert!(matches!(speed.base, PropertyValue::Number { value } if value == 40.0));
+    // The base is the 12 m/s the circle was created with, untouched.
+    assert!(matches!(speed.base, PropertyValue::Number { value } if value == 12.0));
 }
 
 #[test]
@@ -840,4 +844,307 @@ fn the_start_time_is_set_cleared_and_undone() {
     ve_core::io::save(&document_of(&state), &path).expect("save");
     let loaded = ve_core::io::load(&path).expect("load");
     assert_eq!(loaded.settings.start_unix_s, Some(1_700_000_000));
+}
+
+// --- The map's transforms write into the animation (spec 9.3) -----------------
+
+use ve_app::transform::{self, TransformKind};
+
+/// Drags an object with the hand, as the map does: begin, one update, end.
+fn drag(state: &AppState, object: u64, step: u32, auto_key: bool, to: (f64, f64)) {
+    let from = transform::transform_of(state, &[object], step)
+        .expect("transform")
+        .expect("present");
+    transform::start_transform(
+        state,
+        &[object],
+        step,
+        TransformKind::Move,
+        from.lon,
+        from.lat,
+        auto_key,
+    )
+    .expect("begin");
+    transform::update_transform(state, to.0, to.1).expect("drag");
+    document::finish_gesture(state).expect("end");
+}
+
+fn keys_of(state: &AppState, object: u64, prop: PropId) -> Vec<u32> {
+    document_of(state)
+        .object(ve_core::Id::from_raw(object))
+        .unwrap()
+        .props
+        .get(prop)
+        .unwrap()
+        .keys()
+        .iter()
+        .map(|key| key.step)
+        .collect()
+}
+
+/// The bug as reported: key a position at two steps, then move the object
+/// with the hand — and every key vanished. A drag must write *into* the
+/// animation: the keys stay, and the step being edited gains one.
+#[test]
+fn moving_a_keyed_object_keeps_its_keys_and_keys_the_current_step() {
+    let (_root, state) = project("drag-keyed");
+    let id = stamp(&state, 0.0, 0.0);
+    key(
+        &state,
+        id,
+        "Position",
+        2,
+        PropertyValue::Position { lon: 0.0, lat: 0.0 },
+    );
+    key(
+        &state,
+        id,
+        "Position",
+        10,
+        PropertyValue::Position {
+            lon: 40.0,
+            lat: 0.0,
+        },
+    );
+
+    drag(&state, id, 6, false, (20.0, 15.0));
+
+    assert_eq!(keys_of(&state, id, PropId::Position), vec![2, 6, 10]);
+    let at = |step| {
+        value_at(&state, id, PropId::Position, step)
+            .as_lonlat()
+            .unwrap()
+    };
+    assert!(
+        at(6).distance_m(ll(20.0, 15.0)) < 1_000.0,
+        "step 6 is where it was dragged to"
+    );
+    assert!(
+        at(2).distance_m(ll(0.0, 0.0)) < 1_000.0,
+        "the first key is untouched"
+    );
+    assert!(
+        at(10).distance_m(ll(40.0, 0.0)) < 1_000.0,
+        "the last key is untouched"
+    );
+    // And the field follows: painted at the new place at step 6, not at 2.
+    assert!(sample(&state, ll(20.0, 15.0), 6).0 > 1.0);
+    assert!(sample(&state, ll(20.0, 15.0), 2).0 < 0.01);
+}
+
+/// With no keys and auto-key off, a drag changes the base as it always did.
+#[test]
+fn moving_an_unkeyed_object_without_auto_key_moves_its_base() {
+    let (_root, state) = project("drag-base");
+    let id = stamp(&state, 0.0, 0.0);
+    drag(&state, id, 6, false, (20.0, 15.0));
+    assert_eq!(keys_of(&state, id, PropId::Position), Vec::<u32>::new());
+    for step in [0, 6, 11] {
+        assert!(
+            value_at(&state, id, PropId::Position, step)
+                .as_lonlat()
+                .unwrap()
+                .distance_m(ll(20.0, 15.0))
+                < 1_000.0
+        );
+    }
+}
+
+/// With auto-key on, the same drag keys the current step instead (spec 9.3).
+#[test]
+fn moving_with_auto_key_keys_the_current_step() {
+    let (_root, state) = project("drag-autokey");
+    let id = stamp(&state, 0.0, 0.0);
+    drag(&state, id, 6, true, (20.0, 15.0));
+    assert_eq!(keys_of(&state, id, PropId::Position), vec![6]);
+}
+
+/// Rotate and scale write the same way, and the position key the drag adds
+/// alongside them does not disturb the others.
+#[test]
+fn rotating_and_scaling_a_keyed_object_keys_the_current_step() {
+    let (_root, state) = project("drag-rotate");
+    let id = circle(&state, 0.0, 0.0);
+    key(
+        &state,
+        id,
+        "RotationDeg",
+        2,
+        PropertyValue::Angle { degrees: 0.0 },
+    );
+    key(
+        &state,
+        id,
+        "RotationDeg",
+        10,
+        PropertyValue::Angle { degrees: 90.0 },
+    );
+    key(
+        &state,
+        id,
+        "ScalePct",
+        2,
+        PropertyValue::Number { value: 100.0 },
+    );
+    key(
+        &state,
+        id,
+        "ScalePct",
+        10,
+        PropertyValue::Number { value: 100.0 },
+    );
+
+    let handles = transform::transform_of(&state, &[id], 6).unwrap().unwrap();
+    transform::start_transform(
+        &state,
+        &[id],
+        6,
+        TransformKind::Rotate,
+        handles.lon + 5.0,
+        handles.lat,
+        false,
+    )
+    .expect("begin");
+    // Turn the pointer a quarter turn about the pivot.
+    transform::update_transform(&state, handles.lon, handles.lat - 5.0).expect("drag");
+    document::finish_gesture(&state).expect("end");
+
+    assert_eq!(keys_of(&state, id, PropId::RotationDeg), vec![2, 6, 10]);
+    assert_eq!(
+        keys_of(&state, id, PropId::ScalePct),
+        vec![2, 10],
+        "scale was not touched"
+    );
+
+    let handles = transform::transform_of(&state, &[id], 6).unwrap().unwrap();
+    transform::start_transform(
+        &state,
+        &[id],
+        6,
+        TransformKind::Scale,
+        handles.lon + 5.0,
+        handles.lat,
+        false,
+    )
+    .expect("begin");
+    transform::update_transform(&state, handles.lon + 10.0, handles.lat).expect("drag");
+    document::finish_gesture(&state).expect("end");
+    assert_eq!(keys_of(&state, id, PropId::ScalePct), vec![2, 6, 10]);
+    let scale = value_at(&state, id, PropId::ScalePct, 6).as_f32().unwrap();
+    assert!(
+        (scale / 200.0 - 1.0).abs() < 0.05,
+        "doubled at step 6, got {scale}"
+    );
+    assert_eq!(
+        value_at(&state, id, PropId::ScalePct, 2).as_f32(),
+        Some(100.0)
+    );
+}
+
+/// Undo after a drag restores the property exactly — keys, base and easings.
+/// The old drag fabricated `before` as a constant, so undo lost the keys too.
+#[test]
+fn undoing_a_drag_restores_the_keys_exactly() {
+    let (_root, state) = project("drag-undo");
+    let id = stamp(&state, 0.0, 0.0);
+    key(
+        &state,
+        id,
+        "Position",
+        2,
+        PropertyValue::Position { lon: 0.0, lat: 0.0 },
+    );
+    key(
+        &state,
+        id,
+        "Position",
+        10,
+        PropertyValue::Position {
+            lon: 40.0,
+            lat: 0.0,
+        },
+    );
+    animation::ease_from(&state, id, "Position", 2, InterpolationView::EaseInOut).unwrap();
+    let before = document_of(&state);
+
+    drag(&state, id, 6, false, (20.0, 15.0));
+    assert_ne!(document_of(&state), before);
+    edit::undo_for_test(&state).expect("undo");
+    assert_eq!(document_of(&state), before);
+}
+
+/// Repinning the anchor goes through the same write, so it keys too.
+#[test]
+fn repinning_a_keyed_object_keys_the_current_step() {
+    let (_root, state) = project("drag-anchor");
+    let id = stamp(&state, 0.0, 0.0);
+    key(
+        &state,
+        id,
+        "Position",
+        2,
+        PropertyValue::Position { lon: 0.0, lat: 0.0 },
+    );
+    key(
+        &state,
+        id,
+        "Position",
+        10,
+        PropertyValue::Position { lon: 0.0, lat: 0.0 },
+    );
+
+    let from = transform::transform_of(&state, &[id], 6).unwrap().unwrap();
+    transform::start_transform(
+        &state,
+        &[id],
+        6,
+        TransformKind::Anchor,
+        from.lon,
+        from.lat,
+        false,
+    )
+    .expect("begin");
+    transform::update_transform(&state, 3.0, 2.0).expect("drag");
+    document::finish_gesture(&state).expect("end");
+    assert_eq!(keys_of(&state, id, PropId::Position), vec![2, 6, 10]);
+}
+
+/// The inspector follows the same rule as the drags: with keys present, an
+/// edit at step 5 keys step 5 even with auto-key off — a base write would be
+/// invisible, since the nearest key holds everywhere (spec 9.3, D42).
+#[test]
+fn editing_an_animated_property_without_auto_key_keys_the_current_step() {
+    let (_root, state) = project("inspector-keyed");
+    let id = stamp(&state, 0.0, 0.0);
+    key(
+        &state,
+        id,
+        "Speed",
+        2,
+        PropertyValue::Number { value: 10.0 },
+    );
+    key(
+        &state,
+        id,
+        "Speed",
+        10,
+        PropertyValue::Number { value: 10.0 },
+    );
+
+    document::set_property_with(
+        &state,
+        id,
+        "Speed",
+        PropertyValue::Number { value: 40.0 },
+        None,
+        5,
+        false,
+    )
+    .expect("edit");
+
+    assert_eq!(keys_of(&state, id, PropId::Speed), vec![2, 5, 10]);
+    let at = |step| value_at(&state, id, PropId::Speed, step).as_f32().unwrap();
+    assert_eq!(at(5), 40.0);
+    assert_eq!(at(2), 10.0);
+    assert_eq!(at(10), 10.0);
 }

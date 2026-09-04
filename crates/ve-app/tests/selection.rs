@@ -98,7 +98,7 @@ fn distance_m(a: (f64, f64), b: (f64, f64)) -> f64 {
 }
 
 fn drag(state: &AppState, objects: &[u64], kind: TransformKind, from: (f64, f64), to: (f64, f64)) {
-    transform::start_transform(state, objects, 0, kind, from.0, from.1).expect("begin");
+    transform::start_transform(state, objects, 0, kind, from.0, from.1, false).expect("begin");
     transform::update_transform(state, to.0, to.1).expect("drag");
     document::finish_gesture(state).expect("end");
 }
@@ -188,7 +188,8 @@ fn the_preview_lands_where_the_drag_commits() {
         let (_root, state) = project(&format!("preview-{kind:?}"));
         let object = short_stroke(&state);
 
-        transform::start_transform(&state, &[object], 0, kind, from.0, from.1).expect("begin");
+        transform::start_transform(&state, &[object], 0, kind, from.0, from.1, false)
+            .expect("begin");
         let preview = transform::peek_transform(&state, to.0, to.1)
             .expect("preview")
             .expect("a drag is in progress");
@@ -237,7 +238,8 @@ fn a_preview_does_not_touch_the_document() {
 
     let before = summary(&state);
     let outline_before = committed_outline(&state, object);
-    transform::start_transform(&state, &[object], 0, TransformKind::Move, 0.0, 0.0).expect("begin");
+    transform::start_transform(&state, &[object], 0, TransformKind::Move, 0.0, 0.0, false)
+        .expect("begin");
 
     for step in 1..20 {
         transform::peek_transform(&state, f64::from(step), f64::from(step) * 0.5).expect("preview");
@@ -464,6 +466,7 @@ fn repeating_a_drag_update_changes_nothing() {
         TransformKind::Move,
         handles.lon,
         handles.lat,
+        false,
     )
     .expect("begin");
 
@@ -498,6 +501,7 @@ fn a_group_drag_is_one_undo_entry() {
         TransformKind::Move,
         handles.lon,
         handles.lat,
+        false,
     )
     .expect("begin");
     for lon in [12.0, 18.0, 24.0, 30.0] {
@@ -646,6 +650,7 @@ fn a_drag_preview_starts_where_the_committed_handles_are() {
             TransformKind::Rotate,
             committed.lon,
             committed.lat + 1.0,
+            false,
         )
         .expect("begin");
         let preview = transform::peek_transform(&state, committed.lon, committed.lat + 1.0)
@@ -684,7 +689,8 @@ fn a_scale_drag_grows_the_handles_with_the_object_not_faster() {
         .expect("present");
 
     // Grab 5° east, drag to 10°: about a factor of two.
-    transform::start_transform(&state, &[a], 0, TransformKind::Scale, 5.0, 0.0).expect("begin");
+    transform::start_transform(&state, &[a], 0, TransformKind::Scale, 5.0, 0.0, false)
+        .expect("begin");
     let doubled = transform::peek_transform(&state, 10.0, 0.0)
         .expect("preview")
         .expect("present")

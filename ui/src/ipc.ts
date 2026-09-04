@@ -174,15 +174,17 @@ export const api = {
     object: number,
     property: string,
     value: PropertyValue,
+    step: number,
+    autoKey: boolean,
     gesture?: string,
-    keyStep?: number,
   ) =>
     call<ProjectSummary>("set_object_property", {
       object,
       property,
       value,
+      step,
+      autoKey,
       gesture: gesture ?? null,
-      keyStep: keyStep ?? null,
     }),
 
   // --- Animation (spec.md 9) ---
@@ -243,7 +245,16 @@ export const api = {
     kind: TransformKind,
     lon: number,
     lat: number,
-  ) => call<SelectionTransform | null>("begin_transform", { objects, step, kind, lon, lat }),
+    autoKey: boolean,
+  ) =>
+    call<SelectionTransform | null>("begin_transform", {
+      objects,
+      step,
+      kind,
+      lon,
+      lat,
+      autoKey,
+    }),
   /**
    * Where the drag would leave the selection, without writing anything.
    *

@@ -653,7 +653,7 @@ reports buffering rather than advancing into anything but a solid frame
 (`playback.test.ts`). A warm tile is served in 63 µs. The step-count shrink
 reports an exact count and names the objects, deletes exactly that, clamps
 lifetimes, and undoes to an identical document. Three decisions recorded as
-D39–D41.
+D39–D42.
 
 **Deliverables**
 
@@ -662,6 +662,10 @@ D39–D41.
 - Object `active_range` bars with draggable ends.
 - Keyframe editing: add, move, delete, box-select, per-segment interpolation.
 - Auto-key mode and explicit per-property key buttons.
+- One write rule for the inspector and the map's transform drags: an animated
+  property keys the current step, an unkeyed one edits its base unless auto-key
+  is on (spec §9.3, D42). Found by hand: the first version of the drags
+  rebuilt the property as a constant and erased every key.
 - Playback: play, pause, stop, loop, configurable rate, buffering hold.
 - Background render worker pool with the priority policy from spec §9.5.
 - Per-step readiness indicators including the distinct **stale** state.
@@ -917,6 +921,7 @@ relitigated by accident.
 | D34 | A clone stamp never merges | Merging re-expresses the absorbed stroke in the target's frame, and a clone stamp samples at a displacement off its own anchor — a different anchor is a different patch of the field. It is the one exception to D24's rule, and it is stated at the merge test rather than buried in it (spec §6.1, §6.2) |
 | D35 | The size's unit is the only control for `stamp_space`, and there is one per tool | The unit already asks the space's question — px is a shape on the map, km one on the ground — so a bar offering both would have two controls for one property, and the space would be the one that did nothing, since the unit is what the gesture freezes. `stamp_space` is therefore not among a tool's options at all; the unit stands in its place and inherits its dependencies, so the shape fill's freehand polygon, which has no size, is offered no unit either. One unit per tool rather than per field for the same reason: a circle with a diameter in px and a ring width in km would be asking for a shape that is on the map in one measurement and on the ground in the other. A tool whose sizes are dragged rather than typed still has the unit, with no number beside it — a drag is a measurement too (spec §3.5) |
 | D41 | Nothing in the render pool is cancelled; the queue is replaced | A unit in flight when an edit lands finishes into a content-hashed key that is merely unreachable — one tile of wasted work and no bookkeeping that could be wrong. Cancellation would need the pool to know which units an edit affected, which is exactly the tracking content addressing exists to avoid (spec §9.5) |
+| D42 | A change to an animated property keys the current step, auto-key or not | Once a property has a key its base is unreachable (nearest key holds, spec §4.5), so a base write is an invisible edit and an undo entry that does nothing. Keying the current step is the only write that shows on screen. Auto-key therefore only decides what happens to a property that has no keys yet. The rule lives in one function (`animation::written`) so the inspector and the map's drags cannot diverge again |
 | D40 | "Stale" is the frontend's memory | The backend reports what the cache holds now; "was solid at an earlier revision, is not at this one" needs the earlier revision, which only the timeline saw. Playback treats stale as not ready: the tiles on screen for it belong to a revision that no longer exists (spec §9.4, §9.5) |
 | D39 | The render pool renders through `protocol::serve`, the function that answers the map's own tile requests | The key, the backend, the quality and the encoding are decided once, so a tile rendered ahead is byte for byte the tile the map will fetch and "ready" means "will be a cache hit". A pool that chose any of those differently would fill the cache with tiles nobody asks for and report frames ready that are not (spec §9.5) |
 | D38 | No tool has `divergence` or `curl`; an object's direction mode is the whole of its direction | Reverses the half of D30 that kept them on the tools with a centre. What it costs is the spiral: a radial component is what makes a low converge rather than merely turn, so a cyclone is now built from more than one object — a circle for the rotation, a larger one aimed at its centre for the inflow. What it buys is that a direction is decided in one place, and that nothing in the evaluator depends on an object's *anchor* rather than its geometry any more. Measured: GPU–CPU agreement tightened from 0.108 m/s to 0.0009 and from 0.186° to 0.004°, the radial terms having been the main source of `f32` disagreement between the kernels. Removing a property from a tool is a migration, never only a table edit (schema version 7, spec §7.5) |

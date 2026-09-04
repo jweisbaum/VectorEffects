@@ -122,12 +122,25 @@ pub struct Settings {
 pub struct TransformBaseline {
     /// Which object.
     pub object: ve_core::Id,
-    /// Its anchor when the drag began.
+    /// Its anchor when the drag began, at the step being edited.
     pub anchor: ve_core::LonLat,
-    /// Its rotation when the drag began, degrees.
+    /// Its rotation when the drag began, degrees, at the step being edited.
     pub rotation_deg: f64,
-    /// Its scale when the drag began, percent.
+    /// Its scale when the drag began, percent, at the step being edited.
     pub scale_pct: f64,
+    /// The three transform properties **as stored** — base and keys — when
+    /// the drag began.
+    ///
+    /// The numbers above are what the step *shows*; these are what the drag
+    /// *writes*. A drag that built its command from the numbers alone replaced
+    /// the whole property with a constant and erased every keyframe the object
+    /// had — and, having fabricated `before` the same way, undo could not bring
+    /// them back.
+    pub position: ve_core::keyframe::Animatable,
+    /// See [`Self::position`].
+    pub rotation: ve_core::keyframe::Animatable,
+    /// See [`Self::position`].
+    pub scale: ve_core::keyframe::Animatable,
     /// Which space its geometry is defined in.
     ///
     /// Moving an anchor re-expresses the geometry in the new frame, and a
@@ -156,6 +169,12 @@ pub struct TransformGesture {
     pub kind: crate::transform::TransformKind,
     /// The step being edited.
     pub step: u32,
+    /// Whether an edit keys the step rather than the base (spec.md 9.3).
+    ///
+    /// The frontend's auto-key switch. An *animated* property is keyed
+    /// regardless: with keys present the base shows at no step, so changing it
+    /// would be an edit nobody could see.
+    pub auto_key: bool,
     /// Where the pointer went down.
     pub pointer: ve_core::LonLat,
     /// What the selection turns and scales about.

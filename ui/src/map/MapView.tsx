@@ -243,6 +243,7 @@ export default function MapView({
   onStepChange,
   onSelect,
   onViewport,
+  autoKey,
 }: {
   project: ProjectSummary;
   step: number;
@@ -260,6 +261,8 @@ export default function MapView({
    * viewport; the timeline is the only thing that needs it.
    */
   onViewport: (tiles: TileAddress[]) => void;
+  /** Whether a drag keys the current step rather than the base (spec.md 9.3). */
+  autoKey: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const rendererRef = useRef<MapRenderer | null>(null);
@@ -1566,13 +1569,15 @@ export default function MapView({
       handleDrag.current = { kind, pointer: geo, asking: false, queued: null };
       dragPreview.current = null;
       void api
-        .beginTransform(selection, step, kind, geo.lon, geo.lat)
+        // Auto-key travels with the drag: with it on, or on any animated
+        // property, the drag keys the current step rather than the base.
+        .beginTransform(selection, step, kind, geo.lon, geo.lat, autoKey)
         .catch((err: unknown) => {
           handleDrag.current = null;
           void api.frontendLog("error", `transform failed to start: ${String(err)}`);
         });
     },
-    [selection, step],
+    [autoKey, selection, step],
   );
 
   /**
@@ -1668,11 +1673,13 @@ export default function MapView({
       const geo = unproject(cameraRef.current, viewRef.current, point);
       onPicked();
       void api
-        .setObjectProperty(picking.object, picking.property, {
-          kind: "position",
-          lon: geo.lon,
-          lat: geo.lat,
-        })
+        .setObjectProperty(
+          picking.object,
+          picking.property,
+          { kind: "position", lon: geo.lon, lat: geo.lat },
+          step,
+          autoKey,
+        )
         .then(onProjectChanged)
         .catch((err: unknown) =>
           void api.frontendLog("error", `placing ${picking.property} failed: ${String(err)}`),

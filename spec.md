@@ -1402,6 +1402,15 @@ concept per the requirements.
 
 - Add a key at the current step by changing a property while auto-key is on, or
   explicitly via the diamond button beside any property in the inspector.
+- **Where a change goes.** A change to a property that has no keys edits its
+  base, unless auto-key is on. A change to a property that already has keys
+  always keys the current step — auto-key or not — because its base is
+  unreachable once a key exists (the nearest key holds outside the keyed range,
+  §4.5), so writing it would change nothing visible. The map's move, rotate,
+  scale and anchor drags are property changes and follow the same rule; a drag
+  at step 6 of an object keyed at 2 and 10 adds a key at 6 and leaves the other
+  two alone. An edit at a keyed step replaces that key's value and keeps its
+  interpolation; a new key takes the kind's default (linear where allowed).
 - Select, move, delete, and box-select keys. Move constrained to integer steps.
 - Right-click a key to set the interpolation of the segment leaving it.
 - Properties with no keys show `base` and no diamonds.

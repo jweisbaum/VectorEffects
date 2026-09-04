@@ -99,9 +99,9 @@ export default function Inspector({
   const write = (property: string, value: PropertyValue) => {
     setError(null);
     api
-      // With auto-key on, the edit becomes a key at this step and the rest
-      // of the animation is left alone (spec.md 9.3).
-      .setObjectProperty(object, property, value, undefined, autoKey ? step : undefined)
+      // Keys this step when the property is animated or auto-key is on, and
+      // edits the base otherwise (spec.md 9.3).
+      .setObjectProperty(object, property, value, step, autoKey)
       .then(onChanged)
       .catch((err: unknown) => setError(String(err)));
   };

@@ -246,11 +246,24 @@ pub fn begin_transform(
     kind: TransformKind,
     lon: f64,
     lat: f64,
+    auto_key: Option<bool>,
 ) -> Result<Option<SelectionTransform>> {
-    start_transform(&state, &objects, step, kind, lon, lat)
+    start_transform(
+        &state,
+        &objects,
+        step,
+        kind,
+        lon,
+        lat,
+        auto_key.unwrap_or(false),
+    )
 }
 
 /// Implementation of [`begin_transform`], callable without a Tauri handle.
+///
+/// `auto_key` is the frontend's switch (spec.md 9.3). A property that already
+/// has keys is keyed at `step` whatever the switch says: its base shows at no
+/// step, so changing the base would be an edit nobody could see.
 pub fn start_transform(
     state: &AppState,
     objects: &[u64],
@@ -258,6 +271,7 @@ pub fn start_transform(
     kind: TransformKind,
     lon: f64,
     lat: f64,
+    auto_key: bool,
 ) -> Result<Option<SelectionTransform>> {
     let pointer = LonLat::new(lon, lat)?;
     with_session(state, |session| {
@@ -274,6 +288,7 @@ pub fn start_transform(
             key: format!("transform:{kind:?}:{}", session.next_gesture_id()),
             kind,
             step,
+            auto_key,
             pointer,
             pivot: baseline.pivot,
             pointer_bearing: bearing_or(baseline.pivot, pointer, 0.0),
@@ -491,6 +506,18 @@ fn baseline_of(
         let Some(flat) = flatten_object(object, step) else {
             continue;
         };
+        // The stored properties, keys and all, so a drag can write *into* an
+        // animation rather than over it. Absent from the map only if the
+        // object predates the property; the schema default stands in.
+        let stored = |id: PropId| {
+            object.props.get(id).cloned().unwrap_or_else(|| {
+                ve_core::keyframe::Animatable::constant(
+                    ve_core::schema::spec_for(object.tool, id)
+                        .map(|spec| spec.default.value())
+                        .unwrap_or(PropValue::F32(0.0)),
+                )
+            })
+        };
         items.push(TransformBaseline {
             object: object.id,
             outline: BaselineOutline::of(&flat.shape),
@@ -500,6 +527,9 @@ fn baseline_of(
             space: flat.frame.space,
             reach_m: flat.cap_radius_m,
             geometry: object.geometry.clone(),
+            position: stored(PropId::Position),
+            rotation: stored(PropId::RotationDeg),
+            scale: stored(PropId::ScalePct),
         });
     }
     if items.is_empty() {
@@ -688,14 +718,15 @@ fn commands_for(gesture: &TransformGesture, pointer: LonLat) -> Vec<Command> {
             // entries -- a rotation that starts at exactly zero degrees is the
             // case that would find it.
             match gesture.kind {
-                TransformKind::Move => vec![set_position(item, to.anchor)],
+                TransformKind::Move => vec![set_position(gesture, item, to.anchor)],
                 TransformKind::Rotate => vec![
-                    set_position(item, to.anchor),
-                    set_rotation(item, to.rotation_deg),
+                    set_position(gesture, item, to.anchor),
+                    set_rotation(gesture, item, to.rotation_deg),
                 ],
-                TransformKind::Scale => {
-                    vec![set_position(item, to.anchor), set_scale(item, to.scale_pct)]
-                }
+                TransformKind::Scale => vec![
+                    set_position(gesture, item, to.anchor),
+                    set_scale(gesture, item, to.scale_pct),
+                ],
                 // Handled above: it rewrites geometry as well.
                 TransformKind::Anchor => Vec::new(),
             }
@@ -703,33 +734,62 @@ fn commands_for(gesture: &TransformGesture, pointer: LonLat) -> Vec<Command> {
         .collect()
 }
 
-fn set_position(item: &TransformBaseline, to: LonLat) -> Command {
+/// The property as the drag leaves it: the stored animatable with `value`
+/// written into it — as a key at the gesture's step when the property is
+/// animated or auto-key is on, as the base otherwise (spec.md 9.3).
+///
+/// A key already at that step keeps its easing; a new one takes the kind's
+/// default. `before` is the stored animatable itself, so undo restores keys
+/// and base exactly.
+/// The drag's value, written by the one rule (spec.md 9.3): into the current
+/// step's key when the property is animated or auto-key is on, else the base.
+fn written(gesture: &TransformGesture, before: &Animatable, value: PropValue) -> Animatable {
+    crate::animation::written(before, gesture.step, gesture.auto_key, value)
+}
+
+fn set_property(
+    gesture: &TransformGesture,
+    item: &TransformBaseline,
+    prop: PropId,
+    before: &Animatable,
+    value: PropValue,
+) -> Command {
     Command::SetProperty {
         object: item.object,
-        prop: PropId::Position,
-        before: Box::new(Animatable::constant(PropValue::LonLat(item.anchor))),
-        after: Box::new(Animatable::constant(PropValue::LonLat(to))),
+        prop,
+        before: Box::new(before.clone()),
+        after: Box::new(written(gesture, before, value)),
     }
 }
 
-fn set_rotation(item: &TransformBaseline, degrees: f64) -> Command {
-    Command::SetProperty {
-        object: item.object,
-        prop: PropId::RotationDeg,
-        before: Box::new(Animatable::constant(PropValue::Angle(Angle::new(
-            item.rotation_deg,
-        )))),
-        after: Box::new(Animatable::constant(PropValue::Angle(Angle::new(degrees)))),
-    }
+fn set_position(gesture: &TransformGesture, item: &TransformBaseline, to: LonLat) -> Command {
+    set_property(
+        gesture,
+        item,
+        PropId::Position,
+        &item.position,
+        PropValue::LonLat(to),
+    )
 }
 
-fn set_scale(item: &TransformBaseline, percent: f64) -> Command {
-    Command::SetProperty {
-        object: item.object,
-        prop: PropId::ScalePct,
-        before: Box::new(Animatable::constant(PropValue::F32(item.scale_pct as f32))),
-        after: Box::new(Animatable::constant(PropValue::F32(percent as f32))),
-    }
+fn set_rotation(gesture: &TransformGesture, item: &TransformBaseline, degrees: f64) -> Command {
+    set_property(
+        gesture,
+        item,
+        PropId::RotationDeg,
+        &item.rotation,
+        PropValue::Angle(Angle::new(degrees)),
+    )
+}
+
+fn set_scale(gesture: &TransformGesture, item: &TransformBaseline, percent: f64) -> Command {
+    set_property(
+        gesture,
+        item,
+        PropId::ScalePct,
+        &item.scale,
+        PropValue::F32(percent as f32),
+    )
 }
 
 /// Moves the anchor and leaves the geometry where it is on the ground.
@@ -776,7 +836,7 @@ fn anchor_commands(gesture: &TransformGesture, pointer: LonLat) -> Vec<Command> 
             Geometry::Disc { .. } | Geometry::Rect { .. } => None,
         };
 
-        commands.push(set_position(item, pointer));
+        commands.push(set_position(gesture, item, pointer));
         if let Some(geometry) = geometry {
             commands.push(Command::SetGeometry {
                 object: item.object,

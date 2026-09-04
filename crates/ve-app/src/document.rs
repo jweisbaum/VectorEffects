@@ -314,10 +314,11 @@ pub fn set_object_property(
     object: u64,
     property: String,
     value: PropertyValue,
-    key_step: Option<u32>,
+    step: u32,
+    auto_key: bool,
     gesture: Option<String>,
 ) -> Result<ProjectSummary> {
-    set_property_with(&state, object, &property, value, gesture, key_step)
+    set_property_with(&state, object, &property, value, gesture, step, auto_key)
 }
 
 /// Implementation of [`set_object_property`] without a gesture.
@@ -327,23 +328,21 @@ pub fn set_property(
     property: &str,
     value: PropertyValue,
 ) -> Result<ProjectSummary> {
-    set_property_with(state, object, property, value, None, None)
+    set_property_with(state, object, property, value, None, 0, false)
 }
 
 /// Implementation of [`set_object_property`], callable without a Tauri handle.
 ///
-/// `key_at` is auto-key (spec.md 9.3): with it, the value becomes a keyframe at
-/// that step instead of the property's base, so an edit made while the timeline
-/// is on step 6 changes step 6 and leaves the rest of the animation alone. The
-/// key keeps the interpolation it already had if one was there, and otherwise
-/// takes the kind's default.
+/// `step` and `auto_key` decide where the change goes — the current step's key
+/// or the base — by the rule in [`crate::animation::written`] (spec.md 9.3).
 pub fn set_property_with(
     state: &AppState,
     object: u64,
     property: &str,
     value: PropertyValue,
     gesture: Option<String>,
-    key_at: Option<u32>,
+    step: u32,
+    auto_key: bool,
 ) -> Result<ProjectSummary> {
     with_session(state, |session| {
         let id = ve_core::Id::from_raw(object);
@@ -375,22 +374,8 @@ pub fn set_property_with(
             })?
             .clone();
 
-        let mut after = before.clone();
         let value = value.into_prop(before.kind())?;
-        match key_at {
-            Some(step) => {
-                let interp = before
-                    .keys()
-                    .iter()
-                    .find(|key| key.step == step)
-                    .map_or_else(
-                        || crate::animation::default_interpolation(before.kind()),
-                        |key| key.interp,
-                    );
-                after.set_key(step, value, interp);
-            }
-            None => after.set_base(value),
-        }
+        let after = crate::animation::written(&before, step, auto_key, value);
 
         let command = ve_core::command::Command::SetProperty {
             object: id,

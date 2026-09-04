@@ -289,6 +289,7 @@ export default function App() {
           onStepChange={setStep}
           onSelect={setSelection}
           onViewport={setViewport}
+          autoKey={autoKey}
         />
 
         <aside className="sidebar right">

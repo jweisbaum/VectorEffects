@@ -94,6 +94,31 @@ pub fn default_interpolation(kind: PropKind) -> Interpolation {
     }
 }
 
+/// Where a change to a property goes (spec.md 9.3, D42).
+///
+/// A property with keys always keys the current step: once a key exists its
+/// base is unreachable — the nearest key holds outside the keyed range — so a
+/// base write would be an edit that changes nothing on screen. A property with
+/// no keys edits its base, unless auto-key is on. An edit at a keyed step keeps
+/// that key's interpolation; a new key takes the kind's default.
+///
+/// The inspector and the map's transform drags both write through here, so the
+/// two cannot disagree about what a change at step 6 means.
+pub fn written(before: &Animatable, step: u32, auto_key: bool, value: PropValue) -> Animatable {
+    let mut after = before.clone();
+    if auto_key || before.is_animated() {
+        let interp = before
+            .keys()
+            .iter()
+            .find(|key| key.step == step)
+            .map_or_else(|| default_interpolation(before.kind()), |key| key.interp);
+        after.set_key(step, value, interp);
+    } else {
+        after.set_base(value);
+    }
+    after
+}
+
 /// One keyframe, on the wire.
 #[derive(Debug, Clone, Serialize, TS)]
 #[ts(export, export_to = "KeyframeView.ts")]
