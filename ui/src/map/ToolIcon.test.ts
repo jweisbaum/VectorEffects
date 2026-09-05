@@ -36,7 +36,7 @@ function paths(tool: (typeof ICON_TOOLS)[number]): string[] {
 
 describe("the icon set", () => {
   /**
-   * Seventeen: the hand, the select tool of 8.2, the measure tool of 10,
+   * Eighteen: the hand, the select tool of 8.2, the measure tool of 10,
    * the two macro tools of 8.7,
    * the six tools of spec 6.2, the four modifiers of 6.3, and the patch of 8.5
    * and the macro of 8.7 — neither drawn from the palette, and both needing a
@@ -58,6 +58,8 @@ describe("the icon set", () => {
         "shape_fill",
         "turn",
         "warp",
+        // The smear, the warp's family (spec.md 6.3, M17).
+        "liquify",
         SELECT,
         // Draws no object at all: it lays a measurement over the map
         // (spec.md 10, M8).

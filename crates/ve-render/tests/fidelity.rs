@@ -267,6 +267,7 @@ fn object(rng: &mut Rng) -> FlatObject {
 
     FlatObject {
         modifier,
+        smear: Vec::new(),
         invert,
         // The mask is the one tool that erases, and `invert` is the one flag
         // the generator gives only to it (spec.md 6.2) — so a scene's erasing
@@ -614,6 +615,11 @@ fn a_warp_scene_is_reported_unsupported() {
     scene.objects[1].modifier = Some(Modifier::Warp(ve_render::scene::Warp::Twist {
         degrees: 45.0,
     }));
+    assert!(!ve_render::gpu::supports(&scene));
+
+    // A liquify re-reads the scene along its stroke, and is declined for the
+    // same reason (spec.md 6.3, M17).
+    scene.objects[1].modifier = Some(Modifier::Smear);
     assert!(!ve_render::gpu::supports(&scene));
 
     // ...and the three that transform the vector where it already is are not

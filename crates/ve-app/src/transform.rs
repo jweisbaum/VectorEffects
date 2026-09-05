@@ -906,6 +906,22 @@ fn anchor_commands(gesture: &TransformGesture, pointer: LonLat) -> Vec<Command> 
             Geometry::Polygon { points } => Some(Geometry::Polygon {
                 points: points.iter().copied().map(reframe).collect(),
             }),
+            // The stamps move with the frame; the deltas are directions in it
+            // and are left alone, as a push's local displacement is.
+            Geometry::Smear { chains } => Some(Geometry::Smear {
+                chains: chains
+                    .iter()
+                    .map(|chain| {
+                        chain
+                            .iter()
+                            .map(|s| {
+                                let moved = reframe(LocalPoint::new(s.x, s.y));
+                                ve_core::document::SmearPoint::new(moved.x, moved.y, s.dx, s.dy)
+                            })
+                            .collect()
+                    })
+                    .collect(),
+            }),
             Geometry::Path { nodes } => Some(Geometry::Path {
                 nodes: nodes
                     .iter()

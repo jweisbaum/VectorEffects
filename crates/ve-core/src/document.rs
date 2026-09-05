@@ -27,6 +27,42 @@ pub struct LocalPoint {
     pub y: f64,
 }
 
+/// One stamp of a liquify stroke: where it is, and how far the pointer moved
+/// to get there (spec.md 6.3, M17).
+///
+/// The delta is the pointer's own movement into this point, in the object's
+/// local frame and already scaled by the stroke's strength — so the geometry
+/// *is* the displacement, and the evaluator adds it up without consulting an
+/// option. Local metres, like the point, so the object's rotation and scale
+/// turn and size the smear with the footprint (spec.md 7.2).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct SmearPoint {
+    /// Eastward offset in metres, before rotation and scale.
+    #[serde(with = "crate::canonical::metres_field")]
+    pub x: f64,
+    /// Northward offset in metres, before rotation and scale.
+    #[serde(with = "crate::canonical::metres_field")]
+    pub y: f64,
+    /// The movement into this stamp, eastward, in metres.
+    #[serde(with = "crate::canonical::metres_field")]
+    pub dx: f64,
+    /// And northward.
+    #[serde(with = "crate::canonical::metres_field")]
+    pub dy: f64,
+}
+
+impl SmearPoint {
+    /// A stamp at `(x, y)` carrying `(dx, dy)`, quantised to canonical precision.
+    pub fn new(x: f64, y: f64, dx: f64, dy: f64) -> Self {
+        Self {
+            x: crate::canonical::metres(x),
+            y: crate::canonical::metres(y),
+            dx: crate::canonical::metres(dx),
+            dy: crate::canonical::metres(dy),
+        }
+    }
+}
+
 impl LocalPoint {
     /// A point at `(x, y)` metres, quantised to canonical precision.
     pub fn new(x: f64, y: f64) -> Self {
@@ -116,6 +152,17 @@ pub enum Geometry {
         /// Path nodes in order.
         nodes: Vec<PathNode>,
     },
+    /// A liquify stroke: swept stamps, each carrying the pointer's movement
+    /// into it (spec.md 6.3, M17).
+    ///
+    /// Its own variant rather than a stroke with a side table, because the
+    /// delta is part of what a stamp *is* here — a smear without its deltas is
+    /// not a smear that does nothing, it is a different object. Chains, plural,
+    /// for the same reason a stroke's are, though a liquify never merges.
+    Smear {
+        /// One chain per stroke, in the order it was drawn.
+        chains: Vec<Vec<SmearPoint>>,
+    },
 }
 
 impl Geometry {
@@ -132,6 +179,7 @@ impl Geometry {
             | ToolKind::Divergence
             | ToolKind::Turn
             | ToolKind::Warp => Self::Stroke { chains: Vec::new() },
+            ToolKind::Liquify => Self::Smear { chains: Vec::new() },
             ToolKind::Circle => Self::Disc { radius_m: None },
             // A patch is pasted with the shape it was captured over, which is
             // one of the region's three; an empty polygon is what it has
@@ -182,6 +230,14 @@ impl Geometry {
                 })
                 .map(|p| p.radius())
                 .fold(0.0, f64::max),
+            // The stamps bound the footprint; the deltas say where it *reads*
+            // from, which the cull does not need — a read outside the cap is a
+            // read of whatever is there, not a write.
+            Self::Smear { chains } => chains
+                .iter()
+                .flatten()
+                .map(|s| s.x.hypot(s.y))
+                .fold(0.0, f64::max),
         }
     }
 
@@ -200,6 +256,10 @@ impl Geometry {
                     && n.in_handle.is_none_or(LocalPoint::is_finite)
                     && n.out_handle.is_none_or(LocalPoint::is_finite)
             }),
+            Self::Smear { chains } => chains
+                .iter()
+                .flatten()
+                .all(|s| [s.x, s.y, s.dx, s.dy].iter().all(|v| v.is_finite())),
         }
     }
 }

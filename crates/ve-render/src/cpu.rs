@@ -15,6 +15,7 @@ use crate::evaluator::{FieldEvaluator, SamplePoint};
 use crate::scene::{
     DirectionMode, EdgeMode, FlatCapture, FlatObject, Modifier, OffsetMode, Scene, SpeedMode, Warp,
 };
+use crate::sdf::Shape;
 
 /// How deep a clone stamp may read through other clone stamps.
 ///
@@ -290,6 +291,17 @@ fn sample_upto(scene: &Scene, position: LonLat, upto: usize, depth: u32) -> (Uv,
                         sample_upto(scene, read, index, depth + 1).0
                     }
                 }
+                // A liquify is the same re-read with a displacement that
+                // varies along the stroke rather than across a region
+                // (spec.md 6.3, M17). Same depth cap, for the same reason.
+                Modifier::Smear => {
+                    if depth >= MAX_CLONE_DEPTH {
+                        accumulated
+                    } else {
+                        let read = smear_source_position(object, position);
+                        sample_upto(scene, read, index, depth + 1).0
+                    }
+                }
                 _ => modified_vector(modifier, object, position, accumulated),
             };
             // One rule for all four: fade from what was there to what the
@@ -489,7 +501,7 @@ fn modified_vector(modifier: Modifier, object: &FlatObject, position: LonLat, be
             }
         }
         // Handled by the caller, which has the scene a warp has to re-read.
-        Modifier::Warp(_) => beneath,
+        Modifier::Warp(_) | Modifier::Smear => beneath,
     }
 }
 
@@ -515,6 +527,141 @@ fn warp_source_position(object: &FlatObject, warp: Warp, position: LonLat, weigh
         }
     };
     object.frame.to_global(moved)
+}
+
+/// Where a liquify reads from, for a point inside it (spec.md 6.3, M17).
+///
+/// Each stamp of the stroke carries the pointer's movement into it. At a cell
+/// the displacement is the sum of those deltas over the stamps that cover the
+/// cell, each faded by the stamp's own feather — the same ramp the footprint's
+/// edge uses, measured from the stamp's centre — so a cell on the centreline
+/// under `k` stamps of delta `d` reads from `k·d` behind, and a cell at the
+/// rim of the outermost stamp reads from where it is. The read is *behind*
+/// the movement, as a push reads from behind its push: the field at `p` is
+/// what used to be at `p − d`.
+///
+/// A plain sum, not a mean: the deltas are increments of one stroke, and a
+/// stroke that drags the hand a long way through a cell should drag the field
+/// as far. It follows that a stroke slowing down over a spot piles up there,
+/// which is what a smear does.
+fn smear_source_position(object: &FlatObject, position: LonLat) -> LonLat {
+    let radius = match &object.shape {
+        Shape::Capsule { radius_m, .. } => *radius_m,
+        Shape::SweptSquare { half_size_m, .. } => *half_size_m,
+        _ => return position,
+    };
+    let chains = match &object.shape {
+        Shape::Capsule { chains, .. } | Shape::SweptSquare { chains, .. } => chains,
+        _ => return position,
+    };
+    let local = object.frame.to_local(position);
+    let mut moved = local;
+    for (chain, deltas) in chains.iter().zip(&object.smear) {
+        for (stamp, delta) in chain.iter().zip(deltas) {
+            let distance = (local[0] - stamp[0]).hypot(local[1] - stamp[1]);
+            // Signed distance to the stamp's own edge, so the ramp is the
+            // footprint's ramp: zero weight at the rim, full inside the band.
+            let w = feather_weight(distance - radius, object.feather, radius);
+            if w > 0.0 {
+                moved[0] -= delta[0] * w;
+                moved[1] -= delta[1] * w;
+            }
+        }
+    }
+    object.frame.to_global(moved)
+}
+
+#[cfg(test)]
+mod smear_tests {
+    use super::*;
+    use crate::aeqd::{Frame, Space};
+    use crate::sdf::Shape;
+
+    /// A liquify of two stamps on a straight line, each carrying delta `d`
+    /// east, radius `r`, feather `f`: the flat object the evaluator sees.
+    fn smear(r: f64, f: f64, d: f64) -> FlatObject {
+        let anchor = LonLat { lon: 0.0, lat: 0.0 };
+        let chains = vec![vec![[0.0, 0.0], [d, 0.0]]];
+        let shape = Shape::Capsule {
+            chains: chains.clone(),
+            radius_m: r,
+        };
+        FlatObject {
+            cap_radius_m: 1e7,
+            speed: SpeedMode::Constant(0.0),
+            direction: DirectionMode::Constant(ve_core::angle::Angle::new(0.0)),
+            feather: f,
+            edge_mode: EdgeMode::Blend,
+            gradient_axis: ve_core::angle::Angle::new(0.0),
+            gradient_extent: 0.0,
+            frame: Frame::in_space(anchor, 0.0, 100.0, Space::Geodesic),
+            shape,
+            path: Vec::new(),
+            clone_source: None,
+            clone_offset: OffsetMode::Aligned,
+            invert: false,
+            modifier: Some(Modifier::Smear),
+            // Both stamps carry a delta, as a stroke that was already moving
+            // when its first sample landed does; a real stroke's first stamp
+            // carries none, which would leave the sum untested here.
+            smear: vec![vec![[d, 0.0], [d, 0.0]]],
+            capture: None,
+            erases: false,
+            motion: crate::scene::Motion::default(),
+        }
+    }
+
+    /// Spec 6.3, M17, hand-computed: on the centreline under both stamps the
+    /// read is `strength × length` behind — the two deltas sum — and at the
+    /// feather's rim of the outer stamp it is nothing at all.
+    #[test]
+    fn a_straight_stroke_displaces_by_its_length_on_the_centreline_and_by_nothing_at_the_rim() {
+        let (r, f, d) = (50_000.0, 0.5, 30_000.0);
+        let object = smear(r, f, d);
+        let at = |x: f64, y: f64| object.frame.to_global([x, y]);
+        let local = |p: LonLat| object.frame.to_local(p);
+
+        // A cell at the second stamp's centre: that stamp weighs 1 (signed
+        // distance −r, past the band), and the first stamp is 30 km away —
+        // signed −20 km against a band of f·r = 25 km — so it weighs
+        // smoothstep(0, 25, 20) = 0.896. The read is 30·1 + 30·0.896 =
+        // 56.88 km behind, written out below against the ramp itself.
+        let read = local(smear_source_position(&object, at(d, 0.0)));
+        let w_first = {
+            let t: f64 = (20_000.0f64 / 25_000.0).clamp(0.0, 1.0);
+            t * t * (3.0 - 2.0 * t)
+        };
+        let expected = d - d * 1.0 - d * w_first;
+        assert!(
+            (read[0] - expected).abs() < 1.0 && read[1].abs() < 1.0,
+            "read from {read:?}, expected x = {expected}"
+        );
+
+        // At the rim of the second stamp — r north of its centre — that stamp
+        // weighs nothing, and the first stamp is further still. No movement.
+        let rim = local(smear_source_position(&object, at(d, r)));
+        assert!(
+            (rim[0] - d).abs() < 1.0 && (rim[1] - r).abs() < 1.0,
+            "the rim moved: {rim:?}"
+        );
+
+        // And far outside, nothing — the position comes back unchanged.
+        let far = local(smear_source_position(&object, at(10.0 * r, 10.0 * r)));
+        assert!((far[0] - 10.0 * r).abs() < 1.0);
+    }
+
+    /// The read is *behind* the movement: a stroke dragged east reads from
+    /// the west, so the field appears to have been pulled along with the hand.
+    #[test]
+    fn a_stroke_east_reads_from_the_west() {
+        let object = smear(50_000.0, 0.0, 20_000.0);
+        let here = object.frame.to_global([20_000.0, 0.0]);
+        let read = object.frame.to_local(smear_source_position(&object, here));
+        assert!(
+            read[0] < 20_000.0 - 1.0,
+            "read from {read:?}, not west of the cell"
+        );
+    }
 }
 
 /// Coverage and feather for an operator, without evaluating any field.

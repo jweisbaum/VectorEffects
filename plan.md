@@ -182,7 +182,7 @@ together: shifting only the lattice left the field trying to draw outside the
 shape that admits it, which is how the first attempt failed. Six end-to-end
 tests and four hand-computed resample ones.
 
-**M17 is next.**
+**M19 is next.**
 
 **Unplanned, after M7: GRIB import** (spec §4.8, D44). A GRIB2 file becomes a
 layer — two, when it holds both wind and currents — whose lattice is sampled
@@ -568,7 +568,7 @@ M0 ─ M1 ─ M2 ─ M3 ─ M4 ══ walking skeleton complete
                     ├─ M14 ────── region selection, fill, copy/paste      ✓
                     ├─ M15 ────── settings and shortcuts               ✓
                     ├─ M16 ────── macros                                ✓
-                    ├─ M17 ────── warp and liquify, two tools
+                    ├─ M17 ────── warp and liquify, two tools            ✓
                     ├─ M18 ────── image layers                           ✓
                     ├─ M19 ────── export precision
                     ├─ M11 ────── projections                            ✓ (cylindrical tier)
@@ -1689,40 +1689,60 @@ a control that was missed is a write during capture.
 
 ---
 
-### M17 — Warp and liquify, two tools
+### M17 — Warp and liquify, two tools · **complete**
 
-Today there is one tool, `Warp`, with `warp_mode: Push | Twist` (D50): a
-painted footprint whose whole field is read from one displaced position. The
-request is two tools, each doing one thing well (D56).
+**Goal:** the placed warp and the painted smear as two tools (D56).
 
-- **Warp** (`W`) keeps the pull and the twist — the operations on a *placed*
-  region: shift-drag the field from the anchor to `push_to`, or turn it about
-  the anchor. Refinements: the pull's line reads out its length in km; the
-  twist gets a rotate handle on the pink edge rather than a number; the
-  displacement fades by the feather as it does now.
-- **Liquify** (`L`) is the painted smear — the forward warp of a paint
-  program. A stroke of stamps where **each stamp carries the pointer's own
-  movement**, so the field is dragged along the stroke rather than moved as
-  one block. At a cell the displacement is the feathered sum of the deltas of
-  the stamps that cover it, and the read position is the cell minus that. The
-  chain therefore carries a delta per point — a new `Geometry` variant, through
-  the geometry recipe in full: `sdf.rs`, `gpu.rs`, `evaluate.wgsl`, the
-  fidelity generator, the cache hash. Options: size, feather and `strength`
-  (the fraction of the pointer's movement applied, 0–1). It reads elsewhere,
-  so it declines the GPU as the warp does (one line in `gpu::supports` and a
-  test), and it merges with nothing — its deltas are its own.
-- Migration: `ToolKind::Warp` stands for existing objects and `Liquify` is
-  new, so `SCHEMA_VERSION` moves only if `warp_mode` changes — it does not. A
-  palette entry, an icon, a catalogue entry, hover as the footprint outline,
-  and the operate-on-the-map preview (D37): the drawn map is shifted through
-  the accumulated displacement under the stroke, a screen-space approximation
-  held until the tiles land.
+**Delivered.** `Warp` keeps the pull and the twist on a placed region; the
+pull's line now reads out its length in km beside its head. **`Liquify`**
+(`L`) is new: a stroke of stamps where each stamp carries the pointer's own
+movement into it, scaled by `strength` and stored *in the geometry* — a new
+`Geometry::Smear` of `SmearPoint { x, y, dx, dy }`. At a cell the displacement
+is the sum of the deltas of the stamps that cover it, each faded by that
+stamp's own feather ramp, and the field is read from behind the sum, as a push
+reads from behind its push.
 
-**Acceptance:** a liquify stroke east over a northward field reads the field
-from west of each cell; a straight stroke displaces by `strength × length` on
-its centreline and by nothing at the feather's rim, hand-computed; the GPU
-decline is tested; a schema-10 warp opens unchanged; both tools pass the
-shared-rule tests.
+**Less of the geometry recipe than the plan expected, and deliberately.** The
+smear's *footprint* is the capsule every swept tool already has: the deltas
+ride beside it on `FlatObject::smear`, parallel to the capsule's chains, so
+`sdf.rs`, coverage, the outlines, the cull and the WGSL learn nothing new. What
+changed is a `Modifier::Smear` with no payload, the CPU's re-read
+(`smear_source_position`), the GPU decline, the cache hash (the deltas are
+hashed with the modifier — they are what the stroke *does*), and the anchor
+re-expression, which moves the stamps and leaves the deltas alone as it does
+a push's local displacement. Strength is frozen at creation because the
+deltas are stored scaled; animating it would mean storing the unscaled stroke
+and re-scaling per step, for an option nobody keyframes.
+
+**Acceptance**
+
+- **A liquify stroke east over a northward field reads from west of each
+  cell**: a field stepping from 5 to 15 m/s at the meridian, dragged east ten
+  degrees at full strength, reads 5 m/s three degrees east of the step and is
+  untouched fifteen degrees out either way. Half strength does not reach.
+- **Hand-computed displacement**: two stamps on a line, radius 50 km, feather
+  0.5, delta 30 km each — a cell at the second stamp's centre reads
+  `30·1.0 + 30·smoothstep(0, 25, 20)` km behind, and a cell at the second
+  stamp's feather rim reads from where it is. Both written out in
+  `cpu.rs`'s test, against `feather_weight`'s own ramp.
+- **The GPU declines it**, in the same test that declines a warp, and the
+  three modifiers that transform in place are still accepted.
+- **A warp from before the liquify opens unchanged**: same kind, same mode,
+  and it does not acquire a strength. The schema version did not move — the
+  liquify is a new kind, not a reinterpretation.
+- **Both tools pass the shared-rule tests** through the catalogue entry, and a
+  liquify never merges — its deltas are its own.
+
+**Not done, and why.** The twist's rotate handle on the pink edge. The
+selection's own transform already offers a rotate handle on every object,
+and giving the twist a second one on the edge band is a gesture-conflict
+question — which rotates the *frame* and which the *field* — that deserves
+its own decision rather than a guess in a milestone about something else. The
+twist stays a number in the bar. The operate-on-the-map preview (D37) for the
+liquify is the footprint outline every other modifier shows: a smear's
+displacement varies along the stroke, so a shifted-camera preview of the kind
+the clone stamp has would be wrong everywhere but one point, and a true one is
+a per-pixel warp of the drawn map — a WebGL pass, not an overlay.
 
 ---
 

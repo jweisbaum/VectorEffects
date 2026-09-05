@@ -1366,9 +1366,10 @@ modifier cannot invent a wind, only change one.
 | **Intensify / reduce** | `I` | Scales the speed by `1 + amount`, leaving the direction alone. `+100%` doubles it, `-100%` takes it to calm. |
 | **Diverge / converge** | `D` | Adds a radial component of `amount × local speed`, outward from the anchor when positive and inward when negative. |
 | **Rotate flow** | `R` | Turns every vector by a fixed angle, clockwise for a positive amount. The speed is untouched. |
-| **Warp / liquify** | `W` | Reads the field from a displaced position: `push` drags it along a bearing, `twist` rotates it about the anchor. Nothing about the vectors changes, only where they are read from. |
+| **Warp** | `W` | Reads the field from a displaced position: `push` drags the field under the anchor to a place, `twist` rotates it about the anchor. A *placed* region's field, moved as one block. Nothing about the vectors changes, only where they are read from. |
+| **Liquify** | `L` | The painted smear — a paint program's forward warp. Each stamp of the stroke carries the pointer's own movement into it, scaled by `strength`; at a cell the displacement is the feathered sum of the deltas of the stamps that cover it, and the field is read from the cell minus that. The field is dragged *along the hand* rather than moved as a block (M17, D56). |
 
-All four are **painted**, like the brush and the mask: a stamp swept along a
+All five are **painted**, like the brush and the mask: a stamp swept along a
 polyline, sized in px or km (§3.5), with the common `position`, `scale_pct`,
 `rotation_deg` and `enabled` (§4.4). A swathe of field is therefore intensified
 or turned in one gesture, and **two strokes of one modifier with identical
@@ -1383,8 +1384,10 @@ target's anchor; a tool whose field is measured from that anchor would paint
 something different afterwards, which is the one thing a merge may never do
 (§6.1). That is the diverge/converge tool, which radiates from its anchor, and
 the warp, which both twists about it and pushes from it — the same rule that
-keeps two clone strokes apart. Intensify and rotate refer to no anchor at all
-and merge freely.
+keeps two clone strokes apart. **A liquify never merges either**, for its own
+reason: its deltas are its geometry, and re-expressing two smears under one
+frame would add the second's movement to the first's stamps. Intensify and
+rotate refer to no anchor at all and merge freely.
 
 | Option | Type | Tool |
 |---|---|---|
@@ -1396,6 +1399,7 @@ and merge freely.
 | `warp_mode` | enum `Push` \| `Twist` | warp |
 | `push_to` | LonLat | warp, `Push`: where the field under the anchor is dragged to |
 | `twist_deg` | f32 ° (−360…360) | warp, `Twist` |
+| `strength` | f32 % (0…100) | liquify: how much of the pointer's movement each stamp applies. Frozen into the geometry at creation — the deltas are stored scaled — so it is a creation option, not an animatable one. |
 
 **The feather is the whole of the edge.** A modifier fades from what was there
 to what it makes of it, by the same coverage weight every tool uses (§7.4), so
@@ -1409,6 +1413,18 @@ direction at all: "outward" at a cell is the frame's radial bearing, the same
 one the circle's rotation is a quarter turn off (§7.5). At the anchor itself
 that bearing is undefined, exactly as a circle's tangent is; the value stays
 finite and the cell is one cell.
+
+**A liquify is a stroke that remembers how it was drawn.** Its geometry is the
+stroke's stamps, each with the delta of the pointer's movement into it in the
+object's local frame, already scaled by `strength`: the geometry *is* the
+displacement, and the evaluator sums the deltas of the stamps covering a cell,
+each faded by that stamp's own feather ramp, and reads from behind the sum — as
+a push reads from behind its push. A plain sum, not a mean: a hand that lingers
+over a spot piles the field up there, which is what a smear does. Its footprint
+is the same capsule every swept tool has, so coverage, outlines and culling
+know nothing new; the deltas ride beside it. It re-reads the scene like a warp
+and is declined by the GPU with it (§7.8). The pull line of a warp reads out its
+length in km beside its head.
 
 **A warp is pulled, not typed.** Hold `Shift` with the warp tool and the
 pointer stops painting: it grabs the warp under it and drags the field where it
@@ -1848,8 +1864,9 @@ Left-hand vertical palette, keyboard-shortcut per tool:
 | ⊕ | Intensify / reduce | `I` |
 | ✳ | Diverge / converge | `D` |
 | ↻ | Rotate flow | `R` |
-| ≈ | Warp / liquify | `W` |
-| 📏 | Measure (dividers / great circle / range rings) | `M` |
+| ≈ | Warp | `W` |
+| 〽 | Liquify | `L` |
+| 📏 | Measure (dividers / great circle / range rings) | `T` |
 
 `P` for the brush and `B` for the curve follow the conventions of other paint
 applications — the brush is the *pen* tool and the curve the *Bézier* — rather

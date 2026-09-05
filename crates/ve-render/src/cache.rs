@@ -274,6 +274,17 @@ fn hash_object(hasher: &mut blake3::Hasher, object: &FlatObject) {
             hash_f64(hasher, degrees);
             hasher
         }
+        // The deltas are what a liquify *does*, so they are hashed with the
+        // modifier rather than with the footprint: two strokes over the same
+        // chains that dragged different ways are two different fields.
+        Some(Modifier::Smear) => {
+            hasher.update(&[6]);
+            hasher.update(&(object.smear.len() as u64).to_le_bytes());
+            for chain in &object.smear {
+                hash_points(hasher, chain);
+            }
+            hasher
+        }
     };
 }
 
@@ -600,6 +611,7 @@ mod tests {
             clone_source: None,
             clone_offset: OffsetMode::Aligned,
             modifier: None,
+            smear: Vec::new(),
             invert: false,
             capture: None,
             erases: false,

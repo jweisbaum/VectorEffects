@@ -51,7 +51,7 @@ import {
   freshSweptPath,
   type SweptPathProgress,
 } from "./footprint";
-import { destination } from "./geo";
+import { destination, distanceM } from "./geo";
 import {
   extendLatticeUnderStroke,
   freshLattice,
@@ -1961,6 +1961,17 @@ export default function MapView({
       context.arc(to.x, to.y, 5 * dpr, 0, Math.PI * 2);
       context.fillStyle = "rgba(255, 110, 190, 0.95)";
       context.fill();
+      // How far the pull is, beside its head (spec.md 6.3, M17): a push is
+      // aimed by eye, and the number says what the eye chose.
+      const km = distanceM(pull.from, pull.to) / 1000;
+      context.font = `${11 * dpr}px system-ui, sans-serif`;
+      context.textAlign = "left";
+      context.textBaseline = "bottom";
+      context.fillText(
+        `${km >= 100 ? Math.round(km) : km.toFixed(1)} km`,
+        to.x + 8 * dpr,
+        to.y - 8 * dpr,
+      );
       context.restore();
     }
 

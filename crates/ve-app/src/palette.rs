@@ -215,7 +215,8 @@ fn gesture_for(tool: ToolKind) -> GestureSelector {
         | ToolKind::Intensity
         | ToolKind::Divergence
         | ToolKind::Turn
-        | ToolKind::Warp => GestureSelector::Always {
+        | ToolKind::Warp
+        | ToolKind::Liquify => GestureSelector::Always {
             gesture: "stroke".to_owned(),
         },
         // A patch is pasted rather than drawn, so it has no gesture at all.
@@ -251,9 +252,11 @@ fn preview_for(tool: ToolKind) -> PreviewKind {
         ToolKind::Mask => PreviewKind::Mask,
         ToolKind::CloneStamp => PreviewKind::Clone,
         // A modifier has no field of its own to show (spec.md 6.3).
-        ToolKind::Intensity | ToolKind::Divergence | ToolKind::Turn | ToolKind::Warp => {
-            PreviewKind::Outline
-        }
+        ToolKind::Intensity
+        | ToolKind::Divergence
+        | ToolKind::Turn
+        | ToolKind::Warp
+        | ToolKind::Liquify => PreviewKind::Outline,
         // Everything else paints a field of its own, which is what its gesture
         // shows. The patch's is a captured one and it has no gesture at all,
         // but it is a field, and `operator_outlines` keys off this: anything
@@ -279,7 +282,8 @@ fn has_hover(tool: ToolKind) -> bool {
         | ToolKind::Intensity
         | ToolKind::Divergence
         | ToolKind::Turn
-        | ToolKind::Warp => true,
+        | ToolKind::Warp
+        | ToolKind::Liquify => true,
         // Stated, not omitted: a polygon is built vertex by vertex and a curve
         // node by node, so a single click produces no footprint to show, and
         // a patch is never under the cursor before it exists.
@@ -310,6 +314,8 @@ fn shortcut_for(tool: ToolKind) -> &'static str {
         ToolKind::Divergence => "d",
         ToolKind::Turn => "r",
         ToolKind::Warp => "w",
+        // The smear (D54).
+        ToolKind::Liquify => "l",
         // Not in the palette, so it has no key. Named rather than left to a
         // wildcard, so a tool that *is* added to the palette cannot ship
         // without one.
@@ -625,8 +631,8 @@ mod tests {
     }
 
     /// The letters spec 8.1 assigns, restated so a change to one has to be a
-    /// change to both. `V` is the hand's and `M` is the measure tool's, which
-    /// M8 will add; neither may be taken in the meantime.
+    /// change to both. `V` is the hand's, `M` the select tool's and `T` the
+    /// measure tool's (D54); none may be taken here.
     #[test]
     fn the_palette_shortcuts_are_the_ones_the_spec_assigns() {
         let shortcuts: Vec<(ToolKind, String)> = palette()
@@ -646,6 +652,7 @@ mod tests {
                 (ToolKind::Divergence, "d".to_owned()),
                 (ToolKind::Turn, "r".to_owned()),
                 (ToolKind::Warp, "w".to_owned()),
+                (ToolKind::Liquify, "l".to_owned()),
             ]
         );
     }

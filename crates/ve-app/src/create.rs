@@ -55,6 +55,8 @@ pub enum Tool {
     Turn,
     /// Displaces the field beneath it.
     Warp,
+    /// Drags the field along the stroke (spec.md 6.3, M17).
+    Liquify,
     /// Replays a field captured from a region (spec.md 8.5, M14).
     ///
     /// In the wire enum but not in the palette: a patch is pasted rather than
@@ -78,6 +80,7 @@ impl Tool {
             Self::Divergence => ToolKind::Divergence,
             Self::Turn => ToolKind::Turn,
             Self::Warp => ToolKind::Warp,
+            Self::Liquify => ToolKind::Liquify,
             Self::Patch => ToolKind::Patch,
             Self::Macro => ToolKind::Macro,
         }
@@ -96,6 +99,7 @@ impl Tool {
             ToolKind::Divergence => Self::Divergence,
             ToolKind::Turn => Self::Turn,
             ToolKind::Warp => Self::Warp,
+            ToolKind::Liquify => Self::Liquify,
             ToolKind::Patch => Self::Patch,
             ToolKind::Macro => Self::Macro,
         }
@@ -114,6 +118,7 @@ impl Tool {
             Self::Divergence => "Divergence",
             Self::Turn => "Rotation",
             Self::Warp => "Warp",
+            Self::Liquify => "Liquify",
             Self::Patch => "Patch",
             Self::Macro => "Macro",
         }
@@ -235,6 +240,14 @@ pub fn create_object(
 ///
 /// Every mode question below asks this rather than the object, because the
 /// object does not exist yet when the geometry has to be built.
+/// A numeric option the gesture is being drawn with, if it holds one.
+fn number_of(props: &PropertyMap, tool: ToolKind, id: PropId) -> Option<f64> {
+    props
+        .value_at(tool, id, 0)
+        .and_then(PropValue::as_f32)
+        .map(f64::from)
+}
+
 fn choice(props: &PropertyMap, tool: ToolKind, id: PropId) -> u8 {
     props
         .value_at(tool, id, 0)
@@ -441,6 +454,39 @@ fn geometry_of(
                 anchor,
                 Geometry::Stroke {
                     chains: vec![local_chain(&frame, &positions)],
+                },
+                positions,
+            ))
+        }
+
+        // A liquify is the painted gesture with the pointer's movement kept:
+        // each stamp carries the step that reached it, scaled by the strength,
+        // so the geometry *is* the displacement (spec.md 6.3, M17). Measured in
+        // the local frame after the chain is, so a stamp's delta is the
+        // difference of the same numbers its position is.
+        (ToolKind::Liquify, Gesture::Stroke { points: raw }) => {
+            let positions = points(raw, 1, "points")?;
+            let anchor = positions[0];
+            let frame = frame_at(anchor, props, tool);
+            let chain = local_chain(&frame, &positions);
+            let strength = number_of(props, tool, PropId::Strength).unwrap_or(100.0) / 100.0;
+            let stamps = chain
+                .iter()
+                .enumerate()
+                .map(|(i, p)| {
+                    let (dx, dy) = if i == 0 {
+                        (0.0, 0.0)
+                    } else {
+                        let q = chain[i - 1];
+                        ((p.x - q.x) * strength, (p.y - q.y) * strength)
+                    };
+                    ve_core::document::SmearPoint::new(p.x, p.y, dx, dy)
+                })
+                .collect();
+            Ok((
+                anchor,
+                Geometry::Smear {
+                    chains: vec![stamps],
                 },
                 positions,
             ))
@@ -727,9 +773,12 @@ fn merge_into(
     // anchor, and a push carries the field from the anchor to a place, so the
     // displacement is the offset between the two and moving the anchor changes
     // it (spec.md 6.3).
+    // A liquify merges with nothing: its deltas are its own, and re-expressing
+    // two smears under one frame would add the second's movement to the
+    // first's stamps (spec.md 6.3, M17).
     let anchored = matches!(
         object.tool,
-        ToolKind::CloneStamp | ToolKind::Divergence | ToolKind::Warp
+        ToolKind::CloneStamp | ToolKind::Divergence | ToolKind::Warp | ToolKind::Liquify
     );
     if anchored {
         return Ok(None);

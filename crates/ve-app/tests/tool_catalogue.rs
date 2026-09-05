@@ -217,6 +217,16 @@ fn catalogue() -> Vec<(Tool, Gesture, Vec<ToolOption>)> {
             },
             vec![number(PropId::SizeKm, 800.0), at(PropId::PushTo, 3.0, 0.0)],
         ),
+        (
+            Tool::Liquify,
+            Gesture::Stroke {
+                points: vec![[1.0, 0.0], [3.0, 0.0]],
+            },
+            vec![
+                number(PropId::SizeKm, 800.0),
+                number(PropId::Strength, 100.0),
+            ],
+        ),
     ]
 }
 

@@ -554,6 +554,12 @@ to the hash input is a correctness bug that shows up as stale frames.
   first, consecutive footprints are joined by a straight line and a brush stroke
   fills as one enormous polygon. `ui/src/map/footprint.ts` exists so this is
   covered by a test rather than by noticing it on screen.
+- **A liquify's deltas ride on `FlatObject::smear`, beside the capsule, not
+  in a shape of their own.** The footprint is the ordinary swept capsule, so
+  coverage, outlines and the cull see nothing new; the deltas are hashed with
+  the *modifier* in `cache.rs`, because they are what the stroke does. A
+  change to how they are read (`smear_source_position`) with no change to the
+  hash is a stale-tile bug, and the GPU declines the object outright.
 - **`from` is a reserved word in WGSL.** So is `in`. Name shader parameters
   `origin`, `start`, and so on.
 - **Preview quality depends on the backend**: coarse on the CPU, exact on the

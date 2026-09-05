@@ -991,6 +991,31 @@ mod tests {
         assert_eq!(chains[0][1].x, 3000.0);
     }
 
+    /// A warp saved before the liquify existed opens as the warp it was, with
+    /// its mode and its push intact: the liquify is a *new* kind, so the
+    /// schema version did not move and nothing about a warp is reinterpreted
+    /// (spec.md 6.3, M17).
+    #[test]
+    fn a_warp_from_before_the_liquify_opens_unchanged() {
+        let mut value: Value = serde_json::to_value(sample()).unwrap();
+        let object = &mut value["layers"][0]["objects"][0];
+        object["tool"] = Value::String("warp".to_owned());
+        object["name"] = Value::String("Warp 1".to_owned());
+
+        let project = from_json(&serde_json::to_string(&value).unwrap()).expect("opens");
+        let object = &project.layers[0].objects[0];
+        assert_eq!(object.tool, ToolKind::Warp);
+        assert_eq!(object.name, "Warp 1");
+        assert!(
+            object.props.get(PropId::WarpMode).is_some(),
+            "the warp keeps its mode"
+        );
+        assert!(
+            object.props.get(PropId::Strength).is_none(),
+            "and does not acquire the liquify's strength"
+        );
+    }
+
     /// A version-7 eraser opens as a mask, with everything it drew intact. The
     /// tool's name is stored on every object, so without the migration the file
     /// would not deserialise at all.

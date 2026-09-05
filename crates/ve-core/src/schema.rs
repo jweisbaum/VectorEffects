@@ -43,6 +43,12 @@ pub enum ToolKind {
     Turn,
     /// Reads the field beneath it from a displaced position.
     Warp,
+    /// Drags the field beneath it along a stroke, each stamp carrying the
+    /// pointer's own movement (spec.md 6.3, M17).
+    ///
+    /// The forward warp of a paint program. A warp moves a *placed* region's
+    /// field as one block; a liquify smears it along the hand.
+    Liquify,
     /// Replays a captured field from the macro library (spec.md 8.7, M16).
     ///
     /// A creation tool with a field: unlike a patch, it *is* placed by a
@@ -64,7 +70,7 @@ impl ToolKind {
     /// a fill and a path suggest; then the mask, which takes one away; then
     /// the modifiers, which change one — because there has to be a field
     /// before either of those does anything.
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::Brush,
         Self::Circle,
         Self::ShapeFill,
@@ -75,6 +81,7 @@ impl ToolKind {
         Self::Divergence,
         Self::Turn,
         Self::Warp,
+        Self::Liquify,
         Self::Patch,
         Self::Macro,
     ];
@@ -102,7 +109,7 @@ impl ToolKind {
     pub fn is_modifier(self) -> bool {
         matches!(
             self,
-            Self::Intensity | Self::Divergence | Self::Turn | Self::Warp
+            Self::Intensity | Self::Divergence | Self::Turn | Self::Warp | Self::Liquify
         )
     }
 
@@ -118,7 +125,8 @@ impl ToolKind {
             Self::Intensity => "Intensify / reduce",
             Self::Divergence => "Diverge / converge",
             Self::Turn => "Rotate flow",
-            Self::Warp => "Warp / liquify",
+            Self::Warp => "Warp",
+            Self::Liquify => "Liquify",
             Self::Patch => "Patch",
             Self::Macro => "Macro",
         }
@@ -269,6 +277,10 @@ pub enum PropId {
     PushTo,
     /// How far a warp twists the field about its anchor, in degrees.
     TwistDeg,
+    /// How much of the pointer's own movement a liquify stroke applies, in
+    /// percent (spec.md 6.3, M17). At 100 the field is dragged as far as the
+    /// hand moved; at 50, half as far.
+    Strength,
     // Where `distance_km` and `push_bearing` were, before a warp pushed to a
     // *place* (spec.md 6.3). The ids are gone with the table rows: a property
     // no tool declares can still be held by an object from an older file, and
@@ -610,6 +622,20 @@ const TURN: &[PropSpec] = &[
     num(PropId::Feather, "Feather", 0.5, 0.0, 1.0, Unit::None),
 ];
 
+const LIQUIFY: &[PropSpec] = &[
+    modifier_stamp!(),
+    modifier_size!(),
+    num(
+        PropId::Strength,
+        "Strength",
+        100.0,
+        0.0,
+        100.0,
+        Unit::Percent,
+    ),
+    num(PropId::Feather, "Feather", 0.5, 0.0, 1.0, Unit::None),
+];
+
 const WARP: &[PropSpec] = &[
     modifier_stamp!(),
     modifier_size!(),
@@ -927,6 +953,7 @@ pub fn dependencies(tool: ToolKind) -> &'static [Dependency] {
         | ToolKind::Intensity
         | ToolKind::Divergence
         | ToolKind::Turn
+        | ToolKind::Liquify
         | ToolKind::Patch => &[],
         ToolKind::Macro => MACRO_DEPENDENCIES,
     }
@@ -1007,6 +1034,7 @@ pub fn tool_specs(tool: ToolKind) -> &'static [PropSpec] {
         ToolKind::Divergence => DIVERGENCE,
         ToolKind::Turn => TURN,
         ToolKind::Warp => WARP,
+        ToolKind::Liquify => LIQUIFY,
         ToolKind::Patch => PATCH,
         ToolKind::Macro => MACRO,
     }
@@ -1356,6 +1384,7 @@ mod tests {
                 (ToolKind::Divergence, PropId::StampSpace),
                 (ToolKind::Turn, PropId::StampSpace),
                 (ToolKind::Warp, PropId::StampSpace),
+                (ToolKind::Liquify, PropId::StampSpace),
                 // A patch's space came from the region it was captured over,
                 // which is map space and cannot be reconsidered afterwards
                 // (spec.md 8.5, D55).

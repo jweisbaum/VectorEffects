@@ -139,6 +139,13 @@ pub enum Modifier {
     /// Reads the field from a displaced position, which is what makes a warp a
     /// warp: nothing about the vectors changes, only where they are read.
     Warp(Warp),
+    /// Drags the field along a stroke (spec.md 6.3, M17).
+    ///
+    /// No payload: the displacement is the object's own [`FlatObject::smear`],
+    /// one delta per stamp, and the read position at a cell is the cell minus
+    /// the feathered sum of the deltas of the stamps that cover it. A warp with
+    /// a displacement that varies along the stroke instead of across a region.
+    Smear,
 }
 
 /// Whether a feathered edge blends with what is beneath it (decision D12).
@@ -296,6 +303,15 @@ pub struct FlatObject {
     /// anything: a modifier writes what it read, changed. The evaluator tests
     /// this before it tests anything else about the object.
     pub modifier: Option<Modifier>,
+    /// A liquify stroke's deltas, one per stamp of each chain, in local metres
+    /// (spec.md 6.3, M17). Empty for everything else.
+    ///
+    /// Parallel to the capsule's chains in [`Self::shape`]: stamp `i` of chain
+    /// `c` is at `shape.chains[c][i]` and carries `smear[c][i]`. Kept beside
+    /// the shape rather than in it so the footprint stays the one capsule
+    /// every swept tool shares — coverage, outlines and culling know nothing
+    /// about the smear.
+    pub smear: Vec<Vec<Local>>,
     /// The captured field this object replays, if it is a patch
     /// (spec.md 8.5, M14).
     ///
@@ -510,6 +526,23 @@ fn shape_of(object: &Object, step: u32) -> Option<(Shape, Vec<Local>)> {
             },
             Vec::new(),
         )),
+        // A liquify's footprint is the capsule every swept tool has; the
+        // deltas ride beside it on the flat object (`smear_of`), so nothing
+        // that measures coverage, outlines or culls learns a new shape.
+        Geometry::Smear { chains } => {
+            let chains: Vec<Vec<Local>> = chains
+                .iter()
+                .map(|chain| chain.iter().map(|p| [p.x, p.y]).collect())
+                .collect();
+            let path = chains.first().cloned().unwrap_or_default();
+            Some((
+                Shape::Capsule {
+                    chains,
+                    radius_m: km(PropId::SizeKm) / 2.0,
+                },
+                path,
+            ))
+        }
         Geometry::Path { nodes } => {
             let path = flatten_path(nodes);
             let radius_m = km(PropId::WidthKm) / 2.0;
@@ -613,6 +646,7 @@ fn modifier_of(object: &Object, step: u32) -> Option<Modifier> {
         ToolKind::Intensity => Some(Modifier::Gain(get(PropId::Gain) / 100.0)),
         ToolKind::Divergence => Some(Modifier::Radial(get(PropId::Radial) / 100.0)),
         ToolKind::Turn => Some(Modifier::Turn(get(PropId::TurnDeg))),
+        ToolKind::Liquify => Some(Modifier::Smear),
         ToolKind::Warp => {
             // Mode 1 twists about the anchor; 0 pushes along a bearing.
             if choice(object, PropId::WarpMode, step) == 1 {
@@ -634,6 +668,20 @@ fn modifier_of(object: &Object, step: u32) -> Option<Modifier> {
             }
         }
         _ => None,
+    }
+}
+
+/// A liquify stroke's deltas, or nothing for any other geometry.
+///
+/// The deltas were scaled by the stroke's strength when it was drawn, so
+/// there is nothing to consult here: the geometry is the displacement.
+fn smear_of(object: &Object) -> Vec<Vec<Local>> {
+    match &object.geometry {
+        Geometry::Smear { chains } => chains
+            .iter()
+            .map(|chain| chain.iter().map(|p| [p.dx, p.dy]).collect())
+            .collect(),
+        _ => Vec::new(),
     }
 }
 
@@ -709,6 +757,7 @@ pub fn flatten_object_at(object: &Object, step: u32, derived: Derived) -> Option
             OffsetMode::Aligned
         },
         modifier: modifier_of(object, step),
+        smear: smear_of(object),
         capture: None,
         erases: object.tool == ToolKind::Mask,
         motion: Motion::default(),

@@ -182,6 +182,13 @@ const ICONS: Record<ActiveTool, Icon> = {
     line("M8.6 12h6.2m-1.8-1.8 1.8 1.8-1.8 1.8", "flow"),
   ],
 
+  // A liquify: one flow dragged along by a hand, the pull deepest where the
+  // stroke went. The warp's family, with the smear told from the block.
+  liquify: [
+    line("M4 8h6c3 0 3 8 6 8h4", "dragged"),
+    line("M4 16h5.5", "left"),
+    line("M13.5 6.5 16 9l-2.5 2.5", "hand"),
+  ],
   // Parallel flows pushed out of true, deepest in the middle: what a warp does
   // to the field it reads.
   warp: [
