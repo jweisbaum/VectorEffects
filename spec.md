@@ -2237,26 +2237,48 @@ macros* a safe button rather than a destructive one. The library's directory is
 a setting (§8.6); a file in it that will not decode is skipped rather than
 emptying the list.
 
-**Capture.** Draw a region, press **Start capture**, and the timeline enters
-capture mode: the rows and the transport grey out and go dead to the pointer,
-the app's edit shortcuts stand down, and only the ruler — and the arrow keys —
-still move the playhead, because scrubbing is how the frames get visited. The
-ruler marks every frame the region has been placed at, and the frame the
-capture began on in its own colour. At each step the region may be **dragged**
-— by delta from where the pointer went down, at pointer resolution, never a
-click that recentres it on the pointer, which jumped — and **each frame holds
-its own position**, initialised to where the region was drawn: moving it at
-frame 3 moves frame 3 and no other. Those positions are capture state — not
-keyframes, not the document, not history — so a placement is not an edit and
-not undoable, and a click outside the region does nothing at all. **Finish** asks for a name and bakes:
-for each frame, the visible composite inside *that frame's* region, evaluated
-with `CpuEvaluator` at the project's grid spacing, undefined kept distinct from
-calm. **Record movement** stores each frame's displacement from the first;
-**Static** stores none, so a region dragged to follow a moving system yields a
-macro of that system standing still. No object is created either way.
+**Capture.** Draw a region, press **Start capture**, and the application
+enters capture mode: the layer panel and the properties panel grey out and
+go dead to the pointer, the palette is disabled, the app's edit shortcuts
+stand down, and only the ruler — and the arrow keys — still move the
+playhead, because scrubbing is how the frames get visited. The steps
+**before the one the capture began on are out of the run**: dimmed on the
+ruler, and neither the ruler nor the arrows will scrub into them. The
+pointer over the map is the selection cursor.
 
-**Capture mode is a lockout, and it is one flag.** While a capture runs the
-document must not change — the frames being baked are of a field that has to
+**The region's positions are keys** (D72). Every step the playhead visits
+gets a key at the region's position there; at any step the region may be
+**dragged** — by delta from where the pointer went down, at pointer
+resolution, never a click that recentres it on the pointer, which jumped —
+and the drag sets that step's key. Between keys the position **interpolates
+by great circle**, so jumping forward and moving the region carries it
+smoothly through the steps between; a key can be removed and the steps it
+held hand themselves back to the interpolation. The timeline shows this as
+a temporary row under the ruler, **selection position**: a diamond at every
+key, a dot at every step between keys, `Delete` on a selected diamond or an
+`Alt`-click removing one. The first step's key stays. The keys are capture
+state — not keyframes of any object, not the document, not history — so a
+placement is not an edit and not undoable, and a click outside the region
+does nothing at all.
+
+**Finish recording** bakes — for each step of the run, the visible composite
+inside the region *where the region is at that step*, evaluated with
+`CpuEvaluator` at the project's grid spacing, undefined kept distinct from
+calm — and enters the **preview** (D71). The map shows the basemap and the
+macro alone, looping over its run, its region outlined in green and *Macro
+Preview* in the map's corner; a click stamps it somewhere else; the panels
+stay grey and the palette dead. The preview is a one-object project the
+session holds, served by the tile pipeline under a revision of its own:
+nothing is written to the document to show it, and the history lock stands
+throughout. **Save macro** asks for a name and writes what was looked at;
+**Edit macro** returns to recording with the keys intact; **Cancel** drops
+everything. **Record movement** stores each frame's displacement from the
+first, interpolated between keys like the position; **Static** stores none,
+so a region dragged to follow a moving system yields a macro of that system
+standing still. No object is created either way.
+
+**Capture mode is a lockout, and it is one flag.** While a capture runs or
+previews the document must not change — the frames being baked are of a field that has to
 still be there at the end — so the *history* refuses every write, and every
 write path in the application already goes through it. Disabling controls in
 the interface would leave whichever one was missed writing during a capture,

@@ -68,9 +68,14 @@ export function classify(
 /**
  * The step playback would move to, or `null` at the end without looping.
  */
-export function nextStep(step: number, last: number, loop: boolean): number | null {
+export function nextStep(
+  step: number,
+  last: number,
+  loop: boolean,
+  first = 0,
+): number | null {
   if (step < last) return step + 1;
-  return loop ? 0 : null;
+  return loop ? first : null;
 }
 
 /** Whether the map holds a step's tiles on the GPU. */
@@ -111,12 +116,14 @@ export function tick(
   elapsedMs: number,
   states: readonly StepState[],
   resident: Resident = () => true,
+  /** Where a loop returns to: step 0, or the first step of a macro preview. */
+  first = 0,
 ): { step: number; advanced: boolean; buffering: boolean; finished: boolean } {
   const interval = 1000 / Math.max(rateStepsPerSecond, 0.01);
   if (elapsedMs < interval) {
     return { step, advanced: false, buffering: false, finished: false };
   }
-  const next = nextStep(step, last, loop);
+  const next = nextStep(step, last, loop, first);
   if (next === null) {
     return { step, advanced: false, buffering: false, finished: true };
   }

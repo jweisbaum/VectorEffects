@@ -61,11 +61,18 @@ impl SceneCache {
         }
 
         let session = state.session.lock().ok()?;
-        let open = session.open.as_ref()?;
-        if open.revision != revision {
-            return None;
-        }
-        let scene = flatten(&open.project, step);
+        // The document at its revision — or the macro preview at its own
+        // (D71): a one-object project the session holds while a capture is
+        // being looked at before it is kept, flattened by the same function
+        // and served by the same path as everything else.
+        let project = match session.open.as_ref() {
+            Some(open) if open.revision == revision => &open.project,
+            _ => match session.preview.as_ref() {
+                Some(preview) if preview.revision == revision => &preview.project,
+                _ => return None,
+            },
+        };
+        let scene = flatten(project, step);
         drop(session);
 
         let hash = scene_hash(&scene);

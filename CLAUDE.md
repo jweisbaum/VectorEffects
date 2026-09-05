@@ -513,6 +513,15 @@ to the hash input is a correctness bug that shows up as stale frames.
   frame is already pending (that frame draws the overlay). Pointer reports
   arrive faster than frames are shown; a synchronous `drawOverlay` per report
   drew the overlay twice per frame on a fast drag.
+- **A macro preview is a project in the session, not a change to the
+  document.** `session.preview` holds a one-object `Project` served by
+  `protocol::serve` under a revision with bit 62 set, so it can never collide
+  with a document revision (both are seeded from the clock, and the webview
+  caches tiles by revision immutably). The map addresses tiles by
+  `frameRevision()` — the preview's while one is shown — and `warm` reads
+  the same function, or playback would wait on the wrong scene's tiles.
+  Nothing in the preview path may write the document: the history lock is
+  what makes the capture's frames trustworthy.
 - **Hints and errors go to `ui/src/hint.ts`**, an external store the status
   bar's one span subscribes to. No panel renders an error line of its own and
   no tool bar carries help text; `reportError` and `setHint` are the whole

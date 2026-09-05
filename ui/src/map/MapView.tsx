@@ -379,6 +379,8 @@ export interface MapHandle {
    * taken, into `layer`.
    */
   pasteCapture(layer: number | null): void;
+  /** Takes a capture mode answered elsewhere — the timeline's key removal. */
+  setCapture(mode: CaptureMode): void;
 }
 
 export default function MapView({
@@ -683,9 +685,20 @@ export default function MapView({
    * at each step, and to offer the two ways out.
    */
   const [recording, setRecording] = useState<CaptureMode | null>(null);
+  const recordingRef = useRef<CaptureMode | null>(null);
+  recordingRef.current = recording;
+  const previewing = recording !== null && recording.phase === "previewing";
   useEffect(() => {
     onRecording(recording);
   }, [onRecording, recording]);
+  /**
+   * The revision tiles are addressed by: the macro preview's while one is
+   * shown, the document's otherwise (D71). One function, read by the draw
+   * loop and by `warm`, so playback and the frame agree about which scene
+   * they are looking at.
+   */
+  const frameRevision = () =>
+    recordingRef.current?.preview_revision ?? projectRef.current.revision;
   /** Whether movement is recorded by the *next* capture. */
   const [recordMovement, setRecordMovement] = useState(false);
   /** The macro library, for the insert tool's bar. */
@@ -1016,7 +1029,7 @@ export default function MapView({
 
     // Revision then step: an edit changes the address, so a cached tile can
     // never show a field that no longer exists.
-    const frame = `${projectRef.current.revision}/${stepRef.current}`;
+    const frame = `${frameRevision()}/${stepRef.current}`;
     const shown = shownFrameRef.current;
     const state: RenderState = {
       camera: cameraRef.current,
@@ -1034,8 +1047,13 @@ export default function MapView({
       // Georeferenced images, above the land and below the field (M18). The
       // revision is part of the texture's address, so an import or a reopen
       // makes the old one unreachable rather than stale.
+      // A preview shows the macro on the basemap alone: no images either.
       images:
-        imagesRef.current?.draws(projectRef.current.revision, imageLayersRef.current) ?? [],
+        recordingRef.current?.preview_revision !== undefined &&
+        recordingRef.current?.preview_revision !== null
+          ? []
+          : (imagesRef.current?.draws(projectRef.current.revision, imageLayersRef.current) ??
+            []),
     };
 
     // Tell the timeline which tiles are on screen, once per change rather
@@ -1380,6 +1398,33 @@ export default function MapView({
   }, []);
 
   /**
+   * Scrubbing to a step while recording keys the region there where it
+   * stands and shows it there (D72): the region at each step is the key, or
+   * the great circle between keys, and the map draws that step's place.
+   */
+  useEffect(() => {
+    if (recording === null || recording.phase !== "recording") return;
+    let live = true;
+    void api
+      .visitCapture(step)
+      .then((mode) => {
+        if (!live || !mode.active) return;
+        setRecording(mode);
+        const at = mode.position;
+        if (at) {
+          setRegion((current) => (current === null ? current : recentred(current, at[0], at[1])));
+          requestOverlay();
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+    // Per step and per phase; the mode itself is what this sets.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, recording?.phase]);
+
+  /**
    * The tool's hint, for the status bar (M25). What the capture bar and the
    * insert bar used to say beside their controls: a hint is about the next
    * thing to do, and the status bar is where the eye goes for that.
@@ -1387,8 +1432,12 @@ export default function MapView({
   useEffect(() => {
     if (tool === CAPTURE && recording === null && region === null) {
       setHint("Draw a region first — it is what gets recorded.");
-    } else if (tool === CAPTURE && recording !== null) {
-      setHint("Scrub the ruler and drag the region into place at each step.");
+    } else if (recording !== null && recording.phase === "previewing") {
+      setHint("Click the map to stamp the macro somewhere else. Save keeps it; Edit goes back to recording.");
+    } else if (recording !== null) {
+      setHint(
+        "Scrub the ruler and drag the region into place at each step; every step visited is a key.",
+      );
     } else if (tool === INSERT && recording === null) {
       setHint(
         (library?.entries.length ?? 0) === 0
@@ -1696,6 +1745,11 @@ export default function MapView({
     projectRef.current = project;
     requestDraw();
   }, [project, requestDraw]);
+  // The preview is served under its own revision (D71): its tiles are other
+  // tiles, so the map redraws when it comes, moves and goes.
+  useEffect(() => {
+    requestDraw();
+  }, [recording, requestDraw]);
 
   // Changing tools disarms a pick and abandons a gesture in progress: the
   // panel that shows a pick is armed goes away with the tool, and a half-drawn
@@ -1710,7 +1764,7 @@ export default function MapView({
   const warm = useCallback((target: number): boolean => {
     const tiles = tilesRef.current;
     if (!tiles) return true;
-    const frame = `${projectRef.current.revision}/${target}`;
+    const frame = `${frameRevision()}/${target}`;
     return tiles.prefetch(frame, uniqueTiles(visibleTiles(cameraRef.current, viewRef.current)));
   }, []);
   const bounds = useCallback((): [number, number, number, number] | null => {
@@ -1748,10 +1802,17 @@ export default function MapView({
     },
     [onProjectChanged],
   );
+  const setCapture = useCallback(
+    (mode: CaptureMode) => {
+      setRecording(mode.active ? mode : null);
+      requestOverlay();
+    },
+    [requestOverlay],
+  );
   useImperativeHandle(
     ref,
-    () => ({ warm, bounds, clearRegion, copyRegion, pasteCapture }),
-    [bounds, clearRegion, copyRegion, pasteCapture, warm],
+    () => ({ warm, bounds, clearRegion, copyRegion, pasteCapture, setCapture }),
+    [bounds, clearRegion, copyRegion, pasteCapture, setCapture, warm],
   );
 
   // A project change can shorten the timeline or forbid barbs.
@@ -2199,8 +2260,32 @@ export default function MapView({
     // as marching ants — the outline every paint application uses for "an
     // area, not a thing" — in a colour used for nothing else here, so a region
     // cannot be mistaken for a selected object's edge.
+    // The preview's region, at the stamp, in green: where the macro is
+    // (spec.md 8.7, M26). The recording's region is drawn below as usual.
+    const stamped = recordingRef.current;
+    if (stamped?.phase === "previewing" && stamped.stamp && region !== null) {
+      const ring = regionRing(recentred(region, stamped.stamp[0], stamped.stamp[1])).map((p) =>
+        toScreen(camera, view, { lon: p[0], lat: p[1] }),
+      );
+      const first = ring[0];
+      if (first) {
+        context.save();
+        context.beginPath();
+        context.moveTo(first.x, first.y);
+        for (const at of ring.slice(1)) context.lineTo(at.x, at.y);
+        context.closePath();
+        context.fillStyle = "rgba(63, 191, 127, 0.10)";
+        context.fill();
+        context.strokeStyle = "rgba(63, 191, 127, 0.95)";
+        context.lineWidth = Math.max(1.5, 1.5 * dpr);
+        context.stroke();
+        context.restore();
+      }
+    }
     const shaping = regionDrag.current;
-    const shown: Region | null = shaping
+    const shown: Region | null = previewing
+      ? null
+      : shaping
       ? regionMode === "lasso"
         ? regionFromLasso(shaping.points)
         : regionFromDrag(
@@ -2549,6 +2634,7 @@ export default function MapView({
     drawFieldPreview,
     drawPlacedPoints,
     eyedropper,
+    previewing,
     glyphStyle,
     library,
     macroId,
@@ -2873,6 +2959,15 @@ export default function MapView({
     // never the document, which is why it is not an edit and not undoable.
     if (recording !== null) {
       const geo = unproject(cameraRef.current, viewRef.current, point);
+      // In the preview a click stamps the macro there (spec.md 8.7, M26):
+      // the session rebuilds its one-object scene under a new revision.
+      if (recording.phase === "previewing") {
+        void api
+          .stampPreview(geo.lon, geo.lat)
+          .then(setCapture)
+          .catch((err: unknown) => setError(String(err)));
+        return;
+      }
       const anchor = region === null ? null : regionAnchor(region);
       if (region !== null && anchor !== null && regionContains(region, geo.lon, geo.lat)) {
         captureDrag.current = { pointer: [geo.lon, geo.lat], anchor };
@@ -4064,6 +4159,7 @@ export default function MapView({
       <canvas ref={overlayRef} className="map-overlay" />
 
       {error === null && !ready && <div className="map-status">Loading basemap…</div>}
+      {previewing && <div className="map-preview-badge">Macro Preview</div>}
 
       <div className="map-toolbar">
         <div className="tools" role="group" aria-label="Tool">
@@ -4074,6 +4170,7 @@ export default function MapView({
           */}
           <button
             className={tool === HAND ? "icon active" : "icon"}
+            disabled={recording !== null}
             onClick={() => setTool(HAND)}
             aria-label="Hand"
             aria-pressed={tool === HAND}
@@ -4089,6 +4186,7 @@ export default function MapView({
           */}
           <button
             className={tool === SELECT ? "icon active" : "icon"}
+            disabled={recording !== null}
             onClick={() => setTool(SELECT)}
             aria-label="Select"
             aria-pressed={tool === SELECT}
@@ -4111,6 +4209,7 @@ export default function MapView({
           */}
           <button
             className={tool === INSERT ? "icon active" : "icon"}
+            disabled={recording !== null}
             onClick={() => setTool(INSERT)}
             aria-label="Insert macro"
             aria-pressed={tool === INSERT}
@@ -4122,6 +4221,7 @@ export default function MapView({
             <button
               key={entry.tool}
               className={tool === entry.tool ? "icon active" : "icon"}
+              disabled={recording !== null}
               onClick={() => setTool(entry.tool)}
               aria-label={entry.label}
               aria-pressed={tool === entry.tool}
@@ -4211,17 +4311,47 @@ export default function MapView({
               </>
             ) : (
               <>
-                <span className="accent">
-                  Recording from step {recording.first_step} · {recording.placed_steps} placed
-                  {recording.record_movement ? " · movement" : " · static"}
-                </span>
-                <span className="muted">
-                  Scrub the ruler and drag the region into place at each step. Everything
-                  else is off until this ends.
-                </span>
-                {captureName === null ? (
+                {recording.phase === "recording" ? (
+                  <span className="accent">
+                    Recording from step {recording.first_step} · {recording.keys.length} keys
+                    {recording.record_movement ? " · movement" : " · static"}
+                  </span>
+                ) : (
+                  <span className="accent">
+                    Preview · steps {recording.first_step}–{recording.last_step}
+                  </span>
+                )}
+                {recording.phase === "recording" && (
+                  <button
+                    onClick={() => {
+                      void api
+                        .previewCapture(lastStep)
+                        .then(setCapture)
+                        .catch((err: unknown) => setError(String(err)));
+                    }}
+                    title="Bake the frames and show the macro alone on the map, looping. Nothing is written."
+                  >
+                    Finish recording
+                  </button>
+                )}
+                {recording.phase === "previewing" && (
+                  <button
+                    onClick={() => {
+                      setCaptureName(null);
+                      void api
+                        .editCapture()
+                        .then(setCapture)
+                        .catch((err: unknown) => setError(String(err)));
+                    }}
+                    title="Back to recording, keys intact"
+                  >
+                    Edit macro
+                  </button>
+                )}
+                {recording.phase === "previewing" &&
+                  (captureName === null ? (
                   <button onClick={() => setCaptureName(`Macro ${library?.entries.length ?? 0}`)}>
-                    Finish…
+                    Save macro…
                   </button>
                 ) : (
                   <>
@@ -4255,7 +4385,7 @@ export default function MapView({
                       Save macro
                     </button>
                   </>
-                )}
+                ))}
                 <button
                   onClick={() => {
                     setCaptureName(null);

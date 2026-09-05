@@ -19,6 +19,7 @@ use ve_app::capture::RegionShape;
 use ve_app::commands::AppState;
 use ve_app::create::{self, Gesture, NewObject, Tool, ToolOption};
 use ve_app::document::{self, PropertyValue};
+use ve_app::edit::{self, BrushStroke};
 use ve_app::paths::AppPaths;
 use ve_app::projects::{self, NewProjectRequest};
 use ve_app::{macros, settings};
@@ -392,4 +393,161 @@ fn two_inserts_share_one_entry() {
     let project = &session.open.as_ref().expect("open").project;
     assert_eq!(project.captures.len(), 1, "one capture, two objects");
     assert_eq!(project.object_count(), 3);
+}
+
+// --- M26: keys, interpolation, and the preview ------------------------------
+
+/// A capture's positions are keys (D72): between two keys the region is on
+/// the great circle between them, a removed key hands its step back to the
+/// interpolation, and the bake reads the same rule.
+#[test]
+fn positions_are_keys_and_the_gaps_interpolate() {
+    let root = TempRoot::new("keys");
+    let app = app(&root);
+    travelling_stroke(&app, 18.0);
+
+    macros::capture_start(&app, region(0.0, 0.0), 0, true).expect("start");
+    // Visit 1 and 2 without dragging: keys where the region stands.
+    macros::capture_visit(&app, 1).expect("visit");
+    macros::capture_visit(&app, 2).expect("visit");
+    assert_eq!(macros::mode(&app, None).expect("mode").keys, vec![0, 1, 2]);
+    // Drag at 4: a key at 40° east; 3 is now between 2 (at 0°) and 4.
+    macros::capture_place(&app, 4, 40.0, 0.0).expect("place");
+    let at_three = macros::mode(&app, Some(3))
+        .expect("mode")
+        .position
+        .expect("pos");
+    assert!(
+        (at_three[0] - 20.0).abs() < 0.05 && at_three[1].abs() < 0.05,
+        "halfway between the keys at 2 and 4, got {at_three:?}"
+    );
+    // Remove the key at 2 and the interpolation spans 1..4 instead.
+    macros::capture_unplace(&app, 2).expect("unplace");
+    let mode = macros::mode(&app, Some(2)).expect("mode");
+    assert_eq!(mode.keys, vec![0, 1, 4]);
+    let at_two = mode.position.expect("pos");
+    assert!(
+        (at_two[0] - 40.0 / 3.0).abs() < 0.05,
+        "a third of the way from 1 to 4, got {at_two:?}"
+    );
+    // The first step's key cannot go.
+    macros::capture_unplace(&app, 0).expect("unplace");
+    assert!(macros::mode(&app, None).expect("mode").keys.contains(&0));
+    // The bake stores the interpolated displacement, since movement is on.
+    let library = macros::capture_finish(&app, "Keys".to_owned(), 4).expect("finish");
+    let entry = &library.entries[0];
+    assert_eq!(entry.frames, 5);
+    assert!(
+        (entry.track[2][0] - 40.0 / 3.0).abs() < 0.05,
+        "{:?}",
+        entry.track
+    );
+    assert!((entry.track[4][0] - 40.0).abs() < 1e-9);
+}
+
+/// The preview bakes into the session and shows on an empty map under its
+/// own revision (D71): the document is never written, the history lock
+/// stands, edit goes back to recording with the keys kept, and save keeps
+/// what was looked at.
+#[test]
+fn a_preview_writes_nothing_and_is_served_apart_from_the_document() {
+    let root = TempRoot::new("preview");
+    let app = app(&root);
+    travelling_stroke(&app, 18.0);
+    let (revision_before, entries_before) = {
+        let session = app.session.lock().expect("lock");
+        let open = session.open.as_ref().expect("open");
+        (open.revision, open.history.entries().len())
+    };
+
+    macros::capture_start(&app, region(0.0, 0.0), 0, false).expect("start");
+    macros::capture_place(&app, 2, 20.0, 0.0).expect("place");
+    let mode = macros::capture_preview(&app, 2).expect("preview");
+    assert_eq!(mode.phase, macros::CapturePhase::Previewing);
+    let preview_revision = mode.preview_revision.expect("a preview revision");
+    assert_ne!(preview_revision, revision_before, "never the document's");
+    assert_eq!(mode.stamp, Some([0.0, 0.0]), "stamped where it was drawn");
+
+    // The preview scene is the macro alone: the field at the stamp is the
+    // stroke, and away from it nothing — the document's stroke is not there.
+    {
+        let session = app.session.lock().expect("lock");
+        let scene = &session.preview.as_ref().expect("preview").project;
+        let at = |step: u32, lon: f64| {
+            sample_scene(&flatten(scene, step), LonLat::new(lon, 0.0).unwrap()).u
+        };
+        assert!((at(0, 0.0) - 18.0).abs() < 0.6, "the stroke, at the stamp");
+        assert!(at(0, 60.0).abs() < 1e-6, "and nothing else on the map");
+        assert_eq!(scene.layers.len(), 1);
+        assert_eq!(scene.layers[0].objects.len(), 1);
+    }
+    // Stamp it elsewhere: a new revision, the macro moved.
+    let moved = macros::preview_stamp(&app, 90.0, 0.0).expect("stamp");
+    assert_ne!(moved.preview_revision, Some(preview_revision));
+    {
+        let session = app.session.lock().expect("lock");
+        let scene = &session.preview.as_ref().expect("preview").project;
+        let u = sample_scene(&flatten(scene, 0), LonLat::new(90.0, 0.0).unwrap()).u;
+        assert!((u - 18.0).abs() < 0.6);
+    }
+    // Every write is still refused, and the document has not moved.
+    assert!(
+        edit::paint(
+            &app,
+            BrushStroke {
+                points: vec![[50.0, 0.0]],
+                size_km: 400.0,
+                speed_mps: 5.0,
+                direction_toward_deg: 0.0,
+                feather: 0.0,
+                ..Default::default()
+            },
+        )
+        .is_err()
+    );
+    {
+        let session = app.session.lock().expect("lock");
+        let open = session.open.as_ref().expect("open");
+        assert_eq!(open.revision, revision_before);
+        assert_eq!(open.history.entries().len(), entries_before);
+    }
+    // Edit: back to recording, keys intact, preview gone.
+    let edited = macros::capture_edit(&app).expect("edit");
+    assert_eq!(edited.phase, macros::CapturePhase::Recording);
+    assert_eq!(edited.keys, vec![0, 2]);
+    assert!(edited.preview_revision.is_none());
+    assert!(app.session.lock().expect("lock").preview.is_none());
+    // Preview again and save: the library has the bake, the lock is lifted.
+    macros::capture_preview(&app, 2).expect("preview");
+    let library = macros::capture_finish(&app, "Kept".to_owned(), 2).expect("finish");
+    assert_eq!(library.entries.len(), 1);
+    assert_eq!(library.entries[0].frames, 3);
+    assert!(app.session.lock().expect("lock").preview.is_none());
+    assert!(!macros::mode(&app, None).expect("mode").active);
+    let after = edit::paint(
+        &app,
+        BrushStroke {
+            points: vec![[50.0, 0.0]],
+            size_km: 400.0,
+            speed_mps: 5.0,
+            direction_toward_deg: 0.0,
+            feather: 0.0,
+            ..Default::default()
+        },
+    );
+    assert!(after.is_ok(), "the lock is lifted with the save");
+}
+
+/// Cancelling from the preview clears it too.
+#[test]
+fn cancel_from_the_preview_clears_the_preview() {
+    let root = TempRoot::new("preview-cancel");
+    let app = app(&root);
+    travelling_stroke(&app, 18.0);
+    macros::capture_start(&app, region(0.0, 0.0), 0, false).expect("start");
+    macros::capture_preview(&app, 1).expect("preview");
+    assert!(app.session.lock().expect("lock").preview.is_some());
+    macros::capture_cancel(&app).expect("cancel");
+    assert!(app.session.lock().expect("lock").preview.is_none());
+    assert!(!macros::mode(&app, None).expect("mode").active);
 }

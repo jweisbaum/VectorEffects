@@ -184,6 +184,12 @@ tests and four hand-computed resample ones.
 
 **Every milestone is delivered; what remains needs a signing key or a screen (M10).**
 
+**M23–M26 complete (2026-09-05).** All thirty findings are delivered, one
+commit per milestone; each section below records what was measured and
+what was left. Every finding that turned out to be a bug in a rule now has
+the rule stated once: one clipboard, one creation layer, one cursor table,
+one hint line, one preview scene.
+
 **Re-planned again on 2026-09-05, from the running app.** With every
 milestone delivered, the user worked through the app and handed over thirty
 numbered findings — bugs, missing affordances and a redesign of macro
@@ -594,7 +600,7 @@ M0 ─ M1 ─ M2 ─ M3 ─ M4 ══ walking skeleton complete
                     ├─ M23 ────── selection, clipboard, deletion (bugs)     ✓
                     ├─ M24 ────── cursors, hover and outlines             ✓
                     ├─ M25 ────── chrome: top row, status bar, panels, timeline ✓
-                    └─ M26 ────── macro recording as keyframes, with a preview
+                    └─ M26 ────── macro recording as keyframes, with a preview ✓
 ```
 
 **M23–M26 (2026-09-05) go bugs first, then what each later one needs.** M23
@@ -2315,10 +2321,25 @@ The findings: 8, 12, 13, 14, 22, 23, 24, 27, 28.
 
 ---
 
-### M26 — Macro recording as keyframes, with a preview
+### M26 — Macro recording as keyframes, with a preview · **complete**
 
 **Goal:** recording a macro is editing a position track, and what was
 recorded can be seen before it is kept.
+
+**Delivered 2026-09-05.** Everything below. Two things the build found.
+The map had never moved the region to a step's position on scrub — each
+frame "held its own position" in the session and the map drew the region
+where it last was — so the keys would have been invisible; visiting a step
+now keys it *and* shows it there, through one command. And a preview
+revision seeded from the clock in the same millisecond as the project's
+*was* the project's revision, which the test caught on its first run; the
+preview's revisions carry a bit no document revision reaches. The preview's
+playback treats every frame as ready by the backend's account and asks the
+map alone, since the readiness strip is the document's. What was not done:
+the fifty-object stress and the capture suite were not run against the
+preview scene, and the interpolation is a great circle rather than the
+easing curves an object's track offers — a capture's keys have no easing
+menu, and none was asked for.
 
 The finding: 29, with the remainder of 18 and the cursor rule from M24.
 

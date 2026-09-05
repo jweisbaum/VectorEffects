@@ -465,7 +465,19 @@ export default function App() {
       </div>
 
       <div className="workspace">
-        <aside className={panels.left ? "sidebar left" : "sidebar left collapsed"}>
+        <aside
+          className={[
+            "sidebar left",
+            panels.left ? "" : "collapsed",
+            // Greyed out and dead to the pointer while a capture records or
+            // previews (spec.md 8.7, M26): every write is refused then, and a
+            // panel that looks live but refuses is worse than one that says
+            // it is off.
+            recording !== null ? "dimmed" : "",
+          ]
+            .filter(Boolean)
+            .join(" ")}
+        >
           <button
             className="panel-toggle"
             onClick={() => toggle("left")}
@@ -508,7 +520,15 @@ export default function App() {
           viewSlot={viewSlot}
         />
 
-        <aside className={panels.right ? "sidebar right" : "sidebar right collapsed"}>
+        <aside
+          className={[
+            "sidebar right",
+            panels.right ? "" : "collapsed",
+            recording !== null ? "dimmed" : "",
+          ]
+            .filter(Boolean)
+            .join(" ")}
+        >
           <button
             className="panel-toggle"
             onClick={() => toggle("right")}
@@ -566,6 +586,7 @@ export default function App() {
         settings={settings}
         capture={recording}
         onCollapse={() => toggle("bottom")}
+        onCapture={(mode) => mapRef.current?.setCapture(mode)}
       />
       ) : (
         <div className="timeline collapsed">

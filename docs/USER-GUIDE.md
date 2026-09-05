@@ -89,9 +89,14 @@ A GRIB layer's frames show on the timeline as marks; select marks and
 
 ## Macros
 
-**Capture** (`K`) records a region of the field over a run of frames into
-the macro library: draw a region, press **Start capture**, scrub the ruler,
-drag the region into place at each frame, then **Finish** and name it.
+**Capture** (`K`, in the title bar) records a region of the field over a
+run of frames into the macro library: draw a region, press **Start
+capture**, scrub the ruler and drag the region into place at the frames
+that matter — every frame you visit becomes a key on the *selection
+position* row, the region glides between keys, and a key can be deleted.
+**Finish recording** shows the macro alone on the map, looping; click to
+stamp it elsewhere, **Edit macro** to go back, **Save macro** to name and
+keep it.
 **Insert** (`N`) puts a macro back down anywhere, in any project, in the
 active layer, playing from the step it was placed at; the pointer shows the
 macro's outline, and its track if it moves, before the click. The library's location

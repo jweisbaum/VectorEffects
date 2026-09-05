@@ -100,6 +100,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ve_app::settings::ShortcutAction::export_all(&cfg)?;
     ve_app::macros::MacroEntry::export_all(&cfg)?;
     ve_app::macros::MacroOutline::export_all(&cfg)?;
+    ve_app::macros::CapturePhase::export_all(&cfg)?;
     ve_app::macros::MacroLibrary::export_all(&cfg)?;
     ve_app::macros::CaptureMode::export_all(&cfg)?;
     ve_app::capture::RegionShape::export_all(&cfg)?;

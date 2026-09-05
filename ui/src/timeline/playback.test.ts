@@ -286,3 +286,11 @@ describe("steppedBy", () => {
     expect(steppedBy(9, 1, 9)).toBe(9);
   });
 });
+
+describe("nextStep from a first step other than zero", () => {
+  it("loops a macro preview round its own run (spec.md 8.7, M26)", () => {
+    expect(nextStep(7, 7, true, 3)).toBe(3);
+    expect(nextStep(5, 7, true, 3)).toBe(6);
+    expect(nextStep(7, 7, false, 3)).toBeNull();
+  });
+});

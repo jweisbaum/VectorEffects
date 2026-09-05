@@ -46,6 +46,9 @@ body {
 .layer-panel header { flex-wrap: wrap; row-gap: 6px; }
 .sidebar.right { border-left: 1px solid var(--border); }
 
+/* A capture in progress greys the panels out entirely (spec.md 8.7, M26). */
+.sidebar.dimmed { opacity: 0.35; pointer-events: none; }
+
 /* --- Collapsible panels (M25) ------------------------------------------ */
 
 /* A collapsed sidebar is a strip wide enough for its toggle and nothing
@@ -903,6 +906,39 @@ body {
   background: #c6aaff;
 }
 .tl-tick.tl-capture-origin::after { background: #ffd678; }
+/* Steps before the one a capture began on are out of the run: dimmed, and
+   the ruler will not scrub into them (spec.md 8.7, M26). */
+.tl-tick.tl-before { opacity: 0.3; }
+/* The capture's own track (D72): its keys as diamonds, in its colour. */
+.tl-row.tl-capture-track { background: #16203a; }
+.tl-row.tl-capture-track .tl-labels { color: #d9a0ff; }
+.tl-row.tl-capture-track .tl-key { background: #c6aaff; }
+.tl-row.tl-capture-track .tl-key.selected { background: #ffd678; }
+.tl-row.tl-capture-track .tl-dot {
+  position: absolute;
+  top: 50%;
+  width: 3px;
+  height: 3px;
+  margin: -1.5px 0 0 -1.5px;
+  border-radius: 50%;
+  background: #c6aaff;
+  opacity: 0.7;
+}
+.tl-preview-label { color: #8cffbe; font-weight: 600; }
+/* The preview badge, bottom right of the map (spec.md 8.7, M26). */
+.map-preview-badge {
+  position: absolute;
+  right: 12px;
+  bottom: 48px;
+  padding: 4px 10px;
+  border: 1px solid #3fbf7f;
+  border-radius: 6px;
+  background: rgba(20, 60, 40, 0.75);
+  color: #8cffbe;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  pointer-events: none;
+}
 .tl-buffering { color: #ffd678; }
 
 /* Rows share one horizontal scroll; the labels column is sticky. */

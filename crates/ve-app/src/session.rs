@@ -34,7 +34,7 @@ static LAST_REVISION: AtomicU64 = AtomicU64::new(0);
 /// across a restart, when the process counter would begin again but the
 /// webview's cache would not. Nothing depends on a revision being reproducible;
 /// it is a cache key, and never reaches a project file or an export.
-fn fresh_revision() -> u64 {
+pub fn fresh_revision() -> u64 {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |since| since.as_millis() as u64);
@@ -218,6 +218,13 @@ pub struct Session {
     /// While this holds one, **every document write is refused**: the frames
     /// being baked are of a field that has to still be there at the end.
     pub capturing: crate::macros::CaptureSession,
+    /// A macro being previewed before it is kept (spec.md 8.7, M26, D71).
+    ///
+    /// A one-object project — the baked capture at the stamped anchor, on
+    /// an empty layer — served by the tile protocol under its own revision,
+    /// so the document is never written to show it and the history lock
+    /// stands.
+    pub preview: Option<crate::macros::PreviewScene>,
     /// The transform drag in progress, if any.
     pub transform: Option<TransformGesture>,
     /// Counter behind [`Session::next_gesture_id`].

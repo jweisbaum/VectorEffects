@@ -136,6 +136,7 @@ export default function Timeline({
   settings,
   capture,
   onCollapse,
+  onCapture,
 }: {
   project: ProjectSummary;
   step: number;
@@ -165,6 +166,12 @@ export default function Timeline({
   onKeysSelected: (active: boolean) => void;
   /** Folds the dock away to a strip (M25). */
   onCollapse: () => void;
+  /**
+   * A capture command answered from here — a key removed from the
+   * *selection position* row (D72) — handed back to the map, which owns
+   * the capture state.
+   */
+  onCapture: (mode: CaptureMode) => void;
   /** The application's bindings table (spec.md 8.6, M15). */
   settings: AppSettings | null;
   /**
@@ -179,8 +186,27 @@ export default function Timeline({
   capture: CaptureMode | null;
 }) {
   const capturing = capture !== null && capture.active;
+  const recordingPhase = capturing && capture.phase === "recording";
+  const previewing = capturing && capture.phase === "previewing";
   const last = Math.max(0, project.step_count - 1);
   const steps = last + 1;
+  /**
+   * The first step the playhead may stand on: the capture's first step
+   * while one runs — the steps before it are out of the run and dimmed
+   * (spec.md 8.7, M26) — and step 0 otherwise.
+   */
+  const firstStep = capturing ? Math.min(capture.first_step, last) : 0;
+  /** The last step playback reaches: the preview's run, or the timeline's. */
+  const playLast = previewing ? Math.min(capture.last_step, last) : last;
+  const clampStep = useCallback(
+    (target: number) => Math.max(firstStep, Math.min(last, target)),
+    [firstStep, last],
+  );
+  /** The capture's key the user has selected on its row, to delete. */
+  const [selectedCaptureKey, setSelectedCaptureKey] = useState<number | null>(null);
+  useEffect(() => {
+    if (!recordingPhase) setSelectedCaptureKey(null);
+  }, [recordingPhase]);
 
   // --- Layout ---
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -261,6 +287,31 @@ export default function Timeline({
   rateRef.current = rate;
   const warmRef = useRef(warm);
   warmRef.current = warm;
+  const previewRef = useRef(previewing);
+  previewRef.current = previewing;
+  const firstRef = useRef(firstStep);
+  firstRef.current = firstStep;
+  const playLastRef = useRef(playLast);
+  playLastRef.current = playLast;
+  const allReadyRef = useRef<StepState[]>([]);
+  if (allReadyRef.current.length !== steps) {
+    allReadyRef.current = Array.from({ length: steps }, () => "solid" as StepState);
+  }
+  // Entering the preview starts it playing from its first frame; leaving
+  // stops. The playhead is never left before the run (spec.md 8.7, M26).
+  useEffect(() => {
+    if (previewing) {
+      onStepChange(firstStep);
+      setPlaying(true);
+    } else {
+      setPlaying(false);
+    }
+    // Only the phase change starts or stops it, not every re-render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [previewing]);
+  useEffect(() => {
+    if (capturing && step < firstStep) onStepChange(firstStep);
+  }, [capturing, firstStep, onStepChange, step]);
 
   useEffect(() => {
     if (!playing) {
@@ -269,23 +320,30 @@ export default function Timeline({
     }
     let frame = 0;
     let lastAdvance = performance.now();
+    // A macro preview plays its run round and round, whatever the loop
+    // switch says, and its readiness is the map's alone: the strip above
+    // is the document's, and the preview is not the document (D71).
+    const looping = () => loopRef.current || previewRef.current;
+    const gate = () =>
+      previewRef.current ? (allReadyRef.current as readonly StepState[]) : statesRef.current;
     const loopFrame = (now: number) => {
       // Keep the map two steps ahead of the playhead, so a step's tiles are on
       // the GPU before its turn comes and playback never waits on a fetch it
       // could have started earlier.
-      const next = nextStep(stepRef.current, last, loopRef.current);
+      const next = nextStep(stepRef.current, playLastRef.current, looping(), firstRef.current);
       if (next !== null && warmRef.current(next)) {
-        const after = nextStep(next, last, loopRef.current);
+        const after = nextStep(next, playLastRef.current, looping(), firstRef.current);
         if (after !== null) warmRef.current(after);
       }
       const result = tick(
         stepRef.current,
-        last,
-        loopRef.current,
+        playLastRef.current,
+        looping(),
         rateRef.current,
         now - lastAdvance,
-        statesRef.current,
+        gate(),
         (target) => warmRef.current(target),
+        firstRef.current,
       );
       if (result.finished) {
         setPlaying(false);
@@ -552,6 +610,17 @@ export default function Timeline({
       // During a capture only the arrows do anything here: the frames are
       // visited by scrubbing, and every other key is an edit the backend would
       // refuse (spec.md 8.7).
+      if (
+        recordingPhase &&
+        (event.key === "Delete" || event.key === "Backspace") &&
+        selectedCaptureKey !== null
+      ) {
+        event.preventDefault();
+        const at = selectedCaptureKey;
+        setSelectedCaptureKey(null);
+        void api.unplaceCapture(at).then(onCapture).catch((err: unknown) => setError(String(err)));
+        return;
+      }
       if (capturing && !(event.key === "ArrowLeft" || event.key === "ArrowRight")) return;
       if ((event.metaKey || event.ctrlKey) && !event.altKey) {
         const key = event.key.toLowerCase();
@@ -579,10 +648,8 @@ export default function Timeline({
         // moving would take the step away again.
         event.preventDefault();
         setPlaying(false);
-        const to = steppedBy(
-          stepRef.current,
-          bound.action === "step_forward" ? 1 : -1,
-          last,
+        const to = clampStep(
+          steppedBy(stepRef.current, bound.action === "step_forward" ? 1 : -1, last),
         );
         if (to !== stepRef.current) onStepChange(to);
       } else if (
@@ -607,6 +674,10 @@ export default function Timeline({
     return () => window.removeEventListener("keydown", onKey);
   }, [
     capturing,
+    clampStep,
+    onCapture,
+    recordingPhase,
+    selectedCaptureKey,
     copyFrames,
     deleteFrames,
     deleteSelected,
@@ -872,16 +943,22 @@ export default function Timeline({
         {/* The ruler: ticks, labels, readiness, and the playhead. */}
         <div className="tl-row tl-ruler">
           <div className="tl-labels tl-ruler-label">
-            {capturing ? <span className="tl-recording">● Recording</span> : "Time"}
+            {recordingPhase ? (
+              <span className="tl-recording">● Recording</span>
+            ) : previewing ? (
+              <span className="tl-preview-label">Macro preview</span>
+            ) : (
+              "Time"
+            )}
           </div>
           <div
             className="tl-grid"
             style={{ width: gridWidth }}
             onPointerDown={(event) => {
               setPlaying(false);
-              onStepChange(stepAt(gridX(event), pxPerStep, last));
+              onStepChange(clampStep(stepAt(gridX(event), pxPerStep, last)));
               const scrub = (move: PointerEvent) =>
-                onStepChange(stepAt(gridX(move), pxPerStep, last));
+                onStepChange(clampStep(stepAt(gridX(move), pxPerStep, last)));
               const done = () => {
                 window.removeEventListener("pointermove", scrub);
                 window.removeEventListener("pointerup", done);
@@ -898,13 +975,20 @@ export default function Timeline({
                   states[s] ?? "empty",
                   // A frame the capture has placed its region at, and the one
                   // it began at: what the user has done and where it started.
-                  capturing && capture.visited.includes(s) ? "tl-visited" : "",
+                  capturing && capture.keys.includes(s) ? "tl-visited" : "",
                   capturing && capture.first_step === s ? "tl-capture-origin" : "",
+                  capturing && s < firstStep ? "tl-before" : "",
                 ].join(" ")}
                 style={{ left: s * pxPerStep, width: pxPerStep }}
                 title={
                   capturing
-                    ? `${tickLabel(s)} · ${capture.visited.includes(s) ? "region placed here" : "region where it was drawn"}`
+                    ? `${tickLabel(s)} · ${
+                        s < firstStep
+                          ? "before the capture"
+                          : capture.keys.includes(s)
+                            ? "region keyed here"
+                            : "region between its keys"
+                      }`
                     : `${tickLabel(s)} · ${states[s] ?? "not rendered"}`
                 }
               >
@@ -918,6 +1002,59 @@ export default function Timeline({
             <div className="tl-playhead" style={{ left: (step + 0.5) * pxPerStep }} />
           </div>
         </div>
+
+        {/*
+          The capture's own track while it records (D72, M26): a temporary
+          row, *selection position*, with a diamond at every step that holds
+          a key and a dot at every step between keys, which the position
+          interpolates through. Click a diamond and press Delete, or
+          Alt-click it, to remove the key. The first step's key stays.
+        */}
+        {recordingPhase && (
+          <div className="tl-row tl-track tl-capture-track">
+            <div className="tl-labels tl-track-label">
+              <span className="tl-track-name" title="Where the recorded region sits at each step">
+                selection position
+              </span>
+            </div>
+            <div className="tl-grid" style={{ width: gridWidth }}>
+              {Array.from({ length: steps }, (_, s) => {
+                if (s < firstStep) return null;
+                const keyed = capture.keys.includes(s);
+                const lastKey = capture.keys[capture.keys.length - 1] ?? firstStep;
+                if (!keyed) {
+                  return s < lastKey ? (
+                    <span key={s} className="tl-dot" style={{ left: (s + 0.5) * pxPerStep }} />
+                  ) : null;
+                }
+                return (
+                  <span
+                    key={s}
+                    className={`tl-key${selectedCaptureKey === s ? " selected" : ""}`}
+                    style={{ left: (s + 0.5) * pxPerStep }}
+                    title={
+                      s === capture.first_step
+                        ? "The first key; it stays"
+                        : "Click and press Delete, or Alt-click, to remove this key"
+                    }
+                    onPointerDown={(event) => {
+                      event.stopPropagation();
+                      if (s === capture.first_step) return;
+                      if (event.altKey) {
+                        void api
+                          .unplaceCapture(s)
+                          .then(onCapture)
+                          .catch((err: unknown) => setError(String(err)));
+                        return;
+                      }
+                      setSelectedCaptureKey((current) => (current === s ? null : s));
+                    }}
+                  />
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* The tree. */}
         {tree?.layers.map((layer) => (

@@ -286,14 +286,29 @@ pub struct CaptureSession {
     pub active: Option<ActiveCapture>,
 }
 
+/// Which half of a capture the session is in (spec.md 8.7, M26).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[ts(export, export_to = "CapturePhase.ts")]
+#[serde(rename_all = "snake_case")]
+pub enum CapturePhase {
+    /// The region is being placed at steps; the document is locked.
+    Recording,
+    /// The capture is baked and shown on an empty map, to be kept, edited
+    /// or dropped. The document is still locked.
+    Previewing,
+}
+
 /// The state of a running capture.
 #[derive(Debug, Clone)]
 pub struct ActiveCapture {
     /// The region's shape, fixed when the capture began: it cannot be
     /// redrawn or reshaped while recording (spec.md 8.7).
     pub shape: RegionShape,
-    /// Where the region sits at each step, by step index. A step the user
-    /// never visited keeps the position it was started at.
+    /// The region's position **keys**, by step (D72). Every step the
+    /// playhead visits while recording gets one at the region's position
+    /// then; dragging the region at a step sets it; a key can be removed,
+    /// and the position between keys interpolates by great circle. The
+    /// first step always has one.
     pub positions: std::collections::BTreeMap<u32, [f64; 2]>,
     /// Where it was drawn: the position every step starts from.
     pub origin: [f64; 2],
@@ -301,6 +316,78 @@ pub struct ActiveCapture {
     pub record_movement: bool,
     /// The first step of the run.
     pub first_step: u32,
+    /// Recording, or previewing what was recorded.
+    pub phase: CapturePhase,
+    /// The bake, once the preview has made it. Kept through *edit* → back to
+    /// recording? No: editing drops it, since the keys may change.
+    pub baked: Option<Arc<Capture>>,
+    /// The last step of the run, fixed when the preview was made.
+    pub last_step: u32,
+    /// Where the preview's stamp sits, `[lon, lat]`; the origin until the
+    /// user clicks somewhere.
+    pub stamp: [f64; 2],
+}
+
+impl ActiveCapture {
+    /// Where the region sits at `step` (D72): its key there, or the great
+    /// circle between the keys either side, or the last key held past the
+    /// end. Before the first key — which cannot happen, since the first
+    /// step always has one — the first key.
+    pub fn position_at(&self, step: u32) -> [f64; 2] {
+        if let Some(at) = self.positions.get(&step) {
+            return *at;
+        }
+        let before = self.positions.range(..step).next_back();
+        let after = self.positions.range(step..).next();
+        match (before, after) {
+            (Some((s0, p0)), Some((s1, p1))) => {
+                let t = f64::from(step - s0) / f64::from(s1 - s0);
+                slerp(*p0, *p1, t)
+            }
+            (Some((_, p0)), None) => *p0,
+            (None, Some((_, p1))) => *p1,
+            (None, None) => self.origin,
+        }
+    }
+}
+
+/// A point `t` of the way along the great circle from `a` to `b`, in degrees.
+///
+/// Unit vectors rather than degree arithmetic, so a track across the seam or
+/// near a pole is the short way round, the same rule a position keyframe's
+/// segment follows (spec.md 4.5).
+fn slerp(a: [f64; 2], b: [f64; 2], t: f64) -> [f64; 2] {
+    let to_vec = |p: [f64; 2]| {
+        let (lon, lat) = (p[0].to_radians(), p[1].to_radians());
+        [lat.cos() * lon.cos(), lat.cos() * lon.sin(), lat.sin()]
+    };
+    let (u, v) = (to_vec(a), to_vec(b));
+    let dot = (u[0] * v[0] + u[1] * v[1] + u[2] * v[2]).clamp(-1.0, 1.0);
+    let omega = dot.acos();
+    if omega < 1e-9 {
+        return a;
+    }
+    let (wa, wb) = (
+        ((1.0 - t) * omega).sin() / omega.sin(),
+        (t * omega).sin() / omega.sin(),
+    );
+    let x = wa * u[0] + wb * v[0];
+    let y = wa * u[1] + wb * v[1];
+    let z = wa * u[2] + wb * v[2];
+    [
+        y.atan2(x).to_degrees(),
+        z.atan2((x * x + y * y).sqrt()).to_degrees(),
+    ]
+}
+
+/// The macro preview the tile protocol serves (D71): a project holding the
+/// baked capture as one object at the stamp, under a revision of its own.
+#[derive(Debug, Clone)]
+pub struct PreviewScene {
+    /// The one-object project.
+    pub project: ve_core::project::Project,
+    /// The revision its tiles are addressed by. Never a document's.
+    pub revision: u64,
 }
 
 /// What the transport shows while a capture runs.
@@ -328,9 +415,25 @@ pub struct CaptureMode {
     /// not the last one clicked. Null when no capture is running or no step was
     /// named.
     pub position: Option<[f64; 2]>,
+    /// Recording, or previewing (M26).
+    pub phase: CapturePhase,
+    /// The steps that hold a position key (D72). What the timeline's
+    /// *selection position* row draws its diamonds at.
+    pub keys: Vec<u32>,
+    /// The last step of the run, once the preview has fixed it; the first
+    /// step until then.
+    pub last_step: u32,
+    /// The revision the preview's tiles are addressed by, while previewing.
+    pub preview_revision: Option<u64>,
+    /// Where the preview is stamped, `[lon, lat]`, while previewing.
+    pub stamp: Option<[f64; 2]>,
 }
 
-fn mode_of(session: &CaptureSession, step: Option<u32>) -> CaptureMode {
+fn mode_of(
+    session: &CaptureSession,
+    preview: Option<&PreviewScene>,
+    step: Option<u32>,
+) -> CaptureMode {
     match &session.active {
         Some(active) => CaptureMode {
             active: true,
@@ -338,15 +441,14 @@ fn mode_of(session: &CaptureSession, step: Option<u32>) -> CaptureMode {
             placed_steps: active.positions.len() as u32,
             record_movement: active.record_movement,
             visited: active.positions.keys().copied().collect(),
-            // A step never visited keeps the position the region was drawn at,
-            // which is the same rule the bake follows.
-            position: step.map(|step| {
-                active
-                    .positions
-                    .get(&step)
-                    .copied()
-                    .unwrap_or(active.origin)
-            }),
+            // The same rule the bake follows: the key, or the great circle
+            // between keys (D72).
+            position: step.map(|step| active.position_at(step)),
+            phase: active.phase,
+            keys: active.positions.keys().copied().collect(),
+            last_step: active.last_step,
+            preview_revision: preview.map(|scene| scene.revision),
+            stamp: (active.phase == CapturePhase::Previewing).then_some(active.stamp),
         },
         None => CaptureMode {
             active: false,
@@ -355,6 +457,11 @@ fn mode_of(session: &CaptureSession, step: Option<u32>) -> CaptureMode {
             record_movement: false,
             visited: Vec::new(),
             position: None,
+            phase: CapturePhase::Recording,
+            keys: Vec::new(),
+            last_step: 0,
+            preview_revision: None,
+            stamp: None,
         },
     }
 }
@@ -389,9 +496,14 @@ pub fn capture_start(
                 origin,
                 record_movement,
                 first_step: step,
+                phase: CapturePhase::Recording,
+                baked: None,
+                last_step: step,
+                stamp: origin,
             }),
         };
-        Ok(mode_of(&session.capturing, Some(step)))
+        session.preview = None;
+        Ok(mode_of(&session.capturing, None, Some(step)))
     })
 }
 
@@ -413,10 +525,200 @@ pub fn place_capture(
 /// state — not keyframes, not the document, not history.
 pub fn capture_place(state: &AppState, step: u32, lon: f64, lat: f64) -> Result<CaptureMode> {
     with_session(state, |session| {
-        if let Some(active) = session.capturing.active.as_mut() {
+        if let Some(active) = session.capturing.active.as_mut()
+            && active.phase == CapturePhase::Recording
+        {
             active.positions.insert(step, [lon, lat]);
         }
-        Ok(mode_of(&session.capturing, Some(step)))
+        Ok(mode_of(
+            &session.capturing,
+            session.preview.as_ref(),
+            Some(step),
+        ))
+    })
+}
+
+/// Keys the region at a step where it stands (D72): visiting a step while
+/// recording records the position there, so the track the timeline shows is
+/// the steps the user went through.
+#[tauri::command]
+pub fn visit_capture(state: tauri::State<'_, AppState>, step: u32) -> Result<CaptureMode> {
+    capture_visit(&state, step)
+}
+
+/// Implementation of [`visit_capture`]: a key at `step` with the position
+/// the region already has there, unless one is there already. Nothing
+/// before the first step, which the ruler refuses.
+pub fn capture_visit(state: &AppState, step: u32) -> Result<CaptureMode> {
+    with_session(state, |session| {
+        if let Some(active) = session.capturing.active.as_mut()
+            && active.phase == CapturePhase::Recording
+            && step >= active.first_step
+            && !active.positions.contains_key(&step)
+        {
+            let at = active.position_at(step);
+            active.positions.insert(step, at);
+        }
+        Ok(mode_of(
+            &session.capturing,
+            session.preview.as_ref(),
+            Some(step),
+        ))
+    })
+}
+
+/// Removes the region's position key at a step (D72); the position there
+/// then interpolates between its neighbours. The first step's key stays.
+#[tauri::command]
+pub fn unplace_capture(state: tauri::State<'_, AppState>, step: u32) -> Result<CaptureMode> {
+    capture_unplace(&state, step)
+}
+
+/// Implementation of [`unplace_capture`].
+pub fn capture_unplace(state: &AppState, step: u32) -> Result<CaptureMode> {
+    with_session(state, |session| {
+        if let Some(active) = session.capturing.active.as_mut()
+            && active.phase == CapturePhase::Recording
+            && step != active.first_step
+        {
+            active.positions.remove(&step);
+        }
+        Ok(mode_of(
+            &session.capturing,
+            session.preview.as_ref(),
+            Some(step),
+        ))
+    })
+}
+
+/// Bakes the capture into the session and shows it on an empty map (M26,
+/// D71). Nothing is written to disk and nothing to the document.
+#[tauri::command]
+pub fn preview_capture(state: tauri::State<'_, AppState>, last_step: u32) -> Result<CaptureMode> {
+    capture_preview(&state, last_step)
+}
+
+/// Implementation of [`preview_capture`].
+pub fn capture_preview(state: &AppState, last_step: u32) -> Result<CaptureMode> {
+    with_session(state, |session| {
+        let baked = {
+            let active = session
+                .capturing
+                .active
+                .clone()
+                .ok_or(AppError::BadOption {
+                    field: "capture",
+                    value: "no capture is running".to_owned(),
+                })?;
+            let open = session.require_open()?;
+            Arc::new(bake(
+                &active,
+                &open.project,
+                last_step.max(active.first_step),
+            )?)
+        };
+        let settings = session.require_open()?.project.settings;
+        let active = session
+            .capturing
+            .active
+            .as_mut()
+            .ok_or(AppError::BadOption {
+                field: "capture",
+                value: "no capture is running".to_owned(),
+            })?;
+        active.last_step = last_step.max(active.first_step);
+        active.phase = CapturePhase::Previewing;
+        active.stamp = active.origin;
+        active.baked = Some(Arc::clone(&baked));
+        session.preview = Some(preview_scene(active, &baked, settings)?);
+        Ok(mode_of(&session.capturing, session.preview.as_ref(), None))
+    })
+}
+
+/// Moves the preview's stamp: the macro is shown centred there instead.
+#[tauri::command]
+pub fn stamp_preview(state: tauri::State<'_, AppState>, lon: f64, lat: f64) -> Result<CaptureMode> {
+    preview_stamp(&state, lon, lat)
+}
+
+/// Implementation of [`stamp_preview`]. A new revision, so the old stamp's
+/// tiles are unreachable rather than stale.
+pub fn preview_stamp(state: &AppState, lon: f64, lat: f64) -> Result<CaptureMode> {
+    with_session(state, |session| {
+        let settings = session.require_open()?.project.settings;
+        let active = session
+            .capturing
+            .active
+            .as_mut()
+            .ok_or(AppError::BadOption {
+                field: "capture",
+                value: "no capture is running".to_owned(),
+            })?;
+        if let Some(baked) = active.baked.clone()
+            && active.phase == CapturePhase::Previewing
+        {
+            active.stamp = [wrap180(lon), lat.clamp(-90.0, 90.0)];
+            session.preview = Some(preview_scene(active, &baked, settings)?);
+        }
+        Ok(mode_of(&session.capturing, session.preview.as_ref(), None))
+    })
+}
+
+/// Back from the preview to recording, keys intact; the bake is dropped,
+/// since the keys may change.
+#[tauri::command]
+pub fn edit_capture(state: tauri::State<'_, AppState>) -> Result<CaptureMode> {
+    capture_edit(&state)
+}
+
+/// Implementation of [`edit_capture`].
+pub fn capture_edit(state: &AppState) -> Result<CaptureMode> {
+    with_session(state, |session| {
+        if let Some(active) = session.capturing.active.as_mut() {
+            active.phase = CapturePhase::Recording;
+            active.baked = None;
+        }
+        session.preview = None;
+        Ok(mode_of(&session.capturing, session.preview.as_ref(), None))
+    })
+}
+
+/// The one-object project the preview is rendered from (D71).
+fn preview_scene(
+    active: &ActiveCapture,
+    baked: &Arc<Capture>,
+    settings: ve_core::project::ProjectSettings,
+) -> Result<PreviewScene> {
+    let mut project = ve_core::project::Project::new("Macro preview", settings);
+    let step_count = settings.step_count;
+    let mut object = Object::new(ToolKind::Macro, "Preview", step_count);
+    object.geometry = baked.shape.clone();
+    object.capture = Some(baked.hash.clone());
+    object.active_range = ve_core::document::StepRange::new(
+        active.first_step.min(step_count.saturating_sub(1)),
+        active.last_step.min(step_count.saturating_sub(1)),
+    );
+    let anchor = LonLat::new(wrap180(active.stamp[0]), active.stamp[1].clamp(-90.0, 90.0))?;
+    if let Some(anim) = object.props.get_mut(PropId::Position) {
+        anim.set_base(PropValue::LonLat(anchor));
+    }
+    if let Some(anim) = object.props.get_mut(PropId::StampSpace) {
+        anim.set_base(PropValue::Enum(1));
+    }
+    project
+        .captures
+        .insert(baked.hash.clone(), Arc::clone(baked));
+    if let Some(layer) = project.layers.first_mut() {
+        layer.objects.push(object);
+    }
+    Ok(PreviewScene {
+        project,
+        // A document's revision is seeded from the clock and counts up by
+        // one per edit, so a preview seeded the same way in the same
+        // millisecond *was* the document's — and the webview caches tiles by
+        // revision, immutably. A bit no document revision will reach keeps
+        // the two address spaces apart for good.
+        revision: crate::session::fresh_revision() | (1 << 62),
     })
 }
 
@@ -430,10 +732,11 @@ pub fn cancel_capture(state: tauri::State<'_, AppState>) -> Result<CaptureMode> 
 pub fn capture_cancel(state: &AppState) -> Result<CaptureMode> {
     with_session(state, |session| {
         session.capturing = CaptureSession::default();
+        session.preview = None;
         if let Ok(open) = session.require_open() {
             open.history.unlock();
         }
-        Ok(mode_of(&session.capturing, None))
+        Ok(mode_of(&session.capturing, None, None))
     })
 }
 
@@ -445,7 +748,9 @@ pub fn capture_mode(state: tauri::State<'_, AppState>, step: Option<u32>) -> Res
 
 /// Implementation of [`capture_mode`].
 pub fn mode(state: &AppState, step: Option<u32>) -> Result<CaptureMode> {
-    with_session(state, |session| Ok(mode_of(&session.capturing, step)))
+    with_session(state, |session| {
+        Ok(mode_of(&session.capturing, session.preview.as_ref(), step))
+    })
 }
 
 /// Bakes the capture under a name and writes it to the library.
@@ -483,77 +788,12 @@ pub fn capture_finish(state: &AppState, name: String, last_step: u32) -> Result<
             })?;
         let open = session.require_open()?;
         let settings = open.project.settings;
-        let spacing = settings.resolution.degrees();
-        let (half_w, half_h) = half_extents(&active.shape);
-        if !(half_w > 0.0 && half_h > 0.0) {
-            return Err(AppError::BadOption {
-                field: "capture",
-                value: "the region has no extent".to_owned(),
-            });
-        }
-        let ni = ((half_w * 2.0 / spacing).ceil() as u32 + 1).min(2_048);
-        let nj = ((half_h * 2.0 / spacing).ceil() as u32 + 1).min(2_048);
-        let x0 = -f64::from(ni - 1) * spacing / 2.0;
-        let y0 = f64::from(nj - 1) * spacing / 2.0;
-
-        let last = last_step.max(active.first_step);
-        let mut frames = Vec::new();
-        let mut held = active.origin;
-        for step in active.first_step..=last {
-            // A step the user never visited keeps the last position the
-            // region was put at, which is what dragging it forward means.
-            if let Some(at) = active.positions.get(&step) {
-                held = *at;
-            }
-            let scene = flatten(&open.project, step);
-            let mut uv = Vec::with_capacity(ni as usize * nj as usize);
-            for j in 0..nj {
-                let lat = held[1] + y0 - f64::from(j) * spacing;
-                for i in 0..ni {
-                    let lon = held[0] + x0 + f64::from(i) * spacing;
-                    let Ok(at) = LonLat::new(wrap180(lon), lat.clamp(-90.0, 90.0)) else {
-                        uv.push(UNDEFINED);
-                        continue;
-                    };
-                    uv.push(match sample_scene_covered(&scene, at) {
-                        Some(sample) => [sample.u, sample.v],
-                        None => UNDEFINED,
-                    });
-                }
-            }
-            let elapsed =
-                f64::from(step - active.first_step) * f64::from(settings.step_hours.hours());
-            // Static stores no displacement at all.
-            let (dx, dy) = if active.record_movement {
-                (
-                    wrap180(held[0] - active.origin[0]),
-                    held[1] - active.origin[1],
-                )
-            } else {
-                (0.0, 0.0)
-            };
-            frames.push(CaptureFrame {
-                offset_hours: elapsed,
-                dx_deg: dx,
-                dy_deg: dy,
-                uv,
-            });
-        }
-
-        let capture = Capture::new(
-            settings.field_kind,
-            CaptureLattice {
-                ni,
-                nj,
-                spacing_deg: spacing,
-                x0_deg: x0,
-                y0_deg: y0,
-            },
-            f64::from(settings.step_hours.hours()) * 3600.0,
-            geometry_of(&active.shape, active.origin),
-            frames,
-        )
-        .map_err(AppError::Core)?;
+        // The preview's bake is the macro, when there is one: what was looked
+        // at is what is kept. Finishing straight from recording bakes now.
+        let capture = match &active.baked {
+            Some(baked) if active.phase == CapturePhase::Previewing => Capture::clone(baked),
+            _ => bake(&active, &open.project, last_step.max(active.first_step))?,
+        };
         let header = MacroHeader {
             name: if name.trim().is_empty() {
                 "Macro".to_owned()
@@ -573,6 +813,7 @@ pub fn capture_finish(state: &AppState, name: String, last_step: u32) -> Result<
         // Cleared whatever happens next: a capture that baked and a capture
         // that failed both end the lockout.
         session.capturing = CaptureSession::default();
+        session.preview = None;
         session.require_open()?.history.unlock();
         Ok((header, capture))
     })?;
@@ -584,6 +825,84 @@ pub fn capture_finish(state: &AppState, name: String, last_step: u32) -> Result<
         encode(&header, &capture)?,
     )?;
     library(state)
+}
+
+/// Bakes a capture: for each step of the run, the visible composite inside
+/// the region **where the region is at that step** (spec.md 8.7), evaluated
+/// with `CpuEvaluator` at the project's grid spacing, undefined kept distinct
+/// from calm. Shared by the preview and the finish, so what is looked at is
+/// what is kept.
+fn bake(
+    active: &ActiveCapture,
+    project: &ve_core::project::Project,
+    last_step: u32,
+) -> Result<Capture> {
+    let settings = project.settings;
+    let spacing = settings.resolution.degrees();
+    let (half_w, half_h) = half_extents(&active.shape);
+    if !(half_w > 0.0 && half_h > 0.0) {
+        return Err(AppError::BadOption {
+            field: "capture",
+            value: "the region has no extent".to_owned(),
+        });
+    }
+    let ni = ((half_w * 2.0 / spacing).ceil() as u32 + 1).min(2_048);
+    let nj = ((half_h * 2.0 / spacing).ceil() as u32 + 1).min(2_048);
+    let x0 = -f64::from(ni - 1) * spacing / 2.0;
+    let y0 = f64::from(nj - 1) * spacing / 2.0;
+
+    let mut frames = Vec::new();
+    for step in active.first_step..=last_step {
+        // The key at this step, or the great circle between keys (D72).
+        let held = active.position_at(step);
+        let scene = flatten(project, step);
+        let mut uv = Vec::with_capacity(ni as usize * nj as usize);
+        for j in 0..nj {
+            let lat = held[1] + y0 - f64::from(j) * spacing;
+            for i in 0..ni {
+                let lon = held[0] + x0 + f64::from(i) * spacing;
+                let Ok(at) = LonLat::new(wrap180(lon), lat.clamp(-90.0, 90.0)) else {
+                    uv.push(UNDEFINED);
+                    continue;
+                };
+                uv.push(match sample_scene_covered(&scene, at) {
+                    Some(sample) => [sample.u, sample.v],
+                    None => UNDEFINED,
+                });
+            }
+        }
+        let elapsed = f64::from(step - active.first_step) * f64::from(settings.step_hours.hours());
+        // Static stores no displacement at all.
+        let (dx, dy) = if active.record_movement {
+            (
+                wrap180(held[0] - active.origin[0]),
+                held[1] - active.origin[1],
+            )
+        } else {
+            (0.0, 0.0)
+        };
+        frames.push(CaptureFrame {
+            offset_hours: elapsed,
+            dx_deg: dx,
+            dy_deg: dy,
+            uv,
+        });
+    }
+
+    Capture::new(
+        settings.field_kind,
+        CaptureLattice {
+            ni,
+            nj,
+            spacing_deg: spacing,
+            x0_deg: x0,
+            y0_deg: y0,
+        },
+        f64::from(settings.step_hours.hours()) * 3600.0,
+        geometry_of(&active.shape, active.origin),
+        frames,
+    )
+    .map_err(AppError::Core)
 }
 
 /// Inserts a library macro as an object, centred on a position.

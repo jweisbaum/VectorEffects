@@ -522,6 +522,16 @@ export const api = {
   /** Moves the capture's region at one step. Each frame holds its own place. */
   placeCapture: (step: number, lon: number, lat: number) =>
     call<CaptureMode>("place_capture", { step, lon, lat }),
+  /** Keys the region at a step where it stands: visiting a step records it (D72). */
+  visitCapture: (step: number) => call<CaptureMode>("visit_capture", { step }),
+  /** Removes the region's position key at a step; the gap interpolates (D72). */
+  unplaceCapture: (step: number) => call<CaptureMode>("unplace_capture", { step }),
+  /** Bakes the capture into the session and shows it alone on the map (D71). */
+  previewCapture: (lastStep: number) => call<CaptureMode>("preview_capture", { lastStep }),
+  /** Moves the preview's stamp. */
+  stampPreview: (lon: number, lat: number) => call<CaptureMode>("stamp_preview", { lon, lat }),
+  /** Back from the preview to recording, keys intact. */
+  editCapture: () => call<CaptureMode>("edit_capture", {}),
   /** Abandons a capture, writing nothing. */
   cancelCapture: () => call<CaptureMode>("cancel_capture", {}),
   /**
