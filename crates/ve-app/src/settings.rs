@@ -163,6 +163,9 @@ pub fn default_shortcuts() -> Vec<Shortcut> {
         tool("divergence", "d"),
         tool("turn", "r"),
         tool("warp", "w"),
+        // The measurement tools (spec.md 10, M8). `M` is the marquee's key in
+        // every paint program, so measure takes `T` (D54).
+        tool("measure", "t"),
     ]
 }
 

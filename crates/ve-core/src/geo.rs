@@ -129,6 +129,164 @@ pub fn rhumb_bearing(from: LonLat, to: LonLat) -> Angle {
     Angle::new(dlambda.atan2(dpsi).to_degrees())
 }
 
+/// Isometric latitude: the Mercator projection's stretched latitude.
+///
+/// The coordinate a rhumb line is straight in, which is what both the rhumb
+/// functions above are built on and what [`rhumb_path`] steps along. Infinite
+/// at the poles, so it is clamped there — a rhumb line reaching a pole spirals
+/// into it through infinitely many turns and has no last point to draw.
+fn isometric_lat(lat_deg: f64) -> f64 {
+    let phi = lat_deg.clamp(-89.999_999, 89.999_999).to_radians();
+    (phi / 2.0 + std::f64::consts::FRAC_PI_4).tan().ln()
+}
+
+/// How finely a measured path is drawn: one vertex per degree of arc.
+///
+/// The paths are geographic, so this is a property of the path and not of the
+/// zoom: densifying by the camera would rebuild every polyline on every wheel
+/// event, and a degree of arc is about a pixel at the sharpest zoom the map
+/// offers over a path long enough for the curvature to show at all.
+const PATH_STEP_DEG: f64 = 1.0;
+
+/// Vertices for a path spanning `span_deg` of arc, at [`PATH_STEP_DEG`].
+///
+/// At least two, so a path is always drawable, and capped: a great circle is
+/// at most 180° of arc and a rhumb line near a pole can run much further in
+/// longitude than it does in distance.
+fn path_vertices(span_deg: f64) -> usize {
+    ((span_deg / PATH_STEP_DEG).ceil() as usize).clamp(1, 512) + 1
+}
+
+/// The great-circle path from `from` to `to`, as a polyline.
+///
+/// Spherical linear interpolation, in Cartesian space: the great circle
+/// *is* the plane through the two points and the centre, so rotating one
+/// vector toward the other in that plane is the path itself rather than an
+/// approximation of it.
+///
+/// Antipodal points have no unique great circle between them — every plane
+/// through the centre contains both — so the pair is returned unjoined rather
+/// than one of the infinitely many answers being invented.
+pub fn great_circle_path(from: LonLat, to: LonLat) -> Vec<LonLat> {
+    let a = unit(from);
+    let b = unit(to);
+    let dot = (a.0 * b.0 + a.1 * b.1 + a.2 * b.2).clamp(-1.0, 1.0);
+    let omega = dot.acos();
+    let sin_omega = omega.sin();
+    if sin_omega.abs() < 1e-12 {
+        return vec![from, to];
+    }
+
+    let count = path_vertices(omega.to_degrees());
+    // The ends are the endpoints themselves, not what a round trip through
+    // Cartesian gives back: a divider's handle sits on the end of its own
+    // segment, and a last-bit difference there is a handle beside the line.
+    (0..count)
+        .map(|i| match i {
+            0 => from,
+            _ if i == count - 1 => to,
+            _ => {
+                let t = i as f64 / (count - 1) as f64;
+                let ca = ((1.0 - t) * omega).sin() / sin_omega;
+                let cb = (t * omega).sin() / sin_omega;
+                from_unit((
+                    ca * a.0 + cb * b.0,
+                    ca * a.1 + cb * b.1,
+                    ca * a.2 + cb * b.2,
+                ))
+            }
+        })
+        .collect()
+}
+
+/// The rhumb-line path from `from` to `to`, as a polyline.
+///
+/// Straight in the isometric latitude, which is the defining property: a
+/// constant bearing means longitude advances in proportion to `psi`, so
+/// stepping both linearly *is* the constant-bearing path. It is drawn as a
+/// polyline all the same, because it is a curve in every projection the map
+/// offers except Mercator.
+///
+/// The longitude difference is taken the short way round, so a course crossing
+/// the antimeridian is the ordinary case rather than a trip round the world.
+pub fn rhumb_path(from: LonLat, to: LonLat) -> Vec<LonLat> {
+    let dlambda = normalize_lon(to.lon - from.lon);
+    let psi1 = isometric_lat(from.lat);
+    let dpsi = isometric_lat(to.lat) - psi1;
+
+    // A path measured in degrees of *arc*, so the two axes are comparable:
+    // longitude counts for less the further from the equator, and a course
+    // along a parallel at 80° covers a sixth of the ground its degrees suggest.
+    let mean_lat = (from.lat + to.lat) / 2.0;
+    let span = (to.lat - from.lat).hypot(dlambda * mean_lat.to_radians().cos());
+    let count = path_vertices(span);
+
+    // Stepped in *latitude*, not in the isometric latitude the line is
+    // straight in. The two trace the same curve, but a rhumb line's distance
+    // is proportional to its change in latitude, so this one puts its vertices
+    // an equal distance apart — which is what a drawn path wants, and what
+    // makes the midpoint of the list the midpoint of the sail.
+    (0..count)
+        .map(|i| match i {
+            0 => from,
+            _ if i == count - 1 => to,
+            _ => {
+                let t = i as f64 / (count - 1) as f64;
+                if dpsi.abs() <= 1e-12 {
+                    // Due east or west: the latitude does not change, and the
+                    // isometric step is zero rather than small — dividing by it
+                    // would be noise.
+                    return LonLat {
+                        lon: normalize_lon(from.lon + t * dlambda),
+                        lat: from.lat,
+                    };
+                }
+                let lat = from.lat + t * (to.lat - from.lat);
+                let lon = from.lon + (isometric_lat(lat) - psi1) / dpsi * dlambda;
+                LonLat {
+                    lon: normalize_lon(lon),
+                    lat: lat.clamp(-90.0, 90.0),
+                }
+            }
+        })
+        .collect()
+}
+
+/// A geodesic circle of `radius_m` about `centre`, as a closed polyline.
+///
+/// Every vertex is [`LonLat::destination`] at one bearing, so the ring is a
+/// set of points at a true distance rather than a shape in degrees. Near a
+/// pole — or at a radius large enough to reach one — that is a very different
+/// figure from a circle on the map, which is the whole reason to draw it.
+pub fn geodesic_ring(centre: LonLat, radius_m: f64) -> Vec<LonLat> {
+    const VERTICES: usize = 180;
+    (0..=VERTICES)
+        .map(|i| {
+            let bearing = Angle::new(i as f64 * 360.0 / VERTICES as f64);
+            centre.destination(bearing, radius_m)
+        })
+        .collect()
+}
+
+/// A position as a unit vector on the sphere.
+fn unit(p: LonLat) -> (f64, f64, f64) {
+    let (phi, lambda) = (p.lat.to_radians(), p.lon.to_radians());
+    (
+        phi.cos() * lambda.cos(),
+        phi.cos() * lambda.sin(),
+        phi.sin(),
+    )
+}
+
+/// And back. The vector need not be normalised: only its direction is read.
+fn from_unit(v: (f64, f64, f64)) -> LonLat {
+    let lat = v.2.atan2(v.0.hypot(v.1)).to_degrees();
+    LonLat {
+        lon: normalize_lon(v.1.atan2(v.0).to_degrees()),
+        lat: lat.clamp(-90.0, 90.0),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -139,6 +297,145 @@ mod tests {
 
     fn close(a: f64, b: f64, tol: f64) {
         assert!((a - b).abs() < tol, "{a} != {b} (tol {tol})");
+    }
+
+    /// Every vertex of a great-circle path is on the great circle.
+    ///
+    /// Checked against the defining property rather than against the slerp
+    /// that made it: a point is on the great circle through A and B exactly
+    /// when its distance from A plus its distance to B is the distance from A
+    /// to B. Any point off the arc makes that sum larger.
+    #[test]
+    fn a_great_circle_path_lies_on_the_great_circle() {
+        for (a, b) in [
+            (ll(-73.78, 40.64), ll(-0.46, 51.47)), // JFK to Heathrow
+            (ll(174.8, -36.9), ll(-58.4, -34.6)),  // Auckland to Buenos Aires
+            (ll(179.0, 60.0), ll(-179.0, 62.0)),   // across the antimeridian
+            (ll(10.0, 85.0), ll(-170.0, 85.0)),    // over the pole
+        ] {
+            let path = great_circle_path(a, b);
+            let whole = a.distance_m(b);
+            assert!(path.len() >= 2, "a path needs two points");
+            assert_eq!((path[0].lon, path[0].lat), (a.lon, a.lat));
+            for point in &path {
+                let via = a.distance_m(*point) + point.distance_m(b);
+                // A metre over ten thousand kilometres.
+                close(via, whole, whole * 1e-7 + 1.0);
+            }
+        }
+    }
+
+    /// A rhumb line is *defined* as the path of constant bearing, so the
+    /// closed form is checked against walking that bearing.
+    ///
+    /// The walk takes two thousand short steps with [`LonLat::destination`],
+    /// each along the same compass bearing — an integration of the defining
+    /// property, and a different computation from the isometric-latitude
+    /// formula the path is built with. If they agree, the formula is right.
+    #[test]
+    fn a_rhumb_path_is_where_walking_the_bearing_arrives() {
+        for (a, b) in [
+            (ll(-73.78, 40.64), ll(-0.46, 51.47)),
+            (ll(20.0, -30.0), ll(-40.0, -55.0)),
+            (ll(178.0, 20.0), ll(-176.0, 44.0)), // across the antimeridian
+        ] {
+            let bearing = rhumb_bearing(a, b);
+            let total = rhumb_distance_m(a, b);
+            const STEPS: usize = 20_000;
+            let mut walked = a;
+            for _ in 0..STEPS {
+                walked = walked.destination(bearing, total / STEPS as f64);
+            }
+            // A kilometre after ten thousand, which is the integration's own
+            // error: each step is a great-circle hop and the bearing drifts
+            // across it.
+            // 134 m over 5,758 km, and it halves when the step count doubles:
+            // the error is the walk's, not the formula's.
+            close(walked.distance_m(b), 0.0, total * 1e-4);
+
+            // And the closed form agrees with the walk in the middle, not only
+            // at the ends — which is a statement about the path's shape, and
+            // about its vertices being spaced by distance: the vertex a third
+            // of the way along the list is a third of the way along the sail.
+            let path = rhumb_path(a, b);
+            let third = path.len() / 3;
+            let fraction = third as f64 / (path.len() - 1) as f64;
+            let mut walked_part = a;
+            for _ in 0..(fraction * STEPS as f64).round() as usize {
+                walked_part = walked_part.destination(bearing, total / STEPS as f64);
+            }
+            close(path[third].distance_m(walked_part), 0.0, total * 1e-4);
+        }
+    }
+
+    /// The rhumb line is straight in Mercator, and only there.
+    ///
+    /// Straightness is checked in the isometric latitude — which is Mercator's
+    /// `y` — against the chord between the endpoints. The same path is then
+    /// shown to bow away from its chord in plain latitude, so the test says
+    /// which projection the property belongs to rather than assuming it.
+    #[test]
+    fn a_rhumb_path_is_straight_in_mercator_and_curved_in_a_flat_map() {
+        let (a, b) = (ll(-73.78, 40.64), ll(-0.46, 51.47));
+        let path = rhumb_path(a, b);
+        let dlon = normalize_lon(b.lon - a.lon);
+        let (psi_a, psi_b) = (isometric_lat(a.lat), isometric_lat(b.lat));
+
+        let mut worst_flat: f64 = 0.0;
+        for point in &path {
+            let t = normalize_lon(point.lon - a.lon) / dlon;
+            close(isometric_lat(point.lat), psi_a + t * (psi_b - psi_a), 1e-9);
+            worst_flat = worst_flat.max((point.lat - (a.lat + t * (b.lat - a.lat))).abs());
+        }
+        assert!(
+            worst_flat > 0.2,
+            "the path should bow off a straight line in latitude, worst was {worst_flat}"
+        );
+    }
+
+    /// A ring is at a true distance from its centre at every bearing.
+    ///
+    /// Including one that swallows a pole, which is where a circle on the
+    /// ground stops being anything like a circle on the map: every longitude
+    /// is inside it, and the ring's northmost point is south of its centre.
+    #[test]
+    fn a_geodesic_ring_is_everywhere_the_same_distance_from_its_centre() {
+        for (centre, radius_m) in [
+            (ll(0.0, 0.0), 500_000.0),
+            (ll(-30.0, 62.0), 2_000_000.0),
+            (ll(140.0, 78.0), 2_000_000.0), // reaches past the pole
+        ] {
+            let ring = geodesic_ring(centre, radius_m);
+            for point in &ring {
+                close(centre.distance_m(*point), radius_m, 1e-3);
+            }
+            assert_eq!(
+                ring.first().map(|p| p.lat),
+                ring.last().map(|p| p.lat),
+                "the ring must close"
+            );
+        }
+
+        // Past the pole: the ring covers every longitude, and its far side has
+        // come back down the other meridian.
+        let over = geodesic_ring(ll(140.0, 78.0), 2_000_000.0);
+        let north = over.iter().fold(f64::MIN, |m, p| m.max(p.lat));
+        assert!(
+            north < 90.0,
+            "a ring cannot reach past the pole, got {north}"
+        );
+        let spread = over
+            .iter()
+            .map(|p| normalize_lon(p.lon - 140.0))
+            .fold(f64::MIN, f64::max)
+            - over
+                .iter()
+                .map(|p| normalize_lon(p.lon - 140.0))
+                .fold(f64::MAX, f64::min);
+        assert!(
+            spread > 300.0,
+            "a ring over the pole spans every longitude, got {spread}"
+        );
     }
 
     #[test]

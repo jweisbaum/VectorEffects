@@ -57,7 +57,9 @@ crates/
   ve-core/     Document model, properties, keyframes/interpolation,
                undo/redo, IDs, geodesy, serde, .veproj I/O, migrations.
                `capture` holds the `.vecap` container a region capture
-               travels in; `follow` resolves objects that follow objects
+               travels in; `follow` resolves objects that follow objects;
+               `annotation` holds the measurements of spec 10, which are
+               document state that reaches no scene and no export
   ve-render/   Scene flattening, SDF rasterisation, compositing,
                FieldEvaluator trait, CpuEvaluator, GpuEvaluator (+ WGSL),
                tile pyramid, content-hashed render cache
@@ -234,6 +236,30 @@ The ones that are actual code in a new tool, rather than free:
   preview needs the new geometry too, but `BaselineOutline::of` matches `Shape`
   exhaustively on purpose, so the compiler asks for it rather than the object
   silently vanishing mid-drag. Keep it that way: no wildcard arm.
+
+### Adding a measurement
+
+A measurement (spec §10) is *not* an object: it makes no field, reaches no
+exported file, and has no properties for a schema to describe. It is document
+state all the same, so it is saved and undone like everything else.
+
+1. Add the variant to `ve_core::annotation::Measurement`, with its `handles`,
+   its `move_handle` arm and its `measure()` arm. The geodesy goes in
+   `ve_core::geo` beside the paths already there, never in the frontend.
+2. Add the kind to `ve_app::measure`'s **mirror** of `MeasurementKind`
+   (`ve-core` has no `ts-rs`, so a type crossing IPC is declared app-side and
+   converted — the `StampSpace` precedent), and to `MEASURE_LABELS` and
+   `pointsNeeded` in `ui/src/map/measure.ts`.
+3. **Do not add a command.** Every edit is `Command::SetAnnotations`, replacing
+   the whole list, which is what makes the inverse right by construction and a
+   drag one history entry.
+4. **Do not call `touch()`.** The tile revision addresses rendered tiles, and a
+   measurement changes no pixel of the field; bumping it discards the cache for
+   a mark on the chart.
+5. Numbers leave `ve-core` in metres and degrees and are formatted in
+   `ve_app::measure`, at the IPC boundary, like every other unit. **A bearing
+   in a measurement is a course, not a wind**, so it is never converted to the
+   project's direction convention.
 
 ### Adding a numeric input
 
@@ -579,6 +605,12 @@ to the hash input is a correctness bug that shows up as stale frames.
 - Geodesy changes need antimeridian **and** polar test cases. Both. A grid is
   not exempt: a polar stereographic grid that contains the pole covers every
   longitude, and a Mercator one can straddle the antimeridian.
+- A path builder is checked against the property that *defines* the path, not
+  against a second copy of its formula: a great-circle vertex by the distances
+  to the two ends summing to the whole, a rhumb-line vertex by walking the
+  constant bearing in twenty thousand steps and arriving in the same place
+  (`geo.rs`). Both are in the suite; extend them rather than restating a
+  formula.
 - Evaluation changes need the parity suite to pass — it is not optional and not
   slow enough to skip.
 - GRIB changes need round-trip plus external decode.

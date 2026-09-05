@@ -2297,16 +2297,41 @@ A worker pool renders frames ahead of the playhead.
 
 These are overlays. They never contribute to the field and never appear in the
 GRIB output. They are saved in `Project.annotations` so a measurement survives
-save/reopen.
+save/reopen. One tool, `T`, with three modes:
 
-| Tool | Behaviour |
+| Mode | Behaviour |
 |---|---|
-| **Dividers** | Click a chain of points. Shows each segment's great-circle distance and initial bearing, plus a running total. Points are draggable. km and nm shown together. |
-| **Great circle / rhumb line** | Pick two points; draws both paths simultaneously in distinguishable styles, labelled with each distance and the constant rhumb bearing. Individually clearable. |
-| **Range rings** | Pick a centre; draws N geodesic circles at a set interval, labelled. Interval, count, and centre are editable. Clearable. |
+| **Dividers** | Click a chain of points. Shows each segment's great-circle distance and initial bearing, plus a running total. The chain stays open until `Enter`, `Escape` or a tool change, so it is built click by click as the polygon is. Points are draggable. km and nm shown together. |
+| **Great circle / rhumb line** | Pick two points; draws both paths simultaneously — the great circle solid, the rhumb dashed — labelled `GC` and `RL` with each distance, the great circle's *initial* bearing and the rhumb's constant one. |
+| **Range rings** | Pick a centre; draws N geodesic circles at a set interval, labelled. Interval and count are typed in the option bar and edit the set most recently placed or touched; the centre is a draggable handle. |
 
-Each has an explicit clear action, and there is a global "clear all
-measurements."
+Each mode has an explicit clear action, there is a global "clear all
+measurements", and alt-clicking any handle removes the measurement it belongs
+to — which is what makes a single passage individually clearable.
+
+**One tool, not three.** They share a gesture (click points on the map), a
+handle, an overlay and a clear action; what differs is how many points make a
+measurement and what is drawn through them. Three palette entries would be
+three ways of pointing at the same thing, and the shortcut table allocates one
+key (D54).
+
+**A bearing here is a course, never a wind.** It is a geometric bearing and is
+therefore *not* converted to the project's direction convention (§3.3). A
+project that names winds by where they come from must not show the reciprocal
+of a course.
+
+**A measurement does not bump the tile revision.** The revision addresses
+rendered tiles (§7.7) and a measurement changes no pixel of the field, so
+bumping it would throw the whole cache away because someone dropped a pair of
+dividers on the map. It is still an ordinary document edit: one undoable
+command replaces the whole set, which is what makes a drag of one point one
+history entry and gives every edit — place, drag, extend, clear — the same
+inverse.
+
+**Distances are computed in Rust and arrive formatted.** The frontend projects
+polylines and strokes them; it measures nothing. The paths are densified to one
+vertex per degree of arc, spaced by distance rather than by parameter, so a
+label sits at the middle of the line and not at the middle of its bounding box.
 
 ---
 

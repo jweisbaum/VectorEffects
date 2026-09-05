@@ -15,6 +15,7 @@ pub mod frames;
 pub mod import;
 pub mod logging;
 pub mod macros;
+pub mod measure;
 pub mod merge;
 pub mod palette;
 pub mod paths;
@@ -124,6 +125,13 @@ pub fn run() -> anyhow::Result<()> {
             settings::set_default_scales,
             settings::set_macro_directory,
             settings::set_projection,
+            measure::measurements,
+            measure::add_measurement,
+            measure::move_measurement_handle,
+            measure::extend_measurement,
+            measure::set_measurement_rings,
+            measure::remove_measurement,
+            measure::clear_measurements,
             settings::set_colour_scale,
             macros::macro_library,
             macros::delete_macros,

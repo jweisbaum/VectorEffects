@@ -37,6 +37,9 @@ import type { PropertyView } from "./generated/PropertyView";
 import type { ExportEstimate } from "./generated/ExportEstimate";
 import type { ExportRequest } from "./generated/ExportRequest";
 import type { ExportResult } from "./generated/ExportResult";
+import type { MeasurementKind } from "./generated/MeasurementKind";
+import type { MeasurementView } from "./generated/MeasurementView";
+import type { NewMeasurement } from "./generated/NewMeasurement";
 import type { ProjectSummary } from "./generated/ProjectSummary";
 import type { RecentProject } from "./generated/RecentProject";
 import type { SelectionTransform } from "./generated/SelectionTransform";
@@ -406,6 +409,28 @@ export const api = {
   /** The colour-ramp top a *new* project of each kind gets, in knots. */
   setDefaultScales: (windKnots: number, currentKnots: number) =>
     call<AppSettings>("set_default_scales", { windKnots, currentKnots }),
+  // --- Measurements (spec.md 10, M8) ---
+  /** Every measurement laid over the map, drawn and labelled by the backend. */
+  measurements: () => call<MeasurementView[]>("measurements"),
+  /** Places one. */
+  addMeasurement: (measurement: NewMeasurement) =>
+    call<MeasurementView[]>("add_measurement", { measurement }),
+  /** Moves one placed point. Coalesces, so a drag is one undo. */
+  moveMeasurementHandle: (id: number, index: number, at: [number, number]) =>
+    call<MeasurementView[]>("move_measurement_handle", { id, index, at }),
+  /** Adds a leg to a chain. */
+  extendMeasurement: (id: number, at: [number, number]) =>
+    call<MeasurementView[]>("extend_measurement", { id, at }),
+  /** Sets a ring set's spacing and count. */
+  setMeasurementRings: (id: number, intervalKm: number, count: number) =>
+    call<MeasurementView[]>("set_measurement_rings", { id, intervalKm, count }),
+  /** Removes one. */
+  removeMeasurement: (id: number) =>
+    call<MeasurementView[]>("remove_measurement", { id }),
+  /** Clears one tool's measurements, or every one of them. */
+  clearMeasurements: (kind: MeasurementKind | null) =>
+    call<MeasurementView[]>("clear_measurements", { kind }),
+
   /** How the map lays the world out (M11). A view preference only. */
   setProjection: (projection: string) =>
     call<AppSettings>("set_projection", { projection }),

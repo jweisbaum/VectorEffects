@@ -250,6 +250,26 @@ pub enum Command {
         restore: Vec<ObjectSnapshot>,
     },
 
+    /// Replaces every measurement laid over the map (spec.md 10, M8).
+    ///
+    /// The whole list, for every edit — placing one, dragging a point,
+    /// clearing a tool's worth, clearing them all. It is the shape that makes
+    /// the inverse right by construction, and the list is a handful of
+    /// measurements of a handful of points each, against a document whose
+    /// objects carry property maps and keyframes. A command per operation
+    /// would be six commands and six inverses to earn nothing but a smaller
+    /// history entry nobody can see.
+    ///
+    /// It also gives a drag its coalescing for free: successive replacements
+    /// under one key keep the first `before` and adopt the newest `after`, so
+    /// one undo puts a dragged point back where the drag started.
+    SetAnnotations {
+        /// Previous measurements.
+        before: crate::project::Annotations,
+        /// New measurements.
+        after: crate::project::Annotations,
+    },
+
     /// Several commands as one reversible step.
     ///
     /// Exists for edits that touch many objects at once and must undo as a
@@ -337,6 +357,7 @@ impl Command {
             Self::SetColourScale { .. } => "Change the colour scale".into(),
             Self::SetStartTime { .. } => "Set start time".into(),
             Self::SetStepCount { .. } => "Change duration".into(),
+            Self::SetAnnotations { .. } => "Change measurements".into(),
         }
     }
 
@@ -474,6 +495,10 @@ impl Command {
             }
             Self::SetColourScale { after, .. } => {
                 project.settings.colour_scale = *after;
+                Ok(())
+            }
+            Self::SetAnnotations { after, .. } => {
+                project.annotations = after.clone();
                 Ok(())
             }
             Self::SetStepCount { after, restore, .. } => {
@@ -622,6 +647,10 @@ impl Command {
                 project.settings.colour_scale = *before;
                 Ok(())
             }
+            Self::SetAnnotations { before, .. } => {
+                project.annotations = before.clone();
+                Ok(())
+            }
             Self::SetStepCount {
                 before, restore, ..
             } => {
@@ -678,6 +707,10 @@ impl Command {
                 },
             ) if a == b && p == q => {
                 *after = next_after.clone();
+                true
+            }
+            (Self::SetAnnotations { after, .. }, Self::SetAnnotations { after: next, .. }) => {
+                *after = next.clone();
                 true
             }
             (

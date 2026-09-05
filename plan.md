@@ -182,7 +182,7 @@ together: shifting only the lattice left the field trying to draw outside the
 shape that admits it, which is how the first attempt failed. Six end-to-end
 tests and four hand-computed resample ones.
 
-**M8 is next.**
+**M18 is next.**
 
 **Unplanned, after M7: GRIB import** (spec §4.8, D44). A GRIB2 file becomes a
 layer — two, when it holds both wind and currents — whose lattice is sampled
@@ -572,7 +572,7 @@ M0 ─ M1 ─ M2 ─ M3 ─ M4 ══ walking skeleton complete
                     ├─ M18 ────── image layers
                     ├─ M19 ────── export precision
                     ├─ M11 ────── projections                            ✓ (cylindrical tier)
-                    ├─ M8 ─────── measurement
+                    ├─ M8 ─────── measurement                            ✓
                                         │
                                        M10 ── hardening & release
 ```
@@ -1024,25 +1024,79 @@ for a dedicated invalidation test suite.
 
 ---
 
-### M8 — Measurement tools
+### M8 — Measurement tools · **complete**
 
 **Goal:** spec §10, complete.
 
-**Deliverables**
+**Delivered as specified**, as one tool with three modes rather than three
+tools: they share a gesture — click points on the map — a handle, an overlay
+and a clear action, so three palette entries would have been three ways of
+pointing at the same thing, and D54 allocated one key (`T`) for exactly this.
 
-- Dividers with draggable multi-point chains, per-segment and total distance,
-  bearings, km and nm.
-- Great circle + rhumb line pair between two points, both drawn and labelled.
-- Range rings with editable centre, interval, and count.
-- Per-tool clear plus global clear-all; persistence in `Project.annotations`.
+- **Dividers**: a chain measured leg by leg, each leg a great circle, with a
+  running total. The chain stays open until `Enter`, `Escape` or a tool change,
+  which is the polygon's gesture and the same code path's reasoning: a shape
+  built up click by click has no pointer-up to end it.
+- **Passage** (the great circle / rhumb pair): both paths between two points,
+  the great circle solid and the rhumb dashed, labelled `GC` and `RL`. The
+  great circle carries its *initial* bearing and the rhumb its constant one —
+  which is the difference between them, said in the label.
+- **Range rings**: N geodesic circles about a draggable centre. The interval
+  and count are typed in the bar and edit the set most recently placed or
+  touched, since neither is a position and neither has a handle.
+- Per-mode clear, global clear-all, and alt-click on any handle to remove that
+  one measurement — which is what "individually clearable" turned out to mean.
+
+**One command, not six.** Every edit — place, drag, extend, set an interval,
+clear a mode, clear everything — is `SetAnnotations { before, after }`,
+replacing the whole list. The list is a handful of measurements of a handful of
+points each, against a document whose objects carry property maps and
+keyframes; six commands and six inverses would have bought nothing but a
+smaller history entry nobody can see. It also gives a drag its coalescing for
+free, so one undo returns a dragged point to where the drag began rather than
+one pointer report back.
+
+**A measurement does not bump the tile revision**, deliberately. The revision
+addresses rendered tiles and a measurement changes no pixel of the field;
+bumping it would discard the whole cache because someone dropped a pair of
+dividers on the map. The cost is that the frontend re-reads the measurements
+whenever the document summary changes rather than watching a number — one short
+call under one lock, off the render path.
 
 **Acceptance**
 
-- Distances match an independent reference implementation within 0.1% for a set
-  of known pairs, including antimeridian-crossing and near-polar cases.
-- The great circle and rhumb line visibly diverge on a long high-latitude pair,
-  and the rhumb line renders as a straight line in equirectangular projection.
-- Annotations survive save/load and never appear in exported GRIB output.
+- **Distances against independent references.** Not against a second copy of
+  the same formula: a quarter of the equator and a pole-to-pole meridian are
+  closed forms; every vertex of a great-circle path is checked by the property
+  that defines the arc (the distances to the two ends sum to the whole); every
+  vertex of a ring is measured back to its centre; and the **rhumb path is
+  checked against walking its own bearing** — twenty thousand short
+  `destination` steps at the constant course, which is a numerical integration
+  of the defining property and a different computation from the closed form.
+  They agree to 134 m over 5 758 km, and the error halves when the step count
+  doubles, so what is left is the walk's and not the formula's. Antimeridian
+  and near-polar pairs are in every one of these.
+- **The two paths visibly diverge** on a long high-latitude passage: New York
+  to Amsterdam parts by more than a hundred kilometres in the middle, and the
+  great circle is both the shorter path and the poleward one.
+- **The rhumb line is straight in Mercator**, checked in the isometric latitude
+  against the chord between the endpoints — and the same path is shown to bow
+  a fifth of a degree off a straight line in *plain* latitude, so the test says
+  which projection the property belongs to.
+- **Annotations survive a save and reopen**, to the file's own nine-decimal
+  quantisation, and are in the hostile-float round trip.
+- **They never reach an export**, asserted on the bytes: the same project
+  exports byte-identically with a chain, a passage and four range rings laid
+  over it as with none. Export is deterministic (invariant 4), so a byte match
+  is a complete statement that the measurements were not consulted — and it
+  stays true if someone later gives `FlatScene` a field it should not have.
+
+**One correction to this plan.** The acceptance list said the rhumb line
+"renders as a straight line in equirectangular projection". It does not, and
+cannot: a rhumb line is straight in the *isometric* latitude, which is
+Mercator's `y` — in a flat map it bows. The property was worth keeping and is
+now testable for the first time, M11 having shipped Mercator, so the criterion
+is corrected rather than dropped.
 
 ---
 

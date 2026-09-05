@@ -3,8 +3,8 @@
  *
  * Inline SVG, drawn here rather than pulled from an icon set: invariant 5 for-
  * bids any runtime network access, so a webfont or a CDN sprite is out, and a
- * bundled icon package would be a dependency carried for eleven glyphs. These
- * are eleven sets of paths.
+ * bundled icon package would be a dependency carried for a dozen glyphs. These
+ * are a dozen sets of paths.
  *
  * Everything is stroked in `currentColor` on a 24-unit grid, so a button's
  * colour — including the active state's — reaches the icon without the icon
@@ -18,7 +18,7 @@
 
 import type { ReactElement } from "react";
 
-import { FILL, HAND, SELECT, type ActiveTool } from "./tools";
+import { FILL, HAND, MEASURE, SELECT, type ActiveTool } from "./tools";
 
 /** One icon: the geometry inside a `0 0 24 24` box. */
 type Icon = readonly ReactElement[];
@@ -79,6 +79,14 @@ const ICONS: Record<ActiveTool, Icon> = {
     line("M11 4 4 11a2 2 0 0 0 0 3l5 5a2 2 0 0 0 3 0l7-7z", "bucket"),
     line("M5.2 10.4h13.2", "rim"),
     line("M20 15c1.2 1.6 1.8 2.6 1.8 3.4A1.8 1.8 0 0 1 18.2 18.4c0-.8.6-1.8 1.8-3.4z", "drip"),
+  ],
+  // A pair of dividers, the instrument the tool is named for: two legs from a
+  // hinge, points down on the chart.
+  [MEASURE]: [
+    line("M12 3.6a1.6 1.6 0 1 1 0 3.2 1.6 1.6 0 0 1 0-3.2z", "hinge"),
+    line("M11.2 6.6 6.4 20.4", "left-leg"),
+    line("M12.8 6.6 17.6 20.4", "right-leg"),
+    line("M9.6 13.2h4.8", "brace"),
   ],
   // The hand that pans, with the thumb and three fingers a hand icon needs to
   // read as one at 18 pixels.

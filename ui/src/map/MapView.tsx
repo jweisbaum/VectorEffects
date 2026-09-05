@@ -9,6 +9,7 @@ import {
 } from "react";
 
 import { api } from "../ipc";
+import NumberField from "../NumberField";
 import type { Gesture } from "../generated/Gesture";
 import type { PathPoint } from "../generated/PathPoint";
 import type { ProjectSummary } from "../generated/ProjectSummary";
@@ -62,6 +63,16 @@ import {
   type ProjectionId,
   projectionOf,
 } from "./projection";
+import {
+  drawMeasurements,
+  HANDLE_REACH_CSS,
+  type HandlePick,
+  handleUnder,
+  MEASURE_LABELS,
+  pointsNeeded,
+} from "./measure";
+import type { MeasurementView } from "../generated/MeasurementView";
+import type { MeasurementKind } from "../generated/MeasurementKind";
 import { RAMP_STOPS, rampCss } from "./ramp";
 import { parseBasemap } from "./format";
 import { marqueeBounds } from "./marquee";
@@ -87,6 +98,7 @@ import ToolIcon from "./ToolIcon";
 import ToolOptions, { type ToolPick } from "./ToolOptions";
 import {
   type ActiveTool,
+  MEASURE,
   cloneSourceCamera,
   defaultState,
   drawsObjects,
@@ -436,6 +448,56 @@ export default function MapView({
   const showGraticuleRef = useRef(true);
   const stepRef = useRef(0);
   const loggedDrawError = useRef(false);
+
+  /**
+   * The measurements laid over the map (spec.md 10, M8).
+   *
+   * Held as state *and* as a ref: the option bar renders from the state, and
+   * `drawOverlay` — which runs from an animation frame — reads the ref, since
+   * its closure would otherwise draw whatever list it captured.
+   *
+   * Everything in them is computed by Rust. Nothing here measures.
+   */
+  const [measurements, setMeasurements] = useState<MeasurementView[]>([]);
+  const measurementsRef = useRef<MeasurementView[]>([]);
+  const [measureKind, setMeasureKind] = useState<MeasurementKind>("dividers");
+  const [ringIntervalKm, setRingIntervalKm] = useState(100);
+  const [ringCount, setRingCount] = useState(3);
+  /**
+   * The ring set the bar is editing.
+   *
+   * Spec.md 10 asks for the interval and count to be editable, and a ring set
+   * has no handle for either — they are numbers, not positions. So the bar
+   * edits the set most recently placed or touched, and the same two fields are
+   * the defaults for the next one. Null when there is no ring set to edit,
+   * which is when the fields are only defaults.
+   */
+  const [activeRings, setActiveRings] = useState<number | null>(null);
+  /** A point placed but not yet joined to a second one. */
+  const pendingPoint = useRef<[number, number] | null>(null);
+  /**
+   * The chain still being built, so the next click extends it rather than
+   * starting another.
+   *
+   * A chain is open from the click that creates it until Escape, Enter, a tool
+   * change or a click on something else — the same rule the polygon follows,
+   * because it is the same gesture: a shape built up click by click has no
+   * pointer-up to end it.
+   */
+  const openChain = useRef<number | null>(null);
+  /** The measurement handle being dragged. */
+  const measureDrag = useRef<HandlePick | null>(null);
+  /**
+   * The handle move in flight, and the position waiting behind it.
+   *
+   * One request at a time, latest wins — the same pattern the readout and the
+   * drag preview use, for the same reason: the pointer reports faster than a
+   * round trip completes.
+   */
+  const measureMove = useRef<{ inFlight: boolean; queued: [number, number] | null }>({
+    inFlight: false,
+    queued: null,
+  });
 
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1084,6 +1146,58 @@ export default function MapView({
     [requestDraw],
   );
 
+  /**
+   * The measurements, re-read whenever the document changes.
+   *
+   * Keyed on the whole summary rather than on the revision, because a
+   * measurement deliberately does *not* bump it — the revision addresses tiles,
+   * and a pair of dividers changes no pixel of the field, so bumping it would
+   * throw the whole tile cache away. Undo and redo do change the measurements
+   * and are ordinary document changes, so this is what catches them. The call
+   * reads a short list under one lock; it is off the render path.
+   */
+  useEffect(() => {
+    let live = true;
+    void api
+      .measurements()
+      .then((views) => {
+        if (!live) return;
+        measurementsRef.current = views;
+        setMeasurements(views);
+        requestOverlay();
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [project, requestOverlay]);
+
+  /** Takes a new set of measurements from the backend and redraws. */
+  const tookMeasurements = useCallback(
+    (views: MeasurementView[]) => {
+      measurementsRef.current = views;
+      setMeasurements(views);
+      requestOverlay();
+      return views;
+    },
+    [requestOverlay],
+  );
+
+  /**
+   * Closes the chain being built, so the next click starts a new one.
+   *
+   * Also drops a lone point that never found its partner: a half-placed
+   * measurement is not a measurement, and leaving the mark on screen after the
+   * gesture has ended is a mark nothing will ever join.
+   */
+  const endMeasuring = useCallback(() => {
+    if (openChain.current === null && pendingPoint.current === null) return false;
+    openChain.current = null;
+    pendingPoint.current = null;
+    requestOverlay();
+    return true;
+  }, [requestOverlay]);
+
   // Single-key tool shortcuts, as in every other paint application.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -1160,8 +1274,10 @@ export default function MapView({
       }
 
       // Enter closes a gesture built up click by click — the polygon and the
-      // curve, which have no pointer-up to end them.
+      // curve, which have no pointer-up to end them, and the dividers, which
+      // are the same gesture with a running total.
       if (event.key === "Enter") {
+        if (endMeasuring()) return;
         finishGestureRef.current();
         return;
       }
@@ -1181,6 +1297,9 @@ export default function MapView({
           requestOverlay();
           return;
         }
+        // A chain being built ends before the tool does, for the same reason a
+        // half-drawn polygon does: the first press is what the gesture needs.
+        if (endMeasuring()) return;
         setTool(HAND);
       }
     };
@@ -1188,6 +1307,7 @@ export default function MapView({
     return () => window.removeEventListener("keydown", onKey);
   }, [
     captured,
+    endMeasuring,
     nudgeCamera,
     onProjectChanged,
     palette,
@@ -1783,6 +1903,17 @@ export default function MapView({
 
     const cursor = cursorRef.current;
 
+    // The measurements (spec.md 10, M8). Drawn whatever the tool is, because
+    // they are annotations: a passage measured with the dividers is still on
+    // the chart while the brush is in hand, which is the whole point of
+    // saving them. Everything drawn here was computed and formatted by Rust.
+    drawMeasurements(context, camera, view, dpr, {
+      views: measurementsRef.current,
+      pending: tool === MEASURE ? pendingPoint.current : null,
+      cursor: tool === MEASURE ? cursor : null,
+      active: measureDrag.current?.id ?? openChain.current,
+    });
+
     // A position property waiting for a click: where it points now, and where
     // the cursor would move it to. Drawn whatever the tool is — the inspector
     // armed it, not the tool.
@@ -2217,6 +2348,90 @@ export default function MapView({
       return;
     }
 
+    // The measurement tools (spec.md 10, M8). A click either grabs a handle
+    // that is already there or places a point; nothing here is a drag, because
+    // a measurement is a set of positions rather than a swept shape.
+    if (tool === MEASURE) {
+      const dpr = window.devicePixelRatio || 1;
+      const grabbed = handleUnder(
+        measurementsRef.current,
+        cameraRef.current,
+        viewRef.current,
+        point,
+        HANDLE_REACH_CSS * dpr,
+      );
+      if (grabbed !== null) {
+        // Alt-click removes the measurement the handle belongs to, which is
+        // spec.md 10's "individually clearable" — a measurement is a mark on a
+        // chart and the way to get rid of one is to point at it.
+        if (event.altKey) {
+          void api
+            .removeMeasurement(grabbed.id)
+            .then((views) => {
+              tookMeasurements(views);
+              if (openChain.current === grabbed.id) openChain.current = null;
+              if (activeRings === grabbed.id) setActiveRings(null);
+            })
+            .catch(() => undefined);
+          return;
+        }
+        measureDrag.current = grabbed;
+        const touched = measurementsRef.current.find((m) => m.id === grabbed.id);
+        if (touched?.kind === "rings") setActiveRings(touched.id);
+        requestOverlay();
+        return;
+      }
+
+      const geo = unproject(cameraRef.current, viewRef.current, point);
+      const at: [number, number] = [geo.lon, geo.lat];
+
+      // A ring set needs only its centre: how big it is comes from the option
+      // bar, where it can be typed and changed, rather than from a drag that
+      // would have to be redone to correct it.
+      if (measureKind === "rings") {
+        void api
+          .addMeasurement({
+            kind: "rings",
+            points: [at],
+            interval_km: ringIntervalKm,
+            count: ringCount,
+          })
+          .then((views) => {
+            tookMeasurements(views);
+            setActiveRings(views[views.length - 1]?.id ?? null);
+          })
+          .catch(() => undefined);
+        return;
+      }
+
+      // A chain already open takes the click as its next leg.
+      const open = openChain.current;
+      if (open !== null && measureKind === "dividers") {
+        void api.extendMeasurement(open, at).then(tookMeasurements).catch(() => undefined);
+        return;
+      }
+
+      const pending = pendingPoint.current;
+      if (pending === null) {
+        pendingPoint.current = at;
+        requestOverlay();
+        return;
+      }
+      pendingPoint.current = null;
+      const kind = measureKind;
+      void api
+        .addMeasurement({ kind, points: [pending, at], interval_km: 0, count: 0 })
+        .then((views) => {
+          tookMeasurements(views);
+          // A chain stays open so the next click continues it; a passage is
+          // complete at two points and has nothing to continue.
+          const placed = views[views.length - 1];
+          openChain.current = kind === "dividers" && placed ? placed.id : null;
+        })
+        .catch(() => undefined);
+      return;
+    }
+
     // The select tool draws a region of ground rather than an object
     // (spec.md 8.2, M14). A plain drag draws it, because the select tool is a
     // tool like the brush and the hand tool is where plain drag still pans
@@ -2517,6 +2732,35 @@ export default function MapView({
       return;
     }
 
+    // A measurement handle being dragged (spec.md 10, M8). One request in
+    // flight, latest wins: the pointer reports faster than a round trip, and a
+    // request per report would queue up behind itself until the line was
+    // following a position the cursor had left.
+    if (measureDrag.current) {
+      const grabbed = measureDrag.current;
+      const geo = unproject(cameraRef.current, viewRef.current, point);
+      const flight = measureMove.current;
+      flight.queued = [geo.lon, geo.lat];
+      if (!flight.inFlight) {
+        const send = () => {
+          const next = flight.queued;
+          flight.queued = null;
+          if (next === null) {
+            flight.inFlight = false;
+            return;
+          }
+          flight.inFlight = true;
+          void api
+            .moveMeasurementHandle(grabbed.id, grabbed.index, next)
+            .then(tookMeasurements)
+            .catch(() => undefined)
+            .finally(send);
+        };
+        send();
+      }
+      return;
+    }
+
     // A tool's hover indicator follows the cursor, and so does a pick's
     // crosshair — and so does the rubber line of a gesture being built up.
     if (tool !== HAND || picking !== null) requestOverlay();
@@ -2726,6 +2970,16 @@ export default function MapView({
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
+    // A measurement handle lets go, and the coalescing group ends with it:
+    // the next drag of the same handle must be its own undo entry rather than
+    // merging into this one.
+    if (measureDrag.current) {
+      measureDrag.current = null;
+      void api.endGesture().catch(() => undefined);
+      requestOverlay();
+      return;
+    }
+
     // A region closes on release: a lasso becomes its own polygon, the other
     // two the shape the drag described. A drag too small to be a region is a
     // click, and a click on empty map clears the selection.
@@ -3168,6 +3422,22 @@ export default function MapView({
           >
             <ToolIcon tool={FILL} />
           </button>
+          {/*
+            The measurement tools (spec.md 10, M8). Not in the backend's
+            palette either, and for the plainest reason of the three: a
+            measurement is not an object at all. It adds nothing to the field
+            and reaches no exported file — it is drawn on the map to read a
+            number off it.
+          */}
+          <button
+            className={tool === MEASURE ? "icon active" : "icon"}
+            onClick={() => setTool(MEASURE)}
+            aria-label="Measure"
+            aria-pressed={tool === MEASURE}
+            title={`Measure (${chord("measure")}) · dividers, a passage's two paths, or range rings · click to place, drag a point to move it, Enter or Escape to finish a chain`}
+          >
+            <ToolIcon tool={MEASURE} />
+          </button>
           {palette.map((entry) => (
             <button
               key={entry.tool}
@@ -3215,13 +3485,118 @@ export default function MapView({
           </div>
         )}
 
+        {/*
+          The measurement bar. Bespoke like the select tool's, and for the same
+          reason: the schema describes an *object's* properties, and a
+          measurement has no object. What a measurement can be told is which
+          kind it is, how big a ring set is, and when to go away.
+        */}
+        {tool === MEASURE && (
+          <div className="tool-options" role="group" aria-label="Measure options">
+            <label>
+              Measure
+              <select
+                value={measureKind}
+                onChange={(event) => {
+                  endMeasuring();
+                  setMeasureKind(event.target.value as MeasurementKind);
+                }}
+                title="Dividers measure a chain leg by leg; a passage draws both ways of sailing between two points; range rings are geodesic circles about a centre"
+              >
+                {(Object.keys(MEASURE_LABELS) as MeasurementKind[]).map((kind) => (
+                  <option key={kind} value={kind}>
+                    {MEASURE_LABELS[kind]}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {measureKind === "rings" && (
+              <>
+                <label>
+                  Interval
+                  <NumberField
+                    value={ringIntervalKm}
+                    min={0.1}
+                    step={10}
+                    onCommit={(value: number) => {
+                      setRingIntervalKm(value);
+                      if (activeRings !== null) {
+                        void api
+                          .setMeasurementRings(activeRings, value, ringCount)
+                          .then(tookMeasurements)
+                          .catch(() => undefined);
+                      }
+                    }}
+                    title="Spacing between rings, in kilometres"
+                  />
+                </label>
+                <label>
+                  Rings
+                  <NumberField
+                    value={ringCount}
+                    min={1}
+                    max={50}
+                    step={1}
+                    onCommit={(value: number) => {
+                      const count = Math.round(value);
+                      setRingCount(count);
+                      if (activeRings !== null) {
+                        void api
+                          .setMeasurementRings(activeRings, ringIntervalKm, count)
+                          .then(tookMeasurements)
+                          .catch(() => undefined);
+                      }
+                    }}
+                    title="How many rings"
+                  />
+                </label>
+              </>
+            )}
+            <span className="muted">
+              {pointsNeeded(measureKind) === 1
+                ? activeRings === null
+                  ? "Click to place."
+                  : "Editing the last set placed. Click to place another."
+                : openChain.current !== null
+                  ? "Click to add a leg; Enter or Escape to finish."
+                  : `Click ${pointsNeeded(measureKind)} points.`}
+              {" Alt-click a point to remove its measurement."}
+            </span>
+            <button
+              disabled={!measurements.some((m) => m.kind === measureKind)}
+              onClick={() => {
+                endMeasuring();
+                if (measureKind === "rings") setActiveRings(null);
+                void api
+                  .clearMeasurements(measureKind)
+                  .then(tookMeasurements)
+                  .catch(() => undefined);
+              }}
+              title={`Clear every ${MEASURE_LABELS[measureKind].toLowerCase()} measurement`}
+            >
+              Clear {MEASURE_LABELS[measureKind].toLowerCase()}
+            </button>
+            <button
+              disabled={measurements.length === 0}
+              onClick={() => {
+                endMeasuring();
+                setActiveRings(null);
+                void api.clearMeasurements(null).then(tookMeasurements).catch(() => undefined);
+              }}
+              title="Clear every measurement on the map"
+            >
+              Clear all
+            </button>
+          </div>
+        )}
+
         {tool === FILL && region === null && (
           <div className="tool-options" role="group" aria-label="Fill options">
             <span className="muted">Select a region first — the fill takes its shape.</span>
           </div>
         )}
 
-        {schema && (tool !== FILL || region !== null) && (
+        {schema && tool !== MEASURE && (tool !== FILL || region !== null) && (
           <ToolOptions
             schema={schema}
             state={toolState}

@@ -6,6 +6,7 @@
 //! here, and tested against independent reference values.
 
 pub mod angle;
+pub mod annotation;
 pub mod canonical;
 pub mod capture;
 pub mod clipboard;

@@ -304,12 +304,33 @@ impl Default for ViewState {
 /// Measurement overlays (spec.md 10).
 ///
 /// Saved with the project but never contributing to the field or the export.
-/// Defined now, populated in M8; having the slot means adding measurements
-/// later needs no schema migration.
+/// Measurements laid over the map (spec.md 10, M8).
+///
+/// One list rather than three, because everything above them treats a
+/// measurement alike — placed, dragged, saved, cleared, drawn — and the one
+/// operation that does not, the per-tool clear, is a filter on the variant.
+/// See [`crate::annotation`].
+///
+/// They are document state and nothing more: no flattening path reads this
+/// field, so a measurement cannot reach a rendered tile or an exported GRIB.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 #[non_exhaustive]
-pub struct Annotations {}
+pub struct Annotations {
+    /// Every measurement, in the order it was placed.
+    pub measurements: Vec<crate::annotation::Annotation>,
+}
+
+impl Annotations {
+    /// The measurements, as a set.
+    ///
+    /// A constructor because the struct is `#[non_exhaustive]`: a future kind
+    /// of annotation must not be a compile error in every crate that builds
+    /// one, and this is the one place that has to learn about it.
+    pub fn of(measurements: Vec<crate::annotation::Annotation>) -> Self {
+        Self { measurements }
+    }
+}
 
 /// A complete project.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -477,6 +498,13 @@ impl Project {
                 object.props.backfill(object.tool);
                 object.active_range = object.active_range.clamped_to(last);
             }
+        }
+
+        // A measurement has an id like anything else, and an unreserved one is
+        // reissued to the next object placed — which would make a drag on the
+        // dividers edit a brush stroke (spec.md 10, M8).
+        for annotation in &self.annotations.measurements {
+            Id::reserve_above(annotation.id.raw());
         }
 
         if self.view.current_step > last {

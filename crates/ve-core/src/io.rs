@@ -1343,6 +1343,37 @@ mod tests {
                 },
             }));
 
+        // A measurement's points and its ring interval reach the file too
+        // (spec.md 10, M8).
+        project.annotations.measurements = vec![
+            crate::annotation::Annotation {
+                id: crate::id::Id::from_raw(31),
+                measurement: crate::annotation::Measurement::Dividers {
+                    points: vec![
+                        LonLat {
+                            lon: HOSTILE[2],
+                            lat: 45.123_456_789_012_34,
+                        },
+                        LonLat {
+                            lon: -12.508_890_379_193_765,
+                            lat: HOSTILE[2].abs() / 2.0,
+                        },
+                    ],
+                },
+            },
+            crate::annotation::Annotation {
+                id: crate::id::Id::from_raw(32),
+                measurement: crate::annotation::Measurement::Rings {
+                    centre: LonLat {
+                        lon: HOSTILE[2],
+                        lat: -12.508_890_379_193_765,
+                    },
+                    interval_m: HOSTILE[0],
+                    count: 3,
+                },
+            },
+        ];
+
         let mut rect = Object::new(ToolKind::ShapeFill, "rect", 24);
         rect.geometry = Geometry::Rect {
             half_width_m: HOSTILE[0],

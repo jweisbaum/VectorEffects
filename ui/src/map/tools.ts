@@ -53,13 +53,23 @@ export const SELECT = "select" as const;
  */
 export const FILL = "fill" as const;
 
-/** What a pointer drag does: pan and select, draw a region, or draw with one
- * of the tools. */
-export type ActiveTool = typeof HAND | typeof SELECT | typeof FILL | Tool;
+/**
+ * The measurement tool: it draws an *annotation* over the map (spec.md 10, M8).
+ *
+ * Frontend-only for the third time, and for the plainest reason yet: a
+ * measurement is not an object at all. It contributes nothing to the field,
+ * reaches no exported file, and has no properties for a schema to describe —
+ * it is something drawn on the map to read a number off it.
+ */
+export const MEASURE = "measure" as const;
+
+/** What a pointer drag does: pan and select, draw a region, measure, or draw
+ * with one of the tools. */
+export type ActiveTool = typeof HAND | typeof SELECT | typeof FILL | typeof MEASURE | Tool;
 
 /** Whether a tool draws or edits objects rather than pointing at ground. */
 export function drawsObjects(tool: ActiveTool): tool is Tool {
-  return tool !== HAND && tool !== SELECT && tool !== FILL;
+  return tool !== HAND && tool !== SELECT && tool !== FILL && tool !== MEASURE;
 }
 
 /** The options a tool is holding, keyed by property id. */
