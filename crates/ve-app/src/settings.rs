@@ -180,7 +180,24 @@ pub struct AppSettings {
     /// Where the macro library lives. Empty means the default under the app
     /// data directory (M16).
     pub macro_directory: String,
+    /// How the map lays the world out (M11): one of [`PROJECTIONS`].
+    ///
+    /// A view preference and nothing else. Nothing below the view reads it —
+    /// the document is geodesic, the evaluator works in lat/lon and the export
+    /// has its own grid — so changing it cannot change a saved project or an
+    /// exported file (invariant 3). It lives in the application's settings
+    /// rather than the project's for exactly that reason: it says how *this*
+    /// person likes to look at a map, not what the map is.
+    pub projection: String,
 }
+
+/// The map projections the view offers, in the order the menu lists them.
+///
+/// Named here because the setting is validated against them, and a hand-edited
+/// settings file naming something else must cost the preference and not the
+/// launch. The formulas live in `ui/src/map/projection.ts`, which is the only
+/// place they are needed.
+pub const PROJECTIONS: [&str; 3] = ["equirectangular", "mercator", "miller"];
 
 impl Default for AppSettings {
     fn default() -> Self {
@@ -189,6 +206,7 @@ impl Default for AppSettings {
             default_wind_scale_knots: 60.0,
             default_current_scale_knots: 6.0,
             macro_directory: String::new(),
+            projection: PROJECTIONS[0].to_owned(),
         }
     }
 }
@@ -266,6 +284,9 @@ impl AppSettings {
         }
         self.default_wind_scale_knots = self.default_wind_scale_knots.clamp(1.0, 400.0);
         self.default_current_scale_knots = self.default_current_scale_knots.clamp(1.0, 400.0);
+        if !PROJECTIONS.contains(&self.projection.as_str()) {
+            self.projection = PROJECTIONS[0].to_owned();
+        }
         self
     }
 }
@@ -387,6 +408,31 @@ pub fn colour_scale_set(
     })
 }
 
+/// Sets how the map lays the world out (M11).
+#[tauri::command]
+pub fn set_projection(
+    state: tauri::State<'_, AppState>,
+    projection: String,
+) -> Result<AppSettings> {
+    projection_set(&state, projection)
+}
+
+/// Implementation of [`set_projection`].
+pub fn projection_set(state: &AppState, projection: String) -> Result<AppSettings> {
+    if !PROJECTIONS.contains(&projection.as_str()) {
+        return Err(AppError::BadOption {
+            field: "projection",
+            value: projection,
+        });
+    }
+    let file = state.paths.settings_file();
+    with_session(state, |session| {
+        session.settings.projection = projection.clone();
+        session.save_settings(&file)?;
+        Ok(session.settings.clone())
+    })
+}
+
 /// Sets where the macro library lives (M16 fills it).
 #[tauri::command]
 pub fn set_macro_directory(
@@ -418,6 +464,26 @@ mod tests {
         let count = chords.len();
         chords.dedup();
         assert_eq!(chords.len(), count, "two defaults share a chord");
+    }
+
+    #[test]
+    fn a_settings_file_naming_an_unknown_projection_costs_the_preference() {
+        // A settings file is a file: it can be hand-edited or written by a
+        // different build. An unusable projection must fall back to the flat
+        // map rather than reach the renderer, which indexes a list with it.
+        let settings = AppSettings {
+            projection: "gall-peters".to_owned(),
+            ..AppSettings::default()
+        }
+        .normalised();
+        assert_eq!(settings.projection, "equirectangular");
+
+        let kept = AppSettings {
+            projection: "mercator".to_owned(),
+            ..AppSettings::default()
+        }
+        .normalised();
+        assert_eq!(kept.projection, "mercator");
     }
 
     #[test]

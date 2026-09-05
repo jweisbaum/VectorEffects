@@ -219,8 +219,14 @@ stamp is a shape in.
 cosine: a degree of latitude is a fixed number of pixels everywhere, so the
 conversion is latitude-independent and the footprint comes out the requested
 number of pixels **across and tall**. `size_km` means the same thing in both
-spaces — the footprint's north-south ground extent, the one axis the projection
-leaves alone — so switching units changes the shape's width, never its height.
+spaces — the footprint's north-south ground extent — so switching units changes
+the shape's width, never its height.
+
+Both statements are made in the project's map space, which is equirectangular
+(§5.1). The px number is measured on the horizontal axis, where every
+projection the view offers is linear, so what a px size resolves to in km does
+not depend on which projection the map is showing — as it must not, since the
+answer is frozen into the object.
 
 The space is a property of the object, frozen at creation like every other tool
 option (§6.1), and it survives in the file. It is not a display setting: a
@@ -721,22 +727,63 @@ file; a file with no usable `u`/`v` pair is refused with the reasons.
 
 ### 5.1 Projection
 
-**Equirectangular (Plate Carrée).** Chosen because the grid is global lat/lon:
-the map is 1:1 with the data grid, both poles are visible (Mercator cannot show
-them, and a global grib has rows at ±90), and there is no zoom-dependent
-distortion of the editing surface.
+**Equirectangular (Plate Carrée) by default**, with **Mercator** and **Miller**
+offered beside it (M11). Equirectangular is the default because the grid is
+global lat/lon: the map is 1:1 with the data grid, both poles are visible (a
+global grib has rows at ±90, and Mercator cannot show them), and there is no
+zoom-dependent distortion of the editing surface.
 
-Distortion near the poles is inherent and visible. Tools that care expose an
-explicit choice (§6.2, circle tool) between a shape that is circular *on screen*
-and one that is circular *on the globe*.
+The alternatives are there because the work is not always global. Mercator is
+what a marine chart is, so a bearing drawn on it is the bearing sailed, and a
+wind field read at a passage is read on the chart the passage is planned on.
+Miller keeps the poles that Mercator loses while shedding most of
+equirectangular's polar stretch.
 
-Other projections, including a globe, are planned as M11. They are a view
-concern only: object geometry is stored in geodesic frames and the export has
-its own grid, so a projection cannot affect a saved project or an exported file
-(invariant 3).
+**All three are cylindrical, and that is the design.** Longitude maps linearly
+to `x`; latitude maps to `y` through a function of latitude alone. That one
+property keeps everything above the view unchanged: a lat/lon rectangle is
+still an axis-aligned screen rectangle, so a tile is still two triangles, the
+world still repeats horizontally at ±360°, and the inverse — what the pointer
+needs — is closed-form and exact.
 
-- Pan: unbounded in longitude (wraps seamlessly), clamped in latitude.
-- Zoom: continuous, from whole-world to roughly 1 grid cell ≈ 8 px.
+Distortion near the poles is inherent and visible in every one of them. Tools
+that care expose an explicit choice (§6.2, circle tool) between a shape that is
+circular *on screen* and one that is circular *on the globe*.
+
+**A projection is a view setting and nothing else.** Object geometry is stored
+in geodesic frames, the evaluator works in lat/lon and true bearings, and the
+export has its own grid, so a projection cannot affect a saved project or an
+exported file (invariant 3). It lives in the *application's* settings, not the
+project's: it says how this person likes to look at a map, not what the map is.
+
+**`stamp_space: projected` means the project's map space, never the view's.**
+A projected stamp (§3.5, §7.2) is defined in equirectangular lon/lat degrees —
+the space the data grid is in — and the view then draws it like any other
+geometry. It has to be that way round: the space is frozen into the object at
+creation and reaches the exported GRIB, so binding it to the projection the map
+happened to be showing would make a document depend on a view setting, and a
+circle drawn under Mercator would change shape when someone opened the file
+flat. The visible consequence is that a projected stamp is a circle on the map
+only under equirectangular; under Mercator it draws taller the further from the
+equator, exactly as a lat/lon rectangle does. That is the same statement as
+"the projection is a view setting", seen from the other side.
+
+**Not done, and why.** The pseudo-cylindrical projections (Mollweide, Robinson,
+Winkel Tripel) and the globe are *not* offered. They break all four cylindrical
+properties at once: a lat/lon quad is curved, so every tile needs subdivision;
+two of the three have no closed-form inverse, so the pointer needs iteration;
+the world no longer repeats as a horizontal translation; and a globe needs
+back-face culling, spherical tile selection, a rotation interaction and a glyph
+lattice that is not a lat/lon grid. Each is a real feature and none of them is
+this one.
+
+- Pan: unbounded in longitude (wraps seamlessly), clamped in the projection's
+  own vertical coordinate, so the map cannot scroll past its top or bottom edge.
+- Zoom: continuous, from whole-world to roughly 1 grid cell ≈ 8 px. `pxPerDeg`
+  means pixels per degree *at the equator* in every projection, so the zoom
+  limits, the tile ladder and the glyph spacing keep their meanings.
+- Mercator stops at ±85.051129° (the Web Mercator limit, which makes the world
+  square). The grid's top and bottom rows sit off the map there.
 - The camera state lives in the frontend and is mirrored into `ViewState` on
   save.
 
@@ -769,7 +816,9 @@ anywhere in the UI.
   through the field as the map pans. Anchoring to the globe is continuous across
   tile boundaries by construction and keeps each glyph on its own geographic
   point. In equirectangular projection a whole-degree lattice is uniform on
-  screen at every latitude, so nothing is lost by it.
+  screen at every latitude, so nothing is lost by it; in the others its
+  vertical spacing varies with latitude as the map itself does, and the step is
+  chosen from the scale at the equator (§5.1).
 - **Two glyph styles ship in v1**, switchable from display settings:
   - **Arrows** — uniform instanced geometry, length optionally scaled by speed.
     Available for both project kinds.
@@ -914,9 +963,13 @@ All tools produce **objects**. Common rules:
   through it. The mask's covered region loses its field, leaving the basemap —
   which is never masked, since something has to be left to see. The clone's
   loses it and gains the field from the source instead, drawn through a camera
-  shifted so the source lands under the brush; a shift is enough because the
-  projection is equirectangular, where a constant offset in degrees is a
-  constant offset in pixels at every latitude (§5.1).
+  shifted so the source lands under the brush. The shift is made in the
+  projection's own vertical coordinate and anchored at the brush, so it is
+  exact where the user is drawing and drifts away from it: a constant offset in
+  degrees is a constant offset in pixels only under equirectangular, and no
+  single translation is right everywhere else (§5.1). That is the same bargain
+  the clone's `Fixed` offset mode already makes, and a preview is allowed to
+  approximate (invariant 3).
 
   **An operator's overlay draws nothing but its nib**: the outline of the stamp
   under the pointer, held through the drag. Not the swept region — a footprint
@@ -1392,7 +1445,9 @@ y = ((cell.lat - anchor.lat)              · M_PER_DEGREE) / (scale_pct / 100)
 `EARTH_RADIUS_M`, so a local metre is north-equivalent: exact due north, and
 worth `cos(lat)` metres of ground due east. A circle in this frame is therefore
 a circle on an equirectangular map at every latitude, which is the whole point,
-and an ellipse on the ground.
+and an ellipse on the ground. **Equirectangular, not whichever projection the
+view is showing**: the space is frozen into the object and reaches the export,
+so it cannot depend on a view setting (§5.1).
 
 Everything downstream is unchanged. The SDFs (§7.3) are the same functions on
 the same numbers; feather is a fraction of the shape's own extent (§7.4), so it
@@ -1589,7 +1644,12 @@ therefore takes the clone stamp's path below, sharing its depth cap.
 ### 7.7 Render tiles
 
 Preview rendering is tiled, in an equirectangular pyramid: `z=0` is 2×1 tiles of
-256², covering 360°×180°; each level doubles.
+256², covering 360°×180°; each level doubles. The pyramid is in *data* space and
+does not follow the view's projection (§5.1): a tile is a lat/lon rectangle, and
+the map draws it wherever that rectangle lands. Every projection the view offers
+is cylindrical, so a tile is still an axis-aligned screen rectangle; only its
+height varies, and the shader recovers each pixel's latitude through the
+projection's inverse rather than interpolating the corners.
 
 Tiles are served to the webview through a Tauri custom URI scheme, not through
 IPC message passing — raw bytes, no JSON, no base64:

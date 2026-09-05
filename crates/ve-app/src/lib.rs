@@ -123,6 +123,7 @@ pub fn run() -> anyhow::Result<()> {
             settings::reset_shortcuts,
             settings::set_default_scales,
             settings::set_macro_directory,
+            settings::set_projection,
             settings::set_colour_scale,
             macros::macro_library,
             macros::delete_macros,

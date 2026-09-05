@@ -16,7 +16,7 @@
  */
 
 import type { RegionShape } from "../generated/RegionShape";
-import { type Camera, normalizeLon } from "./camera";
+import { type Camera, normalizeLon, visibleBounds } from "./camera";
 
 /** How a drag with the select tool draws its region. */
 export type RegionMode = "rect" | "circle" | "lasso";
@@ -88,10 +88,13 @@ export function regionFromLasso(points: ReadonlyArray<readonly [number, number]>
  */
 export function regionOfView(camera: Camera, width: number, height: number): Region {
   const halfWidthDeg = width / 2 / camera.pxPerDeg;
-  const halfHeightDeg = height / 2 / camera.pxPerDeg;
   if (halfWidthDeg >= 180) return wholeMap();
-  const north = Math.min(90, camera.centerLat + halfHeightDeg);
-  const south = Math.max(-90, camera.centerLat - halfHeightDeg);
+  // The vertical edges are found in the projection's own coordinate and read
+  // back as latitudes: half a viewport is a different band of latitude in each
+  // projection, and the region is a band of latitude (M11).
+  const bounds = visibleBounds(camera, { width, height });
+  const north = Math.min(90, bounds.north);
+  const south = Math.max(-90, bounds.south);
   return {
     kind: "rect",
     centre: [normalizeLon(camera.centerLon), (north + south) / 2],

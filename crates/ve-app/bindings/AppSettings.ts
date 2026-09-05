@@ -21,4 +21,15 @@ default_current_scale_knots: number,
  * Where the macro library lives. Empty means the default under the app
  * data directory (M16).
  */
-macro_directory: string, };
+macro_directory: string, 
+/**
+ * How the map lays the world out (M11): one of [`PROJECTIONS`].
+ *
+ * A view preference and nothing else. Nothing below the view reads it —
+ * the document is geodesic, the evaluator works in lat/lon and the export
+ * has its own grid — so changing it cannot change a saved project or an
+ * exported file (invariant 3). It lives in the application's settings
+ * rather than the project's for exactly that reason: it says how *this*
+ * person likes to look at a map, not what the map is.
+ */
+projection: string, };

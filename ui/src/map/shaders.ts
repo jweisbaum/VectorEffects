@@ -1,23 +1,69 @@
 /**
  * GLSL sources for the map renderer.
  *
- * All programs share one projection: equirectangular, with the camera as
- * (centreLon, centreLat, pxPerDeg). Longitude is *not* normalised in the
- * vertex shaders — the renderer draws the world three times at offsets of
- * -360, 0 and +360 instead. That is what makes panning across the dateline
- * seamless without any wrapping special case in the geometry.
+ * All programs share one projection helper, with the camera as
+ * (centreLon, centreY, pxPerDeg). Longitude is *not* normalised in the vertex
+ * shaders — the renderer draws the world three times at offsets of -360, 0 and
+ * +360 instead. That is what makes panning across the dateline seamless
+ * without any wrapping special case in the geometry.
+ *
+ * **The camera's second component is the projection's `y`, not a latitude.**
+ * Every projection the map offers is cylindrical (M11), so longitude is linear
+ * in `x` and latitude reaches `y` through a function of latitude alone; the
+ * shader evaluates that function and everything else is unchanged. The mode
+ * is a uniform rather than a program per projection, because the branch is
+ * taken identically by every vertex in a draw, and a shader that differs from
+ * another only in one `if` is a shader worth not having twice.
+ *
+ * `ui/src/map/projection.ts` holds the same three formulas in TypeScript, for
+ * the overlay and the pointer. Change one and change the other, or the arrows
+ * stop landing where the field is.
  */
 
 /** Shared projection helper, prefixed to every vertex shader. */
 const PROJECTION = `
-uniform vec3 uCamera;      // centreLon, centreLat, pxPerDeg
+uniform vec3 uCamera;      // centreLon, centreY, pxPerDeg
 uniform vec2 uViewport;    // width, height in device pixels
 uniform float uLonOffset;  // world copy: -360, 0 or 360
+// Explicitly highp, and not because it needs the range. An int's *default*
+// precision is highp in a vertex shader and mediump in a fragment one, so a
+// bare "uniform int" declared in a block both stages include fails to link
+// with "precisions differ between VERTEX and FRAGMENT shaders". Floats are
+// safe only because every source here opens with precision highp float.
+uniform highp int uProjection;  // 0 equirectangular, 1 Mercator, 2 Miller
+
+const float VE_DEG = 0.017453292519943295;
+
+// The vertical map coordinate of a latitude, in degrees at the equator. The
+// port of Projection.yOf in projection.ts, decision for decision. (No
+// backticks in here: this is a template literal, and one would end it.)
+float latToY(float lat) {
+  if (uProjection == 1) {
+    float clamped = clamp(lat, -85.051129, 85.051129);
+    return log(tan(0.7853981633974483 + clamped * VE_DEG * 0.5)) / VE_DEG;
+  }
+  if (uProjection == 2) {
+    float clamped = clamp(lat, -90.0, 90.0);
+    return 1.25 * log(tan(0.7853981633974483 + 0.4 * clamped * VE_DEG)) / VE_DEG;
+  }
+  return lat;
+}
+
+// And back. Only the raster needs it, but it belongs beside its forward.
+float yToLat(float y) {
+  if (uProjection == 1) {
+    return (2.0 * atan(exp(y * VE_DEG)) - 1.5707963267948966) / VE_DEG;
+  }
+  if (uProjection == 2) {
+    return (2.5 * atan(exp(0.8 * y * VE_DEG)) - 1.9634954084936207) / VE_DEG;
+  }
+  return y;
+}
 
 vec2 geoToScreen(vec2 lonLat) {
   return vec2(
     (lonLat.x + uLonOffset - uCamera.x) * uCamera.z + uViewport.x * 0.5,
-    (uCamera.y - lonLat.y) * uCamera.z + uViewport.y * 0.5
+    (uCamera.y - latToY(lonLat.y)) * uCamera.z + uViewport.y * 0.5
   );
 }
 
@@ -110,6 +156,8 @@ void main() {
 export const RASTER_FRAG = `#version 300 es
 precision highp float;
 in vec2 vUV;
+${PROJECTION}
+uniform vec4 uTileGeo;      // west, north, spanX, spanY
 uniform sampler2D uTile;
 uniform float uSpeedScale;  // full-scale speed, m/s
 uniform float uRampMax;     // speed mapped to the top of the ramp
@@ -157,8 +205,28 @@ vec3 ramp(float t) {
   return mix(c5, c6, (t - 0.8333) / 0.1667);
 }
 
+/**
+ * Where in the tile this pixel is.
+ *
+ * Longitude is linear in x in every projection here, so the interpolated u is
+ * exact. Latitude is not: a tile is an axis-aligned rectangle on the map, but
+ * the latitude across it is the projection's inverse, and interpolating the
+ * corners instead would bow the field inside a tall tile. So v is recovered
+ * from the pixel, which is exact everywhere.
+ *
+ * Equirectangular takes the interpolated value unchanged, so the projection
+ * the app grew up in draws precisely the pixels it always did.
+ */
+vec2 tileUV() {
+  if (uProjection == 0) return vUV;
+  // gl_FragCoord is y-up from the bottom; the camera's y is y-down from the top.
+  float screenY = uViewport.y - gl_FragCoord.y;
+  float y = uCamera.y - (screenY - uViewport.y * 0.5) / uCamera.z;
+  return vec2(vUV.x, (uTileGeo.y - yToLat(y)) / uTileGeo.w);
+}
+
 void main() {
-  float speed = sampleSpeed(vUV);
+  float speed = sampleSpeed(tileUV());
   vec3 colour = ramp(speed / max(uRampMax, 0.001));
   // Calm water stays transparent so the basemap shows through.
   // Capped below 1 so the basemap stays visible through the field; calm areas

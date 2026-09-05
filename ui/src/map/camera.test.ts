@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 
+import { PROJECTIONS, projectionOf } from "./projection";
+
 import {
   MAX_TILE_LEVEL,
   clampCamera,
   minPxPerDeg,
   normalizeLon,
+  panBy,
   project,
   tileBounds,
   tileColumns,
@@ -334,5 +337,111 @@ describe("glyph lattice", () => {
     expect(lattice.originLon + (lattice.cols - 1) * step).toBeLessThan(bounds.east + 1e-9);
     expect(lattice.originLat).toBeLessThanOrEqual(bounds.north + 1e-9);
     expect(lattice.originLat - (lattice.rows - 1) * step).toBeGreaterThan(bounds.south - 1e-9);
+  });
+});
+
+describe("the cylindrical projections (M11)", () => {
+  const view = { width: 800, height: 400 };
+
+  it("round-trips a screen point back to where it came from", () => {
+    // `unproject` is on the *painting* path: a stroke drawn at 60°N has to
+    // land at 60°N, in every projection (M11's acceptance).
+    for (const projection of PROJECTIONS) {
+      const camera = clampCamera(
+        { centerLon: 10, centerLat: 40, pxPerDeg: 8, projection: projection.id },
+        view,
+      );
+      for (const point of [
+        { x: 100, y: 80 },
+        { x: 400, y: 200 },
+        { x: 750, y: 350 },
+      ]) {
+        const geo = unproject(camera, view, point);
+        const back = project(camera, view, geo);
+        expect(back.x, `${projection.id} x`).toBeCloseTo(point.x, 6);
+        expect(back.y, `${projection.id} y`).toBeCloseTo(point.y, 6);
+      }
+    }
+  });
+
+  it("keeps the point under the cursor under the cursor while zooming", () => {
+    for (const projection of PROJECTIONS) {
+      const camera = clampCamera(
+        { centerLon: 0, centerLat: 30, pxPerDeg: 6, projection: projection.id },
+        view,
+      );
+      const anchor = { x: 200, y: 120 };
+      const before = unproject(camera, view, anchor);
+      const zoomed = zoomAbout(camera, view, anchor, 1.8);
+      const after = unproject(zoomed, view, anchor);
+      expect(after.lon, `${projection.id} lon`).toBeCloseTo(before.lon, 4);
+      expect(after.lat, `${projection.id} lat`).toBeCloseTo(before.lat, 4);
+    }
+  });
+
+  it("never scrolls the map off the top or bottom", () => {
+    for (const projection of PROJECTIONS) {
+      const clamped = clampCamera(
+        { centerLon: 0, centerLat: 89.9, pxPerDeg: 40, projection: projection.id },
+        view,
+      );
+      const top = project(clamped, view, { lon: 0, lat: projection.maxLat });
+      expect(top.y, `${projection.id}`).toBeLessThanOrEqual(0.001);
+    }
+  });
+
+  it("carries the projection through a clamp, so the camera keeps it", () => {
+    // Everything downstream reads the projection off the camera it is handed;
+    // a clamp that dropped the field would silently draw the world flat again.
+    const clamped = clampCamera(
+      { centerLon: 0, centerLat: 10, pxPerDeg: 6, projection: "mercator" },
+      view,
+    );
+    expect(clamped.projection).toBe("mercator");
+    expect(zoomAbout(clamped, view, { x: 10, y: 10 }, 2).projection).toBe("mercator");
+  });
+
+  it("culls to the band of latitude actually on screen", () => {
+    // Under Mercator the same pixel height is a narrower band of latitude the
+    // further north it sits. Culling to the equirectangular band instead would
+    // ask for tiles that are not on screen and skip ones that are.
+    const camera = { centerLon: 0, centerLat: 60, pxPerDeg: 4, projection: "mercator" as const };
+    const bounds = visibleBounds(camera, view);
+    const halfY = view.height / 2 / camera.pxPerDeg;
+    const mercator = projectionOf("mercator");
+    expect(bounds.north).toBeCloseTo(mercator.latOf(mercator.yOf(60) + halfY), 6);
+    expect(bounds.south).toBeCloseTo(mercator.latOf(mercator.yOf(60) - halfY), 6);
+    // And it really is narrower than the flat reading would have been.
+    expect(bounds.north - bounds.south).toBeLessThan(2 * halfY);
+  });
+
+  it("keeps the grabbed point under the pointer while panning", () => {
+    // A drag is a drag of the *map*: whatever was under the pointer when it
+    // went down is still under it as the hand moves. Panning in degrees of
+    // latitude instead makes the map run away from the pointer under Mercator,
+    // further the higher the latitude.
+    for (const projection of PROJECTIONS) {
+      const camera = clampCamera(
+        { centerLon: 0, centerLat: 55, pxPerDeg: 12, projection: projection.id },
+        view,
+      );
+      const grabbed = { x: 300, y: 140 };
+      const under = unproject(camera, view, grabbed);
+      const moved = { x: grabbed.x - 70, y: grabbed.y + 45 };
+      const panned = panBy(camera, view, -(moved.x - grabbed.x), -(moved.y - grabbed.y));
+      const back = project(panned, view, under);
+      expect(back.x, `${projection.id} x`).toBeCloseTo(moved.x, 6);
+      expect(back.y, `${projection.id} y`).toBeCloseTo(moved.y, 6);
+    }
+  });
+
+  it("leaves the equirectangular numbers exactly as they were", () => {
+    // A camera that names no projection is the one the app grew up in, so
+    // every existing caller keeps the behaviour it had.
+    const camera = { centerLon: 12, centerLat: -20, pxPerDeg: 5 };
+    const point = { lon: 40, lat: 33 };
+    expect(project(camera, view, point)).toEqual(
+      project({ ...camera, projection: "equirectangular" }, view, point),
+    );
   });
 });

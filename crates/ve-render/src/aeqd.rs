@@ -63,9 +63,12 @@ pub enum Space {
     #[default]
     Geodesic,
     /// Map space: local metres are degrees scaled by [`M_PER_DEGREE`]. A circle
-    /// here is a circle in equirectangular projection, so it is a circle on
-    /// screen at every latitude — and an ellipse on the ground, narrowed
-    /// east-west by `cos(lat)`.
+    /// here is a circle in equirectangular projection at every latitude — and
+    /// an ellipse on the ground, narrowed east-west by `cos(lat)`.
+    ///
+    /// Equirectangular specifically, and not whichever projection the map
+    /// happens to be showing: the space is frozen into the object and reaches
+    /// the export, so it cannot depend on a view setting (spec §5.1, D63).
     Projected,
 }
 

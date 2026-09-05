@@ -31,6 +31,8 @@ import {
   clampCamera,
   minPxPerDeg,
   normalizeLon,
+  panBy,
+  projectionFor,
   project as toScreen,
   unproject,
   visibleTiles,
@@ -54,6 +56,12 @@ import {
   type LatticeProgress,
   latticeUnder,
 } from "./glyph";
+import {
+  DEFAULT_PROJECTION,
+  PROJECTIONS,
+  type ProjectionId,
+  projectionOf,
+} from "./projection";
 import { RAMP_STOPS, rampCss } from "./ramp";
 import { parseBasemap } from "./format";
 import { marqueeBounds } from "./marquee";
@@ -293,6 +301,7 @@ export default function MapView({
   onProjectChanged,
   onRegionActive,
   settings,
+  onSettings,
   onStepChange,
   onSelect,
   onViewport,
@@ -319,6 +328,8 @@ export default function MapView({
    * wrong one.
    */
   settings: AppSettings | null;
+  /** Called when the map changes a view preference — the projection (M11). */
+  onSettings: (settings: AppSettings) => void;
   onStepChange: (step: number) => void;
   onSelect: (objects: number[]) => void;
   /**
@@ -1064,20 +1075,9 @@ export default function MapView({
           action === "zoom_in" ? 1.25 : 0.8,
         );
       } else {
-        const dLon =
-          (action === "pan_right" ? 1 : action === "pan_left" ? -1 : 0) *
-          ((view.width * stepPx) / camera.pxPerDeg);
-        const dLat =
-          (action === "pan_up" ? 1 : action === "pan_down" ? -1 : 0) *
-          ((view.height * stepPx) / camera.pxPerDeg);
-        cameraRef.current = clampCamera(
-          {
-            centerLon: normalizeLon(camera.centerLon + dLon),
-            centerLat: camera.centerLat + dLat,
-            pxPerDeg: camera.pxPerDeg,
-          },
-          view,
-        );
+        const dx = (action === "pan_right" ? 1 : action === "pan_left" ? -1 : 0) * stepPx;
+        const dy = (action === "pan_down" ? 1 : action === "pan_up" ? -1 : 0) * stepPx;
+        cameraRef.current = panBy(camera, view, view.width * dx, view.height * dy);
       }
       requestDraw();
     },
@@ -1306,6 +1306,26 @@ export default function MapView({
     if (!barbsAvailable) setGlyphStyle("arrow");
   }, [barbsAvailable, lastStep, onStepChange, step]);
 
+  /**
+   * The map projection, taken from the settings onto the camera (M11).
+   *
+   * It rides on the camera because everything that needs it — the renderer,
+   * the pointer, the overlay — is already handed one. Re-clamped on the way,
+   * since a projection change moves where the poles are and the current centre
+   * may no longer be a legal one.
+   */
+  useEffect(() => {
+    const wanted = projectionOf(
+      (settings?.projection ?? DEFAULT_PROJECTION) as ProjectionId,
+    ).id;
+    if (cameraRef.current.projection === wanted) return;
+    cameraRef.current = clampCamera(
+      { ...cameraRef.current, projection: wanted },
+      viewRef.current,
+    );
+    requestDraw();
+  }, [requestDraw, settings?.projection]);
+
   // Mirror display state into the refs `draw` reads, then redraw.
   useEffect(() => {
     glyphStyleRef.current = glyphStyle;
@@ -1411,7 +1431,7 @@ export default function MapView({
         // report as a short one. The key holds everything the geometry depends
         // on besides the points; a zoom mid-stroke rebuilds from nothing.
         const key = [
-          camera.centerLon, camera.centerLat, camera.pxPerDeg,
+          camera.centerLon, camera.centerLat, camera.pxPerDeg, camera.projection,
           view.width, view.height,
           footprint.radiusKm, footprint.shape, footprint.space,
           stepDeg, MAX_PREVIEW_GLYPHS,
@@ -2505,23 +2525,16 @@ export default function MapView({
       const dx = point.x - dragging.current.x;
       const dy = point.y - dragging.current.y;
       dragging.current = point;
-      const camera = cameraRef.current;
-      cameraRef.current = clampCamera(
-        {
-          ...camera,
-          // Longitude is never clamped, so dragging past the dateline just
-          // keeps going and wraps.
-          centerLon: camera.centerLon - dx / camera.pxPerDeg,
-          centerLat: camera.centerLat + dy / camera.pxPerDeg,
-        },
-        viewRef.current,
-      );
+      // The camera moves against the pointer: the map follows the hand.
+      cameraRef.current = panBy(cameraRef.current, viewRef.current, -dx, -dy);
       requestDraw();
     }
 
     readoutStore.current?.set({
       zoomPercent: Math.round(
-        (cameraRef.current.pxPerDeg / minPxPerDeg(viewRef.current)) * 100,
+        (cameraRef.current.pxPerDeg /
+          minPxPerDeg(viewRef.current, projectionFor(cameraRef.current))) *
+          100,
       ),
     });
     sampleAt(unproject(cameraRef.current, viewRef.current, point));
@@ -3261,6 +3274,23 @@ export default function MapView({
             {barbsAvailable && <option value="barb">Wind barbs</option>}
             <option value="arrow">Arrows</option>
             <option value="off">Off</option>
+          </select>
+        </label>
+        <label>
+          Projection
+          <select
+            value={settings?.projection ?? "equirectangular"}
+            disabled={settings === null}
+            onChange={(e) => {
+              void api.setProjection(e.target.value).then(onSettings);
+            }}
+            title="How the map lays the world out. A view setting: it never changes what is stored or exported."
+          >
+            {PROJECTIONS.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.label}
+              </option>
+            ))}
           </select>
         </label>
         <label>

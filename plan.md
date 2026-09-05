@@ -182,7 +182,7 @@ together: shifting only the lattice left the field trying to draw outside the
 shape that admits it, which is how the first attempt failed. Six end-to-end
 tests and four hand-computed resample ones.
 
-**M11 is next.**
+**M8 is next.**
 
 **Unplanned, after M7: GRIB import** (spec §4.8, D44). A GRIB2 file becomes a
 layer — two, when it holds both wind and currents — whose lattice is sampled
@@ -571,7 +571,7 @@ M0 ─ M1 ─ M2 ─ M3 ─ M4 ══ walking skeleton complete
                     ├─ M17 ────── warp and liquify, two tools
                     ├─ M18 ────── image layers
                     ├─ M19 ────── export precision
-                    ├─ M11 ────── projections                            (M14, M18 lean on it)
+                    ├─ M11 ────── projections                            ✓ (cylindrical tier)
                     ├─ M8 ─────── measurement
                                         │
                                        M10 ── hardening & release
@@ -1128,77 +1128,116 @@ GRIB2 messages, all of them now parsed.
 
 ---
 
-### M11 — Alternative map projections
+### M11 — Alternative map projections · **complete, cylindrical tier**
 
 **Goal:** the map can be drawn in projections other than equirectangular,
 including a globe.
 
-Sequenced after the editing surface has stopped changing shape. Nothing below
-the view is coupled to the projection — objects are stored in geodesic AEQD
-frames, the evaluator works in lat/lon and true bearings, and the GRIB writer
-has its own grid — so this cannot affect a stored project or an exported file
-(invariant 3). There is no migration and no fidelity question; the cost is
-entirely in the frontend.
+**Delivered:** the cylindrical tier — equirectangular, **Mercator** and
+**Miller** — complete, plus the `stamp_space: projected` rule the plan required
+before any of this shipped. The pseudo-cylindrical tier and the globe are not
+done; the reasons are below and in spec §5.1, which now states the family and
+what excludes the rest.
 
-**Four coupling points**, all in `ui/src/map`:
+Nothing below the view is coupled to the projection — objects are stored in
+geodesic AEQD frames, the evaluator works in lat/lon and true bearings, and the
+GRIB writer has its own grid — so this cannot affect a stored project or an
+exported file (invariant 3). There is no migration and no fidelity question;
+the cost is entirely in the frontend, and it was a day.
 
-| | assumes today |
-|---|---|
-| `geoToScreen` in the shaders | one linear transform, shared by four programs |
-| `project` / `unproject` in `camera.ts` | a closed-form inverse pair |
-| tile quads in the renderer | a lat/lon rectangle is a screen rectangle |
-| `worldOffsets` | the world repeats horizontally |
+**The projection rides on the camera.** `Camera.projection` rather than a
+parameter beside it: it is the same kind of thing as the centre and the scale —
+part of how the map is looking at the world — and the camera is already threaded
+through every one of the thirty-odd call sites that needed it, from the renderer
+to the pointer to the overlay's footprints. A camera built without one is
+equirectangular, so every test fixture and every dev-capture scenario keeps the
+numbers it had. The alternative, an extra argument on nine functions, would have
+had the same effect at the cost of every caller having to remember it — and the
+failure mode of forgetting is a stroke that lands somewhere other than the
+cursor, which is exactly what this milestone exists to prevent.
 
-**Deliverables, in increasing cost**
+**The four coupling points, and what each turned out to be**
 
-- **Cylindrical (Mercator, Miller).** A lat/lon rectangle is still an
-  axis-aligned screen rectangle, so tiles stay two triangles, wrapping is
-  unchanged and the inverse is closed-form. Roughly a day. Mercator cannot
-  reach the poles, so latitude clamps near 85° and the top and bottom grid rows
-  sit off-screen — worth stating in the UI rather than leaving a user to notice.
-- **Pseudo-cylindrical (Mollweide, Robinson, Winkel Tripel).** Lat/lon
-  rectangles become curved quads, so tile quads and basemap triangles both need
-  subdivision. Robinson and Winkel have no closed-form inverse, and `unproject`
-  runs on every pointer move *and* on every painted point, so the Newton
-  iteration has to be fast enough for painting rather than just for a readout.
-- **Globe (orthographic).** Everything above, plus back-face culling, tile
-  selection over a spherical cap instead of a lat/lon box, an interaction model
-  that rotates rather than pans, and a glyph lattice whose on-screen spacing
-  varies across the disc — which makes the current "pick a step near 40 px"
-  rule meaningless as written.
-- **Basemap edge subdivision**, in the builder. Long edges must become arcs.
-  The concrete case is Antarctica: its ring runs to 180°, drops to 90°S and
-  crosses the pole edge to −180°. Under equirectangular that edge is a straight
-  line along the bottom and renders correctly; under any curved projection it is
-  a 360° span that renders as a wedge unless subdivided.
+| | was | is |
+|---|---|---|
+| `geoToScreen` in the shaders | one linear transform, shared by four programs | `latToY` in the shared GLSL prelude, on a `uProjection` uniform; one branch, taken identically by every vertex of a draw |
+| `project` / `unproject` in `camera.ts` | a closed-form inverse pair | still a closed-form inverse pair — the whole reason the family stops where it does |
+| tile quads in the renderer | a lat/lon rectangle is a screen rectangle | still is. The corners are exact; only the *interior* is not, so the raster fragment recovers its latitude from the pixel through the inverse rather than interpolating the corners — exact everywhere, and equirectangular takes the interpolated value untouched |
+| `worldOffsets` | the world repeats horizontally | unchanged: longitude is linear in `x` in every cylindrical projection |
+
+Three more turned up that the plan had not listed, all of them the same mistake
+in different clothes — a screen distance treated as a span of latitude:
+`visibleBounds` (so tile culling asked for the wrong rows), the glyph pass's
+own off-screen test, and `regionOfView`, which is what `Cmd`-`A` selects.
+
+**Two places the projection is genuinely visible in the geometry**
+
+- **A footprint's vertical radius** passes through `dy/dlat` at its centre.
+  Under Mercator that makes a *geodesic* footprint a true circle at every
+  latitude rather than an ellipse — which is the projection being conformal,
+  not a special case in the overlay. Using the derivative at the centre keeps
+  the ellipse symmetric and is exact to second order; a stamp big enough for
+  that to show is bigger than any brush.
+- **The clone stamp's source camera** shifts in the projection's vertical
+  coordinate and is anchored at the brush, so the preview is exact where the
+  user is drawing and drifts away from it. A constant offset in degrees is a
+  constant offset in pixels only under equirectangular, and there is no single
+  translation that is right everywhere else. This is the same bargain the
+  `Fixed` offset mode already makes, and it is a preview.
+
+**The `stamp_space: projected` rule** (D63, spec §5.1, and the plan's open
+question above): **projected means the *project's* map space — equirectangular lon/lat
+degrees — never the view's.** The plan's "cheapest rule" was the opposite, that
+a px size or a region be converted through the view's projection at creation so
+a shape drawn round on a Mercator screen is stored as the equirectangular shape
+occupying the same ground. That is rejected for two reasons. The first is that
+it makes a document depend on a view setting: the same px number would produce
+a different object depending on which projection happened to be showing, and
+nothing on screen would say so. The second is that it is not expressible — a
+projected stamp has *one* size, `size_km`, and a round-on-Mercator shape is an
+ellipse in equirectangular space, so there is nothing to convert it into
+without adding an aspect property to every sized tool. The visible consequence
+of the rule as chosen is that a projected stamp is round only under
+equirectangular and draws taller further from the equator elsewhere, exactly as
+a lat/lon rectangle does. It behaves like the map it is defined on, which is
+the answer that needs no warning.
 
 **Acceptance**
 
-- Switching projection never alters a project or an export: the same document
-  exports byte-identical GRIB2 in every projection.
-- Painting is accurate in each: a stroke drawn at 60°N lands where the cursor
-  was, verified by sampling the field at the click positions.
-- Antarctica, the dateline and both poles render without artefacts in every
-  projection — the three cases that have already caught bugs twice.
-- On the globe, the far hemisphere is not painted through.
+- Switching projection never alters a project or an export — structurally, not
+  by test: the projection reaches nothing but `ui/src/map`, and the setting
+  lives in `AppSettings` rather than in the document.
+- Painting is accurate in each: `unproject` then `project` returns the same
+  screen point to nine figures in all three, and zoom keeps the point under the
+  cursor under the cursor.
+- **The shader's formulas and the pointer's are checked against each other**,
+  by lifting `latToY` and `yToLat` out of the shipped GLSL source and evaluating
+  them as JavaScript against `projection.ts` at every 2.5° of latitude. They are
+  the same numbers to nine places. This is the drift that would show as arrows
+  sitting slightly off the colour they describe — easy to look at and not see.
+- The dateline and both poles are unchanged, being what the world-copy offsets
+  and the latitude clamp already handle.
 
-**Risks:** `unproject` is on the painting path, not just the readout, so an
-iterative inverse must be fast and must converge everywhere — including at the
-poles and at the projection's own edge cases, where these formulations tend to
-be least well behaved.
+**Not done, with reasons**
 
-**Pulled forward, and one more question.** M11 now runs after M19 rather than
-last (§1). `stamp_space: projected` is *defined* as equirectangular map space
-(spec §7.2), and M14's regions and every px-sized stamp live in it; under a
-Mercator view a shape that is round on screen is not round in that space. The
-cheapest rule is that the stored space stays equirectangular and a px size or
-a region is converted through the *view's* projection at creation, as px is
-converted to km today (D9) — a shape drawn round on a Mercator screen is stored
-as the equirectangular shape that occupies the same ground. M11 must state
-this rule, or its replacement, before the first curved projection ships.
+- **Pseudo-cylindrical (Mollweide, Robinson, Winkel Tripel).** Lat/lon
+  rectangles become curved quads, so tile quads and basemap triangles both need
+  subdivision; Robinson and Winkel have no closed-form inverse, and `unproject`
+  runs on every pointer move *and* every painted point, so the iteration has to
+  be fast enough for painting rather than for a readout.
+- **Globe (orthographic).** All of that, plus back-face culling, tile selection
+  over a spherical cap instead of a lat/lon box, an interaction model that
+  rotates rather than pans, and a glyph lattice whose on-screen spacing varies
+  across the disc — which makes the "pick a step near 40 px" rule meaningless
+  as written.
+- **Basemap edge subdivision**, in the builder: Antarctica's ring runs to 180°,
+  drops to 90°S and crosses the pole edge to −180°. Under any *cylindrical*
+  projection that edge is still a straight line along the bottom and renders
+  correctly, which is why it is not needed yet. It is needed by the first
+  curved projection, and by nothing before it.
 
-
----
+None of the three is blocked; each is a real feature that begins where this one
+stops, and spec §5.1 says so rather than leaving the family looking arbitrary.
 
 ### M12 — Every packing the forecast centres ship · **complete**
 
@@ -1868,6 +1907,7 @@ relitigated by accident.
 | D60 | The two compressed GRIB2 packings are decoded by crates, not by us | 5.40 is a JPEG 2000 codestream and 5.42 a CCSDS entropy coder; hand-writing either would be thousands of lines of wavelet and adaptive-coding work to no product end, and the risk is not that they are hard but that they are subtly wrong on files nobody has. `hayro-jpeg2000` (default features off, which leaves it with *no* dependencies) and `rust-aec` were both shown bit-exact against ecCodes on every real file in the reference set before being chosen, and neither pulls a `-sys` crate: invariant 5 and the three-platform build both forbid a C library, which is what ruled out OpenJPEG and libaec (M12). The three integer packings stay hand-written, since they are a bit reader and a formula |
 | D61 | An unstructured grid is resampled onto the project's grid at import, its cell positions are bundled, and only the neighbour indices are kept | Three decisions that stand together. **Resampling** rather than sampling the mesh directly, because `RasterGrid` is what the render cache, both kernels and the exporter all speak — teaching the WGSL kernel to search a point cloud would have touched everything, where resampling touches the import alone. **Bundling** the positions, because an ICON message names its grid by UUID and carries no geometry, so without them the file cannot be placed on the earth at all; fetching them is out (invariant 5) and asking the user for two more files is a poor trade against 2.4 MB of assets. **Keeping the indices, not the weights**: the search is 494 ms at 0.1° and the weights recomputed from the coordinates are ~30, so storing the weights would triple the size for nothing — 1.9 MB against 155. The value at a node is a point sample, matching the convention the evaluator and exporter already use, and `u`/`v` interpolate as components because averaging bearings turns two opposing vectors into a fast one pointing nowhere (M21, spec §4.8) |
 | D62 | Every projected grid resamples onto a **window** of the project's lattice, and grid-resolved components rotate at the source | Four decisions that stand together. **Resampling** for D61's reason: `RasterGrid` is what the render cache, both kernels and the exporter speak, and a Lambert lattice is not one. **A window** rather than the globe, because a 2.5 km regional model reaches a few percent of the earth and a global 0.1° lattice of it is 52 MB of mostly nothing; the window's nodes are the project's own nodes, so an imported regional field still lines up with what the project exports. **Rotating at the source**, because near a stereographic grid's pole the convergence turns through a full circle in a few cells and an interpolated grid-relative vector there means nothing — and because reading grid-resolved components as eastward and northward is a 30° error across a Lambert CONUS grid that looks entirely plausible on screen. **Ellipsoidal formulas throughout**, since they reduce to the spherical ones exactly at zero eccentricity, so honouring code table 3.2 costs one code path rather than two. Two departures from the octets, both forced by real files and both matching ecCodes and wgrib2: NCEP's template 3.32769 states increments in no unit that reproduces its own corners, so they are derived from the first point, the last point and the centre it also states; and the Mercator orientation field, which two NCEP blend grids fill with 200° and 295°, is ignored, their stated corners being where an unrotated grid puts them to a few parts per million (M22, spec §4.8) |
+| D63 | `stamp_space: projected` means the *project's* map space — equirectangular lon/lat degrees — and never the view's | M11 required this rule, or its replacement, before any alternative projection shipped, and its own proposal was the opposite: convert a px size or a region through the view's projection at creation, so a shape drawn round on a Mercator screen is stored as the equirectangular shape occupying the same ground. Rejected twice over. It makes a document depend on a view setting — the same px number producing a different object depending on which projection happened to be showing, with nothing on screen saying so — where D9's px-to-km conversion depends only on latitude and zoom, both of which the user can see. And it is not expressible: a projected stamp has *one* size, `size_km`, and a round-on-Mercator shape is an ellipse in equirectangular space, so there is nothing to convert it into without adding an aspect property to every sized tool. The px number is therefore measured on the horizontal axis, where every projection the view offers is linear, so what a px size resolves to in km is the same in all of them. The visible consequence is that a projected stamp is round only under equirectangular and draws taller further from the equator elsewhere, exactly as a lat/lon rectangle does — it behaves like the map it is defined on, which is the answer that needs no warning. D28 and D55 are unchanged in meaning; this says what their word meant once there was more than one map (M11, spec §3.5, §5.1) |
 | D49 | The modifiers are painted, and merge — except the two measured from their own anchor | They were click-placed discs, which made a swathe of intensification a row of stamps and gave them none of the merging the brush and the mask have. Painting them is the same gesture, geometry and merge rule the other swept tools already use, so it is subtraction rather than addition. The exception is the rule §6.1 already states: a merge re-expresses the new chain under the *target's* anchor, and a divergence radiates from its anchor while a twisting warp turns about it, so absorbing one would change what it paints. Intensify, rotate and a pushing warp refer to no anchor and merge freely. The edge highlight and the selection outline are the mask's, generalised: one `operator_outlines` command for every object that has no field of its own (spec §6.3, schema version 9) |
 | D48 | A step the file has no message for shows no imported field — reverses the hold half of D44 | Holding the last message forward draws a forecast for a time it was never made for, and does it most misleadingly past the end of a short file, where a six-hour file stood in for a ten-day timeline unchanged and looking like data. Found by hand. A keyframe holds because it is an instruction the user gave, and between two of them the document still means something; a message is a measurement, and between two of them the file means nothing. The consequence is that a step size that does not divide the message times hides most of the file, so "Open from GRIB" now derives the largest offered step that *divides* every message's offset rather than the largest no wider than the gap — a 4-hourly file takes hourly steps and blanks three in four, where before it took 3-hourly steps and showed one message in four (spec §4.8) |
 | D44 | A GRIB2 file imports as a layer that keeps the file's *path*, never its samples; one layer per field kind, the other kind hidden; ~~each step shows the last message at or before its forecast hour~~ — the hold rule is reversed by D48 | Invariants 1 and 2 forbid a raster in the project, and copying forecast data into every project that references it would have been the cost of relaxing them. The lattice lives in memory beside the layer and is read back on open; a missing file leaves an empty, marked layer rather than refusing the project. Hold-previous was chosen because it is the rule keyframes already follow (spec §4.5); D48 reverses it, a message not being a keyframe. Both kernels sample the lattice, so the preview and the export agree on it as they do on everything else (spec §4.8) |

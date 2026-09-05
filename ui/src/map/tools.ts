@@ -20,7 +20,7 @@ import type { ToolOptionSpec } from "../generated/ToolOptionSpec";
 import type { ToolSchema } from "../generated/ToolSchema";
 import type { StampSpace } from "../generated/StampSpace";
 import { displayDirection } from "../project/format";
-import { type Camera, normalizeLon } from "./camera";
+import { type Camera, normalizeLon, projectionFor } from "./camera";
 import {
   cosLat,
   type Footprint,
@@ -678,9 +678,15 @@ function tangentAt(
  * The camera a clone stamp's source is read through.
  *
  * The main camera shifted so that what is at the source appears where the brush
- * is. A plain translation, because the projection is equirectangular: a
- * constant offset in degrees is a constant offset in pixels at every latitude
- * (spec.md 5.1). `null` when the gesture has nothing placed yet.
+ * is. `null` when the gesture has nothing placed yet.
+ *
+ * The longitude shift is a plain translation, because longitude is linear in
+ * `x` in every projection the map offers. The latitude shift is not: a constant
+ * offset in degrees is a constant offset in pixels only under equirectangular
+ * (spec.md 5.1). So the shift is made in the projection's own vertical
+ * coordinate and anchored at the brush — exact where the user is drawing, and
+ * increasingly approximate away from it, which is the same bargain the `Fixed`
+ * mode below already makes.
  *
  * Which offset depends on the mode (spec.md 6.2). `Aligned` measures it from
  * the object's anchor — where the gesture began — and is exact everywhere.
@@ -704,9 +710,11 @@ export function cloneSourceCamera(
   const from = choiceOf(state.values, "OffsetMode") === 1 ? pointer : anchor;
   const [sourceLon, sourceLat] = positionOf(state.values, "SourcePoint");
 
+  const projection = projectionFor(camera);
+  const shiftY = projection.yOf(from[1]) - projection.yOf(sourceLat);
   return {
+    ...camera,
     centerLon: camera.centerLon - normalizeLon(from[0] - sourceLon),
-    centerLat: camera.centerLat - (from[1] - sourceLat),
-    pxPerDeg: camera.pxPerDeg,
+    centerLat: projection.latOf(projection.yOf(camera.centerLat) - shiftY),
   };
 }

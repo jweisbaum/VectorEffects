@@ -12,6 +12,7 @@ import {
   type Camera,
   type Viewport,
   glyphLattice,
+  projectionFor,
   tileBounds,
   visibleBounds,
   visibleTiles,
@@ -64,9 +65,8 @@ export interface OperatorPreview {
   /**
    * For a clone, the camera the source is read through.
    *
-   * The main camera shifted so that the source lands where the brush is. A
-   * plain translation, because the projection is equirectangular: a constant
-   * offset in degrees is a constant offset in pixels at every latitude.
+   * The main camera shifted so that the source lands where the brush is; see
+   * `cloneSourceCamera`, which builds it.
    */
   source?: Camera;
 }
@@ -189,7 +189,7 @@ export class MapRenderer {
     this.rasterProgram = link(gl, RASTER_VERT, RASTER_FRAG);
     this.glyphProgram = link(gl, GLYPH_VERT, GLYPH_FRAG);
 
-    const shared = ["uCamera", "uViewport", "uLonOffset"];
+    const shared = ["uCamera", "uViewport", "uLonOffset", "uProjection"];
     this.geoUniforms = uniforms(gl, this.geoProgram, [...shared, "uColor"]);
     const mask = ["uMask", "uMaskSize", "uMaskMode"];
     this.rasterUniforms = uniforms(gl, this.rasterProgram, [
@@ -269,9 +269,20 @@ export class MapRenderer {
     lonOffset: number,
   ): void {
     const gl = this.gl;
-    gl.uniform3f(u.uCamera ?? null, camera.centerLon, camera.centerLat, camera.pxPerDeg);
+    const projection = projectionFor(camera);
+    // The camera's second component reaches the shader as the projection's own
+    // vertical coordinate, computed here rather than there: the centre is the
+    // one point every draw is measured from, so it is the one point the two
+    // implementations of the formula must not differ on by a bit.
+    gl.uniform3f(
+      u.uCamera ?? null,
+      camera.centerLon,
+      projection.yOf(camera.centerLat),
+      camera.pxPerDeg,
+    );
     gl.uniform2f(u.uViewport ?? null, view.width, view.height);
     gl.uniform1f(u.uLonOffset ?? null, lonOffset);
+    gl.uniform1i(u.uProjection ?? null, projection.mode);
   }
 
   /**
@@ -437,15 +448,23 @@ export class MapRenderer {
     this.setMask(this.glyphUniforms, state.view, mode);
     gl.activeTexture(gl.TEXTURE0);
 
+    const projection = projectionFor(camera);
+    const centreY = projection.yOf(camera.centerLat);
+
     for (const tile of tiles) {
       const { texture } = this.textureFor(state, tile);
       if (!texture) continue;
       const b = tileBounds(tile.z, tile.x, tile.y);
       const originX =
         (b.west + tile.lonOffset - camera.centerLon) * camera.pxPerDeg + state.view.width / 2;
-      const originY = (camera.centerLat - b.north) * camera.pxPerDeg + state.view.height / 2;
+      // The tile's top and bottom edges on the map, not in latitude: a tile of
+      // a fixed latitude span is a different height at different latitudes in
+      // every projection but the flat one, and culling on the flat height
+      // would skip tiles that are on screen (M11).
+      const originY =
+        (centreY - projection.yOf(b.north)) * camera.pxPerDeg + state.view.height / 2;
       const widthPx = (b.east - b.west) * camera.pxPerDeg;
-      const heightPx = (b.north - b.south) * camera.pxPerDeg;
+      const heightPx = (projection.yOf(b.north) - projection.yOf(b.south)) * camera.pxPerDeg;
 
       // Entirely off screen: skip before spending instances on it.
       if (
@@ -491,9 +510,7 @@ export class MapRenderer {
     const mode: 0 | 1 | 2 = operating ? 1 : 0;
     // A clone draws the field a second time, read through a camera shifted so
     // the source lands where the brush is, and kept only where the gesture
-    // covers. The shift is a plain translation because the projection is
-    // equirectangular: a constant offset in degrees is a constant offset in
-    // pixels, at every latitude (spec.md 5.1).
+    // covers (spec.md 5.1).
     const source =
       operating && state.operator?.kind === "clone" ? (state.operator.source ?? null) : null;
 

@@ -1,13 +1,41 @@
 /**
- * Equirectangular camera maths.
+ * Camera maths (spec.md 5.1).
  *
- * The projection is equirectangular because the data grid is global lat/lon:
- * the map is 1:1 with the grid, both poles are visible, and there is no
- * zoom-dependent distortion of the editing surface (spec.md 5.1).
+ * Equirectangular by default, because the data grid is global lat/lon: the map
+ * is 1:1 with the grid, both poles are visible, and there is no zoom-dependent
+ * distortion of the editing surface. The cylindrical alternatives (M11) ride
+ * on the camera itself — `Camera.projection` — so every function here reads it
+ * from the camera it was already given, and a camera without one is
+ * equirectangular, which is the identity.
  *
  * Everything here is pure so it can be tested without a GPU. The renderer does
  * no geometry of its own beyond what these functions produce.
  */
+
+import {
+  DEFAULT_PROJECTION,
+  type Projection,
+  type ProjectionId,
+  projectionOf,
+  worldHeightDeg,
+} from "./projection";
+
+/** What a camera that names no projection is drawn in. */
+const PLATE_CARREE = projectionOf(DEFAULT_PROJECTION);
+
+/**
+ * The projection a camera is looking through.
+ *
+ * The projection rides on the camera rather than being passed alongside it,
+ * because it is the same kind of thing as the centre and the scale: part of
+ * how the map is currently looking at the world, and needed by everything the
+ * camera is already threaded through. A camera built without one — every test
+ * fixture, every dev-capture scenario — is equirectangular, which is what the
+ * app has always drawn.
+ */
+export function projectionFor(camera: Camera): Projection {
+  return projectionOf(camera.projection ?? DEFAULT_PROJECTION);
+}
 
 /** Deepest tile level served by the backend. Mirrors `ve_render::tile`. */
 export const MAX_TILE_LEVEL = 12;
@@ -24,6 +52,13 @@ export interface Camera {
   centerLat: number;
   /** Scale, in screen pixels per degree. */
   pxPerDeg: number;
+  /**
+   * How the world is laid out on the map (M11). Absent means equirectangular.
+   *
+   * A view setting and nothing more: it changes where a latitude lands on the
+   * screen, never what is stored or exported (invariant 3).
+   */
+  projection?: ProjectionId;
 }
 
 /** Viewport size in CSS pixels. */
@@ -50,8 +85,13 @@ export function normalizeLon(lon: number): number {
 }
 
 /** The smallest scale that still fits the whole world in the viewport. */
-export function minPxPerDeg(view: Viewport): number {
-  return Math.min(view.width / 360, view.height / 180);
+export function minPxPerDeg(
+  view: Viewport,
+  projection: Projection = PLATE_CARREE,
+): number {
+  // Mercator's world is 360 degrees tall on this scale rather than 180, so
+  // "fit the world" is a different number in it.
+  return Math.min(view.width / 360, view.height / worldHeightDeg(projection));
 }
 
 /**
@@ -62,21 +102,27 @@ export function minPxPerDeg(view: Viewport): number {
  * empty space; when the world is shorter than the viewport, it centres instead.
  */
 export function clampCamera(camera: Camera, view: Viewport): Camera {
+  const projection = projectionFor(camera);
   const pxPerDeg = Math.min(
-    Math.max(camera.pxPerDeg, minPxPerDeg(view)),
+    Math.max(camera.pxPerDeg, minPxPerDeg(view, projection)),
     MAX_PX_PER_DEG,
   );
   const halfHeightDeg = view.height / 2 / pxPerDeg;
+  // The clamp is in the projection's own vertical coordinate, not in degrees
+  // of latitude: what must not scroll off is the *map*, and where a latitude
+  // sits on it is the projection's business.
+  const worldHalf = worldHeightDeg(projection) / 2;
 
   let centerLat: number;
-  if (halfHeightDeg >= 90) {
+  if (halfHeightDeg >= worldHalf) {
     centerLat = 0;
   } else {
-    const limit = 90 - halfHeightDeg;
-    centerLat = Math.min(Math.max(camera.centerLat, -limit), limit);
+    const limit = worldHalf - halfHeightDeg;
+    const y = Math.min(Math.max(projection.yOf(camera.centerLat), -limit), limit);
+    centerLat = projection.latOf(y);
   }
 
-  return { centerLon: normalizeLon(camera.centerLon), centerLat, pxPerDeg };
+  return { ...camera, centerLon: normalizeLon(camera.centerLon), centerLat, pxPerDeg };
 }
 
 /**
@@ -86,18 +132,49 @@ export function clampCamera(camera: Camera, view: Viewport): Camera {
  * point near the dateline lands next to the centre rather than a world away.
  */
 export function project(camera: Camera, view: Viewport, point: GeoPoint): ScreenPoint {
+  const projection = projectionFor(camera);
   const dLon = normalizeLon(point.lon - camera.centerLon);
   return {
     x: view.width / 2 + dLon * camera.pxPerDeg,
-    y: view.height / 2 + (camera.centerLat - point.lat) * camera.pxPerDeg,
+    y:
+      view.height / 2 +
+      (projection.yOf(camera.centerLat) - projection.yOf(point.lat)) * camera.pxPerDeg,
   };
 }
 
 /** Converts a screen position back to a geographic one. */
 export function unproject(camera: Camera, view: Viewport, point: ScreenPoint): GeoPoint {
+  const projection = projectionFor(camera);
   const lon = camera.centerLon + (point.x - view.width / 2) / camera.pxPerDeg;
-  const lat = camera.centerLat - (point.y - view.height / 2) / camera.pxPerDeg;
+  const y =
+    projection.yOf(camera.centerLat) - (point.y - view.height / 2) / camera.pxPerDeg;
+  const lat = projection.latOf(y);
   return { lon: normalizeLon(lon), lat: Math.min(Math.max(lat, -90), 90) };
+}
+
+/**
+ * Moves the camera by a screen offset, y down.
+ *
+ * The vertical move is made in the projection's own coordinate, not in degrees
+ * of latitude: a drag of ten pixels is ten pixels of *map*, and how many
+ * degrees of latitude that is depends on where the map is looking (M11).
+ * Doing it in latitude instead makes a drag under Mercator run away from the
+ * pointer, further the higher the latitude.
+ *
+ * Longitude needs no such care, being linear in `x` in every projection here,
+ * and is never clamped: a drag past the dateline keeps going and wraps.
+ */
+export function panBy(camera: Camera, view: Viewport, dxPx: number, dyPx: number): Camera {
+  const projection = projectionFor(camera);
+  const y = projection.yOf(camera.centerLat) - dyPx / camera.pxPerDeg;
+  return clampCamera(
+    {
+      ...camera,
+      centerLon: camera.centerLon + dxPx / camera.pxPerDeg,
+      centerLat: projection.latOf(y),
+    },
+    view,
+  );
 }
 
 /**
@@ -112,14 +189,20 @@ export function zoomAbout(
   anchor: ScreenPoint,
   factor: number,
 ): Camera {
+  const projection = projectionFor(camera);
   const before = unproject(camera, view, anchor);
   const zoomed = clampCamera({ ...camera, pxPerDeg: camera.pxPerDeg * factor }, view);
   const after = unproject(zoomed, view, anchor);
+  // The correction is applied in the projection's own vertical coordinate:
+  // a difference in latitude is not a difference in pixels once the two are
+  // not the same thing, and applying one as the other slides the anchor.
+  const centerY =
+    projection.yOf(zoomed.centerLat) + (projection.yOf(before.lat) - projection.yOf(after.lat));
   return clampCamera(
     {
       ...zoomed,
       centerLon: zoomed.centerLon + normalizeLon(before.lon - after.lon),
-      centerLat: zoomed.centerLat + (before.lat - after.lat),
+      centerLat: projection.latOf(centerY),
     },
     view,
   );
@@ -137,15 +220,21 @@ export interface ViewBounds {
 
 /** The geographic extent currently on screen. */
 export function visibleBounds(camera: Camera, view: Viewport): ViewBounds {
+  const projection = projectionFor(camera);
   const halfLon = view.width / 2 / camera.pxPerDeg;
-  const halfLat = view.height / 2 / camera.pxPerDeg;
+  // Half the viewport in the projection's own vertical coordinate, then back
+  // to latitudes. Under Mercator the same pixel height is a much narrower band
+  // of latitude at the top of the map than at the equator, and culling to the
+  // wrong band would drop tiles that are on screen.
+  const halfY = view.height / 2 / camera.pxPerDeg;
+  const centreY = projection.yOf(camera.centerLat);
   // More than a full world across: there is no meaningful sub-range to cull to.
   const spanLon = Math.min(halfLon * 2, 360);
   return {
     west: camera.centerLon - spanLon / 2,
     east: camera.centerLon + spanLon / 2,
-    north: Math.min(camera.centerLat + halfLat, 90),
-    south: Math.max(camera.centerLat - halfLat, -90),
+    north: Math.min(projection.latOf(centreY + halfY), 90),
+    south: Math.max(projection.latOf(centreY - halfY), -90),
   };
 }
 

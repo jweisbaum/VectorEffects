@@ -8,11 +8,13 @@
 
 import type { BrushShape } from "../generated/BrushShape";
 import type { StampSpace } from "../generated/StampSpace";
-import { type Camera, type Viewport, normalizeLon, project } from "./camera";
+import { type Camera, type Viewport, normalizeLon, project, projectionFor } from "./camera";
 import { EARTH_RADIUS_M } from "./geo";
 
 /**
- * Kilometres per degree of latitude. Constant in equirectangular.
+ * Kilometres per degree of latitude — a ground measure, so it is the same
+ * everywhere and in every projection. What varies is how many *pixels* a
+ * degree of latitude is worth, which is `Projection.scaleAt`.
  *
  * Derived from the one earth radius rather than written out: this is the same
  * conversion `ve_render::aeqd::M_PER_DEGREE` makes, and a preview that measures
@@ -53,9 +55,14 @@ export interface PathSink {
 /**
  * Screen dimensions of a stamp of `radiusKm`.
  *
- * `radiusKm` is the north-south ground extent in both spaces, which is the one
- * axis the projection leaves alone; the spaces differ only in how far the stamp
- * reaches east-west.
+ * `radiusKm` is the north-south ground extent in both spaces; the spaces differ
+ * only in how far the stamp reaches east-west.
+ *
+ * The vertical radius passes through the map projection (M11), because a span
+ * of latitude is not a fixed number of pixels once `y` is not the latitude.
+ * Under Mercator that makes a geodesic footprint a true circle at every
+ * latitude rather than an ellipse — which is the projection being conformal,
+ * not a special case here.
  */
 export function footprintRadii(
   camera: Camera,
@@ -63,14 +70,15 @@ export function footprintRadii(
   radiusKm: number,
   space: StampSpace = "geodesic",
 ): { rx: number; ry: number } {
-  const ry = (radiusKm / KM_PER_DEGREE) * camera.pxPerDeg;
+  const halfDeg = radiusKm / KM_PER_DEGREE;
+  const ry = halfDeg * projectionFor(camera).scaleAt(lat) * camera.pxPerDeg;
   // A circle on the ground spans more longitude the further from the equator,
   // so it draws as an ellipse. A projected stamp is defined on the map instead
-  // and stays a circle at every latitude — which is what a size in pixels is
+  // and spans the same degrees both ways — which is what a size in pixels is
   // asking for (spec.md 3.5).
   // Clamped so a geodesic footprint near a pole stays finite rather than
   // filling the map.
-  const rx = space === "projected" ? ry : ry / cosLat(lat);
+  const rx = (space === "projected" ? halfDeg : halfDeg / cosLat(lat)) * camera.pxPerDeg;
   return { rx, ry };
 }
 

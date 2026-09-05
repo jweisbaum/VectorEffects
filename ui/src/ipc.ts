@@ -406,6 +406,9 @@ export const api = {
   /** The colour-ramp top a *new* project of each kind gets, in knots. */
   setDefaultScales: (windKnots: number, currentKnots: number) =>
     call<AppSettings>("set_default_scales", { windKnots, currentKnots }),
+  /** How the map lays the world out (M11). A view preference only. */
+  setProjection: (projection: string) =>
+    call<AppSettings>("set_projection", { projection }),
   /** Where the macro library lives. */
   setMacroDirectory: (directory: string) =>
     call<AppSettings>("set_macro_directory", { directory }),

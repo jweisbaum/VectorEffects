@@ -337,6 +337,7 @@ export default function App() {
           onProjectChanged={setProject}
           onRegionActive={onRegionActive}
           settings={settings}
+          onSettings={setSettings}
           onStepChange={setStep}
           onSelect={setSelection}
           onViewport={setViewport}

@@ -74,7 +74,7 @@ crates/
                custom URI scheme, autosave
 ui/            React + TypeScript + Vite frontend (npm workspace member)
                  project/  start screen, native dialogs, display formatting
-                 map/      camera, tiles, WebGL renderer, shaders
+                 map/      camera, projections, tiles, WebGL renderer, shaders
 assets/        Natural Earth source data, GRIB templates
 tools/         Asset converters and the offline invariant check
 package.json   Root npm workspace: owns the Tauri CLI and every script
@@ -521,6 +521,32 @@ to the hash input is a correctness bug that shows up as stale frames.
   which looks like glyphs clustered into blocks. See `glyphLattice`.
 - GLSL lives in template literals, so **a backtick in a shader comment
   terminates the string**. Write "modulo", not the operator in backticks.
+- **An integer uniform in a shared prelude must state its precision.** An `int`
+  defaults to `highp` in a vertex shader and `mediump` in a fragment one, so a
+  bare `uniform int` in a block both stages include links with "Precisions of
+  uniform 'x' differ between VERTEX and FRAGMENT shaders" and the map never
+  mounts. Floats escape it only because every source opens with
+  `precision highp float`. `shaders.test.ts` now checks this; it did not, and
+  `uProjection` shipped bare.
+- **The map projection lives twice**: `latToY`/`yToLat` in `shaders.ts` and
+  `Projection.yOf`/`latOf` in `projection.ts`, because the map is drawn by the
+  GPU and the pointer, the overlay and the tile cull are computed by the CPU.
+  `shaders.test.ts` lifts the two functions out of the shipped GLSL and
+  evaluates them against the TypeScript, so drift fails the suite rather than
+  showing up as glyphs sitting slightly off the colour they describe. The mode
+  is `Projection.mode`, which is what the shader branches on; equirectangular
+  must stay 0, since that is the GLSL default branch.
+- **The projection rides on the `Camera`**, not beside it. Everything that
+  needs it — `project`, `unproject`, `panBy`, `visibleBounds`, the footprint
+  radii, the renderer's uniforms — reads it off the camera it was already
+  handed, and a camera without one is equirectangular. A new camera built by
+  spreading an old one keeps it; one built from three literal fields silently
+  flattens the map.
+- **A screen distance is not a span of latitude.** Anything that divides pixels
+  by `pxPerDeg` and treats the answer as degrees of latitude is correct only
+  under equirectangular. Go through `panBy` or `visibleBounds`; that mistake
+  has already been made in the pan, the tile cull, the glyph cull and
+  `regionOfView`.
 - **`[profile.dev.package."*"]` covers dependencies, not the workspace's own
   crates.** Both entries are needed; without `[profile.dev]`, tile sampling ran
   2.4x slower under `tauri dev` than in release. `cargo test -p ve-render --test
