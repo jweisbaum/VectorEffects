@@ -25,6 +25,9 @@ import type { ShortcutAction } from "../generated/ShortcutAction";
 import type { ToolSchema } from "../generated/ToolSchema";
 import { actionFor, chordOf, toolChord } from "../settings/bindings";
 import { cursorFor } from "./cursor";
+import { createPortal } from "react-dom";
+import { reportError, setHint } from "../hint";
+import { IconSvg, REDO_ICON, UNDO_ICON } from "./ToolIcon";
 import type { PositionPick } from "../picking";
 import type { SelectionTransform } from "../generated/SelectionTransform";
 import type { TransformPreview } from "../generated/TransformPreview";
@@ -394,8 +397,16 @@ export default function MapView({
   onSelect,
   onViewport,
   autoKey,
+  viewSlot,
 }: {
   ref?: Ref<MapHandle>;
+  /**
+   * The title bar's centre, which the view controls — the capture and
+   * measure tools, glyphs, projection, graticule, undo and redo — are
+   * rendered into through a portal (M25, D68). The state stays here, where
+   * the draw loop reads it; only the buttons move.
+   */
+  viewSlot: HTMLElement | null;
   project: ProjectSummary;
   step: number;
   selection: number[];
@@ -611,7 +622,13 @@ export default function MapView({
   });
 
   const [ready, setReady] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setErrorState] = useState<string | null>(null);
+  // The map's errors go to the status bar's hint area (M25); the state is
+  // kept only so the basemap's loading line knows to stand down.
+  const setError = useCallback((message: string | null) => {
+    setErrorState(message);
+    reportError(message);
+  }, []);
   const [glyphStyle, setGlyphStyle] = useState<"arrow" | "barb">("barb");
   const [showGlyphs, setShowGlyphs] = useState(true);
   const [showGraticule, setShowGraticule] = useState(true);
@@ -1361,6 +1378,27 @@ export default function MapView({
       live = false;
     };
   }, []);
+
+  /**
+   * The tool's hint, for the status bar (M25). What the capture bar and the
+   * insert bar used to say beside their controls: a hint is about the next
+   * thing to do, and the status bar is where the eye goes for that.
+   */
+  useEffect(() => {
+    if (tool === CAPTURE && recording === null && region === null) {
+      setHint("Draw a region first — it is what gets recorded.");
+    } else if (tool === CAPTURE && recording !== null) {
+      setHint("Scrub the ruler and drag the region into place at each step.");
+    } else if (tool === INSERT && recording === null) {
+      setHint(
+        (library?.entries.length ?? 0) === 0
+          ? "The macro library is empty. Capture a run of frames first."
+          : "Click the map to place the macro.",
+      );
+    } else {
+      setHint(null);
+    }
+  }, [library, recording, region, tool]);
 
   /** The macro library, for the insert tool's bar. */
   const readLibrary = useCallback(() => {
@@ -4025,7 +4063,6 @@ export default function MapView({
 
       <canvas ref={overlayRef} className="map-overlay" />
 
-      {error !== null && <div className="map-error">{error}</div>}
       {error === null && !ready && <div className="map-status">Loading basemap…</div>}
 
       <div className="map-toolbar">
@@ -4073,15 +4110,6 @@ export default function MapView({
             from rather than a bar of options to describe.
           */}
           <button
-            className={tool === CAPTURE ? "icon active" : "icon"}
-            onClick={() => setTool(CAPTURE)}
-            aria-label="Capture"
-            aria-pressed={tool === CAPTURE}
-            title={`Capture (${chord("capture")}) · record a region of the field over a run of frames into the macro library`}
-          >
-            <ToolIcon tool={CAPTURE} />
-          </button>
-          <button
             className={tool === INSERT ? "icon active" : "icon"}
             onClick={() => setTool(INSERT)}
             aria-label="Insert macro"
@@ -4089,15 +4117,6 @@ export default function MapView({
             title={`Insert macro (${chord("insert")}) · put a captured run of frames back on the map`}
           >
             <ToolIcon tool={INSERT} />
-          </button>
-          <button
-            className={tool === MEASURE ? "icon active" : "icon"}
-            onClick={() => setTool(MEASURE)}
-            aria-label="Measure"
-            aria-pressed={tool === MEASURE}
-            title={`Measure (${chord("measure")}) · dividers, a passage's two paths, or range rings · click to place, drag a point to move it, Enter or Escape to finish a chain`}
-          >
-            <ToolIcon tool={MEASURE} />
           </button>
           {palette.map((entry) => (
             <button
@@ -4188,9 +4207,7 @@ export default function MapView({
                 >
                   Start capture
                 </button>
-                {region === null && (
-                  <span className="muted">Draw a region first — it is what gets recorded.</span>
-                )}
+
               </>
             ) : (
               <>
@@ -4281,11 +4298,6 @@ export default function MapView({
                 ))}
               </select>
             </label>
-            <span className="muted">
-              {(library?.entries.length ?? 0) === 0
-                ? "The library is empty. Capture a run of frames first."
-                : "Click the map to place it."}
-            </span>
             <button onClick={readLibrary} title="Re-read the macro library from disk">
               Refresh
             </button>
@@ -4421,22 +4433,57 @@ export default function MapView({
           />
         )}
 
+      </div>
+
+      {/*
+        The view controls, in the title bar (M25, D68): what the map is
+        showing rather than what is being painted. Rendered from here through
+        a portal so the tool, the glyph style and the graticule stay the
+        map's state; only where the buttons sit has changed.
+      */}
+      {viewSlot !== null &&
+        createPortal(
+          <div className="view-controls" role="group" aria-label="View">
+        <button
+          className={tool === CAPTURE ? "icon active" : "icon"}
+          onClick={() => setTool(CAPTURE)}
+          aria-label="Capture"
+          aria-pressed={tool === CAPTURE}
+          title={`Capture (${chord("capture")}) · record a region of the field over a run of frames into the macro library`}
+        >
+          <ToolIcon tool={CAPTURE} />
+        </button>
+        <button
+          className={tool === MEASURE ? "icon active" : "icon"}
+          onClick={() => setTool(MEASURE)}
+          aria-label="Measure"
+          aria-pressed={tool === MEASURE}
+          title={`Measure (${chord("measure")}) · dividers, a passage's two paths, or range rings · click to place, drag a point to move it, Enter or Escape to finish a chain`}
+        >
+          <ToolIcon tool={MEASURE} />
+        </button>
+        <span className="divider" />
         <div className="history" role="group" aria-label="History">
           <button
+            className="icon"
             disabled={!project.can_undo || busy}
             onClick={() => void api.undo().then(onProjectChanged)}
             title="Undo (Cmd+Z)"
+            aria-label="Undo"
           >
-            Undo
+            <IconSvg icon={UNDO_ICON} />
           </button>
           <button
+            className="icon"
             disabled={!project.can_redo || busy}
             onClick={() => void api.redo().then(onProjectChanged)}
             title="Redo (Cmd+Shift+Z)"
+            aria-label="Redo"
           >
-            Redo
+            <IconSvg icon={REDO_ICON} />
           </button>
         </div>
+        <span className="divider" />
 
         <label>
           Glyphs
@@ -4481,11 +4528,10 @@ export default function MapView({
           />
           Graticule
         </label>
-        <span className="step muted" title="Scrub the timeline below to change the step">
-          Step {step} / {lastStep} (+{step * project.step_hours} h)
-        </span>
         {pending > 0 && <span className="activity">rendering {pending}…</span>}
-      </div>
+          </div>,
+          viewSlot,
+        )}
 
       <div className="map-legend">
         <div

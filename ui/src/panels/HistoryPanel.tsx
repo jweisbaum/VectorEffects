@@ -29,9 +29,6 @@ export default function HistoryPanel({
 
   return (
     <div className="history-panel">
-      <header>
-        <h2>History</h2>
-      </header>
       <ol className="history">
         <li
           className={history.cursor === 0 ? "entry current" : "entry"}

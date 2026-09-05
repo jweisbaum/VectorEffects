@@ -593,7 +593,7 @@ M0 ─ M1 ─ M2 ─ M3 ─ M4 ══ walking skeleton complete
                                         │
                     ├─ M23 ────── selection, clipboard, deletion (bugs)     ✓
                     ├─ M24 ────── cursors, hover and outlines             ✓
-                    ├─ M25 ────── chrome: top row, status bar, panels, timeline
+                    ├─ M25 ────── chrome: top row, status bar, panels, timeline ✓
                     └─ M26 ────── macro recording as keyframes, with a preview
 ```
 
@@ -2233,11 +2233,29 @@ the overlay's hover indicators a second table beside it.
 
 ---
 
-### M25 — Chrome: the top row, the status bar, the panels and the timeline
+### M25 — Chrome: the top row, the status bar, the panels and the timeline · **complete**
 
 **Goal:** the controls that are not about painting move out of the painting
 toolbar, every panel can be put away, and two things that felt slow or
 unreachable are fixed.
+
+**Delivered 2026-09-05.** Everything below, with D69 as settled: the
+start-time field and its clear button are gone and nothing replaces them.
+**The speed filter's slowness was the frontend, measured**: one coalesced
+`set_layer_speed_range` write costs under a microsecond on the backend
+(`speed_filter_write_cost`, release: 200 writes in less than a tenth of a
+millisecond), so the cost per slider tick was the round trip, the
+`ProjectSummary` re-render of every panel, and the invalidation of every
+visible tile of the imported field — 38 ms a tile on the CPU (§13), a
+second or more per tick at a full viewport, with the slider's value held
+back until the document returned. The thumb follows the hand now and the
+writes are one in flight, latest wins, so a drag sends as many as the
+round trips allow and no more; the tiles still re-render per write, which
+is what the band means. The release-to-last-tile time was not measured:
+it is the tile cost times the viewport, unchanged by this milestone. The
+offline check gained one allowance, the SVG XML namespace, which the M24
+cursors need and which no parser fetches. The history and properties
+panels' own headers moved into the shell, where the fold lives.
 
 The findings: 8, 12, 13, 14, 22, 23, 24, 27, 28.
 

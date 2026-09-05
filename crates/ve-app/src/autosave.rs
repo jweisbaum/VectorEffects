@@ -33,6 +33,7 @@ use crate::commands::AppState;
 use crate::error::{AppError, Result};
 use crate::projects::{ProjectSummary, refuse_to_discard, with_session};
 use crate::session::OpenProject;
+use crate::settings::AutosaveMode;
 
 /// How often the thread looks.
 ///
@@ -113,7 +114,8 @@ fn now_unix_s() -> u64 {
 pub fn snapshot(state: &AppState, force: bool) -> Result<bool> {
     let dir = &state.paths.autosave_dir;
     // Clone the document out from under the lock (see the module doc).
-    let Some((project, path, revision, entries)) = with_session(state, |session| {
+    let Some((project, path, revision, entries, mode)) = with_session(state, |session| {
+        let mode = session.settings.autosave;
         Ok(session.open.as_ref().and_then(|open| {
             open.dirty.then(|| {
                 (
@@ -121,6 +123,7 @@ pub fn snapshot(state: &AppState, force: bool) -> Result<bool> {
                     open.path.clone(),
                     open.revision,
                     open.history.entries().len(),
+                    mode,
                 )
             })
         }))
@@ -128,6 +131,10 @@ pub fn snapshot(state: &AppState, force: bool) -> Result<bool> {
     else {
         return Ok(false);
     };
+    // Off means nothing is written until the user saves (D70).
+    if mode == AutosaveMode::Off {
+        return Ok(false);
+    }
 
     let id = project.id.raw();
     let previous = std::fs::read_to_string(manifest_path(dir, id))
@@ -145,7 +152,19 @@ pub fn snapshot(state: &AppState, force: bool) -> Result<bool> {
     }
 
     std::fs::create_dir_all(dir)?;
-    io::save(&project, &snapshot_path(dir, id))?;
+    // In `Save` mode a project with a path is written in place instead — the
+    // same cadence, the file the user chose. The save clears the snapshot,
+    // so the manifest is written afterwards to carry the cadence: a manifest
+    // without a snapshot file lists nothing on the start screen and only
+    // says when the last write was. A project with no path yet has nowhere
+    // to be written and takes a snapshot like everyone else.
+    if mode == AutosaveMode::Save && path.is_some() {
+        crate::projects::save(state)?;
+        tracing::info!(id, "autosaved the project in place");
+    } else {
+        io::save(&project, &snapshot_path(dir, id))?;
+        tracing::info!(id, "wrote a crash-recovery snapshot");
+    }
     let manifest = Manifest {
         name: project.name.clone(),
         original_path: path,
@@ -157,7 +176,6 @@ pub fn snapshot(state: &AppState, force: bool) -> Result<bool> {
         manifest_path(dir, id),
         serde_json::to_string_pretty(&manifest).map_err(ve_core::CoreError::Json)?,
     )?;
-    tracing::info!(id, "wrote a crash-recovery snapshot");
     Ok(true)
 }
 

@@ -29,7 +29,9 @@ import type { ShrinkImpact } from "../generated/ShrinkImpact";
 import type { TileAddress } from "../generated/TileAddress";
 import type { TrackSamples } from "../generated/TrackSamples";
 import NumberField from "../NumberField";
+import { reportError } from "../hint";
 import { api } from "../ipc";
+import { IconSvg, LOOP_ICON } from "../map/ToolIcon";
 import { MAX_STEPS } from "../project/format";
 import {
   type Extent,
@@ -133,6 +135,7 @@ export default function Timeline({
   onKeysSelected,
   settings,
   capture,
+  onCollapse,
 }: {
   project: ProjectSummary;
   step: number;
@@ -160,6 +163,8 @@ export default function Timeline({
    * down (spec.md 9.3, M23).
    */
   onKeysSelected: (active: boolean) => void;
+  /** Folds the dock away to a strip (M25). */
+  onCollapse: () => void;
   /** The application's bindings table (spec.md 8.6, M15). */
   settings: AppSettings | null;
   /**
@@ -306,7 +311,8 @@ export default function Timeline({
   const [tree, setTree] = useState<DocumentTree | null>(null);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [tracks, setTracks] = useState<Map<number, ObjectTracks>>(new Map());
-  const [error, setError] = useState<string | null>(null);
+  // Errors go to the status bar's hint area (M25), not a line of their own.
+  const setError = reportError;
   /** Tracks whose value graph is expanded, by `trackId`. */
   const [graphs, setGraphs] = useState<Set<string>>(new Set());
   const [samples, setSamples] = useState<Map<string, TrackSamples>>(new Map());
@@ -782,10 +788,6 @@ export default function Timeline({
       .catch((err: unknown) => setError(String(err)));
   };
 
-  const startValue = useMemo(() => {
-    if (project.start_unix_s === null) return "";
-    return new Date(project.start_unix_s * 1000).toISOString().slice(0, 16);
-  }, [project.start_unix_s]);
 
   // --- Render ---
   const tickLabel = (s: number) =>
@@ -801,11 +803,13 @@ export default function Timeline({
           ■
         </button>
         <button
-          className={loop ? "active" : ""}
+          className={loop ? "active tl-loop" : "tl-loop"}
           onClick={() => setLoop((on) => !on)}
           title="Loop"
+          aria-label="Loop"
+          aria-pressed={loop}
         >
-          ⟳
+          <IconSvg icon={LOOP_ICON} size={22} />
         </button>
         <label title="Steps per second (spec.md 9.4)">
           <NumberField
@@ -829,26 +833,11 @@ export default function Timeline({
           {buffering && <span className="tl-buffering"> · buffering…</span>}
         </span>
         <span className="spacer" />
-        <label title="When step 0 is, in UTC (spec.md 9.1)">
-          Start
-          <input
-            type="datetime-local"
-            value={startValue}
-            onChange={(e) => {
-              const raw = e.target.value;
-              if (raw === "") {
-                run(api.setStartTime(null));
-                return;
-              }
-              // The input has no zone; it is read as UTC, because the ruler is.
-              const at = Date.parse(`${raw}:00Z`);
-              if (Number.isFinite(at)) run(api.setStartTime(Math.round(at / 1000)));
-            }}
-          />
-          <button onClick={() => run(api.setStartTime(null))} title="Clear the start time">
-            ×
-          </button>
-        </label>
+        {/*
+          No start-time field (D69): a project has no clock of its own until a
+          GRIB file gives it one, and the export asks for the one it needs.
+          The ruler labels forecast hours until then.
+        */}
         <label title="Number of time steps. Reducing it deletes keyframes past the end, after a confirmation (spec.md 4.1)">
           Steps
           <NumberField
@@ -862,6 +851,14 @@ export default function Timeline({
             onCommit={changeStepCount}
           />
         </label>
+        <button
+          className="tl-collapse"
+          onClick={onCollapse}
+          title="Hide the timeline"
+          aria-label="Hide the timeline"
+        >
+          ▼
+        </button>
       </div>
 
       <div
@@ -1342,7 +1339,7 @@ export default function Timeline({
         )}
       </div>
 
-      {error && !capturing && <div className="tl-error">{error}</div>}
+
 
       {menu && (
         <div

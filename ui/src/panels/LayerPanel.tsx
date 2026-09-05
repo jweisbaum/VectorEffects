@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { GribLayerInfo } from "../generated/GribLayerInfo";
+import { reportError } from "../hint";
 import { api } from "../ipc";
 import type { DocumentTree } from "../generated/DocumentTree";
 import type { ProjectSummary } from "../generated/ProjectSummary";
@@ -53,7 +54,21 @@ export default function LayerPanel({
   const [draft, setDraft] = useState("");
   const [dragging, setDragging] = useState<Dragging | null>(null);
   const [dropTarget, setDropTarget] = useState<number | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // Errors go to the status bar's hint area (M25), not a line of their own.
+  const setError = reportError;
+  /**
+   * Layers whose object lists are folded away (M25). Panel state: which
+   * lists are open is how this person is looking at the project, not a fact
+   * about it.
+   */
+  const [folded, setFolded] = useState<Set<number>>(new Set());
+  const toggleFold = (id: number) =>
+    setFolded((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
   // The tree is derived from the document, so it is refetched whenever the
   // revision moves rather than being patched in place.
@@ -64,9 +79,12 @@ export default function LayerPanel({
       .catch((err: unknown) => setError(String(err)));
   }, [project.revision, step]);
 
-  const run = (action: Promise<ProjectSummary>) => {
+  const run = (action: Promise<ProjectSummary>, done?: () => void) => {
     setError(null);
-    action.then(onChanged).catch((err: unknown) => setError(String(err)));
+    action
+      .then(onChanged)
+      .catch((err: unknown) => setError(String(err)))
+      .finally(() => done?.());
   };
 
   /** Picks a GRIB2 file and imports it as a layer, or two if it holds both kinds. */
@@ -112,7 +130,7 @@ export default function LayerPanel({
   };
 
   if (!tree) {
-    return <div className="panel-empty muted">{error ?? "Loading…"}</div>;
+    return <div className="panel-empty muted">Loading…</div>;
   }
 
   // Top of the stack first: index 0 is the bottom of the document.
@@ -203,6 +221,18 @@ export default function LayerPanel({
                 }}
               >
                 <button
+                  className={folded.has(layer.id) ? "fold" : "fold open"}
+                  title={folded.has(layer.id) ? "Show this layer's objects" : "Hide this layer's objects"}
+                  aria-label={folded.has(layer.id) ? "Show objects" : "Hide objects"}
+                  aria-expanded={!folded.has(layer.id)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleFold(layer.id);
+                  }}
+                >
+                  ▾
+                </button>
+                <button
                   className={layer.visible ? "eye on" : "eye"}
                   title={layer.visible ? "Hide layer" : "Show layer"}
                   aria-label={layer.visible ? "Hide layer" : "Show layer"}
@@ -278,8 +308,8 @@ export default function LayerPanel({
               {layer.grib?.loaded && (
                 <SpeedFilter
                   grib={layer.grib}
-                  onChange={(min, max, gesture) =>
-                    run(api.setLayerSpeedRange(layer.id, min, max, gesture))
+                  onChange={(min, max, gesture, done) =>
+                    run(api.setLayerSpeedRange(layer.id, min, max, gesture), done)
                   }
                 />
               )}
@@ -292,6 +322,7 @@ export default function LayerPanel({
                 />
               )}
 
+              {!folded.has(layer.id) && (
               <ul
                 className="objects"
                 onDragOver={(e) => {
@@ -398,12 +429,12 @@ export default function LayerPanel({
                   <li className="object empty muted">empty</li>
                 )}
               </ul>
+              )}
             </li>
           );
         })}
       </ul>
 
-      {error !== null && <p className="error">{error}</p>}
     </div>
   );
 }
@@ -429,13 +460,36 @@ function SpeedFilter({
   /**
    * `gesture` names a drag in progress so its ticks coalesce into one history
    * entry; a typed value or the checkbox passes null and stands alone.
+   * `done` is called once the write has landed, whichever way it went.
    */
-  onChange: (minMps: number | null, maxMps: number | null, gesture: string | null) => void;
+  onChange: (
+    minMps: number | null,
+    maxMps: number | null,
+    gesture: string | null,
+    done?: () => void,
+  ) => void;
 }) {
   const ceiling = Math.max(5, Math.ceil(knotsFromMps(grib.speed_ceiling_mps)));
   const on = grib.speed_min_mps !== null && grib.speed_max_mps !== null;
-  const low = on ? knotsFromMps(grib.speed_min_mps ?? 0) : 0;
-  const high = on ? knotsFromMps(grib.speed_max_mps ?? 0) : ceiling;
+  const stored: [number, number] = [
+    on ? knotsFromMps(grib.speed_min_mps ?? 0) : 0,
+    on ? knotsFromMps(grib.speed_max_mps ?? 0) : ceiling,
+  ];
+  /**
+   * The band while the thumb is down (M25). The slider used to show the
+   * *document's* band, which arrived a write and a re-render later than the
+   * pointer — and every tick was a write, each one invalidating every tile of
+   * the imported field. The thumb follows the hand now; the writes are one in
+   * flight, latest wins, the drag preview's pattern, so a fast drag sends a
+   * handful of them rather than one per report and the last one is the
+   * band the pointer let go at.
+   */
+  const [dragging, setDragging] = useState<[number, number] | null>(null);
+  const flight = useRef<{ inFlight: boolean; queued: [number, number] | null }>({
+    inFlight: false,
+    queued: null,
+  });
+  const [low, high] = dragging ?? stored;
 
   const set = (nextLow: number, nextHigh: number, gesture: string | null = null) =>
     onChange(mpsFromKnots(nextLow), mpsFromKnots(nextHigh), gesture);
@@ -445,7 +499,38 @@ function SpeedFilter({
    * across the slider was a history entry per tick.
    */
   const dragKey = `grib-speed:${grib.path}`;
-  const endDrag = () => void api.endGesture().catch(() => undefined);
+  const send = (band: [number, number]) => {
+    const state = flight.current;
+    if (state.inFlight) {
+      state.queued = band;
+      return;
+    }
+    state.inFlight = true;
+    state.queued = null;
+    onChange(mpsFromKnots(band[0]), mpsFromKnots(band[1]), dragKey, () => {
+      state.inFlight = false;
+      const next = state.queued;
+      if (next !== null) send(next);
+    });
+  };
+  const drag = (band: [number, number]) => {
+    setDragging(band);
+    send(band);
+  };
+  const endDrag = () => {
+    // The band the pointer let go at, then the end of the gesture — after
+    // the write, so the last tick's coalescing key is still open when it
+    // lands.
+    const last = dragging;
+    setDragging(null);
+    flight.current.queued = null;
+    const settle = () => void api.endGesture().catch(() => undefined);
+    if (last === null) {
+      settle();
+      return;
+    }
+    onChange(mpsFromKnots(last[0]), mpsFromKnots(last[1]), dragKey, settle);
+  };
 
   return (
     <div className="grib-filter">
@@ -466,7 +551,7 @@ function SpeedFilter({
               max={ceiling}
               step={1}
               value={Math.min(low, high)}
-              onChange={(e) => set(Number(e.target.value), high, dragKey)}
+              onChange={(e) => drag([Number(e.target.value), high])}
               onPointerUp={endDrag}
               onKeyUp={endDrag}
               title="Slowest speed kept"
@@ -486,7 +571,7 @@ function SpeedFilter({
               max={ceiling}
               step={1}
               value={Math.max(low, high)}
-              onChange={(e) => set(low, Number(e.target.value), dragKey)}
+              onChange={(e) => drag([low, Number(e.target.value)])}
               onPointerUp={endDrag}
               onKeyUp={endDrag}
               title="Fastest speed kept"

@@ -212,10 +212,37 @@ export const EYEDROPPER_ICON: Icon = [
   line("M12 7.4 16.6 12", "tip"),
 ];
 
+/** Undo: an arrow curling back to the left (M25). */
+export const UNDO_ICON: Icon = [
+  line("M8.4 7.2 4.6 11l3.8 3.8", "head"),
+  line("M4.8 11h9a5.2 5.2 0 0 1 0 10.4H10", "arrow"),
+];
+
+/** Redo: the same arrow, curling forward to the right. */
+export const REDO_ICON: Icon = [
+  line("M15.6 7.2 19.4 11l-3.8 3.8", "head"),
+  line("M19.2 11h-9a5.2 5.2 0 0 0 0 10.4H14", "arrow"),
+];
+
+/** Loop: two arrows chasing each other round a ring, for the transport. */
+export const LOOP_ICON: Icon = [
+  line("M17.6 8.4A7 7 0 0 0 5.4 10", "top"),
+  line("M6.4 15.6A7 7 0 0 0 18.6 14", "bottom"),
+  line("M4.6 6.2v4.2h4.2", "top-head"),
+  line("M19.4 17.8v-4.2h-4.2", "bottom-head"),
+];
+
 /** An icon as an SVG, for a button that is not a tool. */
-export function IconSvg({ icon }: { icon: Icon }): ReactElement {
+export function IconSvg({ icon, size = 18 }: { icon: Icon; size?: number }): ReactElement {
   return (
-    <svg className="tool-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
+    <svg
+      className="tool-icon"
+      viewBox="0 0 24 24"
+      width={size}
+      height={size}
+      aria-hidden="true"
+      focusable="false"
+    >
       {icon}
     </svg>
   );

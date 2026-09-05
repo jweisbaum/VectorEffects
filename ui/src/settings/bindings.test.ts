@@ -11,6 +11,7 @@ const settings: AppSettings = {
     { action: "pan_left", tool: "", key: "arrowleft", shift: false, alt: true },
     { action: "tool", tool: "brush", key: "p", shift: false, alt: false },
   ],
+  autosave: "recovery",
   default_wind_scale_knots: 60,
   default_current_scale_knots: 6,
   macro_directory: "",

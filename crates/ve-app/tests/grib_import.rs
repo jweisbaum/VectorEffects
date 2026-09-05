@@ -496,3 +496,39 @@ fn creating_from_a_grib_refuses_to_discard_unsaved_work() {
     let summary = import::grib_project(&app, path, true).expect("discard and create");
     assert_eq!(summary.name, "wind");
 }
+
+/// The cost of one speed-filter write, the thing a slider drag sends (M25).
+///
+/// A measurement, not an assertion: the slider used to send one of these per
+/// pointer report and wait for the document to come back before it moved;
+/// now it follows the hand and sends one at a time. Run in release with
+/// `--nocapture` and put the number in the plan.
+#[test]
+#[ignore = "a measurement: cargo test -p ve-app --release --test grib_import -- --ignored --nocapture"]
+fn speed_filter_write_cost() {
+    let root = TempRoot::new("filter-cost");
+    let app = state(&root, 3, 8);
+    let path = write_file(&root, "field.grib2", &[FieldKind::Wind], &[0, 3, 6]);
+    import::grib_import(&app, path).expect("import");
+    let layer = document::tree(&app, 0).expect("tree").layers[1].id;
+    let started = std::time::Instant::now();
+    let ticks = 200u32;
+    for tick in 0..ticks {
+        document::layer_speed_range(
+            &app,
+            layer,
+            Some(0.0),
+            Some(1.0 + f32::from(tick as u16) * 0.05),
+            Some("grib-speed:test".to_owned()),
+        )
+        .expect("write");
+    }
+    let each = started.elapsed().as_secs_f64() * 1000.0 / f64::from(ticks);
+    println!("one speed-filter write, coalesced: {each:.3} ms");
+    let started = std::time::Instant::now();
+    let _ = u_at(&app, 0);
+    println!(
+        "one full-field sample after it (flatten and sample): {:.3} ms",
+        started.elapsed().as_secs_f64() * 1000.0
+    );
+}

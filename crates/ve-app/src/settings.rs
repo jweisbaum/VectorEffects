@@ -229,11 +229,30 @@ pub fn default_shortcuts() -> Vec<Shortcut> {
     ]
 }
 
+/// What the autosave thread does with a dirty project (D70, M25).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "AutosaveMode.ts")]
+#[serde(rename_all = "snake_case")]
+pub enum AutosaveMode {
+    /// Nothing is written until the user saves.
+    Off,
+    /// A crash-recovery snapshot beside the app data, offered back on the
+    /// start screen (spec.md 4.2). The default, and what every install did
+    /// before the setting existed.
+    #[default]
+    Recovery,
+    /// The project file itself, written in place on the same cadence when
+    /// the project has a path — and a recovery snapshot when it does not.
+    Save,
+}
+
 /// The application's persisted preferences.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "AppSettings.ts")]
 #[serde(default)]
 pub struct AppSettings {
+    /// What happens to unsaved work while the user is not saving (D70).
+    pub autosave: AutosaveMode,
     /// Every binding, in the order the dialog lists them.
     pub shortcuts: Vec<Shortcut>,
     /// The colour-ramp top a *new* wind project gets, in knots.
@@ -265,6 +284,7 @@ pub const PROJECTIONS: [&str; 3] = ["equirectangular", "mercator", "miller"];
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
+            autosave: AutosaveMode::Recovery,
             shortcuts: default_shortcuts(),
             default_wind_scale_knots: 60.0,
             default_current_scale_knots: 6.0,
@@ -498,6 +518,25 @@ pub fn projection_set(state: &AppState, projection: String) -> Result<AppSetting
     let file = state.paths.settings_file();
     with_session(state, |session| {
         session.settings.projection = projection.clone();
+        session.save_settings(&file)?;
+        Ok(session.settings.clone())
+    })
+}
+
+/// Sets what the autosave thread does with unsaved work (D70).
+#[tauri::command]
+pub fn set_autosave_mode(
+    state: tauri::State<'_, AppState>,
+    mode: AutosaveMode,
+) -> Result<AppSettings> {
+    autosave_mode_set(&state, mode)
+}
+
+/// Implementation of [`set_autosave_mode`].
+pub fn autosave_mode_set(state: &AppState, mode: AutosaveMode) -> Result<AppSettings> {
+    let file = state.paths.settings_file();
+    with_session(state, |session| {
+        session.settings.autosave = mode;
         session.save_settings(&file)?;
         Ok(session.settings.clone())
     })

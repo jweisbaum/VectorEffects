@@ -14,6 +14,7 @@
 import { useEffect, useState } from "react";
 
 import type { AppSettings } from "../generated/AppSettings";
+import type { AutosaveMode } from "../generated/AutosaveMode";
 import type { MacroLibrary } from "../generated/MacroLibrary";
 import type { ProjectSummary } from "../generated/ProjectSummary";
 import type { Shortcut } from "../generated/Shortcut";
@@ -145,6 +146,28 @@ export default function SettingsDialog({
           >
             Reset to defaults
           </button>
+        </section>
+
+        <section>
+          <h3>Autosave</h3>
+          <label className="settings-field">
+            While you work, unsaved changes are
+            <select
+              value={settings.autosave}
+              onChange={(event) => {
+                setError(null);
+                void api
+                  .setAutosaveMode(event.target.value as AutosaveMode)
+                  .then(onSettings)
+                  .catch(report);
+              }}
+              title="Every minute, or every fifty edits, whichever comes first"
+            >
+              <option value="recovery">kept as a recovery snapshot, offered back after a crash</option>
+              <option value="save">saved into the project file itself</option>
+              <option value="off">left until you save</option>
+            </select>
+          </label>
         </section>
 
         <section>

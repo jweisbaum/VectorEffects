@@ -513,6 +513,22 @@ to the hash input is a correctness bug that shows up as stale frames.
   frame is already pending (that frame draws the overlay). Pointer reports
   arrive faster than frames are shown; a synchronous `drawOverlay` per report
   drew the overlay twice per frame on a fast drag.
+- **Hints and errors go to `ui/src/hint.ts`**, an external store the status
+  bar's one span subscribes to. No panel renders an error line of its own and
+  no tool bar carries help text; `reportError` and `setHint` are the whole
+  API. A refused write shows there until the tool's hint changes.
+- **The view controls are rendered by `MapView` into the title bar through a
+  portal** (`viewSlot`, D68). The tool, the glyph style and the graticule stay
+  the map's state; lifting them to `App` re-renders the shell on every tool
+  change. A control about the *view* goes in that portal; one about the tool
+  in hand stays in the map's option bar.
+- **Panel layout is `ui/src/panels/layout.ts`**, kept in `localStorage`, never
+  in a project or the settings file: which panels are open is how one person
+  is looking, not what the document is.
+- **`www.w3.org/2000/svg` is allowed by `check-offline.sh` on purpose**: an
+  XML namespace is an identifier the parser compares and never fetches, and
+  an SVG data URI cursor renders as nothing without it. Nothing else on
+  w3.org is allowed, and no other host.
 - **The canvas cursor is `cursorFor` (`ui/src/map/cursor.ts`), written to the
   element per pointer report.** Never a CSS rule and never a class on the
   canvas: two of its inputs (inside the region, panning) change per pointer

@@ -12,6 +12,8 @@ import UnsavedChangesDialog from "./project/UnsavedChangesDialog";
 import { mayReplaceProject, type UnsavedChoice } from "./project/saveGuard";
 import { pickProjectToOpen, pickProjectToSave } from "./project/dialogs";
 import { api, IpcError } from "./ipc";
+import { reportError, shown, useHint } from "./hint";
+import { type PanelState, loadPanels, savePanels, togglePanel } from "./panels/layout";
 import SettingsDialog from "./settings/SettingsDialog";
 import type { AppInfo } from "./generated/AppInfo";
 import type { AppSettings } from "./generated/AppSettings";
@@ -103,7 +105,26 @@ export default function App() {
   // Armed by the inspector, answered by the map: the next map click places this
   // property of this object.
   const [picking, setPicking] = useState<PositionPick | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  /**
+   * Which panels are open (M25). A viewer's convenience, remembered in
+   * `localStorage`, never a project's fact.
+   */
+  const [panels, setPanels] = useState<PanelState>(loadPanels);
+  const toggle = useCallback((panel: keyof PanelState) => {
+    setPanels((current) => {
+      const next = togglePanel(current, panel);
+      savePanels(next);
+      return next;
+    });
+  }, []);
+  /** The project's name being edited in the title bar, if it is (M25). */
+  const [renaming, setRenaming] = useState<string | null>(null);
+  /**
+   * The title bar's centre slot, which the map fills with its view controls
+   * through a portal (M25, D68). State rather than a ref so the map re-renders
+   * once the element exists.
+   */
+  const [viewSlot, setViewSlot] = useState<HTMLElement | null>(null);
   // Auto-key (spec.md 9.3): while on, an edit in the inspector keys the
   // current step instead of changing the property's base.
   const [autoKey, setAutoKey] = useState(false);
@@ -158,11 +179,11 @@ export default function App() {
   }, []);
 
   const report = (err: unknown) =>
-    setError(err instanceof IpcError ? `[${err.kind}] ${err.message}` : String(err));
+    reportError(err instanceof IpcError ? `[${err.kind}] ${err.message}` : String(err));
 
   const flash = (message: string) => {
     setStatus(message);
-    setError(null);
+    reportError(null);
     window.setTimeout(() => setStatus((current) => (current === message ? null : current)), 2500);
   };
 
@@ -247,7 +268,7 @@ export default function App() {
       setSelection([]);
       setActiveLayer(null);
       setStep(0);
-      setError(null);
+      reportError(null);
       setProject(null);
     } catch (err) {
       report(err);
@@ -268,7 +289,7 @@ export default function App() {
       setSelection([]);
       setActiveLayer(null);
       setStep(0);
-      setError(null);
+      reportError(null);
       setProject(opened);
     } catch (err) {
       report(err);
@@ -375,14 +396,46 @@ export default function App() {
     <div className="app">
       <div className="titlebar">
         <span className="brand">VectorEffects</span>
-        <span className="project-name">
-          {project.name}
-          {project.dirty && <span className="dirty" title="Unsaved changes"> •</span>}
-        </span>
+        {/*
+          The name is edited where it is shown (M25): click it, type, Enter.
+          A document write like a layer's rename, so it undoes.
+        */}
+        {renaming !== null ? (
+          <input
+            className="project-name"
+            autoFocus
+            value={renaming}
+            aria-label="Project name"
+            onChange={(event) => setRenaming(event.target.value)}
+            onBlur={() => {
+              const name = renaming.trim();
+              setRenaming(null);
+              if (name.length > 0 && name !== project.name) {
+                void api.renameProject(name).then(setProject).catch(report);
+              }
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") event.currentTarget.blur();
+              if (event.key === "Escape") setRenaming(null);
+            }}
+          />
+        ) : (
+          <button
+            className="project-name"
+            onClick={() => setRenaming(project.name)}
+            title="Click to rename the project"
+          >
+            {project.name}
+            {project.dirty && <span className="dirty" title="Unsaved changes"> •</span>}
+          </button>
+        )}
         <span className="muted project-meta">
           {project.field_kind} · {project.resolution_label} · {project.step_count} ×{" "}
           {project.step_hours} h
         </span>
+        <span className="spacer" />
+        {/* The map's view controls and the capture tool land here (D68). */}
+        <div className="titlebar-centre" ref={setViewSlot} />
         <span className="spacer" />
         <button onClick={() => void startNewProject()}>New…</button>
         <button onClick={() => void openProject()}>Open…</button>
@@ -412,17 +465,28 @@ export default function App() {
       </div>
 
       <div className="workspace">
-        <aside className="sidebar left">
-          <LayerPanel
-            project={project}
-            step={step}
-            selection={selection}
-            activeLayer={activeLayer}
-            onSelect={selectObjects}
-            onActivateLayer={setActiveLayer}
-            onChanged={setProject}
-            viewBounds={viewBounds}
-          />
+        <aside className={panels.left ? "sidebar left" : "sidebar left collapsed"}>
+          <button
+            className="panel-toggle"
+            onClick={() => toggle("left")}
+            title={panels.left ? "Hide the layer panel" : "Show the layer panel"}
+            aria-label={panels.left ? "Hide the layer panel" : "Show the layer panel"}
+            aria-expanded={panels.left}
+          >
+            {panels.left ? "◀" : "▶"}
+          </button>
+          {panels.left && (
+            <LayerPanel
+              project={project}
+              step={step}
+              selection={selection}
+              activeLayer={activeLayer}
+              onSelect={selectObjects}
+              onActivateLayer={setActiveLayer}
+              onChanged={setProject}
+              viewBounds={viewBounds}
+            />
+          )}
         </aside>
 
         <MapView
@@ -441,24 +505,53 @@ export default function App() {
           onSelect={selectObjects}
           onViewport={setViewport}
           autoKey={autoKey}
+          viewSlot={viewSlot}
         />
 
-        <aside className="sidebar right">
-          <Inspector
-            project={project}
-            selection={selection}
-            step={step}
-            autoKey={autoKey}
-            picking={picking}
-            onPick={setPicking}
-            onChanged={setProject}
-          />
-          <HistoryPanel project={project} onChanged={setProject} />
+        <aside className={panels.right ? "sidebar right" : "sidebar right collapsed"}>
+          <button
+            className="panel-toggle"
+            onClick={() => toggle("right")}
+            title={panels.right ? "Hide the properties and history" : "Show the properties and history"}
+            aria-label={panels.right ? "Hide the properties and history" : "Show the properties and history"}
+            aria-expanded={panels.right}
+          >
+            {panels.right ? "▶" : "◀"}
+          </button>
+          {panels.right && (
+            <>
+              <section className="panel-section">
+                <header onClick={() => toggle("properties")}>
+                  <span className="disclose">{panels.properties ? "▾" : "▸"}</span>
+                  <h2>Properties</h2>
+                </header>
+                {panels.properties && (
+                  <Inspector
+                    project={project}
+                    selection={selection}
+                    step={step}
+                    autoKey={autoKey}
+                    picking={picking}
+                    onPick={setPicking}
+                    onChanged={setProject}
+                  />
+                )}
+              </section>
+              <section className="panel-section">
+                <header onClick={() => toggle("history")}>
+                  <span className="disclose">{panels.history ? "▾" : "▸"}</span>
+                  <h2>History</h2>
+                </header>
+                {panels.history && <HistoryPanel project={project} onChanged={setProject} />}
+              </section>
+            </>
+          )}
         </aside>
       </div>
 
-      <Timeline
-        project={project}
+      {panels.bottom ? (
+        <Timeline
+          project={project}
         step={step}
         onStepChange={setStep}
         selection={selection}
@@ -472,7 +565,24 @@ export default function App() {
         onKeysSelected={onKeysSelected}
         settings={settings}
         capture={recording}
+        onCollapse={() => toggle("bottom")}
       />
+      ) : (
+        <div className="timeline collapsed">
+          <button
+            className="panel-toggle"
+            onClick={() => toggle("bottom")}
+            title="Show the timeline"
+            aria-label="Show the timeline"
+            aria-expanded={false}
+          >
+            ▲ Timeline
+          </button>
+          <span className="muted">
+            Step {step} / {Math.max(0, project.step_count - 1)}
+          </span>
+        </div>
+      )}
 
       {showSettings && settings !== null && (
         <SettingsDialog
@@ -496,7 +606,7 @@ export default function App() {
             setSelection([]);
             setActiveLayer(null);
             setStep(0);
-            setError(null);
+            reportError(null);
             setProject(created);
           }}
           onCancel={() => setCreating(null)}
@@ -522,8 +632,8 @@ export default function App() {
           {project.grid_ni} × {project.grid_nj} grid
         </span>
         <span className="spacer" />
-        {status !== null && <span className="accent">{status}</span>}
-        {error !== null && <span className="error">{error}</span>}
+        <StatusHint status={status} />
+        <span className="spacer" />
         {project.path !== null && <span className="muted path">{project.path}</span>}
         {/*
           The product of the whole app, so it sits apart from the file
@@ -535,4 +645,18 @@ export default function App() {
       </div>
     </div>
   );
+}
+
+/**
+ * The status bar's middle: the tool's hint, an error, or a flash (M25).
+ *
+ * Its own component so the hint store's updates — which arrive per pointer
+ * report from the map — re-render this span and nothing else.
+ */
+function StatusHint({ status }: { status: string | null }) {
+  const state = useHint();
+  const line = shown(state);
+  if (status !== null) return <span className="hint accent">{status}</span>;
+  if (line === null) return <span className="hint" />;
+  return <span className={line.kind === "error" ? "hint error" : "hint muted"}>{line.text}</span>;
 }

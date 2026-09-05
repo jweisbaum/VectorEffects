@@ -25,6 +25,7 @@ import type { ToolSchema } from "./generated/ToolSchema";
 import type { DocumentTree } from "./generated/DocumentTree";
 import type { ClipboardState } from "./generated/ClipboardState";
 import type { ClipboardKind } from "./generated/ClipboardKind";
+import type { AutosaveMode } from "./generated/AutosaveMode";
 import type { AppSettings } from "./generated/AppSettings";
 import type { CaptureMode } from "./generated/CaptureMode";
 import type { CaptureState } from "./generated/CaptureState";
@@ -328,6 +329,8 @@ export const api = {
   /** Imports a GRIB2 file as one layer per field kind it holds (spec 4.8). */
   importGrib: (path: string) => call<ProjectSummary>("import_grib", { path }),
   removeLayer: (layer: number) => call<ProjectSummary>("remove_layer", { layer }),
+  /** Renames the project: a document write, undoable (M25). */
+  renameProject: (name: string) => call<ProjectSummary>("rename_project", { name }),
   renameLayer: (layer: number, name: string) =>
     call<ProjectSummary>("rename_layer", { layer, name }),
   /**
@@ -500,6 +503,8 @@ export const api = {
   /** How the map lays the world out (M11). A view preference only. */
   setProjection: (projection: string) =>
     call<AppSettings>("set_projection", { projection }),
+  /** What the autosave thread does with unsaved work (D70). */
+  setAutosaveMode: (mode: AutosaveMode) => call<AppSettings>("set_autosave_mode", { mode }),
   /** Where the macro library lives. */
   setMacroDirectory: (directory: string) =>
     call<AppSettings>("set_macro_directory", { directory }),

@@ -46,6 +46,60 @@ body {
 .layer-panel header { flex-wrap: wrap; row-gap: 6px; }
 .sidebar.right { border-left: 1px solid var(--border); }
 
+/* --- Collapsible panels (M25) ------------------------------------------ */
+
+/* A collapsed sidebar is a strip wide enough for its toggle and nothing
+   else; the map takes the room, through the same resize path a window
+   resize takes. */
+.sidebar.collapsed { flex: 0 0 22px; width: 22px; overflow: hidden; }
+.panel-toggle {
+  flex: 0 0 auto;
+  align-self: stretch;
+  background: #0f1a2c;
+  color: var(--muted);
+  border: none;
+  border-bottom: 1px solid var(--border);
+  padding: 4px 0;
+  font-size: 10px;
+  cursor: pointer;
+}
+.panel-toggle:hover { color: var(--text); background: #16233a; }
+.sidebar.collapsed .panel-toggle { border-bottom: none; height: 100%; }
+.panel-section { display: flex; flex-direction: column; min-height: 0; }
+.panel-section > header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  background: #0d1526;
+  cursor: pointer;
+  user-select: none;
+}
+.panel-section > header h2 { margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.panel-section > header .disclose { color: var(--muted); width: 1em; }
+.timeline.collapsed {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  height: auto;
+  min-height: 0;
+  padding: 0 12px 0 0;
+  border-top: 1px solid var(--border);
+  background: #0d1526;
+  font-size: 12px;
+}
+.timeline.collapsed .panel-toggle { border-bottom: none; padding: 4px 10px; font-size: 11px; }
+.layer-panel .fold {
+  width: 16px;
+  padding: 0;
+  color: var(--muted);
+  transition: transform 120ms ease;
+  transform: rotate(-90deg);
+}
+.layer-panel .fold.open { transform: none; }
+
 .map { position: relative; flex: 1; min-width: 0; min-height: 0; }
 
 /* The cursor is set on the element by `cursorFor` (ui/src/map/cursor.ts):
@@ -99,8 +153,6 @@ body {
   border-radius: 5px;
   padding: 2px 6px;
 }
-.map-toolbar .step { min-width: 190px; }
-.map-toolbar .step input { flex: 1; }
 .activity { color: var(--accent); font-variant-numeric: tabular-nums; }
 
 /*
@@ -192,6 +244,60 @@ body {
 }
 .titlebar button:hover { background: #1d2d49; }
 .project-name { font-weight: 600; }
+/* The name is a button that looks like the name, and a field while edited. */
+.titlebar button.project-name {
+  background: none;
+  border: 1px solid transparent;
+  padding: 2px 6px;
+  font: inherit;
+  font-weight: 600;
+  color: var(--text);
+}
+.titlebar button.project-name:hover { border-color: var(--border); background: #16233a; }
+.titlebar input.project-name {
+  background: #0f1a2c;
+  color: var(--text);
+  border: 1px solid var(--accent);
+  border-radius: 5px;
+  padding: 2px 6px;
+  font: inherit;
+  font-weight: 600;
+  width: 18ch;
+}
+/* The map's view controls, centred (M25, D68). */
+.titlebar-centre { display: flex; justify-content: center; }
+.view-controls { display: flex; align-items: center; gap: 8px; }
+.view-controls label { display: flex; gap: 6px; align-items: center; color: var(--muted); }
+.view-controls select {
+  background: #0f1a2c;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 2px 6px;
+  accent-color: var(--accent);
+}
+.view-controls .divider { width: 1px; height: 18px; background: var(--border); }
+.view-controls .history { display: flex; gap: 4px; }
+.view-controls button.icon {
+  padding: 3px 5px;
+  display: inline-flex;
+  align-items: center;
+}
+.view-controls button.icon .tool-icon { opacity: 0.75; }
+.view-controls button.icon:hover .tool-icon,
+.view-controls button.icon.active .tool-icon { opacity: 1; }
+.view-controls button.active { background: #1d5a7a; border-color: #2b7ba4; }
+.view-controls button:disabled { opacity: 0.45; cursor: default; }
+/* The status bar's middle: the hint, an error, or a flash (M25). */
+.statusbar .hint {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 60ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: center;
+}
 .dirty { color: var(--accent); }
 .project-meta { font-variant: small-caps; }
 .spacer { flex: 1; }
@@ -759,6 +865,10 @@ body {
 .tl-transport button.autokey.active { background: #6b3a12; border-color: #b9701f; color: #ffd678; }
 .tl-transport label { display: flex; gap: 6px; align-items: center; }
 .tl-transport input[type="number"] { width: 4rem; }
+/* The loop button is drawn larger: it is the one the eye looks for during
+   playback, and a glyph at text size was easy to miss (M25). */
+.tl-transport button.tl-loop { padding: 2px 6px; display: inline-flex; align-items: center; }
+.tl-transport .tl-collapse { margin-left: 8px; }
 .tl-transport input {
   background: #0f1a2c;
   color: var(--text);

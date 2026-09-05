@@ -237,3 +237,72 @@ fn recovering_will_not_silently_discard_an_open_dirty_project() {
     assert!(autosave::recover(&state, id, false).is_err());
     assert!(autosave::recover(&state, id, true).is_ok());
 }
+
+/// Autosave is a setting (D70, M25): `save` writes the project file itself in
+/// place when it has one, on the same cadence, and leaves nothing to recover.
+#[test]
+fn save_mode_writes_the_project_in_place() {
+    let root = TempRoot::new("save-mode");
+    let state = app(&root);
+    create(&state);
+    let path = root.0.join("kept.veproj");
+    projects::save_as(&state, path.to_string_lossy().into_owned()).expect("save as");
+    let before = std::fs::metadata(&path).expect("saved").len();
+    ve_app::settings::autosave_mode_set(&state, ve_app::settings::AutosaveMode::Save)
+        .expect("mode");
+
+    paint(&state, 0.0);
+    assert!(
+        projects::current(&state)
+            .expect("current")
+            .expect("open")
+            .dirty,
+        "an edit dirties the project"
+    );
+    assert!(
+        autosave::snapshot(&state, true).expect("tick"),
+        "the tick writes"
+    );
+    let summary = projects::current(&state).expect("current").expect("open");
+    assert!(!summary.dirty, "written in place, so the project is clean");
+    assert_ne!(
+        std::fs::metadata(&path).expect("saved").len(),
+        before,
+        "the file at the project's own path changed"
+    );
+    assert!(
+        autosave::list(&state).is_empty(),
+        "nothing to recover: the file is the save"
+    );
+    assert!(
+        !autosave::snapshot(&state, true).expect("tick"),
+        "and an unchanged project is not written again"
+    );
+}
+
+/// A project that has never been saved has nowhere to be written in place,
+/// so `save` mode takes a recovery snapshot for it like everyone else.
+#[test]
+fn save_mode_snapshots_a_project_with_no_path() {
+    let root = TempRoot::new("save-mode-no-path");
+    let state = app(&root);
+    create(&state);
+    ve_app::settings::autosave_mode_set(&state, ve_app::settings::AutosaveMode::Save)
+        .expect("mode");
+    assert!(autosave::snapshot(&state, true).expect("tick"));
+    assert_eq!(autosave::list(&state).len(), 1);
+}
+
+/// `off` writes nothing, however dirty the project is.
+#[test]
+fn off_writes_nothing() {
+    let root = TempRoot::new("off");
+    let state = app(&root);
+    create(&state);
+    ve_app::settings::autosave_mode_set(&state, ve_app::settings::AutosaveMode::Off).expect("mode");
+    for lon in 0..60 {
+        paint(&state, f64::from(lon) * 2.0 - 60.0);
+    }
+    assert!(!autosave::snapshot(&state, true).expect("tick"));
+    assert!(autosave::list(&state).is_empty());
+}

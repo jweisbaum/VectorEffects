@@ -23,7 +23,11 @@ CONF=crates/ve-app/tauri.conf.json
 # reference, the dev server, and the Tauri IPC origin.
 # `.localhost` is a reserved TLD (RFC 6761) that never resolves off-machine, so
 # the Tauri IPC origin and our tile scheme's Windows form are local by definition.
-ALLOW='schema\.tauri\.app|//localhost:|\.localhost|//127\.0\.0\.1'
+# The SVG XML namespace is an identifier, never a location: an XML parser
+# compares it as a string and dereferences nothing. It is required in an SVG
+# carried as a data URI (the map's cursors, M24), which otherwise renders as
+# nothing at all.
+ALLOW='schema\.tauri\.app|//localhost:|\.localhost|//127\.0\.0\.1|www\.w3\.org/2000/svg'
 # Pure comment lines. A URL in a comment fetches nothing, and the generated
 # ts-rs bindings carry a provenance URL in their header.
 COMMENT=':[0-9]+:[[:space:]]*(//|\*|/\*)'

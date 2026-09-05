@@ -614,6 +614,33 @@ pub(crate) fn creation_layer(project: &Project, layer: Option<u64>) -> Result<&L
     Ok(found)
 }
 
+/// Renames the project (M25): a document write, undoable.
+#[tauri::command]
+pub fn rename_project(state: tauri::State<'_, AppState>, name: String) -> Result<ProjectSummary> {
+    project_rename(&state, name)
+}
+
+/// Implementation of [`rename_project`].
+///
+/// The name is the project's, so it is a history entry like a layer's
+/// rename; an empty name is refused rather than written, since the title bar
+/// and the recent list would then show nothing to click on.
+pub fn project_rename(state: &AppState, name: String) -> Result<ProjectSummary> {
+    let name = name.trim().to_owned();
+    if name.is_empty() {
+        return Err(AppError::BadOption {
+            field: "name",
+            value: "a project needs a name".to_owned(),
+        });
+    }
+    apply(state, |project| {
+        Ok(Command::SetProjectName {
+            before: project.name.clone(),
+            after: name,
+        })
+    })
+}
+
 /// Adds a layer above the current top.
 #[tauri::command]
 pub fn add_layer(state: tauri::State<'_, AppState>, name: String) -> Result<ProjectSummary> {

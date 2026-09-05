@@ -13,19 +13,26 @@ steps. Everything else is editable. **New…** starts one; **Open from GRIB…**
 starts one shaped by a forecast file — its kind, grid, step and span come
 from the file, and the file becomes the first layer.
 
-Save with `Cmd`-`S`. A `.veproj` holds geometry and parameters, never pixels;
-a GRIB or image layer keeps the file's *path*. If the application stops
-unexpectedly, the start screen offers the last snapshot of any unsaved work
-under **Recovered work** — a snapshot is taken every thirty seconds while a
-project has unsaved changes and removed when it is saved or closed.
+Save with `Cmd`-`S`; click the project's name in the title bar to rename it.
+A `.veproj` holds geometry and parameters, never pixels; a GRIB or image layer
+keeps the file's *path*. **Autosave** in Settings decides what happens to
+unsaved work while you paint: a recovery snapshot every minute or fifty
+edits, offered back on the start screen under **Recovered work** if the
+application stops unexpectedly (the default); the project file itself
+written in place on the same cadence; or nothing until you save.
 
 ## The map
 
 Drag with the hand tool (`V`) to pan, wheel to zoom, `Alt`+arrows to pan by
-the keyboard. **Projection** in the
-map's toolbar switches between equirectangular (the default — the map is 1:1
-with the grid), Mercator (a bearing drawn on it is the bearing sailed) and
-Miller. A projection is a view setting: it changes nothing stored or exported.
+the keyboard. The title bar's centre holds what the map is *showing*:
+**Projection** switches between equirectangular (the default — the map is
+1:1 with the grid), Mercator (a bearing drawn on it is the bearing sailed)
+and Miller — a view setting that changes nothing stored or exported —
+beside **Glyphs**, the graticule switch, undo and redo, and the capture and
+measure tools. The status bar's middle says what the tool in hand wants
+next, or what went wrong. The layer panel, the properties and history panel
+and the timeline each fold away with the arrow on their edge; a layer's
+objects fold under its name.
 
 Speed is the colour ramp; direction is the glyph. **Glyphs** offers arrows or
 wind barbs, and the readout at the bottom gives the field under the cursor in
@@ -113,7 +120,8 @@ background, can be cancelled, and never leaves a truncated file behind.
 
 ## Settings
 
-`Cmd`-`,` or the ⚙ button: every shortcut is rebindable, the default colour
-scales for new projects, and the macro library's directory.
+`Cmd`-`,` or the ⚙ button: what autosave does, every shortcut (rebindable,
+with Shift or Alt), the default colour scales for new projects, and the macro
+library's directory.
 
 The application makes no network requests at any time.

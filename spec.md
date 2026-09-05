@@ -283,6 +283,7 @@ increased or decreased after creation.
 | `step_hours` | `1` \| `3` \| `6` \| `24` | Yes |
 | `step_count` | `1..=240` | No |
 | `direction_convention` | `From` \| `Toward` | No (display only) |
+| `name` | text | No — edited in place from the title bar, undoably (M25) |
 
 If a user needs a different resolution, they create a new project. A "duplicate
 project at new resolution" action is a possible future addition (§14).
@@ -455,10 +456,13 @@ META-INF/version      schema_version, for fast pre-parse rejection
 with migration. The one foreign format that can be imported is GRIB2, as a
 layer rather than as a project (§4.8).
 
-**Autosave** writes a recovery copy to the app data directory every 60 s and on
-every 50 history entries, whichever comes first (M10). Only while the project is
-dirty and has changed since the last copy: a snapshot of nothing new is a write
-for nothing. The copy is a full `.veproj` beside a manifest naming where the
+**Autosave is a setting** (D70): *recovery*, the default, writes a recovery
+copy to the app data directory every 60 s and on every 50 history entries,
+whichever comes first (M10); *save* writes the **project file itself** in
+place on the same cadence when the project has a path, and a recovery copy
+when it has none; *off* writes nothing until the user saves. Only while the
+project is dirty and has changed since the last write: a snapshot of nothing
+new is a write for nothing. The copy is a full `.veproj` beside a manifest naming where the
 project lived, taken from a clone of the document so the session is never held
 for the write. A clean save, a deliberate close and a replacement the user
 agreed to remove it; a crash leaves it, and the start screen offers it back
@@ -916,6 +920,26 @@ shows rendering is in flight.
 
 Everything drawn over the map — the active tool's options, the colour legend,
 the cursor readout, selection handles, gesture previews — obeys three rules.
+
+**What the map is showing lives in the title bar; what is being painted lives
+over the map** (M25, D68). The title bar's centre holds the view controls —
+the capture and measure tools, the glyph and projection menus, the graticule
+switch, undo and redo as icons — beside the project's name, which is edited
+in place by clicking it. The option bar over the map holds the palette and
+the tool in hand's options and nothing about the view; the step is the
+timeline's to say. The controls are rendered by the map through a portal, so
+the tool, the glyph style and the graticule stay the map's state.
+
+**The status bar's middle is one line**: the tool's hint, or the last error,
+whichever is newer, from a store every panel and the map write to. No panel
+keeps an error line of its own, and no bar carries help text beside its
+controls.
+
+**Every panel can be put away.** The layer panel, the properties-and-history
+panel and the timeline dock each collapse to a strip with a toggle; inside
+the right panel, properties and history fold separately; each layer's object
+list folds under its header. What is open is a viewer's convenience, kept in
+`localStorage`, never a project's fact.
 
 **The tool option bar spans the map view and wraps within it.** It is the width
 of the map, not of its contents. A tool's options grow as the tool gains them,
@@ -2278,8 +2302,10 @@ showing a GRIB layer of the other kind is (§4.8); the list marks the kind.
 A bottom dock, resizable, with two coordinated regions:
 
 - **Ruler:** one tick per time step, labelled with the forecast hour and, once a
-  start time is set, the absolute UTC time. Click or scrub to change the current
-  step.
+  GRIB file has given the project a start time (§4.8), the absolute UTC time.
+  There is no field for the start time: a project has no clock of its own,
+  and the export asks for the one the GRIB needs (D69). Click or scrub to
+  change the current step.
 - **Tracks:** a collapsible tree — layers, then objects, then one row per
   animatable property, with keyframe diamonds on each.
 

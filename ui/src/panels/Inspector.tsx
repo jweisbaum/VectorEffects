@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import NumberField from "../NumberField";
 
+import { reportError } from "../hint";
 import { api } from "../ipc";
 import type { ProjectSummary } from "../generated/ProjectSummary";
 import type { PropertyValue } from "../generated/PropertyValue";
@@ -72,7 +73,8 @@ export default function Inspector({
   // though they applied to all of them would be a lie.
   const object = selection.length === 1 ? (selection[0] ?? null) : null;
   const [properties, setProperties] = useState<PropertyView[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // Errors go to the status bar's hint area (M25), not a line of their own.
+  const setError = reportError;
 
   useEffect(() => {
     if (object === null) {
@@ -95,7 +97,7 @@ export default function Inspector({
     );
   }
   if (!properties) {
-    return <div className="panel-empty muted">{error ?? "Loading…"}</div>;
+    return <div className="panel-empty muted">Loading…</div>;
   }
 
   const write = (property: string, value: PropertyValue) => {
@@ -118,10 +120,6 @@ export default function Inspector({
 
   return (
     <div className="inspector">
-      <header>
-        <h2>Properties</h2>
-      </header>
-
       <div className="properties">
         {properties.map((property) => {
           const suffix = unitLabel(property.unit);
@@ -306,7 +304,7 @@ export default function Inspector({
         })}
       </div>
 
-      {error !== null && <p className="error">{error}</p>}
+
     </div>
   );
 }
