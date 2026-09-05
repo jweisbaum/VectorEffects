@@ -61,6 +61,7 @@ fn file(kind: FieldKind, hours: &[u32]) -> Vec<u8> {
                 reference_time: reference_time(),
                 forecast_hour: hour,
                 centre: 255,
+                bits: 16,
             };
             out.extend(message(&spec, values).unwrap());
         }

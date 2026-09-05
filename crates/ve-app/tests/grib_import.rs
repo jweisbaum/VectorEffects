@@ -95,6 +95,7 @@ fn write_file(root: &TempRoot, name: &str, kinds: &[FieldKind], hours: &[u32]) -
                     },
                     forecast_hour: hour,
                     centre: 255,
+                    bits: 16,
                 };
                 bytes.extend(message(&spec, &vec![value; count]).unwrap());
             }

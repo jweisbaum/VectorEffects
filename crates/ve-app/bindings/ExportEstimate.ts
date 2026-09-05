@@ -15,4 +15,14 @@ messages: number,
 /**
  * Grid points per message.
  */
-points_per_message: bigint, };
+points_per_message: bigint, 
+/**
+ * The width the estimate was made at.
+ */
+bits: number, 
+/**
+ * The step one level is worth at that width, in knots, over a nominal
+ * ±60 m/s field — the resolution the width implies before the field's own
+ * range is known.
+ */
+step_knots: number, };

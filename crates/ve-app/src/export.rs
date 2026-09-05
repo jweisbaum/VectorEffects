@@ -46,6 +46,17 @@ pub struct ExportRequest {
     pub hour: u8,
     /// Originating centre code. 255 means missing, which is the honest default.
     pub centre: u16,
+    /// Bits per packed value: 8, 12, 16 or 24 (spec.md 12.3, M19).
+    ///
+    /// Sixteen unless chosen otherwise, which is what every export before this
+    /// option existed wrote; an old caller that sends nothing gets the file it
+    /// always got.
+    #[serde(default = "default_bits")]
+    pub bits: u8,
+}
+
+fn default_bits() -> u8 {
+    ve_grib::packing::BITS_PER_VALUE
 }
 
 /// What an export produced.
@@ -84,6 +95,12 @@ pub struct ExportEstimate {
     pub messages: u32,
     /// Grid points per message.
     pub points_per_message: u64,
+    /// The width the estimate was made at.
+    pub bits: u8,
+    /// The step one level is worth at that width, in knots, over a nominal
+    /// ±60 m/s field — the resolution the width implies before the field's own
+    /// range is known.
+    pub step_knots: f64,
 }
 
 /// Estimates the output size without doing any work.
@@ -95,15 +112,19 @@ pub struct ExportEstimate {
 /// a project with nothing painted in it — needs no data section at all and
 /// collapses to a few hundred bytes. Any step with content packs every point,
 /// so the estimate is accurate as soon as a project has anything in it.
-pub fn estimate(project: &Project) -> ExportEstimate {
+pub fn estimate(project: &Project, bits: u8) -> ExportEstimate {
     let points = project.settings.resolution.point_count();
     let messages = project.settings.step_count * 2;
-    // Two bytes per packed value, plus a little for section headers.
-    let bytes = points * 2 * u64::from(messages) + u64::from(messages) * 200;
+    // `bits` per packed value, rounded up to whole octets per message, plus a
+    // little for section headers.
+    let data = (points * u64::from(bits)).div_ceil(8);
+    let bytes = data * u64::from(messages) + u64::from(messages) * 200;
     ExportEstimate {
         bytes,
         messages,
         points_per_message: points,
+        bits,
+        step_knots: ve_core::units::knots_from_mps(ve_grib::packing::nominal_step_mps(bits)),
     }
 }
 
@@ -117,12 +138,18 @@ fn parameters(kind: FieldKind) -> (Parameter, Parameter) {
 
 /// Estimates the size of the export for the open project.
 #[tauri::command]
-pub fn export_estimate(state: tauri::State<'_, AppState>) -> Result<ExportEstimate> {
+pub fn export_estimate(
+    state: tauri::State<'_, AppState>,
+    bits: Option<u8>,
+) -> Result<ExportEstimate> {
     let mut session = state
         .session
         .lock()
         .map_err(|_| AppError::Internal("session lock was poisoned".to_owned()))?;
-    Ok(estimate(&session.require_open()?.project))
+    Ok(estimate(
+        &session.require_open()?.project,
+        bits.unwrap_or(ve_grib::packing::BITS_PER_VALUE),
+    ))
 }
 
 /// Asks a running export to stop.
@@ -163,6 +190,19 @@ pub fn run(
     cancel: &AtomicBool,
     mut on_progress: impl FnMut(ExportProgress),
 ) -> Result<ExportResult> {
+    // Refused here, before a file is opened, rather than by the packer on the
+    // first message: the widths are the four the dialog offers, and anything
+    // else is a caller's bug and not a preference (spec.md 12.3, M19).
+    if !ve_grib::packing::BIT_WIDTHS.contains(&request.bits) {
+        return Err(AppError::BadOption {
+            field: "bits",
+            value: format!(
+                "{} bits per value; the export offers {:?}",
+                request.bits,
+                ve_grib::packing::BIT_WIDTHS
+            ),
+        });
+    }
     let started = std::time::Instant::now();
     let settings = project.settings;
     let grid = GridSpec {
@@ -223,6 +263,7 @@ pub fn run(
                     reference_time,
                     forecast_hour: hour,
                     centre: request.centre,
+                    bits: request.bits,
                 };
                 bytes += write_message(&mut out, &spec, values)? as u64;
                 messages += 1;

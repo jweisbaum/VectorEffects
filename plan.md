@@ -182,7 +182,7 @@ together: shifting only the lattice left the field trying to draw outside the
 shape that admits it, which is how the first attempt failed. Six end-to-end
 tests and four hand-computed resample ones.
 
-**M19 is next.**
+**M10 is next.**
 
 **Unplanned, after M7: GRIB import** (spec §4.8, D44). A GRIB2 file becomes a
 layer — two, when it holds both wind and currents — whose lattice is sampled
@@ -570,7 +570,7 @@ M0 ─ M1 ─ M2 ─ M3 ─ M4 ══ walking skeleton complete
                     ├─ M16 ────── macros                                ✓
                     ├─ M17 ────── warp and liquify, two tools            ✓
                     ├─ M18 ────── image layers                           ✓
-                    ├─ M19 ────── export precision
+                    ├─ M19 ────── export precision                        ✓
                     ├─ M11 ────── projections                            ✓ (cylindrical tier)
                     ├─ M8 ─────── measurement                            ✓
                                         │
@@ -1813,18 +1813,30 @@ it as dead code. It is a free function now, which cannot be shadowed.
 
 ---
 
-### M19 — Export precision
+### M19 — Export precision · **complete**
 
-The request reads "export GRIBs as float16". GRIB2 has no 16-bit float
-representation — template 5.4 (IEEE) offers 32, 64 and 128 bits — and the
-export stays simple packing, template 5.0, as required. **The export already
-packs 16 bits per value** (spec §12.3): a wind between −60 and 60 m/s to about
-0.002 m/s. So this milestone makes precision a *choice*, and visible: the
-export dialog gains **bits per value** (8, 12, 16, 24; default 16) with the
-resolution it implies in knots and the file size beside it — 8 bits halves the
-file at steps of about half a knot. Golden fixtures at each width; ecCodes
-decodes each within `2^E`; byte-identical across the three CI platforms as
-now. Confirmed as the intended reading (D53).
+**Goal:** the packing width as a visible choice against the file size (D53).
+
+**Delivered.** The export dialog offers **8, 12, 16 or 24 bits per value**,
+default 16 — which is what every export wrote before this was a choice, so an
+old caller that sends nothing gets the file it always got. Beside the choice:
+the step the width implies, in knots over a nominal ±60 m/s (half a knot at 8
+bits, 0.004 at 16), and the estimated size, which now scales with the width
+rather than assuming two bytes. Template 5.0 stays the only packing written;
+the width is refused before a file is opened if it is not one of the four.
+
+**Acceptance.** Every offered width writes a message that reads back within
+its own step, through the writer's test verifier *and* through the import
+decoder — the one that meets other centres' files and must meet ours at every
+width. Section 5 records the width. The file shrinks in exactly the
+proportion the width says, headers being equal. Every width is
+byte-reproducible (invariant 4). The 8-bit step over ±60 m/s is `2^E` for the
+`E` the packer chose, which is the number the dialog shows.
+
+**Not done.** ecCodes decoding each width is a CI step, as the other external
+decodes are (§12.5); it is not run locally. The in-repo import decoder standing
+in for it is a weaker witness only for our own output — it is the decoder that
+has been checked against ecCodes on ten centres' files.
 
 ---
 

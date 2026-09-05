@@ -65,6 +65,7 @@ fn request(path: &std::path::Path) -> ExportRequest {
         day: 2,
         hour: 0,
         centre: 255,
+        bits: 16,
     }
 }
 
@@ -367,7 +368,7 @@ fn the_size_estimate_is_in_the_right_ballpark() {
         let mut session = state.session.lock().expect("lock");
         session.require_open().expect("open").project.clone()
     };
-    let estimate = export::estimate(&project);
+    let estimate = export::estimate(&project, 16);
     let path = root.0.join("e.grib2");
     let actual =
         export::run(&project, &request(&path), &AtomicBool::new(false), |_| {}).expect("export");

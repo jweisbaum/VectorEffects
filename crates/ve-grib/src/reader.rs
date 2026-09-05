@@ -44,6 +44,8 @@ pub struct Decoded {
     pub scanning_mode: u8,
     pub resolution_flags: u8,
     pub values: Vec<f32>,
+    /// Bits per packed value, as section 5 recorded it.
+    pub bits: u8,
 }
 
 fn u16_at(bytes: &[u8], at: usize) -> u16 {
@@ -94,6 +96,7 @@ pub fn decode(bytes: &[u8]) -> Decoded {
     };
 
     Decoded {
+        bits: packed.bits,
         discipline,
         edition,
         centre: u16_at(s1, 5),

@@ -171,6 +171,9 @@ pub struct MessageSpec {
     pub forecast_hour: u32,
     /// Originating centre. 255 means missing.
     pub centre: u16,
+    /// Bits per packed value (spec.md 12.3, M19). [`packing::BITS_PER_VALUE`]
+    /// unless the user chose otherwise.
+    pub bits: u8,
 }
 
 // --- Byte helpers -----------------------------------------------------------
@@ -351,7 +354,7 @@ pub fn message(spec: &MessageSpec, values: &[f32]) -> Result<Vec<u8>> {
         )));
     }
 
-    let packed = packing::pack(values)?;
+    let packed = packing::pack(values, spec.bits)?;
     let body = [
         section1(spec),
         section3(spec.grid),
@@ -411,6 +414,7 @@ mod tests {
             },
             forecast_hour: 6,
             centre: 255,
+            bits: 16,
         }
     }
 
@@ -421,7 +425,7 @@ mod tests {
         assert_eq!(section4(&spec()).len(), 34);
         assert_eq!(section6().len(), 6);
 
-        let packed = packing::pack(&[1.0, 2.0]).expect("packs");
+        let packed = packing::pack(&[1.0, 2.0], packing::BITS_PER_VALUE).expect("packs");
         assert_eq!(section5(&packed).len(), 21);
         assert_eq!(section7(&packed).len(), 5 + packed.data.len());
     }

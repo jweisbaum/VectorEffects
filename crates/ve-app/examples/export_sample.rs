@@ -78,6 +78,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             day: 2,
             hour: 0,
             centre: 255,
+            bits: 16,
         },
         &AtomicBool::new(false),
         |progress| println!("  step {}/{}", progress.step, progress.total),

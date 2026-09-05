@@ -27,4 +27,12 @@ hour: number,
 /**
  * Originating centre code. 255 means missing, which is the honest default.
  */
-centre: number, };
+centre: number, 
+/**
+ * Bits per packed value: 8, 12, 16 or 24 (spec.md 12.3, M19).
+ *
+ * Sixteen unless chosen otherwise, which is what every export before this
+ * option existed wrote; an old caller that sends nothing gets the file it
+ * always got.
+ */
+bits: number, };

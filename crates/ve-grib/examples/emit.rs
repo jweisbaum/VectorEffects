@@ -45,6 +45,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
         forecast_hour: 0,
         centre: 255,
+        bits: 16,
     };
 
     let file = std::fs::File::create(&path)?;
@@ -72,7 +73,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     println!(
         "packing step {:?}",
-        packing::pack(&u).map(|p| p.binary_scale)
+        packing::pack(&u, packing::BITS_PER_VALUE).map(|p| p.binary_scale)
     );
     Ok(())
 }

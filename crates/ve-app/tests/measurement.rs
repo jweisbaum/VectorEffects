@@ -360,6 +360,7 @@ fn measurements_never_reach_an_export() {
                 day: 2,
                 hour: 0,
                 centre: 255,
+                bits: 16,
             },
             &AtomicBool::new(false),
             |_| {},

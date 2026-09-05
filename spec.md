@@ -2524,22 +2524,33 @@ Key field values:
 Y * 10^D = R + X * 2^E
 ```
 
-For each field: `D = 0`; `R = min(Y)`; `bits = 16`;
-`E = ceil(log2((max - min) / (2^bits - 1)))`, clamped to ≥ a floor that avoids
-denormal blow-up; `X = round((Y * 10^D - R) / 2^E)`.
+For each field: `D = 0`; `R = min(Y)`; `bits` as chosen — **8, 12, 16 or 24,
+default 16** (M19, D53); `E = ceil(log2((max - min) / (2^bits - 1)))`, clamped
+to ≥ a floor that avoids denormal blow-up; `X = round((Y * 10^D - R) / 2^E)`.
 
-16 bits gives roughly 0.001 m/s resolution over a ±60 m/s range — far finer than
-anything the tools can express. A constant field (max == min) is encoded with
-`bits = 0` and no data octets, which is legal and compact.
+16 bits gives roughly 0.002 m/s resolution over a ±60 m/s range — far finer than
+anything the tools can express, and what every export wrote before the width
+was a choice. 8 bits halves the file at steps of about half a knot; 24 is for
+someone who asked. The export dialog shows the step the width implies, in
+knots over a nominal ±60 m/s, and the size beside it; the packer refuses any
+width but those four, before a file is opened. A constant field (max == min) is
+encoded with `bits = 0` and no data octets, which is legal and compact.
+
+"Export as float16" was the request that became this option. GRIB2 has no
+16-bit float representation — template 5.4 offers 32, 64 and 128 — and the
+export already packed 16 bits per value, so what was wanted was the precision
+as a visible choice against the file size (D53). Template 5.0 stays the only
+packing written.
 
 ### 12.4 Export flow
 
 1. User invokes export and supplies: **forecast start time (UTC)**, output
    **file name**, and **output location**. Optionally centre code and the
    `fast_export` toggle.
-2. A pre-flight panel shows the estimated file size (`Ni × Nj × 2 bytes × 2
+2. A pre-flight panel shows the estimated file size (`Ni × Nj × bits/8 × 2
    fields × step_count`, plus headers) and the estimated duration. At 0.1° with
-   120 steps this is ≈ 6.2 GB, which the user should see before starting.
+   120 steps and 16 bits this is ≈ 6.2 GB, which the user should see before
+   starting; at 8 bits, half that.
 3. Export runs on a background worker, streaming to disk one message at a time —
    the whole field set is never held in memory.
 4. Progress is per-step, with a cancel button. Cancelling deletes the partial

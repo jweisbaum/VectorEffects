@@ -169,7 +169,8 @@ export const api = {
   // --- Export ---
 
   /** Approximate size of the export, before committing to it. */
-  exportEstimate: () => call<ExportEstimate>("export_estimate"),
+  /** The size and resolution an export would have at a width (spec.md 12.3). */
+  exportEstimate: (bits?: number) => call<ExportEstimate>("export_estimate", { bits: bits ?? null }),
 
   /** Writes the open project to a GRIB2 file. */
   exportGrib: (request: ExportRequest) => call<ExportResult>("export_grib", { request }),

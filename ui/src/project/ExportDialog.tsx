@@ -35,6 +35,12 @@ export default function ExportDialog({
   const [day, setDay] = useState(start.day);
   const [hour, setHour] = useState(0);
   const [centre, setCentre] = useState(255);
+  /**
+   * Bits per packed value (spec.md 12.3, M19). Sixteen is what every export
+   * wrote before this was a choice; 8 halves the file at steps of about half a
+   * knot, which the estimate says beside it.
+   */
+  const [bits, setBits] = useState(16);
 
   const [estimate, setEstimate] = useState<ExportEstimate | null>(null);
   const [progress, setProgress] = useState<ExportProgress | null>(null);
@@ -43,8 +49,8 @@ export default function ExportDialog({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    api.exportEstimate().then(setEstimate).catch(() => setEstimate(null));
-  }, []);
+    api.exportEstimate(bits).then(setEstimate).catch(() => setEstimate(null));
+  }, [bits]);
 
   useEffect(() => {
     const pending = listen<ExportProgress>("export://progress", (event) =>
@@ -64,7 +70,7 @@ export default function ExportDialog({
     setRunning(true);
     setProgress(null);
     try {
-      const result = await api.exportGrib({ path, year, month, day, hour, centre });
+      const result = await api.exportGrib({ path, year, month, day, hour, centre, bits });
       setDone(
         `Wrote ${result.messages} messages, ${formatBytes(result.bytes)}, ` +
           `in ${(result.elapsed_ms / 1000).toFixed(1)} s`,
@@ -114,6 +120,23 @@ export default function ExportDialog({
               <NumberField min={0} max={23} value={hour} onCommit={setHour} />
             </label>
           </div>
+
+          <label className="modal-centre">
+            Precision
+            <select value={bits} onChange={(event) => setBits(Number(event.target.value))}>
+              {[8, 12, 16, 24].map((width) => (
+                <option key={width} value={width}>
+                  {width} bits per value
+                </option>
+              ))}
+            </select>
+            <span className="muted">
+              {estimate
+                ? `steps of about ${estimate.step_knots >= 0.1 ? estimate.step_knots.toFixed(2) : estimate.step_knots.toFixed(4)} kt over ±60 m/s · ${formatBytes(estimate.bytes)}`
+                : ""}
+              {bits === 16 ? " · the default, and what earlier exports used" : ""}
+            </span>
+          </label>
 
           <label className="modal-centre">
             Originating centre
