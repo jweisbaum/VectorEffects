@@ -927,9 +927,11 @@ body {
   background: #c6aaff;
 }
 .tl-tick.tl-capture-origin::after { background: #ffd678; }
-/* Steps before the one a capture began on are out of the run: dimmed, and
-   the ruler will not scrub into them (spec.md 8.7, M26). */
-.tl-tick.tl-before { opacity: 0.3; }
+/* Steps outside a capture's run — before the one it began on, which the
+   ruler will not scrub into, and after the frame the playhead is on, where
+   the recording will end — are dimmed, so the ruler shows the macro's
+   length (spec.md 8.7, M26). */
+.tl-tick.tl-outside { opacity: 0.3; }
 /* The capture's own track (D72): its keys as diamonds, in its colour. */
 .tl-row.tl-capture-track { background: #16203a; }
 .tl-row.tl-capture-track .tl-labels { color: #d9a0ff; }

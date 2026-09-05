@@ -2254,9 +2254,13 @@ emptying the list.
 enters capture mode: the layer panel and the properties panel grey out and
 go dead to the pointer, the palette is disabled, the app's edit shortcuts
 stand down, and only the ruler — and the arrow keys — still move the
-playhead, because scrubbing is how the frames get visited. The steps
-**before the one the capture began on are out of the run**: dimmed on the
-ruler, and neither the ruler nor the arrows will scrub into them. The
+playhead, because scrubbing is how the frames get visited. **The run is
+from the frame the capture began on to the frame the playhead is on when
+recording ends** — a macro is as long as was recorded, not as long as the
+timeline, unless recording ends on the timeline's last frame. The ruler
+dims every step outside that run: the steps before the first, which neither
+the ruler nor the arrows will scrub into, and the steps after the playhead,
+which move with it so the ruler always shows the macro's length. The
 pointer over the map is the selection cursor.
 
 **The region's positions are keys** (D72). Every step the playhead visits
@@ -2274,7 +2278,8 @@ state — not keyframes of any object, not the document, not history — so a
 placement is not an edit and not undoable, and a click outside the region
 does nothing at all.
 
-**Finish recording** bakes — for each step of the run, the visible composite
+**Finish recording** ends the run on the current frame and bakes — for each
+step of the run, the visible composite
 inside the region *where the region is at that step*, evaluated with
 `CpuEvaluator` at the project's grid spacing, undefined kept distinct from
 calm — and enters the **preview** (D71). The map shows the basemap and the

@@ -4324,12 +4324,15 @@ export default function MapView({
                 {recording.phase === "recording" && (
                   <button
                     onClick={() => {
+                      // The run ends on the frame the playhead is on: a
+                      // macro is as long as the user recorded, not as long
+                      // as the timeline (spec.md 8.7).
                       void api
-                        .previewCapture(lastStep)
+                        .previewCapture(stepRef.current)
                         .then(setCapture)
                         .catch((err: unknown) => setError(String(err)));
                     }}
-                    title="Bake the frames and show the macro alone on the map, looping. Nothing is written."
+                    title="End the recording on this frame, bake the frames and show the macro alone on the map, looping. Nothing is written."
                   >
                     Finish recording
                   </button>
@@ -4371,7 +4374,7 @@ export default function MapView({
                         const name = captureName.trim();
                         setCaptureName(null);
                         void api
-                          .finishCapture(name, lastStep)
+                          .finishCapture(name, recording.last_step)
                           .then((held) => {
                             setRecording(null);
                             setLibrary(held);

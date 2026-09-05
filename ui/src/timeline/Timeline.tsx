@@ -198,6 +198,12 @@ export default function Timeline({
   const firstStep = capturing ? Math.min(capture.first_step, last) : 0;
   /** The last step playback reaches: the preview's run, or the timeline's. */
   const playLast = previewing ? Math.min(capture.last_step, last) : last;
+  /**
+   * Where the run ends, for the ruler's dimming: the frame the playhead is
+   * on while recording — the macro will end there when recording ends — and
+   * the fixed last step once the preview has baked it (spec.md 8.7).
+   */
+  const runEnd = recordingPhase ? step : previewing ? playLast : last;
   const clampStep = useCallback(
     (target: number) => Math.max(firstStep, Math.min(last, target)),
     [firstStep, last],
@@ -977,7 +983,7 @@ export default function Timeline({
                   // it began at: what the user has done and where it started.
                   capturing && capture.keys.includes(s) ? "tl-visited" : "",
                   capturing && capture.first_step === s ? "tl-capture-origin" : "",
-                  capturing && s < firstStep ? "tl-before" : "",
+                  capturing && (s < firstStep || s > runEnd) ? "tl-outside" : "",
                 ].join(" ")}
                 style={{ left: s * pxPerStep, width: pxPerStep }}
                 title={
@@ -985,7 +991,9 @@ export default function Timeline({
                     ? `${tickLabel(s)} · ${
                         s < firstStep
                           ? "before the capture"
-                          : capture.keys.includes(s)
+                          : s > runEnd
+                            ? "after the frame the recording ends on"
+                            : capture.keys.includes(s)
                             ? "region keyed here"
                             : "region between its keys"
                       }`
