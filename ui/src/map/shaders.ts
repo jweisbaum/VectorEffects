@@ -94,6 +94,51 @@ void main() { fragColor = uColor; }
 `;
 
 /**
+ * A georeferenced image layer (spec.md 4.9, M18).
+ *
+ * Drawn as a subdivided quad rather than two triangles. The placement is an
+ * affine in *degrees*, so a straight line across the image is straight in
+ * lon/lat — and a straight line in lon/lat is not straight on the map once the
+ * projection is not the flat one (M11). Subdividing follows the curve; the
+ * count is fixed rather than derived from the zoom, because it is a few hundred
+ * vertices either way and a mesh that changed with the camera would rebuild
+ * itself on every wheel event.
+ *
+ * The texture coordinate is the vertex's own place in the image, so nothing
+ * about the interior is interpolated through the projection.
+ */
+export const IMAGE_VERT = `#version 300 es
+precision highp float;
+in vec2 aCell;              // 0..1 across the image
+${PROJECTION}
+uniform vec3 uPlaceLon;     // lon = x*u + y*v + z, with u and v in 0..1
+uniform vec3 uPlaceLat;     // and the same for the latitude
+out vec2 vUV;
+void main() {
+  vUV = aCell;
+  vec2 lonLat = vec2(
+    uPlaceLon.x * aCell.x + uPlaceLon.y * aCell.y + uPlaceLon.z,
+    uPlaceLat.x * aCell.x + uPlaceLat.y * aCell.y + uPlaceLat.z
+  );
+  gl_Position = screenToClip(geoToScreen(lonLat));
+}
+`;
+
+export const IMAGE_FRAG = `#version 300 es
+precision highp float;
+in vec2 vUV;
+uniform sampler2D uImage;
+uniform float uOpacity;
+out vec4 fragColor;
+void main() {
+  vec4 texel = texture(uImage, vUV);
+  // The image's own alpha is kept and scaled: a chart scan with a transparent
+  // margin must not gain an opaque one on the way to the screen.
+  fragColor = vec4(texel.rgb, texel.a * uOpacity);
+}
+`;
+
+/**
  * Speed raster.
  *
  * Speed arrives as a 16-bit value split across the red and green channels, so

@@ -216,7 +216,20 @@ fn capture_mode_refuses_every_write_and_cancel_restores() {
     };
 
     macros::capture_start(&app, region(0.0, 0.0), 0, false).expect("start");
-    assert!(macros::mode(&app).expect("mode").active);
+    assert!(macros::mode(&app, None).expect("mode").active);
+    // Each frame holds its own position, and the map draws the region while
+    // the capture runs — so asking about a step has to give *that* step's
+    // place, and a step never visited gives the one it was drawn at.
+    let at_first = macros::mode(&app, Some(0)).expect("mode");
+    assert!(
+        at_first.position.is_some(),
+        "a running capture has a position"
+    );
+    let unvisited = macros::mode(&app, Some(1)).expect("mode");
+    assert_eq!(
+        unvisited.position, at_first.position,
+        "a step never visited keeps the position the region was drawn at"
+    );
 
     // Every kind of write: a new object, a property edit, a keyframe, an undo.
     assert!(
@@ -244,7 +257,7 @@ fn capture_mode_refuses_every_write_and_cancel_restores() {
     );
 
     macros::capture_cancel(&app).expect("cancel");
-    assert!(!macros::mode(&app).expect("mode").active);
+    assert!(!macros::mode(&app, None).expect("mode").active);
     let after = {
         let session = app.session.lock().expect("lock");
         session.open.as_ref().expect("open").project.object_count()

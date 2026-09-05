@@ -458,12 +458,161 @@ pub enum LayerSource {
         /// wind and currents imports as two layers.
         field: FieldKind,
     },
+    /// A georeferenced image, drawn under the field (spec.md 4.9, M18).
+    ///
+    /// **Display only.** It is never composited into the field, never
+    /// evaluated, never exported, and has no vectors of its own — it is a chart
+    /// scan, a satellite picture or a synoptic chart put under the map to trace
+    /// or to compare against. The project keeps the file's path and where the
+    /// image sits, never its pixels (invariant 2), exactly as a GRIB layer
+    /// does.
+    Image {
+        /// The file, as the user chose it. Not copied into the project.
+        path: PathBuf,
+        /// Where the image sits on the earth.
+        placement: Placement,
+        /// How strongly it shows, `0.0` to `1.0`.
+        #[serde(with = "crate::canonical::ratio_field")]
+        opacity: f64,
+    },
 }
 
 impl LayerSource {
     /// Whether this is the default, unwritten source.
     pub fn is_painted(&self) -> bool {
         matches!(self, Self::Painted)
+    }
+
+    /// The file this layer reads, if it reads one.
+    pub fn path(&self) -> Option<&std::path::Path> {
+        match self {
+            Self::Painted => None,
+            Self::Grib { path, .. } | Self::Image { path, .. } => Some(path),
+        }
+    }
+}
+
+/// Where a georeferenced image sits on the earth (spec.md 4.9, M18).
+///
+/// An affine map from the image's own pixel coordinates to lon/lat degrees:
+///
+/// ```text
+/// lon = a·u + b·v + c
+/// lat = d·u + e·v + f
+/// ```
+///
+/// with `u` across and `v` *down* from the image's top-left corner, which is
+/// the convention every image format and every world file uses. A plain
+/// north-up placement has `b` and `d` zero and `e` negative, because `v`
+/// increases southward.
+///
+/// **Degrees, not metres.** An image is a picture laid on the map, so it is
+/// placed in the map's own coordinates — the same space a `stamp_space:
+/// projected` object lives in (§3.5, D63), and equirectangular for the same
+/// reason: the placement is stored, so it cannot depend on which projection the
+/// view happens to be showing. Six numbers is exactly what a world file
+/// carries and what `ModelTiepoint` plus `ModelPixelScale` reduce to, so an
+/// imported georeference needs no conversion at all.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Placement {
+    /// Degrees of longitude per pixel across.
+    #[serde(with = "crate::canonical::degrees_field")]
+    pub a: f64,
+    /// Degrees of longitude per pixel down. Zero for a north-up image.
+    #[serde(with = "crate::canonical::degrees_field")]
+    pub b: f64,
+    /// Longitude of the image's top-left corner.
+    #[serde(with = "crate::canonical::degrees_field")]
+    pub c: f64,
+    /// Degrees of latitude per pixel across. Zero for a north-up image.
+    #[serde(with = "crate::canonical::degrees_field")]
+    pub d: f64,
+    /// Degrees of latitude per pixel down. Negative for a north-up image.
+    #[serde(with = "crate::canonical::degrees_field")]
+    pub e: f64,
+    /// Latitude of the image's top-left corner.
+    #[serde(with = "crate::canonical::degrees_field")]
+    pub f: f64,
+}
+
+impl Placement {
+    /// A north-up placement spanning a lon/lat rectangle.
+    ///
+    /// What an image with no georeference of its own gets when it is dropped
+    /// on the map, and what a world file describes in the ordinary case.
+    pub fn spanning(west: f64, north: f64, east: f64, south: f64, width: u32, height: u32) -> Self {
+        let width = width.max(1) as f64;
+        let height = height.max(1) as f64;
+        Self {
+            a: (east - west) / width,
+            b: 0.0,
+            c: west,
+            d: 0.0,
+            // Negative: `v` runs down the image and latitude runs up the map.
+            e: (south - north) / height,
+            f: north,
+        }
+    }
+
+    /// Where a pixel lands, in degrees.
+    ///
+    /// The longitude is *not* normalised. An image spanning the whole world
+    /// runs from -180 to 180 and its right edge must stay to the right of its
+    /// left one; wrapping it here would fold the picture in half.
+    pub fn place(&self, u: f64, v: f64) -> (f64, f64) {
+        (
+            self.a * u + self.b * v + self.c,
+            self.d * u + self.e * v + self.f,
+        )
+    }
+
+    /// The placement that puts three pixel corners at three positions.
+    ///
+    /// The corners are the image's top-left, top-right and bottom-left, which
+    /// is what the map's three control points drag. Three points determine an
+    /// affine exactly, so this is a solve and not a fit.
+    ///
+    /// `None` when the three would be collinear — a degenerate image with no
+    /// area, which is what a control point dragged onto another one asks for.
+    pub fn from_corners(
+        width: u32,
+        height: u32,
+        top_left: (f64, f64),
+        top_right: (f64, f64),
+        bottom_left: (f64, f64),
+    ) -> Option<Self> {
+        let w = f64::from(width.max(1));
+        let h = f64::from(height.max(1));
+        let a = (top_right.0 - top_left.0) / w;
+        let d = (top_right.1 - top_left.1) / w;
+        let b = (bottom_left.0 - top_left.0) / h;
+        let e = (bottom_left.1 - top_left.1) / h;
+        // The determinant is the area of one pixel; zero means the three
+        // control points fell on a line.
+        if (a * e - b * d).abs() < 1e-12 {
+            return None;
+        }
+        Some(Self {
+            a,
+            b,
+            c: top_left.0,
+            d,
+            e,
+            f: top_left.1,
+        })
+    }
+
+    /// The image's four corners, in the order top-left, top-right,
+    /// bottom-right, bottom-left.
+    pub fn corners(&self, width: u32, height: u32) -> [(f64, f64); 4] {
+        let w = f64::from(width);
+        let h = f64::from(height);
+        [
+            self.place(0.0, 0.0),
+            self.place(w, 0.0),
+            self.place(w, h),
+            self.place(0.0, h),
+        ]
     }
 }
 

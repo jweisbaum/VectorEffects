@@ -95,6 +95,8 @@ export default function App() {
   // The map holds the tiles; playback asks it, not the backend, whether a step
   // can be shown (spec.md 9.4). Before the map exists there is nothing to wait for.
   const warm = useCallback((target: number) => mapRef.current?.warm(target) ?? true, []);
+  /** Where the map is looking, for an image that has to be placed by hand. */
+  const viewBounds = useCallback(() => mapRef.current?.bounds() ?? null, []);
 
   // A shorter timeline cannot leave the playhead past its end.
   useEffect(() => {
@@ -210,6 +212,29 @@ export default function App() {
     if (decision.proceed) setCreating({ discardUnsaved: decision.discardUnsaved });
   }, [mayReplace]);
 
+  /**
+   * Puts the project down and goes back to the start screen.
+   *
+   * Through the same guard every other discard uses, so unsaved work is asked
+   * about rather than dropped. Without this a project could be opened and never
+   * closed: the start screen, and with it the recent list, was reachable only
+   * at launch.
+   */
+  const closeProject = useCallback(async () => {
+    const decision = await mayReplace();
+    if (!decision.proceed) return;
+    try {
+      await api.closeProject(decision.discardUnsaved);
+      setSelection([]);
+      setActiveLayer(null);
+      setStep(0);
+      setError(null);
+      setProject(null);
+    } catch (err) {
+      report(err);
+    }
+  }, [mayReplace]);
+
   const openProject = useCallback(async () => {
     // Ask about unsaved changes before the file dialog, not after: a user who
     // has picked a file has already decided, and asking then reads as the app
@@ -311,6 +336,27 @@ export default function App() {
         <button onClick={() => void openProject()}>Open…</button>
         <button onClick={() => void save()}>Save</button>
         <button onClick={() => void saveAs()}>Save As…</button>
+        {/*
+          A project could be opened but never put down: the start screen — and
+          with it the recent list and the templates — was reachable only at
+          launch. Closing goes through the same guard every other discard does,
+          so unsaved work is asked about rather than dropped.
+        */}
+        <button onClick={() => void closeProject()}>Close</button>
+        {/*
+          The shortcut alone is not a way to find something. `Cmd`-`,` is where
+          every Mac application keeps its preferences and is worth binding, but
+          a feature reachable only by a chord nobody was told about is a feature
+          nobody opens.
+        */}
+        <button
+          className="settings"
+          onClick={() => setShowSettings(true)}
+          title="Settings (Cmd+,) · shortcuts, default scales, the macro library"
+          aria-label="Settings"
+        >
+          ⚙
+        </button>
       </div>
 
       <div className="workspace">
@@ -323,6 +369,7 @@ export default function App() {
             onSelect={setSelection}
             onActivateLayer={setActiveLayer}
             onChanged={setProject}
+            viewBounds={viewBounds}
           />
         </aside>
 

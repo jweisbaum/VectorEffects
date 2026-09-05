@@ -6,7 +6,8 @@ import type { DocumentTree } from "../generated/DocumentTree";
 import type { ProjectSummary } from "../generated/ProjectSummary";
 import NumberField from "../NumberField";
 import { knotsFromMps, mpsFromKnots } from "../project/format";
-import { pickGribToImport } from "../project/dialogs";
+import type { ImageLayerView } from "../generated/ImageLayerView";
+import { pickGribToImport, pickImageToImport } from "../project/dialogs";
 import { EyeIcon } from "./EyeIcon";
 
 /** What is being dragged, while a reorder is in progress. */
@@ -31,6 +32,7 @@ export default function LayerPanel({
   onSelect,
   onActivateLayer,
   onChanged,
+  viewBounds,
 }: {
   project: ProjectSummary;
   step: number;
@@ -39,6 +41,12 @@ export default function LayerPanel({
   onSelect: (objects: number[]) => void;
   onActivateLayer: (layer: number | null) => void;
   onChanged: (project: ProjectSummary) => void;
+  /**
+   * The visible map as `[west, north, east, south]`, for an image that carries
+   * no georeference: it lands filling the view, so its control points are
+   * somewhere the user can reach them (spec.md 4.9, M18).
+   */
+  viewBounds?: () => [number, number, number, number] | null;
 }) {
   const [tree, setTree] = useState<DocumentTree | null>(null);
   const [renaming, setRenaming] = useState<number | null>(null);
@@ -67,6 +75,14 @@ export default function LayerPanel({
     const path = await pickGribToImport();
     if (path === null) return;
     run(api.importGrib(path));
+  };
+
+  /** Picks an image and lays it under the field (spec.md 4.9, M18). */
+  const importImage = async () => {
+    setError(null);
+    const path = await pickImageToImport();
+    if (path === null) return;
+    run(api.importImage(path, viewBounds?.() ?? null));
   };
 
   const commitRename = (id: number, isLayer: boolean) => {
@@ -137,6 +153,13 @@ export default function LayerPanel({
           onClick={() => void importGrib()}
         >
           Import GRIB
+        </button>
+        <button
+          className="import-grib"
+          title="Lay a georeferenced image under the field. A GeoTIFF or an image with a world file lands where it says; anything else lands on the view, to be placed by its corners."
+          onClick={() => void importImage()}
+        >
+          Import image
         </button>
       </header>
 
@@ -252,6 +275,14 @@ export default function LayerPanel({
                 <SpeedFilter
                   grib={layer.grib}
                   onChange={(min, max) => run(api.setLayerSpeedRange(layer.id, min, max))}
+                />
+              )}
+
+              {layer.image && (
+                <ImageControls
+                  image={layer.image}
+                  onOpacity={(value) => run(api.setImageOpacity(layer.id, value))}
+                  onReset={() => run(api.resetImagePlacement(layer.id))}
                 />
               )}
 
@@ -449,6 +480,58 @@ function SpeedFilter({
           </span>
           <span className="muted">kt, of {ceiling} in the file</span>
         </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * An image layer's own controls (spec.md 4.9, M18).
+ *
+ * Opacity, because an image under a field is a reference and a reference at
+ * full strength hides what it is a reference *for*. And a way back to the
+ * file's own georeference — offered only when the file has one, since a
+ * hand-placed image has nothing to go back to.
+ */
+function ImageControls({
+  image,
+  onOpacity,
+  onReset,
+}: {
+  image: ImageLayerView;
+  onOpacity: (opacity: number) => void;
+  onReset: () => void;
+}) {
+  if (!image.loaded) {
+    return (
+      <div className="image-controls">
+        <span className="grib-missing" title={`${image.path}\nThe file could not be read.`}>
+          image missing
+        </span>
+      </div>
+    );
+  }
+  return (
+    <div className="image-controls">
+      <label>
+        Opacity
+        <input
+          type="range"
+          min={0}
+          max={100}
+          value={Math.round(image.opacity * 100)}
+          onChange={(event) => onOpacity(Number(event.target.value) / 100)}
+          title="How strongly the image shows through"
+        />
+      </label>
+      <span className="muted">
+        {image.width}×{image.height}
+        {image.georeferenced ? " · georeferenced" : " · placed by hand"}
+      </span>
+      {image.georeferenced && (
+        <button onClick={onReset} title="Put the image back where its own file says it goes">
+          Reset place
+        </button>
       )}
     </div>
   );

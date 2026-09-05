@@ -250,6 +250,24 @@ pub enum Command {
         restore: Vec<ObjectSnapshot>,
     },
 
+    /// Replaces a layer's source (spec.md 4.9, M18).
+    ///
+    /// What an image layer's placement and opacity are edited through. The
+    /// whole source rather than a field of it, for the reason
+    /// [`Self::SetAnnotations`] replaces a whole list: the inverse is right by
+    /// construction, one command covers dragging a control point and changing
+    /// an opacity, and a source is six numbers and a path.
+    ///
+    /// It coalesces, so dragging a corner across the map is one history entry.
+    SetLayerSource {
+        /// Target layer.
+        layer: crate::id::Id,
+        /// Previous source.
+        before: Box<crate::document::LayerSource>,
+        /// New source.
+        after: Box<crate::document::LayerSource>,
+    },
+
     /// Replaces every measurement laid over the map (spec.md 10, M8).
     ///
     /// The whole list, for every edit — placing one, dragging a point,
@@ -358,6 +376,7 @@ impl Command {
             Self::SetStartTime { .. } => "Set start time".into(),
             Self::SetStepCount { .. } => "Change duration".into(),
             Self::SetAnnotations { .. } => "Change measurements".into(),
+            Self::SetLayerSource { .. } => "Place the image".into(),
         }
     }
 
@@ -499,6 +518,13 @@ impl Command {
             }
             Self::SetAnnotations { after, .. } => {
                 project.annotations = after.clone();
+                Ok(())
+            }
+            Self::SetLayerSource { layer, after, .. } => {
+                project
+                    .layer_mut(*layer)
+                    .ok_or(CoreError::MissingLayer(layer.raw()))?
+                    .source = (**after).clone();
                 Ok(())
             }
             Self::SetStepCount { after, restore, .. } => {
@@ -651,6 +677,13 @@ impl Command {
                 project.annotations = before.clone();
                 Ok(())
             }
+            Self::SetLayerSource { layer, before, .. } => {
+                project
+                    .layer_mut(*layer)
+                    .ok_or(CoreError::MissingLayer(layer.raw()))?
+                    .source = (**before).clone();
+                Ok(())
+            }
             Self::SetStepCount {
                 before, restore, ..
             } => {
@@ -710,6 +743,19 @@ impl Command {
                 true
             }
             (Self::SetAnnotations { after, .. }, Self::SetAnnotations { after: next, .. }) => {
+                *after = next.clone();
+                true
+            }
+            (
+                Self::SetLayerSource {
+                    layer: a, after, ..
+                },
+                Self::SetLayerSource {
+                    layer: b,
+                    after: next,
+                    ..
+                },
+            ) if a == b => {
                 *after = next.clone();
                 true
             }

@@ -20,4 +20,13 @@ placed_steps: number,
 /**
  * Whether movement is being recorded.
  */
-record_movement: boolean, };
+record_movement: boolean, 
+/**
+ * Where the region sits at the step that was asked about, as `[lon, lat]`.
+ *
+ * The map draws the region while a capture runs, and each frame holds its
+ * own position — so scrubbing to a step has to show *that step's* place,
+ * not the last one clicked. Null when no capture is running or no step was
+ * named.
+ */
+position: [number, number] | null, };

@@ -103,6 +103,61 @@ export function regionOfView(camera: Camera, width: number, height: number): Reg
   };
 }
 
+/**
+ * The same region, centred somewhere else (spec.md 8.7, M16).
+ *
+ * A capture's region is placed per frame, and the map has to draw it where the
+ * frame it is showing puts it. Only the position changes: the shape is fixed
+ * once the capture starts and cannot be reshaped while it records.
+ */
+export function recentred(region: Region, lon: number, lat: number): Region {
+  switch (region.kind) {
+    case "rect":
+    case "disc":
+      return { ...region, centre: [lon, lat] };
+    case "polygon": {
+      // A polygon has no centre of its own, so it moves by the difference from
+      // its **bounding-box** centre — which is what `RegionShape::anchor`
+      // computes on the other side of the wire, and therefore the point the
+      // backend is placing. The mean of the vertices would be a different
+      // point, and a dense corner would drag the region off the pointer.
+      const anchor = polygonAnchor(region.points);
+      if (anchor === null) return region;
+      const dLon = lon - anchor[0];
+      const dLat = lat - anchor[1];
+      return {
+        kind: "polygon",
+        points: region.points.map((point) => [point[0] + dLon, point[1] + dLat]),
+      };
+    }
+  }
+}
+
+/**
+ * A polygon's anchor: the centre of its bounding box.
+ *
+ * Longitudes are carried the short way from the first point, so a ring across
+ * the seam keeps its shape instead of spanning the world. The port of
+ * `RegionShape::anchor`, decision for decision.
+ */
+function polygonAnchor(points: ReadonlyArray<readonly [number, number]>): [number, number] | null {
+  const first = points[0];
+  if (first === undefined) return null;
+  let running = first[0];
+  let west = first[0];
+  let east = first[0];
+  let south = first[1];
+  let north = first[1];
+  for (const point of points) {
+    running += normalizeLon(point[0] - running);
+    west = Math.min(west, running);
+    east = Math.max(east, running);
+    south = Math.min(south, point[1]);
+    north = Math.max(north, point[1]);
+  }
+  return [(west + east) / 2, (south + north) / 2];
+}
+
 /** The whole earth — what `Cmd`-`Shift`-`A` selects. */
 export function wholeMap(): Region {
   return { kind: "rect", centre: [0, 0], halfWidthDeg: 180, halfHeightDeg: 90 };

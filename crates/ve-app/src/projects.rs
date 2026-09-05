@@ -342,13 +342,19 @@ pub fn save_as(state: &AppState, path: String) -> Result<ProjectSummary> {
 
 /// Closes the open project without saving.
 #[tauri::command]
-pub fn close_project(state: tauri::State<'_, AppState>) -> Result<()> {
-    close(&state)
+pub fn close_project(state: tauri::State<'_, AppState>, discard_unsaved: bool) -> Result<()> {
+    close_open(&state, discard_unsaved)
 }
 
 /// Implementation of [`close_project`], callable without a Tauri handle.
-pub fn close(state: &AppState) -> Result<()> {
+///
+/// Guarded like every other path that replaces the open project: the backend
+/// is what knows whether the document is dirty, so it is what refuses. The
+/// frontend asks first and passes the answer, exactly as `new` and `open` do —
+/// and a frontend that forgot to ask still cannot drop unsaved work.
+pub fn close_open(state: &AppState, discard_unsaved: bool) -> Result<()> {
     with_session(state, |session| {
+        refuse_to_discard(session, discard_unsaved)?;
         session.open = None;
         Ok(())
     })

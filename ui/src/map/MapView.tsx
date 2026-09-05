@@ -18,6 +18,8 @@ import type { ObjectOutline } from "../generated/ObjectOutline";
 import type { TileAddress } from "../generated/TileAddress";
 import type { Tool } from "../generated/Tool";
 import type { AppSettings } from "../generated/AppSettings";
+import type { CaptureMode } from "../generated/CaptureMode";
+import type { MacroLibrary } from "../generated/MacroLibrary";
 import type { ShortcutAction } from "../generated/ShortcutAction";
 import type { ToolSchema } from "../generated/ToolSchema";
 import { actionFor, chordOf, toolChord } from "../settings/bindings";
@@ -34,6 +36,7 @@ import {
   normalizeLon,
   panBy,
   projectionFor,
+  visibleBounds,
   project as toScreen,
   unproject,
   visibleTiles,
@@ -98,6 +101,8 @@ import ToolIcon from "./ToolIcon";
 import ToolOptions, { type ToolPick } from "./ToolOptions";
 import {
   type ActiveTool,
+  CAPTURE,
+  INSERT,
   MEASURE,
   cloneSourceCamera,
   defaultState,
@@ -117,6 +122,7 @@ import {
 import {
   fillGesture,
   type Region,
+  recentred,
   regionShape,
   type RegionMode,
   regionFromDrag,
@@ -125,6 +131,16 @@ import {
   regionRing,
   wholeMap,
 } from "./region";
+import { ImageCache } from "./images";
+import type { ImageLayerView } from "../generated/ImageLayerView";
+import {
+  CORNER_REACH_CSS,
+  type CornerPick,
+  cornerUnder,
+  cornersOf,
+  draggedCorners,
+  hasArea,
+} from "./place";
 import { MapRenderer, type OperatorPreview, type RenderState } from "./renderer";
 import { uniqueTiles } from "../timeline/playback";
 import { TileCache } from "./tiles";
@@ -300,6 +316,15 @@ export interface MapHandle {
    * they are; the backend holding them rendered is not enough.
    */
   warm(step: number): boolean;
+  /**
+   * The visible map as `[west, north, east, south]`, or null before the map
+   * has a size.
+   *
+   * For an image with no georeference of its own: it lands filling the view,
+   * where its control points can be reached (spec.md 4.9, M18). The map is the
+   * only thing that knows where it is looking.
+   */
+  bounds(): [number, number, number, number] | null;
 }
 
 export default function MapView({
@@ -356,6 +381,16 @@ export default function MapView({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const rendererRef = useRef<MapRenderer | null>(null);
   const tilesRef = useRef<TileCache | null>(null);
+  /** Textures for the image layers (spec.md 4.9, M18). */
+  const imagesRef = useRef<ImageCache | null>(null);
+  /**
+   * The image layers, mirrored into a ref `draw` can read.
+   *
+   * They come from the document tree, so they change when the project does —
+   * which is also when the revision changes, and the revision is part of the
+   * texture's address.
+   */
+  const imageLayersRef = useRef<ImageLayerView[]>([]);
   /**
    * The last frame whose tiles were all on screen. A frame that is not yet
    * draws its missing tiles from this one, dimmed, rather than blank.
@@ -485,6 +520,13 @@ export default function MapView({
    * pointer-up to end it.
    */
   const openChain = useRef<number | null>(null);
+  /** The image control point being dragged (spec.md 4.9, M18). */
+  const cornerDrag = useRef<CornerPick | null>(null);
+  /** The placement in flight, and the one waiting behind it. */
+  const cornerMove = useRef<{
+    inFlight: boolean;
+    queued: ReturnType<typeof draggedCorners> | null;
+  }>({ inFlight: false, queued: null });
   /** The measurement handle being dragged. */
   const measureDrag = useRef<HandlePick | null>(null);
   /**
@@ -536,6 +578,22 @@ export default function MapView({
   const [region, setRegion] = useState<Region | null>(null);
   /** Whether a captured field is waiting to be pasted (spec.md 8.5, M14). */
   const [captured, setCaptured] = useState(false);
+  /**
+   * The macro capture in progress, if any (spec.md 8.7, M16).
+   *
+   * While it is active the backend refuses *every* document write — the
+   * history lock — so the map's job is to say so, to let the region be placed
+   * at each step, and to offer the two ways out.
+   */
+  const [recording, setRecording] = useState<CaptureMode | null>(null);
+  /** Whether movement is recorded by the *next* capture. */
+  const [recordMovement, setRecordMovement] = useState(false);
+  /** The macro library, for the insert tool's bar. */
+  const [library, setLibrary] = useState<MacroLibrary | null>(null);
+  /** Which macro the insert tool will place. */
+  const [macroId, setMacroId] = useState<string | null>(null);
+  /** The name being typed for a capture being finished. */
+  const [captureName, setCaptureName] = useState<string | null>(null);
   useEffect(() => {
     onRegionActive(region !== null || captured);
   }, [region, captured, onRegionActive]);
@@ -880,6 +938,11 @@ export default function MapView({
       // The gesture's own operation while it is being drawn, and the one it
       // committed while its tiles are still on their way.
       operator: operatorRef.current ?? heldOperator(settling.current),
+      // Georeferenced images, above the land and below the field (M18). The
+      // revision is part of the texture's address, so an import or a reopen
+      // makes the old one unreachable rather than stale.
+      images:
+        imagesRef.current?.draws(projectRef.current.revision, imageLayersRef.current) ?? [],
     };
 
     // Tell the timeline which tiles are on screen, once per change rather
@@ -1015,6 +1078,7 @@ export default function MapView({
     let disposed = false;
     let renderer: MapRenderer | null = null;
     let tiles: TileCache | null = null;
+    let pictures: ImageCache | null = null;
 
     void (async () => {
       const trace = (stage: string) => void api.frontendLog("info", `map init: ${stage}`);
@@ -1030,6 +1094,10 @@ export default function MapView({
         const basemap = parseBasemap(buffer);
         trace(`basemap parsed, ${basemap.lods.length} lods`);
         tiles = new TileCache(gl, baseUrl);
+        pictures = new ImageCache(gl, baseUrl);
+        pictures.onChange = () => requestDraw();
+        pictures.onError = (message) => void api.frontendLog("error", message);
+        imagesRef.current = pictures;
         renderer = new MapRenderer(gl, basemap, tiles);
         tiles.onChange = () => requestDraw();
         let reported = 0;
@@ -1062,8 +1130,10 @@ export default function MapView({
       }
       renderer?.dispose();
       tiles?.dispose();
+      pictures?.dispose();
       rendererRef.current = null;
       tilesRef.current = null;
+      imagesRef.current = null;
     };
     // Set up once; `requestDraw` is stable enough for this purpose and
     // re-running would tear down the GL context on every option change.
@@ -1145,6 +1215,91 @@ export default function MapView({
     },
     [requestDraw],
   );
+
+  /**
+   * Whether a captured field is already held, asked once on mount.
+   *
+   * The capture lives in the session, not in this component: it survives a
+   * remount, a project change and a reload of the view. Assuming there is none
+   * left a field that had been copied unpasteable, with nothing on screen
+   * saying why (spec.md 8.5, M14).
+   */
+  useEffect(() => {
+    let live = true;
+    void api
+      .captureState()
+      .then((held) => {
+        if (live) setCaptured(held.has_capture);
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  /**
+   * Whether a macro capture is running (spec.md 8.7, M16).
+   *
+   * Asked once on mount and kept by the commands that change it. A capture
+   * survives a reload of this component — it lives in the session — so the map
+   * has to *ask* rather than assume it starts with none.
+   */
+  useEffect(() => {
+    let live = true;
+    void api
+      .captureMode()
+      .then((mode) => {
+        if (live) setRecording(mode.active ? mode : null);
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  /** The macro library, for the insert tool's bar. */
+  const readLibrary = useCallback(() => {
+    void api
+      .macroLibrary()
+      .then((held) => {
+        setLibrary(held);
+        // Keep a choice that is still there; otherwise fall to the newest,
+        // which is the one just captured.
+        setMacroId((current) =>
+          current !== null && held.entries.some((entry) => entry.id === current)
+            ? current
+            : (held.entries[0]?.id ?? null),
+        );
+      })
+      .catch(() => undefined);
+  }, []);
+  useEffect(() => {
+    if (tool === INSERT) readLibrary();
+  }, [readLibrary, tool]);
+
+  /**
+   * The image layers, re-read whenever the document changes.
+   *
+   * From the document tree, because that is where a layer's own view of itself
+   * lives and an image layer is a layer. The revision is part of a texture's
+   * address, so this arriving late is only a frame of an unpainted picture and
+   * never a wrong one.
+   */
+  useEffect(() => {
+    let live = true;
+    void api
+      .documentTree(0)
+      .then((tree) => {
+        if (!live) return;
+        const images = tree.layers.flatMap((layer) => (layer.image ? [layer.image] : []));
+        imageLayersRef.current = images;
+        requestDraw();
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [project, requestDraw]);
 
   /**
    * The measurements, re-read whenever the document changes.
@@ -1297,6 +1452,19 @@ export default function MapView({
           requestOverlay();
           return;
         }
+        // A running capture is the biggest thing Escape can be about: while it
+        // runs, every edit in the application is refused (spec.md 8.7).
+        if (recording !== null) {
+          setCaptureName(null);
+          void api
+            .cancelCapture()
+            .then(() => {
+              setRecording(null);
+              requestOverlay();
+            })
+            .catch(() => undefined);
+          return;
+        }
         // A chain being built ends before the tool does, for the same reason a
         // half-drawn polygon does: the first press is what the gesture needs.
         if (endMeasuring()) return;
@@ -1308,6 +1476,7 @@ export default function MapView({
   }, [
     captured,
     endMeasuring,
+    recording,
     nudgeCamera,
     onProjectChanged,
     palette,
@@ -1418,7 +1587,13 @@ export default function MapView({
     const frame = `${projectRef.current.revision}/${target}`;
     return tiles.prefetch(frame, uniqueTiles(visibleTiles(cameraRef.current, viewRef.current)));
   }, []);
-  useImperativeHandle(ref, () => ({ warm }), [warm]);
+  const bounds = useCallback((): [number, number, number, number] | null => {
+    const view = viewRef.current;
+    if (view.width <= 1 || view.height <= 1) return null;
+    const seen = visibleBounds(cameraRef.current, view);
+    return [seen.west, seen.north, seen.east, seen.south];
+  }, []);
+  useImperativeHandle(ref, () => ({ warm, bounds }), [bounds, warm]);
 
   // A project change can shorten the timeline or forbid barbs.
   useEffect(() => {
@@ -1903,6 +2078,45 @@ export default function MapView({
 
     const cursor = cursorRef.current;
 
+    // The active image layer's outline and control points (spec.md 4.9, M18).
+    // Only the active one: a project with several charts under it would
+    // otherwise stack handles from all of them on the same corner, with no way
+    // to say which a drag meant.
+    const placing = imageLayersRef.current.find((image) => image.layer === activeLayer);
+    if (placing?.loaded) {
+      const outline = placing.corners.map((corner) =>
+        toScreen(camera, view, { lon: corner[0], lat: corner[1] }),
+      );
+      const first = outline[0];
+      if (first) {
+        context.save();
+        context.beginPath();
+        context.moveTo(first.x, first.y);
+        for (const at of outline.slice(1)) context.lineTo(at.x, at.y);
+        context.closePath();
+        context.strokeStyle = "rgba(120, 200, 255, 0.85)";
+        context.lineWidth = Math.max(1, dpr);
+        context.setLineDash([5 * dpr, 4 * dpr]);
+        context.stroke();
+        context.setLineDash([]);
+
+        // Three handles, not four: three points determine an affine, and a
+        // fourth would let the user ask for a shape no affine can make.
+        const corners = cornersOf(placing);
+        for (const corner of [corners.topLeft, corners.topRight, corners.bottomLeft]) {
+          const at = toScreen(camera, view, { lon: corner[0], lat: corner[1] });
+          context.beginPath();
+          context.arc(at.x, at.y, 5 * dpr, 0, Math.PI * 2);
+          context.fillStyle = "rgba(120, 200, 255, 0.95)";
+          context.fill();
+          context.strokeStyle = "rgba(20, 28, 44, 0.9)";
+          context.lineWidth = Math.max(1, dpr);
+          context.stroke();
+        }
+        context.restore();
+      }
+    }
+
     // The measurements (spec.md 10, M8). Drawn whatever the tool is, because
     // they are annotations: a passage measured with the dividers is still on
     // the chart while the brush is in hand, which is the whole point of
@@ -2348,6 +2562,74 @@ export default function MapView({
       return;
     }
 
+    // An image layer's control point, whatever the tool (spec.md 4.9, M18).
+    // A handle takes precedence over what is under it — the same rule the
+    // transform handles and the placed markers follow — and only the active
+    // layer has any, so a chart being placed does not take clicks meant for the
+    // brush on some other layer.
+    {
+      const grabbed = cornerUnder(
+        imageLayersRef.current,
+        activeLayer,
+        cameraRef.current,
+        viewRef.current,
+        point,
+        CORNER_REACH_CSS * (window.devicePixelRatio || 1),
+      );
+      if (grabbed !== null) {
+        cornerDrag.current = grabbed;
+        requestOverlay();
+        return;
+      }
+    }
+
+    // While a capture is running the click places its region at this step
+    // (spec.md 8.7, M16). Each frame holds its own position, so this moves the
+    // step being viewed and no other — and it is capture state, never the
+    // document, which is why it is not an edit and not undoable.
+    if (recording !== null) {
+      const geo = unproject(cameraRef.current, viewRef.current, point);
+      void api
+        .placeCapture(stepRef.current, geo.lon, geo.lat)
+        .then((mode) => {
+          setRecording(mode.active ? mode : null);
+          // The drawn region follows: what is recorded at this frame is what
+          // the map is showing, and a region that stayed where it was drawn
+          // would be a promise the bake does not keep.
+          setRegion((current) =>
+            current === null || mode.position === null
+              ? current
+              : recentred(current, mode.position[0], mode.position[1]),
+          );
+          requestOverlay();
+        })
+        .catch((err: unknown) => setError(String(err)));
+      return;
+    }
+
+    // The insert tool puts a library macro down where it is clicked
+    // (spec.md 8.7, M16). One click, one object, like the fill tool: the macro
+    // carries its own frames, so there is nothing to drag out.
+    if (tool === INSERT) {
+      if (macroId === null) return;
+      const geo = unproject(cameraRef.current, viewRef.current, point);
+      void api
+        .insertMacro(macroId, geo.lon, geo.lat)
+        .then(onProjectChanged)
+        .catch((err: unknown) => setError(String(err)));
+      return;
+    }
+
+    // The capture tool draws its region with the select tool's own gestures:
+    // the region *is* the select tool's, and a second way of drawing one would
+    // be a second thing to keep in step.
+    if (tool === CAPTURE) {
+      const geo = unproject(cameraRef.current, viewRef.current, point);
+      regionDrag.current = { from: [geo.lon, geo.lat], points: [[geo.lon, geo.lat]] };
+      requestOverlay();
+      return;
+    }
+
     // The measurement tools (spec.md 10, M8). A click either grabs a handle
     // that is already there or places a point; nothing here is a drag, because
     // a measurement is a set of positions rather than a swept shape.
@@ -2732,6 +3014,49 @@ export default function MapView({
       return;
     }
 
+    // An image control point being dragged (spec.md 4.9, M18). One request in
+    // flight, latest wins, and the same coalescing key throughout — so the
+    // whole drag is one undo and the picture follows the hand.
+    if (cornerDrag.current) {
+      const grabbed = cornerDrag.current;
+      const image = imageLayersRef.current.find((v) => v.layer === grabbed.layer);
+      if (image) {
+        const geo = unproject(cameraRef.current, viewRef.current, point);
+        const next = draggedCorners(image, grabbed.corner, [geo.lon, geo.lat], event.shiftKey);
+        // A drag that would flatten the image is refused by the backend; not
+        // sending it means the picture simply stops following rather than
+        // filling the log at pointer rate.
+        if (hasArea(next)) {
+          const flight = cornerMove.current;
+          flight.queued = next;
+          if (!flight.inFlight) {
+            const send = () => {
+              const wanted = flight.queued;
+              flight.queued = null;
+              if (wanted === null) {
+                flight.inFlight = false;
+                return;
+              }
+              flight.inFlight = true;
+              void api
+                .setImageCorners(
+                  grabbed.layer,
+                  wanted.topLeft,
+                  wanted.topRight,
+                  wanted.bottomLeft,
+                  `image:${grabbed.layer}:place`,
+                )
+                .then(onProjectChanged)
+                .catch(() => undefined)
+                .finally(send);
+            };
+            send();
+          }
+        }
+      }
+      return;
+    }
+
     // A measurement handle being dragged (spec.md 10, M8). One request in
     // flight, latest wins: the pointer reports faster than a round trip, and a
     // request per report would queue up behind itself until the line was
@@ -2970,6 +3295,15 @@ export default function MapView({
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
+    // An image control point lets go: the coalescing group ends, so the next
+    // drag of the same corner is its own undo entry (spec.md 4.9, M18).
+    if (cornerDrag.current) {
+      cornerDrag.current = null;
+      void api.endGesture().catch(() => undefined);
+      requestOverlay();
+      return;
+    }
+
     // A measurement handle lets go, and the coalescing group ends with it:
     // the next drag of the same handle must be its own undo entry rather than
     // merging into this one.
@@ -3429,6 +3763,30 @@ export default function MapView({
             and reaches no exported file — it is drawn on the map to read a
             number off it.
           */}
+          {/*
+            The macro tools (spec.md 8.7, M16). Neither is in the backend's
+            palette: the capture tool makes a *file*, not an object, and the
+            insert tool makes a macro object, which has a library to choose
+            from rather than a bar of options to describe.
+          */}
+          <button
+            className={tool === CAPTURE ? "icon active" : "icon"}
+            onClick={() => setTool(CAPTURE)}
+            aria-label="Capture"
+            aria-pressed={tool === CAPTURE}
+            title={`Capture (${chord("capture")}) · record a region of the field over a run of frames into the macro library`}
+          >
+            <ToolIcon tool={CAPTURE} />
+          </button>
+          <button
+            className={tool === INSERT ? "icon active" : "icon"}
+            onClick={() => setTool(INSERT)}
+            aria-label="Insert macro"
+            aria-pressed={tool === INSERT}
+            title={`Insert macro (${chord("insert")}) · put a captured run of frames back on the map`}
+          >
+            <ToolIcon tool={INSERT} />
+          </button>
           <button
             className={tool === MEASURE ? "icon active" : "icon"}
             onClick={() => setTool(MEASURE)}
@@ -3481,6 +3839,152 @@ export default function MapView({
               title="Clear the selected region (cmd-D)"
             >
               Deselect
+            </button>
+          </div>
+        )}
+
+        {/*
+          The capture bar (spec.md 8.7, M16). Before a capture it draws the
+          region and says what will be recorded; during one it is the only way
+          out, because every document write is refused while it runs.
+        */}
+        {(tool === CAPTURE || recording !== null) && (
+          <div className="tool-options" role="group" aria-label="Capture options">
+            {recording === null ? (
+              <>
+                <label>
+                  Shape
+                  <select
+                    value={regionMode}
+                    onChange={(event) => setRegionMode(event.target.value as RegionMode)}
+                    title="The select tool's own gestures: rectangle and lasso are drawn corner to corner and freehand, a circle from its centre"
+                  >
+                    <option value="rect">Rectangle</option>
+                    <option value="circle">Circle</option>
+                    <option value="lasso">Lasso</option>
+                  </select>
+                </label>
+                <label title="Static writes every frame as if the region never moved, so a region dragged to follow a system yields that system standing still. Record movement keeps each frame's displacement from the first.">
+                  <input
+                    type="checkbox"
+                    checked={recordMovement}
+                    onChange={(event) => setRecordMovement(event.target.checked)}
+                  />
+                  Record movement
+                </label>
+                <button
+                  disabled={region === null || busy}
+                  onClick={() => {
+                    if (region === null) return;
+                    void api
+                      .startCapture(regionShape(region), stepRef.current, recordMovement)
+                      .then((mode) => setRecording(mode.active ? mode : null))
+                      .catch((err: unknown) => setError(String(err)));
+                  }}
+                  title="Start recording. Until it is finished or cancelled, every edit is refused."
+                >
+                  Start capture
+                </button>
+                {region === null && (
+                  <span className="muted">Draw a region first — it is what gets recorded.</span>
+                )}
+              </>
+            ) : (
+              <>
+                <span className="accent">
+                  Recording from step {recording.first_step} · {recording.placed_steps} placed
+                  {recording.record_movement ? " · movement" : " · static"}
+                </span>
+                <span className="muted">
+                  Scrub the timeline and click the map to place the region at each step. Every
+                  edit is refused until this ends.
+                </span>
+                {captureName === null ? (
+                  <button onClick={() => setCaptureName(`Macro ${library?.entries.length ?? 0}`)}>
+                    Finish…
+                  </button>
+                ) : (
+                  <>
+                    <input
+                      autoFocus
+                      value={captureName}
+                      onChange={(event) => setCaptureName(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") event.currentTarget.blur();
+                      }}
+                      aria-label="Macro name"
+                      placeholder="Name"
+                    />
+                    <button
+                      disabled={captureName.trim().length === 0}
+                      onClick={() => {
+                        const name = captureName.trim();
+                        setCaptureName(null);
+                        void api
+                          .finishCapture(name, lastStep)
+                          .then((held) => {
+                            setRecording(null);
+                            setLibrary(held);
+                            setMacroId(held.entries[0]?.id ?? null);
+                            setRegion(null);
+                            requestOverlay();
+                          })
+                          .catch((err: unknown) => setError(String(err)));
+                      }}
+                    >
+                      Save macro
+                    </button>
+                  </>
+                )}
+                <button
+                  onClick={() => {
+                    setCaptureName(null);
+                    void api
+                      .cancelCapture()
+                      .then(() => {
+                        setRecording(null);
+                        requestOverlay();
+                      })
+                      .catch((err: unknown) => setError(String(err)));
+                  }}
+                  title="Abandon the capture. Nothing is written."
+                >
+                  Cancel
+                </button>
+              </>
+            )}
+          </div>
+        )}
+
+        {/*
+          The insert bar: the library, and nothing else. A macro carries its
+          own frames and its own size, so there is nothing to set — only which
+          one, and where, and the map answers the second question.
+        */}
+        {tool === INSERT && recording === null && (
+          <div className="tool-options" role="group" aria-label="Insert options">
+            <label>
+              Macro
+              <select
+                value={macroId ?? ""}
+                disabled={(library?.entries.length ?? 0) === 0}
+                onChange={(event) => setMacroId(event.target.value)}
+              >
+                {library?.entries.map((entry) => (
+                  <option key={entry.id} value={entry.id}>
+                    {entry.name} · {entry.frames} frames · {entry.span_hours} h
+                    {entry.moves ? " · moves" : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <span className="muted">
+              {(library?.entries.length ?? 0) === 0
+                ? "The library is empty. Capture a run of frames first."
+                : "Click the map to place it."}
+            </span>
+            <button onClick={readLibrary} title="Re-read the macro library from disk">
+              Refresh
             </button>
           </div>
         )}
@@ -3596,7 +4100,12 @@ export default function MapView({
           </div>
         )}
 
-        {schema && tool !== MEASURE && (tool !== FILL || region !== null) && (
+        {schema &&
+          tool !== MEASURE &&
+          tool !== CAPTURE &&
+          tool !== INSERT &&
+          recording === null &&
+          (tool !== FILL || region !== null) && (
           <ToolOptions
             schema={schema}
             state={toolState}

@@ -129,7 +129,12 @@ export const api = {
   saveProjectAs: (path: string) => call<ProjectSummary>("save_project_as", { path }),
 
   /** Closes the open project without saving. */
-  closeProject: () => call<void>("close_project"),
+  /**
+   * Puts the open project down. Refused when it is dirty unless
+   * `discardUnsaved`, the same guard `newProject` and `openProject` use.
+   */
+  closeProject: (discardUnsaved: boolean) =>
+    call<void>("close_project", { discardUnsaved }),
 
   /** The open project, or null. */
   currentProject: () => call<ProjectSummary | null>("current_project"),
@@ -409,6 +414,38 @@ export const api = {
   /** The colour-ramp top a *new* project of each kind gets, in knots. */
   setDefaultScales: (windKnots: number, currentKnots: number) =>
     call<AppSettings>("set_default_scales", { windKnots, currentKnots }),
+  // --- Image layers (spec.md 4.9, M18) ---
+  /**
+   * Adds a georeferenced image under the field.
+   *
+   * `view` is the visible map as `[west, north, east, south]`, used only when
+   * the file says nothing about where it goes — the image then lands filling
+   * the view, where its control points can be reached.
+   */
+  importImage: (path: string, view: [number, number, number, number] | null) =>
+    call<ProjectSummary>("import_image", { path, view }),
+  /** Moves an image by its three control points. */
+  setImageCorners: (
+    layer: number,
+    topLeft: [number, number],
+    topRight: [number, number],
+    bottomLeft: [number, number],
+    gesture: string | null,
+  ) =>
+    call<ProjectSummary>("set_image_corners", {
+      layer,
+      topLeft,
+      topRight,
+      bottomLeft,
+      gesture,
+    }),
+  /** Sets how strongly an image shows. */
+  setImageOpacity: (layer: number, opacity: number) =>
+    call<ProjectSummary>("set_image_opacity", { layer, opacity }),
+  /** Puts an image back where its own file says it goes. */
+  resetImagePlacement: (layer: number) =>
+    call<ProjectSummary>("reset_image_placement", { layer }),
+
   // --- Measurements (spec.md 10, M8) ---
   /** Every measurement laid over the map, drawn and labelled by the backend. */
   measurements: () => call<MeasurementView[]>("measurements"),
@@ -453,8 +490,14 @@ export const api = {
     call<CaptureMode>("place_capture", { step, lon, lat }),
   /** Abandons a capture, writing nothing. */
   cancelCapture: () => call<CaptureMode>("cancel_capture", {}),
-  /** Whether a capture is running. */
-  captureMode: () => call<CaptureMode>("capture_mode", {}),
+  /**
+   * Whether a capture is running, and where its region sits at `step`.
+   *
+   * The step is optional because two callers want different things: one asks
+   * whether a capture exists at all, the other is scrubbing and needs the
+   * position this frame holds.
+   */
+  captureMode: (step?: number) => call<CaptureMode>("capture_mode", { step: step ?? null }),
   /** Bakes the capture under a name. Creates no object. */
   finishCapture: (name: string, lastStep: number) =>
     call<MacroLibrary>("finish_capture", { name, lastStep }),

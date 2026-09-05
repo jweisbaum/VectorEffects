@@ -328,7 +328,7 @@ fn the_field_is_read_from_the_file_again_when_the_project_reopens() {
         size < 20_000,
         "project file is {size} bytes; the field must not be in it"
     );
-    projects::close(&app).expect("close");
+    projects::close_open(&app, true).expect("close");
 
     let reopened =
         projects::open(&app, project_path.to_string_lossy().into_owned(), false).expect("open");
@@ -338,7 +338,7 @@ fn the_field_is_read_from_the_file_again_when_the_project_reopens() {
     assert!(tree.layers[1].grib.as_ref().expect("grib").loaded);
 
     // With the file gone the layer opens empty and says so.
-    projects::close(&app).expect("close");
+    projects::close_open(&app, true).expect("close");
     std::fs::remove_file(&grib).expect("remove grib");
     projects::open(&app, project_path.to_string_lossy().into_owned(), false).expect("open");
     let tree = document::tree(&app, 0).expect("tree");

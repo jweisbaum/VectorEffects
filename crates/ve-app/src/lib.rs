@@ -12,6 +12,7 @@ pub mod edit;
 pub mod error;
 pub mod export;
 pub mod frames;
+pub mod image;
 pub mod import;
 pub mod logging;
 pub mod macros;
@@ -125,6 +126,10 @@ pub fn run() -> anyhow::Result<()> {
             settings::set_default_scales,
             settings::set_macro_directory,
             settings::set_projection,
+            image::import_image,
+            image::set_image_corners,
+            image::set_image_opacity,
+            image::reset_image_placement,
             measure::measurements,
             measure::add_measurement,
             measure::move_measurement_handle,

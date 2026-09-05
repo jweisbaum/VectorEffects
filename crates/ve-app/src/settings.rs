@@ -166,6 +166,10 @@ pub fn default_shortcuts() -> Vec<Shortcut> {
         // The measurement tools (spec.md 10, M8). `M` is the marquee's key in
         // every paint program, so measure takes `T` (D54).
         tool("measure", "t"),
+        // The macro tools (spec.md 8.7, M16): capture a run of frames, and
+        // put one back down (D54).
+        tool("capture", "k"),
+        tool("insert", "n"),
     ]
 }
 

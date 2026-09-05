@@ -823,7 +823,7 @@ fn the_options_survive_a_save_and_load() {
     projects::save_as(&state, path.to_string_lossy().into_owned()).expect("save");
 
     let before = sample(&state, ll(5.0, 5.0));
-    projects::close(&state).expect("close");
+    projects::close_open(&state, true).expect("close");
     projects::open(&state, path.to_string_lossy().into_owned(), false).expect("open");
     let after = sample(&state, ll(5.0, 5.0));
 

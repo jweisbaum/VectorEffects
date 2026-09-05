@@ -53,6 +53,8 @@ pub struct LayerNode {
     pub objects: Vec<ObjectNode>,
     /// The imported field beneath the objects, for a GRIB layer.
     pub grib: Option<GribLayerInfo>,
+    /// The picture beneath everything, for an image layer (spec.md 4.9, M18).
+    pub image: Option<crate::image::ImageLayerView>,
 }
 
 /// What one step of a GRIB layer shows (spec.md 4.8, M20).
@@ -267,8 +269,12 @@ fn tree_of(project: &Project, step: u32) -> DocumentTree {
                 name: layer.name.clone(),
                 visible: layer.visible,
                 locked: layer.locked,
+                image: crate::image::view(layer.id, &layer.source),
                 grib: match &layer.source {
-                    ve_core::document::LayerSource::Painted => None,
+                    // An image contributes no field, so it has no GRIB view; it
+                    // has an `image` one instead (spec.md 4.9, M18).
+                    ve_core::document::LayerSource::Painted
+                    | ve_core::document::LayerSource::Image { .. } => None,
                     ve_core::document::LayerSource::Grib { path, field } => Some(GribLayerInfo {
                         path: path.to_string_lossy().into_owned(),
                         field_kind: match field {

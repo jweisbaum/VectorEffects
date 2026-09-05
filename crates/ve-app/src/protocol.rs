@@ -10,6 +10,12 @@
 //! rather than stale, so a cached tile can never show a field that no longer
 //! exists. A request for a revision that is no longer current is refused rather
 //! than answered with current data under a stale URL.
+//!
+//! Image layers (spec.md 4.9, M18) come through the same scheme, at
+//! `<base>/image/<revision>/<layer>/<max edge>`, and for the same reasons: a
+//! chart scan is megabytes of PNG, which has no business crossing the IPC
+//! channel as JSON. The caller sends the largest texture its GPU will take, so
+//! the downsampling happens once, here, rather than in the webview.
 
 use std::sync::{Arc, Mutex};
 
@@ -83,27 +89,50 @@ pub fn base_url() -> String {
     }
 }
 
-/// Parsed tile request.
+/// What a request is for.
 #[derive(Debug, PartialEq, Eq)]
-struct TileRequest {
-    revision: u64,
-    step: u32,
-    id: tile::TileId,
+enum Served {
+    /// A field tile.
+    Tile {
+        revision: u64,
+        step: u32,
+        id: tile::TileId,
+    },
+    /// An image layer's picture (spec.md 4.9, M18).
+    Image {
+        revision: u64,
+        layer: u64,
+        max_edge: u32,
+    },
 }
 
-/// Extracts `<revision>/<step>/<z>/<x>/<y>` from a request path.
-fn parse(path: &str) -> Option<TileRequest> {
+/// Extracts `<revision>/<step>/<z>/<x>/<y>`, or an image address, from a path.
+fn parse(path: &str) -> Option<Served> {
     let mut parts = path.trim_start_matches('/').split('/');
-    let revision: u64 = parts.next()?.parse().ok()?;
+    let first = parts.next()?;
+    if first == "image" {
+        let revision: u64 = parts.next()?.parse().ok()?;
+        let layer: u64 = parts.next()?.parse().ok()?;
+        // The last segment may carry an extension; ignore anything after a dot.
+        let max_edge: u32 = parts.next()?.split('.').next()?.parse().ok()?;
+        if parts.next().is_some() {
+            return None;
+        }
+        return Some(Served::Image {
+            revision,
+            layer,
+            max_edge,
+        });
+    }
+    let revision: u64 = first.parse().ok()?;
     let step: u32 = parts.next()?.parse().ok()?;
     let z: u32 = parts.next()?.parse().ok()?;
     let x: u32 = parts.next()?.parse().ok()?;
-    // The last segment may carry an extension; ignore anything after a dot.
     let y: u32 = parts.next()?.split('.').next()?.parse().ok()?;
     if parts.next().is_some() {
         return None;
     }
-    Some(TileRequest {
+    Some(Served::Tile {
         revision,
         step,
         id: tile::TileId::new(z, x, y).ok()?,
@@ -111,9 +140,13 @@ fn parse(path: &str) -> Option<TileRequest> {
 }
 
 fn respond(status: u16, body: Vec<u8>) -> Response<Vec<u8>> {
+    typed(status, "application/octet-stream", body)
+}
+
+fn typed(status: u16, content_type: &str, body: Vec<u8>) -> Response<Vec<u8>> {
     Response::builder()
         .status(status)
-        .header("Content-Type", "application/octet-stream")
+        .header("Content-Type", content_type)
         .header("Access-Control-Allow-Origin", "*")
         // A tile URL names one revision of one step, so it never changes.
         .header("Cache-Control", "public, max-age=31536000, immutable")
@@ -128,6 +161,15 @@ pub fn handle(app: &tauri::AppHandle, request: &Request<Vec<u8>>) -> Response<Ve
     let Some(parsed) = parse(&path) else {
         tracing::warn!(%path, "rejected malformed tile request");
         return respond(404, Vec::new());
+    };
+
+    let parsed = match parsed {
+        Served::Image {
+            revision,
+            layer,
+            max_edge,
+        } => return serve_image(app, revision, layer, max_edge),
+        Served::Tile { revision, step, id } => TileRequest { revision, step, id },
     };
 
     let state = app.state::<AppState>();
@@ -150,6 +192,62 @@ pub fn handle(app: &tauri::AppHandle, request: &Request<Vec<u8>>) -> Response<Ve
         Err(err) => {
             tracing::error!(%err, "tile evaluation failed");
             respond(500, Vec::new())
+        }
+    }
+}
+
+/// A tile request, once the image case has been split off.
+#[derive(Debug, PartialEq, Eq)]
+struct TileRequest {
+    revision: u64,
+    step: u32,
+    id: tile::TileId,
+}
+
+/// Serves an image layer's picture, decoded and downsampled here.
+///
+/// The revision in the address is the document's, so importing or replacing an
+/// image makes the old address unreachable rather than stale — the same rule
+/// the tiles follow, and the reason both can be served `immutable`.
+fn serve_image(
+    app: &tauri::AppHandle,
+    revision: u64,
+    layer: u64,
+    max_edge: u32,
+) -> Response<Vec<u8>> {
+    let state = app.state::<AppState>();
+    let path = {
+        let Ok(session) = state.session.lock() else {
+            return respond(500, Vec::new());
+        };
+        let Some(open) = session.open.as_ref() else {
+            return respond(409, Vec::new());
+        };
+        if open.revision != revision {
+            tracing::debug!(revision, "image request for a stale revision");
+            return respond(409, Vec::new());
+        }
+        match open
+            .project
+            .layer(ve_core::id::Id::from_raw(layer))
+            .map(|l| l.source.path().map(std::path::Path::to_path_buf))
+        {
+            Some(Some(path)) => path,
+            _ => return respond(404, Vec::new()),
+        }
+    };
+
+    // Decoded outside the session lock: a hundred-megapixel TIFF takes long
+    // enough that holding the document while it decodes would stall every
+    // edit, and nothing about the file depends on the document.
+    match crate::image::render(&path, max_edge) {
+        Ok((png, width, height)) => {
+            tracing::debug!(path = %path.display(), width, height, "served image layer");
+            typed(200, "image/png", png)
+        }
+        Err(err) => {
+            tracing::warn!(path = %path.display(), %err, "could not serve image layer");
+            respond(404, Vec::new())
         }
     }
 }
@@ -244,16 +342,55 @@ pub fn serve_keyed(
 mod tests {
     use super::*;
 
+    /// A tile address, unpacked.
+    fn tile_of(path: &str) -> (u64, u32, tile::TileId) {
+        match parse(path).expect("should parse") {
+            Served::Tile { revision, step, id } => (revision, step, id),
+            other => panic!("{path:?} parsed as {other:?}"),
+        }
+    }
+
     #[test]
     fn well_formed_paths_parse() {
-        let r = parse("/7/3/2/5/1").expect("should parse");
-        assert_eq!(r.revision, 7);
-        assert_eq!(r.step, 3);
-        assert_eq!((r.id.z, r.id.x, r.id.y), (2, 5, 1));
+        let (revision, step, id) = tile_of("/7/3/2/5/1");
+        assert_eq!(revision, 7);
+        assert_eq!(step, 3);
+        assert_eq!((id.z, id.x, id.y), (2, 5, 1));
 
         // A trailing extension is tolerated so the frontend may use one.
-        let r = parse("/1/0/0/1/0.bin").expect("should parse");
-        assert_eq!((r.id.z, r.id.x, r.id.y), (0, 1, 0));
+        let (_, _, id) = tile_of("/1/0/0/1/0.bin");
+        assert_eq!((id.z, id.x, id.y), (0, 1, 0));
+    }
+
+    /// An image address is the same scheme, told apart by its first segment
+    /// (spec.md 4.9, M18). `image` is not a number, so it can never collide
+    /// with a revision.
+    #[test]
+    fn an_image_address_parses_as_an_image() {
+        assert_eq!(
+            parse("/image/12/34/4096"),
+            Some(Served::Image {
+                revision: 12,
+                layer: 34,
+                max_edge: 4096,
+            })
+        );
+        assert_eq!(
+            parse("/image/1/2/2048.png"),
+            Some(Served::Image {
+                revision: 1,
+                layer: 2,
+                max_edge: 2048,
+            })
+        );
+        for path in [
+            "/image/1/2",       // too few segments
+            "/image/1/2/3/4",   // too many
+            "/image/x/2/4096",  // unparseable revision
+            "/image/1/2/large", // unparseable size
+        ] {
+            assert!(parse(path).is_none(), "{path:?} should not parse");
+        }
     }
 
     #[test]
@@ -278,6 +415,8 @@ mod tests {
         let a = parse("/1/0/0/0/0").expect("parses");
         let b = parse("/2/0/0/0/0").expect("parses");
         assert_ne!(a, b, "different revisions must be different tiles");
+        // And the same for an image, which is cached by the browser for a year.
+        assert_ne!(parse("/image/1/9/4096"), parse("/image/2/9/4096"));
     }
 
     #[test]

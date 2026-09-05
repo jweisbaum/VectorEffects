@@ -73,7 +73,9 @@ crates/
                unstructured-grid definitions. `reader` is the writer's
                test-only verifier.
   ve-app/      Tauri app: IPC commands, app state, background workers,
-               custom URI scheme, autosave
+               custom URI scheme, autosave. `image` decodes and georeferences
+               the picture layers of spec 4.9; `measure` is the measurement
+               tools of spec 10
 ui/            React + TypeScript + Vite frontend (npm workspace member)
                  project/  start screen, native dialogs, display formatting
                  map/      camera, projections, tiles, WebGL renderer, shaders
@@ -440,6 +442,26 @@ a second at 0.1° and depends only on the mesh and the grid — it is derived
 state, and `io::read_regrid` drops a set that no longer matches rather than
 trusting it.
 
+### Adding an image layer format
+
+An image layer (spec §4.9) is display only: it never reaches a scene, a tile or
+an export. The pixels live in no document and no session — they are decoded on
+demand by the URI scheme and cached as a PNG.
+
+1. Add the arm to `ve_app::image::Format` and its `probe_*`/`decode_*` pair.
+   **The decoder must be pure Rust with no `-sys` crate** — invariant 5 and the
+   three-platform build both forbid a C library, the same rule the GRIB codecs
+   live under. Check `cargo tree` after any version bump.
+2. If the format carries its own georeference, read it into a `Placement`'s six
+   numbers and nothing else. A **projected** CRS is refused by name, never
+   guessed at: metres read as degrees put an image somewhere plausible.
+3. Add the world-file extensions to `Format::world_extensions`. A world file
+   names the **centre** of the top-left pixel and a placement names its corner,
+   so the half-pixel comes off — on a coarse chart that is tens of kilometres.
+4. Write the fixture in the test, byte by byte, including the IFD if it has
+   one. A committed image whose provenance is "it decoded" asserts nothing
+   about the tags being read right (`tests/image_layers.rs`).
+
 ### Touching the render cache
 
 Cache keys are BLAKE3 over the canonicalised flat scene. If an edit changes what
@@ -554,6 +576,11 @@ to the hash input is a correctness bug that shows up as stale frames.
   mounts. Floats escape it only because every source opens with
   `precision highp float`. `shaders.test.ts` now checks this; it did not, and
   `uProjection` shipped bare.
+- **An image layer's pixels are never in the document or the session.** They
+  are decoded on demand by `protocol::serve_image`, downsampled to the caller's
+  own `MAX_TEXTURE_SIZE` and cached by the *browser* under an immutable address
+  carrying the document revision. The decode happens outside the session lock:
+  a hundred-megapixel TIFF would otherwise stall every edit while it ran.
 - **The map projection lives twice**: `latToY`/`yToLat` in `shaders.ts` and
   `Projection.yOf`/`latOf` in `projection.ts`, because the map is drawn by the
   GPU and the pointer, the overlay and the tile cull are computed by the CPU.

@@ -242,21 +242,38 @@ pub struct CaptureMode {
     pub placed_steps: u32,
     /// Whether movement is being recorded.
     pub record_movement: bool,
+    /// Where the region sits at the step that was asked about, as `[lon, lat]`.
+    ///
+    /// The map draws the region while a capture runs, and each frame holds its
+    /// own position — so scrubbing to a step has to show *that step's* place,
+    /// not the last one clicked. Null when no capture is running or no step was
+    /// named.
+    pub position: Option<[f64; 2]>,
 }
 
-fn mode_of(session: &CaptureSession) -> CaptureMode {
+fn mode_of(session: &CaptureSession, step: Option<u32>) -> CaptureMode {
     match &session.active {
         Some(active) => CaptureMode {
             active: true,
             first_step: active.first_step,
             placed_steps: active.positions.len() as u32,
             record_movement: active.record_movement,
+            // A step never visited keeps the position the region was drawn at,
+            // which is the same rule the bake follows.
+            position: step.map(|step| {
+                active
+                    .positions
+                    .get(&step)
+                    .copied()
+                    .unwrap_or(active.origin)
+            }),
         },
         None => CaptureMode {
             active: false,
             first_step: 0,
             placed_steps: 0,
             record_movement: false,
+            position: None,
         },
     }
 }
@@ -293,7 +310,7 @@ pub fn capture_start(
                 first_step: step,
             }),
         };
-        Ok(mode_of(&session.capturing))
+        Ok(mode_of(&session.capturing, Some(step)))
     })
 }
 
@@ -318,7 +335,7 @@ pub fn capture_place(state: &AppState, step: u32, lon: f64, lat: f64) -> Result<
         if let Some(active) = session.capturing.active.as_mut() {
             active.positions.insert(step, [lon, lat]);
         }
-        Ok(mode_of(&session.capturing))
+        Ok(mode_of(&session.capturing, Some(step)))
     })
 }
 
@@ -335,19 +352,19 @@ pub fn capture_cancel(state: &AppState) -> Result<CaptureMode> {
         if let Ok(open) = session.require_open() {
             open.history.unlock();
         }
-        Ok(mode_of(&session.capturing))
+        Ok(mode_of(&session.capturing, None))
     })
 }
 
 /// What the capture mode is, for the transport.
 #[tauri::command]
-pub fn capture_mode(state: tauri::State<'_, AppState>) -> Result<CaptureMode> {
-    mode(&state)
+pub fn capture_mode(state: tauri::State<'_, AppState>, step: Option<u32>) -> Result<CaptureMode> {
+    mode(&state, step)
 }
 
 /// Implementation of [`capture_mode`].
-pub fn mode(state: &AppState) -> Result<CaptureMode> {
-    with_session(state, |session| Ok(mode_of(&session.capturing)))
+pub fn mode(state: &AppState, step: Option<u32>) -> Result<CaptureMode> {
+    with_session(state, |session| Ok(mode_of(&session.capturing, step)))
 }
 
 /// Bakes the capture under a name and writes it to the library.

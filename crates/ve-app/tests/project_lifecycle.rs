@@ -70,7 +70,10 @@ fn a_project_survives_create_save_close_and_reopen() {
     assert_eq!(saved.path.as_deref(), Some(path.to_string_lossy().as_ref()));
     assert!(path.exists(), "the file must actually be on disk");
 
-    projects::close(&app).expect("close");
+    // Closing is guarded like every other path that replaces the open
+    // project: the backend knows whether the document is dirty, so it is what
+    // refuses. A frontend that forgot to ask still cannot drop unsaved work.
+    projects::close_open(&app, true).expect("close");
     assert!(projects::current(&app).expect("current").is_none());
 
     let reopened = projects::open(&app, path.to_string_lossy().into_owned(), false).expect("open");
@@ -246,7 +249,7 @@ fn opening_a_project_will_not_silently_discard_unsaved_changes() {
 
     projects::create(&app, request("Saved"), false).expect("create");
     projects::save_as(&app, path.to_string_lossy().into_owned()).expect("save as");
-    projects::close(&app).expect("close");
+    projects::close_open(&app, true).expect("close");
 
     projects::create(&app, request("Unsaved"), false).expect("create");
     let err = projects::open(&app, path.to_string_lossy().into_owned(), false);
@@ -281,4 +284,39 @@ fn an_explicit_discard_replaces_the_project() {
     projects::create(&app, request("Doomed"), false).expect("create");
     let next = projects::create(&app, request("Replacement"), true).expect("discard and create");
     assert_eq!(next.name, "Replacement");
+}
+
+/// Closing a dirty project is refused unless the caller says to discard.
+///
+/// The guard is the backend's, not the dialog's: the frontend asks first and
+/// passes the answer, and a frontend that forgot to ask must still not be able
+/// to drop somebody's work.
+#[test]
+fn closing_a_dirty_project_is_refused_without_a_decision() {
+    let root = TempRoot::new("close-dirty");
+    let app = state(&root);
+    projects::create(&app, request("Dirty"), false).expect("create");
+    ve_app::edit::paint(
+        &app,
+        ve_app::edit::BrushStroke {
+            points: vec![[0.0, 0.0], [5.0, 0.0]],
+            size_km: 500.0,
+            speed_mps: 10.0,
+            direction_toward_deg: 90.0,
+            ..Default::default()
+        },
+    )
+    .expect("paint");
+
+    assert!(
+        projects::close_open(&app, false).is_err(),
+        "a dirty project must not close silently"
+    );
+    assert!(
+        projects::current(&app).expect("current").is_some(),
+        "and it must still be open afterwards"
+    );
+
+    projects::close_open(&app, true).expect("close with a decision");
+    assert!(projects::current(&app).expect("current").is_none());
 }

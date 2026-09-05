@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import type { Region } from "./region";
+import { normalizeLon } from "./camera";
 import {
   fillGesture,
+  recentred,
   regionBounds,
   regionContains,
   regionFromDrag,
@@ -209,5 +211,74 @@ describe("fillGesture", () => {
     const { gesture, shapeSource } = fillGesture({ kind: "polygon", points });
     expect(shapeSource).toBe(0);
     expect(gesture).toEqual({ kind: "ring", points });
+  });
+});
+
+describe("recentred", () => {
+  it("moves a rectangle and a disc by their own centre", () => {
+    // A capture's region is placed per frame and the map has to draw it where
+    // the frame it is showing puts it (spec.md 8.7, M16).
+    const rect = recentred(
+      { kind: "rect", centre: [0, 0], halfWidthDeg: 5, halfHeightDeg: 3 },
+      20,
+      -10,
+    );
+    expect(rect).toEqual({
+      kind: "rect",
+      centre: [20, -10],
+      halfWidthDeg: 5,
+      halfHeightDeg: 3,
+    });
+    expect(recentred({ kind: "disc", centre: [1, 2], radiusDeg: 4 }, -30, 60)).toEqual({
+      kind: "disc",
+      centre: [-30, 60],
+      radiusDeg: 4,
+    });
+  });
+
+  it("moves a polygon by its bounding-box centre, as the backend does", () => {
+    // `RegionShape::anchor` uses the bounding box, not the mean of the
+    // vertices. The mean would be a different point, and a dense corner would
+    // drag the region off the pointer.
+    const dense: [number, number][] = [
+      [0, 0],
+      [0.1, 0],
+      [0.2, 0],
+      [10, 10],
+    ];
+    const moved = recentred({ kind: "polygon", points: dense }, 100, 100);
+    expect(moved.kind).toBe("polygon");
+    if (moved.kind !== "polygon") return;
+    // The box centre was (5, 5), so every point moves by (95, 95).
+    expect(moved.points[0]).toEqual([95, 95]);
+    expect(moved.points[3]).toEqual([105, 105]);
+  });
+
+  it("keeps a polygon's shape across the seam", () => {
+    // A ring straddling 180 is stored with raw longitudes either side of it —
+    // 179 and -179 — and moving it shifts every one by the same amount. What
+    // has to survive is the *shape*: each edge, measured the short way round,
+    // is the edge it was. Comparing the raw spread instead would say a
+    // two-degree ring is 358 degrees wide, which is the seam and not the ring.
+    const ring: [number, number][] = [
+      [179, 0],
+      [-179, 0],
+      [-179, 2],
+      [179, 2],
+    ];
+    const edges = (points: ReadonlyArray<readonly [number, number]>) =>
+      points.map((point, i) => {
+        const next = points[(i + 1) % points.length]!;
+        return [normalizeLon(next[0] - point[0]), next[1] - point[1]];
+      });
+
+    const moved = recentred({ kind: "polygon", points: ring }, 0, 0);
+    if (moved.kind !== "polygon") return;
+    expect(edges(moved.points)).toEqual(edges(ring));
+
+    // And the ring really has moved: its bounding-box centre was on the seam
+    // and is now at the origin, which is what the backend was told.
+    const shift = normalizeLon(moved.points[0]![0] - ring[0]![0]);
+    expect(shift).toBeCloseTo(normalizeLon(-180), 9);
   });
 });

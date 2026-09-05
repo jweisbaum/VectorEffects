@@ -182,7 +182,7 @@ together: shifting only the lattice left the field trying to draw outside the
 shape that admits it, which is how the first attempt failed. Six end-to-end
 tests and four hand-computed resample ones.
 
-**M18 is next.**
+**M17 is next.**
 
 **Unplanned, after M7: GRIB import** (spec §4.8, D44). A GRIB2 file becomes a
 layer — two, when it holds both wind and currents — whose lattice is sampled
@@ -569,7 +569,7 @@ M0 ─ M1 ─ M2 ─ M3 ─ M4 ══ walking skeleton complete
                     ├─ M15 ────── settings and shortcuts               ✓
                     ├─ M16 ────── macros                                ✓
                     ├─ M17 ────── warp and liquify, two tools
-                    ├─ M18 ────── image layers
+                    ├─ M18 ────── image layers                           ✓
                     ├─ M19 ────── export precision
                     ├─ M11 ────── projections                            ✓ (cylindrical tier)
                     ├─ M8 ─────── measurement                            ✓
@@ -1726,34 +1726,70 @@ shared-rule tests.
 
 ---
 
-### M18 — Image layers
+### M18 — Image layers · **complete**
 
 **Goal:** a georeferenced image shows under the field.
 
-- `LayerSource::Image { path, placement }`, display only: never composited,
-  never exported, no field of its own. The project keeps the path and the
-  placement, never pixels — invariant 2, as for a GRIB.
-- **Georeferenced on import** when the file says where it is: GeoTIFF (the
-  `tiff` crate; `ModelTiepoint` and `ModelPixelScale`; geographic coordinates
-  only — a projected CRS is refused by name, since reprojecting a raster is
-  M11-shaped work), or PNG and JPEG with a world file beside them.
-  **Georeferenced by hand** otherwise: the image lands centred on the view and
-  the user drags two control points (translate and scale, north-up) or three
-  (affine) from pixels to places on the map. The placement is a map-space
-  affine, editable and undoable like any property. Opacity per layer.
-- Rendering: decoded in Rust (`png`, `jpeg-decoder`, `tiff` — all pure
-  Rust), served through the custom URI scheme as a texture capped to the GPU's
-  maximum size and downsampled beyond it (the file is never modified), drawn
-  as a textured quad between the basemap and the field tiles, wrapping in
-  longitude. Under M11's curved projections the quad subdivides as the tiles
-  do.
-- No bars, no messages on the timeline: an image is static.
+**Delivered as planned.** `LayerSource::Image { path, placement, opacity }`,
+display only — never composited, never evaluated, never exported, no field of
+its own. The project keeps the path and six numbers; the pixels reach the
+screen and nowhere else (invariant 2).
 
-**Acceptance:** a GeoTIFF of known extent lands with its corners at the right
-lon/lat, including a 0–360° image across the antimeridian; a hand-placed
-image's control points survive save and load; a project with an image layer
-exports byte-identically to the same project without it; the `.veproj`
-contains no pixel data.
+**Georeferenced on import** where the file says: a GeoTIFF's `ModelTiepoint`
+and `ModelPixelScale`, or a world file beside a PNG, a JPEG or a TIFF. Both
+reduce to exactly the six numbers a placement holds, so there is no conversion
+— only a half-pixel, because a world file names the *centre* of the top-left
+pixel and the placement names its corner. Half a pixel on a coarse chart is
+tens of kilometres, so it has a test of its own. A **projected** GeoTIFF is
+refused by name, saying what to do about it: reprojecting a raster is a
+different piece of work from placing one, and metres read as degrees put an
+image somewhere plausible and wrong.
+
+**Placed by hand otherwise**, by three control points — top-left, top-right,
+bottom-left. Three because three determine an affine exactly; a fourth handle
+would let the user ask for a shape no affine can make. A plain drag shears
+(the three-point case); shift keeps the image north-up and its aspect true (the
+two-point case), which is what a chart scan almost always wants. The handles
+belong to the **active layer** only, or a project with several charts under it
+would stack handles from all of them on one corner.
+
+**Rendering.** Decoded in Rust by `png`, `jpeg-decoder` and `tiff` — pure Rust,
+no `-sys` crate between them, the same rule the GRIB codecs live under.
+Downsampled to the caller's own `MAX_TEXTURE_SIZE` and re-encoded as a lossless
+PNG, served through the tile scheme at `image/<revision>/<layer>/<max edge>`:
+the revision makes the address immutable exactly as it does for a tile. **The
+file on disk is never touched.** Drawn as a 16×16 subdivided quad between the
+land and the field tiles, with world copies at ±360° — subdivided because the
+placement is affine in *degrees*, and a straight line in lon/lat is not straight
+on the map once the projection is not the flat one (M11 having just shipped two
+that are not).
+
+**Acceptance**
+
+- **A GeoTIFF of known extent lands with its corners at the right lon/lat**,
+  and so does one whose tiepoint is not the corner — the walk back to the
+  corner is its own test. The fixtures are written by the test, byte by byte,
+  including the IFD: a committed GeoTIFF whose provenance is "it decoded"
+  asserts nothing about the tags being read right.
+- **An image across the antimeridian keeps its longitudes unwrapped.** A
+  60°-wide image starting at 150°E has its right edge at 210°, not at −150°;
+  normalising it would put the right edge to the left of the left one and fold
+  the picture in half.
+- **A hand-placed image's control points survive a save and a reopen**, to the
+  file's nine decimal places, and the layer says it was placed by hand rather
+  than by the file.
+- **A project with an image layer exports byte-identically** to the same
+  project without it — asserted on the bytes, with the image laid directly over
+  the painted stroke so a leak would reach the values compared.
+- **The `.veproj` contains no pixel data**, asserted by looking for the
+  fixture's own byte run in the saved file.
+- Opacity is clamped, a drag of a control point is one undo, and three points
+  on a line are refused rather than stored.
+
+**One thing the plan did not mention and the code needed.** `Path` already has
+an inherent `with_extension`, so the extension trait written to find `MAP.TFW`
+beside `MAP.TIF` was shadowed at every call site and never ran — clippy caught
+it as dead code. It is a free function now, which cannot be shadowed.
 
 ---
 

@@ -18,7 +18,7 @@
 
 import type { ReactElement } from "react";
 
-import { FILL, HAND, MEASURE, SELECT, type ActiveTool } from "./tools";
+import { CAPTURE, FILL, HAND, INSERT, MEASURE, SELECT, type ActiveTool } from "./tools";
 
 /** One icon: the geometry inside a `0 0 24 24` box. */
 type Icon = readonly ReactElement[];
@@ -79,6 +79,20 @@ const ICONS: Record<ActiveTool, Icon> = {
     line("M11 4 4 11a2 2 0 0 0 0 3l5 5a2 2 0 0 0 3 0l7-7z", "bucket"),
     line("M5.2 10.4h13.2", "rim"),
     line("M20 15c1.2 1.6 1.8 2.6 1.8 3.4A1.8 1.8 0 0 1 18.2 18.4c0-.8.6-1.8 1.8-3.4z", "drip"),
+  ],
+  // The capture tool: a frame with a record dot in it. Recording a run of
+  // frames is what it does, and a bare dot would read as a brush.
+  [CAPTURE]: [
+    line("M4.5 6.5h15a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1z", "frame"),
+    line("M12 9.2a2.8 2.8 0 1 1 0 5.6 2.8 2.8 0 0 1 0-5.6z", "dot", true),
+  ],
+  // The insert tool: a stamp coming down onto a baseline, which is what
+  // putting a captured run of frames back on the map looks like.
+  [INSERT]: [
+    line("M8 3.6h8a1 1 0 0 1 1 1v5.4a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V4.6a1 1 0 0 1 1-1z", "block"),
+    line("M12 12.2v4.4", "stem"),
+    line("M9.4 14.6 12 17.2l2.6-2.6", "point"),
+    line("M4.5 20.4h15", "ground"),
   ],
   // A pair of dividers, the instrument the tool is named for: two legs from a
   // hinge, points down on the chart.

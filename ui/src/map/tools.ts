@@ -63,13 +63,46 @@ export const FILL = "fill" as const;
  */
 export const MEASURE = "measure" as const;
 
-/** What a pointer drag does: pan and select, draw a region, measure, or draw
- * with one of the tools. */
-export type ActiveTool = typeof HAND | typeof SELECT | typeof FILL | typeof MEASURE | Tool;
+/**
+ * The capture tool: it records a run of frames into the macro library
+ * (spec.md 8.7, M16).
+ *
+ * Frontend-only like the region tools, and for the same reason: it makes no
+ * object. What it makes is a file in the library, and the object that replays
+ * one is the insert tool's.
+ */
+export const CAPTURE = "capture" as const;
+
+/**
+ * The insert tool: it puts a library macro down as an object (spec.md 8.7).
+ *
+ * The object it makes is a `ToolKind::Macro`, which is *not* in the backend's
+ * palette — a macro has no schema bar of options to draw, it has a library to
+ * choose from. So the tool is here and the object is there.
+ */
+export const INSERT = "insert" as const;
+
+/** What a pointer drag does: pan and select, draw a region, measure, capture,
+ * insert, or draw with one of the tools. */
+export type ActiveTool =
+  | typeof HAND
+  | typeof SELECT
+  | typeof FILL
+  | typeof MEASURE
+  | typeof CAPTURE
+  | typeof INSERT
+  | Tool;
 
 /** Whether a tool draws or edits objects rather than pointing at ground. */
 export function drawsObjects(tool: ActiveTool): tool is Tool {
-  return tool !== HAND && tool !== SELECT && tool !== FILL && tool !== MEASURE;
+  return (
+    tool !== HAND &&
+    tool !== SELECT &&
+    tool !== FILL &&
+    tool !== MEASURE &&
+    tool !== CAPTURE &&
+    tool !== INSERT
+  );
 }
 
 /** The options a tool is holding, keyed by property id. */

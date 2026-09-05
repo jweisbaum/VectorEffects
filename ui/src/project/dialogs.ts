@@ -27,6 +27,22 @@ export async function pickGribToImport(): Promise<string | null> {
   return typeof chosen === "string" ? chosen : null;
 }
 
+/**
+ * Picks an image to lay under the field (spec.md 4.9, M18).
+ *
+ * The three formats there are pure-Rust decoders for. A GeoTIFF is a `.tif`
+ * like any other, so it is not offered separately: whether a file carries a
+ * georeference is something only the file knows.
+ */
+export async function pickImageToImport(): Promise<string | null> {
+  const chosen = await open({
+    multiple: false,
+    directory: false,
+    filters: [{ name: "Image", extensions: ["tif", "tiff", "png", "jpg", "jpeg"] }],
+  });
+  return typeof chosen === "string" ? chosen : null;
+}
+
 /** Asks where to write a GRIB2 file. Returns null if the user cancelled. */
 export async function pickGribDestination(projectName: string): Promise<string | null> {
   const chosen = await save({

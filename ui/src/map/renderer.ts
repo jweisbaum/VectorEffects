@@ -24,6 +24,8 @@ import {
   GEO_VERT,
   GLYPH_FRAG,
   GLYPH_VERT,
+  IMAGE_FRAG,
+  IMAGE_VERT,
   RASTER_FRAG,
   RASTER_VERT,
 } from "./shaders";
@@ -41,6 +43,30 @@ export const SPEED_SCALE_MPS = 100.0;
 const MASK_UNIT = 1;
 /** Vertices per glyph instance; see the glyph vertex shader. */
 const GLYPH_VERTICES = 54;
+
+/**
+ * How finely an image quad is subdivided, per side.
+ *
+ * A placement is an affine in degrees, so the image's edges are straight in
+ * lon/lat and *curved* on the map under any projection but the flat one (M11).
+ * Sixteen cells a side is 512 triangles — nothing on a GPU — and puts the
+ * worst error at a fraction of a pixel even for an image spanning the globe.
+ */
+const IMAGE_CELLS = 16;
+
+/** One georeferenced image, as the renderer draws it (spec.md 4.9, M18). */
+export interface ImageDraw {
+  /** The layer, which is also the texture's key. */
+  layer: number;
+  /** Its texture, or null while the picture is still being fetched. */
+  texture: WebGLTexture | null;
+  /** `lon = a·u + b·v + c` with `u` and `v` across the whole image, 0 to 1. */
+  placeLon: [number, number, number];
+  /** And the same for the latitude. */
+  placeLat: [number, number, number];
+  /** How strongly it shows. */
+  opacity: number;
+}
 
 /**
  * A gesture in progress that operates on the field rather than adding one.
@@ -101,6 +127,14 @@ export interface RenderState {
   pixelRatio: number;
   /** A gesture that operates on the field, while one is being drawn. */
   operator?: OperatorPreview | null;
+  /**
+   * Georeferenced images, bottom of the stack first (spec.md 4.9, M18).
+   *
+   * Drawn above the land and below the field: an image is a reference to trace
+   * or compare against, so the coastline underneath it stays a coastline and
+   * the field the user is painting stays on top of it.
+   */
+  images?: readonly ImageDraw[];
 }
 
 const SEA: [number, number, number, number] = [0.043, 0.078, 0.133, 1];
@@ -161,6 +195,9 @@ export class MapRenderer {
   private readonly gl: WebGL2RenderingContext;
   private readonly tiles: TileCache;
 
+  private readonly imageProgram: WebGLProgram;
+  private readonly imageUniforms: Uniforms;
+  private readonly imageMesh: { vao: WebGLVertexArrayObject; count: number };
   private readonly geoProgram: WebGLProgram;
   private readonly rasterProgram: WebGLProgram;
   private readonly glyphProgram: WebGLProgram;
@@ -185,6 +222,7 @@ export class MapRenderer {
     this.gl = gl;
     this.tiles = tiles;
 
+    this.imageProgram = link(gl, IMAGE_VERT, IMAGE_FRAG);
     this.geoProgram = link(gl, GEO_VERT, GEO_FRAG);
     this.rasterProgram = link(gl, RASTER_VERT, RASTER_FRAG);
     this.glyphProgram = link(gl, GLYPH_VERT, GLYPH_FRAG);
@@ -194,6 +232,9 @@ export class MapRenderer {
     const mask = ["uMask", "uMaskSize", "uMaskMode"];
     this.rasterUniforms = uniforms(gl, this.rasterProgram, [
       ...shared, ...mask, "uTileGeo", "uTile", "uSpeedScale", "uRampMax", "uDim",
+    ]);
+    this.imageUniforms = uniforms(gl, this.imageProgram, [
+      ...shared, "uPlaceLon", "uPlaceLat", "uImage", "uOpacity",
     ]);
     this.glyphUniforms = uniforms(gl, this.glyphProgram, [
       ...shared, ...mask, "uTileGeo", "uGlyphOrigin", "uGlyphStep", "uGrid", "uSpacing",
@@ -206,6 +247,7 @@ export class MapRenderer {
     }
 
     this.quadVao = this.buildQuad();
+    this.imageMesh = this.buildImageMesh();
     // Glyphs need no vertex data at all: geometry comes from gl_VertexID.
     const glyphVao = gl.createVertexArray();
     if (!glyphVao) throw new Error("could not create glyph vao");
@@ -250,6 +292,40 @@ export class MapRenderer {
     gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
     gl.bindVertexArray(null);
     return vao;
+  }
+
+  /**
+   * A subdivided unit square, for image layers.
+   *
+   * Built once: the mesh is in the image's own 0-to-1 coordinates, so every
+   * image of every size and every placement draws from this one buffer.
+   */
+  private buildImageMesh(): { vao: WebGLVertexArrayObject; count: number } {
+    const gl = this.gl;
+    const vao = gl.createVertexArray();
+    const vbo = gl.createBuffer();
+    if (!vao || !vbo) throw new Error("could not allocate image mesh buffers");
+
+    const step = 1 / IMAGE_CELLS;
+    const cells: number[] = [];
+    for (let row = 0; row < IMAGE_CELLS; row++) {
+      for (let col = 0; col < IMAGE_CELLS; col++) {
+        const u = col * step;
+        const v = row * step;
+        cells.push(
+          u, v, u + step, v, u, v + step,
+          u, v + step, u + step, v, u + step, v + step,
+        );
+      }
+    }
+
+    gl.bindVertexArray(vao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(cells), gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+    gl.bindVertexArray(null);
+    return { vao, count: cells.length / 2 };
   }
 
   /** World copies to draw so the map wraps seamlessly at the dateline. */
@@ -532,6 +608,30 @@ export class MapRenderer {
       }
     }
 
+    // --- Image layers (spec.md 4.9, M18) ---
+    // Above the land and below the field: an image is a reference to trace or
+    // compare against, so the coastline under it stays visible and the field
+    // being painted stays on top. Never masked, for the same reason the
+    // basemap is not — a mask takes the field away, not what is beneath it.
+    const images = state.images ?? [];
+    if (images.length > 0) {
+      gl.useProgram(this.imageProgram);
+      gl.bindVertexArray(this.imageMesh.vao);
+      gl.uniform1i(this.imageUniforms.uImage ?? null, 0);
+      gl.activeTexture(gl.TEXTURE0);
+      for (const image of images) {
+        if (!image.texture || image.opacity <= 0) continue;
+        gl.uniform3f(this.imageUniforms.uPlaceLon ?? null, ...image.placeLon);
+        gl.uniform3f(this.imageUniforms.uPlaceLat ?? null, ...image.placeLat);
+        gl.uniform1f(this.imageUniforms.uOpacity ?? null, image.opacity);
+        gl.bindTexture(gl.TEXTURE_2D, image.texture);
+        for (const offset of offsets) {
+          this.setShared(this.imageUniforms, state.camera, state.view, offset);
+          gl.drawArrays(gl.TRIANGLES, 0, this.imageMesh.count);
+        }
+      }
+    }
+
     // --- Speed raster ---
     // The basemap is never masked: a mask takes away the field, not the
     // coastline underneath it.
@@ -613,6 +713,7 @@ export class MapRenderer {
     for (const buffers of [...this.landByLod.values(), ...this.coastByLod.values()]) {
       gl.deleteVertexArray(buffers.vao);
     }
+    gl.deleteVertexArray(this.imageMesh.vao);
     if (this.graticule) {
       gl.deleteVertexArray(this.graticule.vao);
       gl.deleteBuffer(this.graticule.buffer);

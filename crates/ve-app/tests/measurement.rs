@@ -288,7 +288,7 @@ fn measurements_survive_a_round_trip() {
     let path = root.0.join("measured.veproj");
     let file = path.to_string_lossy().into_owned();
     projects::save_as(&state, file.clone()).expect("save");
-    projects::close(&state).expect("close");
+    projects::close_open(&state, true).expect("close");
     projects::open(&state, file, true).expect("reopen");
 
     let after = measure::measurements_of(&state).expect("read");

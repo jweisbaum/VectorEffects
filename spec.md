@@ -721,6 +721,75 @@ rather than at every frame.
 A message that cannot be read is skipped and logged rather than failing the
 file; a file with no usable `u`/`v` pair is refused with the reasons.
 
+### 4.9 Image layers
+
+A georeferenced picture laid **under** the field: a chart scan, a satellite
+image, a synoptic chart drawn by hand and photographed. Something to trace or
+to compare against.
+
+**Display only.** An image layer is never composited into the field, never
+evaluated, never exported, and carries no vectors. It is a `LayerSource`
+(§4.3) like a GRIB, so it is a layer in the panel with a name, an order, a
+visibility toggle — and an opacity, which nothing else has, because a reference
+at full strength hides what it is a reference *for*.
+
+**The project keeps the path and six numbers, never the pixels** (invariant 2),
+exactly as a GRIB layer does. The six are an affine from the image's own pixel
+coordinates to lon/lat degrees:
+
+```
+lon = a·u + b·v + c
+lat = d·u + e·v + f
+```
+
+with `u` across and `v` **down** from the top-left corner, which is what every
+image format and every world file means by a pixel coordinate. A north-up
+placement has `b` and `d` zero and `e` negative. It is stored in *degrees* and
+in the project's own map space — equirectangular (§5.1, D63) — because the
+placement is saved, and a placement that depended on the view's projection
+would move when someone opened the file in another one.
+
+**Georeferenced by the file where the file says.** A GeoTIFF's `ModelTiepoint`
+and `ModelPixelScale`, or a world file (`.tfw`, `.pgw`, `.jgw`, `.wld`) beside
+a PNG, a JPEG or a TIFF. Both reduce to exactly those six numbers, so there is
+no conversion — only a half-pixel, because a world file names the *centre* of
+the top-left pixel and the placement names its corner. A GeoTIFF in a
+**projected** coordinate system is refused by name, saying so and saying what
+to do: reprojecting a raster is a different piece of work from placing one, and
+metres quietly read as degrees put an image somewhere plausible and wrong.
+
+**Placed by hand otherwise.** The image lands filling the visible map, north-up
+and keeping its aspect, so its handles are on screen and grabbable. Three
+control points — the top-left, top-right and bottom-left corners — drag it into
+place. Three, because three points determine an affine exactly: a fourth handle
+would let the user ask for a shape no affine can make. A plain drag moves one
+point and shears the image; **shift** keeps it north-up and its aspect true,
+which is the translate-and-scale case a chart scan almost always wants. Three
+points on a line have no area and are refused.
+
+The control points belong to the **active layer** only. A project with several
+charts under it would otherwise stack handles from all of them on one corner of
+the map, with no way to say which a drag meant.
+
+**Decoded on the way to the screen, never into the document.** PNG, JPEG and
+TIFF, through pure-Rust decoders. The picture is served through the same
+`ve-tile://` scheme the field tiles use — a chart scan is megabytes, which has
+no business crossing the IPC channel as JSON — at
+`<base>/image/<revision>/<layer>/<max edge>`, downsampled to what the caller's
+GPU will hold and re-encoded losslessly. The revision makes the address
+immutable, the same rule the tiles follow. **The file on disk is never
+modified.**
+
+**Drawn above the land and below the field**, as a subdivided quad with world
+copies at ±360°. Subdivided because the placement is affine in *degrees*: a
+straight line across the image is straight in lon/lat, and a straight line in
+lon/lat is not straight on the map under any projection but the flat one
+(§5.1). It is never masked, for the reason the basemap is not — a mask takes
+the field away, not what is beneath it.
+
+**No bars and no messages on the timeline.** An image is static: it has no
+forecast hour, so there is nothing for a step to show or not show.
+
 ---
 
 ## 5. Map view
