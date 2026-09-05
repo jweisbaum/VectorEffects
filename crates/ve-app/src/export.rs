@@ -159,7 +159,7 @@ pub fn cancel_export(cancel: tauri::State<'_, ExportCancel>) {
 }
 
 /// Writes the open project to a GRIB2 file.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn export_grib(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,

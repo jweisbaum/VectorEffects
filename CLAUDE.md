@@ -552,6 +552,21 @@ to the hash input is a correctness bug that shows up as stale frames.
   and the whole toolbar to refresh four spans. It is an external store now
   (`createReadoutStore`), and only `MapReadout` subscribes. Its IPC sample is
   one-in-flight, latest-wins — the same pattern as the drag preview.
+- **The tile protocol is registered with
+  `register_asynchronous_uri_scheme_protocol`, never the synchronous one.**
+  The synchronous variant runs the handler on the main thread, which is the
+  webview's, so every tile evaluation froze the interface for as long as it
+  took — a viewport of imported-field tiles is a second or more, and a
+  slider dragged over a GRIB layer stood still while its last tick's tiles
+  rendered. `spawn_blocking` does the work and the responder answers when it
+  is done. Anything else served by a custom scheme takes the same shape.
+- **A command that can take longer than a frame is `#[tauri::command(async)]`.**
+  A plain `#[tauri::command]` on a sync function runs inline on the main
+  thread; the `async` attribute on the same sync function runs it on Tauri's
+  thread pool. Every command in `LONG_RUNNING` (`ui/src/ipc.ts`) carries it —
+  imports, open, save, export, the capture bakes, the macro insert, the
+  duration change — so the spinner has something to spin over rather than a
+  frozen window. A new long command needs both the attribute and the label.
 - **A tile rendered ahead is the tile that will be served.** `protocol::serve`
   is the one path a tile takes — the key, the backend, the quality and the
   encoding are decided there — and the render pool calls it. A pool that chose

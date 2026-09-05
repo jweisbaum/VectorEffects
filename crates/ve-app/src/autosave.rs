@@ -276,7 +276,7 @@ pub fn autosaves(state: tauri::State<'_, AppState>) -> Result<Vec<Autosave>> {
 }
 
 /// Opens a snapshot as the project it was taken from.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn recover_autosave(
     state: tauri::State<'_, AppState>,
     id: u64,

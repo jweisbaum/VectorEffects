@@ -184,6 +184,25 @@ tests and four hand-computed resample ones.
 
 **Every milestone is delivered; what remains needs a signing key or a screen (M10).**
 
+**Found by hand after M25: the speed filter still stood still, and the
+cause was under everything.** The tile protocol was registered with Tauri's
+*synchronous* scheme handler, which runs on the main thread — the webview's
+own — so every tile evaluation froze the interface for as long as it took.
+A viewport of imported-field tiles is a second or more on the CPU (§13),
+and each slider tick asked for one, so the slider stood still while its
+last tick rendered under it; M25's one-write-in-flight was correct and
+beside the point. The handler is asynchronous now, doing its work on the
+runtime's blocking pool and answering when it is done. This had been true
+since M2 and showed on nothing until a layer whose tiles cost tens of
+milliseconds met a control that wrote on every pointer report. The same
+rule held for commands: a plain `#[tauri::command]` runs inline on the main
+thread, so a GRIB import, an export or a two-second capture bake froze the
+window for its whole run and the new spinner would have had nothing to
+spin over. The fourteen commands the spinner names are
+`#[tauri::command(async)]` now and run on Tauri's thread pool. Not
+measured: it needs the app on a screen, and the number is the tile cost,
+which is known.
+
 **M23–M26 complete (2026-09-05).** All thirty findings are delivered, one
 commit per milestone; each section below records what was measured and
 what was left. Every finding that turned out to be a bug in a rule now has

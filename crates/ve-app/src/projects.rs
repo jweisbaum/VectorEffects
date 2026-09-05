@@ -259,7 +259,7 @@ pub fn create(
 }
 
 /// Opens a project from disk.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn open_project(
     state: tauri::State<'_, AppState>,
     path: String,
@@ -296,7 +296,7 @@ pub fn open(state: &AppState, path: String, discard_unsaved: bool) -> Result<Pro
 }
 
 /// Saves the open project to its existing path.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_project(state: tauri::State<'_, AppState>) -> Result<ProjectSummary> {
     save(&state)
 }
@@ -322,7 +322,7 @@ pub fn save(state: &AppState) -> Result<ProjectSummary> {
 }
 
 /// Saves the open project to a new path.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_project_as(state: tauri::State<'_, AppState>, path: String) -> Result<ProjectSummary> {
     save_as(&state, path)
 }

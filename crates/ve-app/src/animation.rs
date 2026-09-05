@@ -862,7 +862,7 @@ pub fn shrink_impact(state: &AppState, step_count: u32) -> Result<ShrinkImpact> 
 /// Growing is free. Shrinking deletes keyframes past the new end and clamps
 /// lifetimes, undoably within the session (decision D13); the confirmation
 /// that gates it is the frontend's, built from [`step_count_impact`].
-#[tauri::command]
+#[tauri::command(async)]
 pub fn set_step_count(
     state: tauri::State<'_, AppState>,
     step_count: u32,

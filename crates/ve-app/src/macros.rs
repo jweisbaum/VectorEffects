@@ -593,7 +593,7 @@ pub fn capture_unplace(state: &AppState, step: u32) -> Result<CaptureMode> {
 
 /// Bakes the capture into the session and shows it on an empty map (M26,
 /// D71). Nothing is written to disk and nothing to the document.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn preview_capture(state: tauri::State<'_, AppState>, last_step: u32) -> Result<CaptureMode> {
     capture_preview(&state, last_step)
 }
@@ -754,7 +754,7 @@ pub fn mode(state: &AppState, step: Option<u32>) -> Result<CaptureMode> {
 }
 
 /// Bakes the capture under a name and writes it to the library.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn finish_capture(
     state: tauri::State<'_, AppState>,
     name: String,
@@ -906,7 +906,7 @@ fn bake(
 }
 
 /// Inserts a library macro as an object, centred on a position.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn insert_macro(
     state: tauri::State<'_, AppState>,
     id: String,

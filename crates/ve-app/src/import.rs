@@ -38,7 +38,7 @@ fn layer_name(kind: FieldKind, path: &Path) -> String {
 }
 
 /// Imports a GRIB2 file as one or more layers above the current top.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn import_grib(state: tauri::State<'_, AppState>, path: String) -> Result<ProjectSummary> {
     grib_import(&state, path)
 }
@@ -196,7 +196,7 @@ pub fn settings_for(sequences: &[RasterSequence]) -> Option<ProjectSettings> {
 }
 
 /// Creates a project shaped by a GRIB2 file and imports the file into it.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn new_project_from_grib(
     state: tauri::State<'_, AppState>,
     path: String,

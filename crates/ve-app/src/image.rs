@@ -611,7 +611,7 @@ fn beside(path: &Path, extension: &str) -> PathBuf {
 /// The layer goes on top of the stack like any other import. It carries no
 /// objects and never will: an image layer is a picture, and painting on it
 /// would make it a painted layer with a picture stuck to it.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn import_image(
     state: tauri::State<'_, AppState>,
     path: String,

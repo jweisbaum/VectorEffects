@@ -186,7 +186,7 @@ pub struct CaptureClipboard {
 }
 
 /// Captures the visible composite inside a region (spec.md 8.5).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn capture_region(
     state: tauri::State<'_, AppState>,
     region: RegionShape,
@@ -307,7 +307,7 @@ pub fn region_capture(state: &AppState, region: RegionShape, step: u32) -> Resul
 const MAX_SIDE: u32 = 2_048;
 
 /// Pastes the captured field as a patch, centred at `lon`/`lat`.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn paste_capture(
     state: tauri::State<'_, AppState>,
     lon: Option<f64>,

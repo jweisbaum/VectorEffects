@@ -70,8 +70,20 @@ pub fn run() -> anyhow::Result<()> {
             autosave::start(app.handle().clone());
             Ok(())
         })
-        .register_uri_scheme_protocol(protocol::SCHEME, |ctx, request| {
-            protocol::handle(ctx.app_handle(), &request)
+        // **Asynchronous, deliberately.** The synchronous variant runs the
+        // handler on the main thread — the webview's own — and a tile of an
+        // imported field costs tens of milliseconds to evaluate on the CPU, a
+        // full viewport of them a second or more. Every one of those blocked
+        // the interface for as long as it took: a slider dragged across a
+        // GRIB layer stood still while the tiles its last tick asked for
+        // rendered under it. The work now runs on the runtime's blocking
+        // pool and the main thread is handed the response when it is ready
+        // (spec.md 13: zero evaluation on the UI thread).
+        .register_asynchronous_uri_scheme_protocol(protocol::SCHEME, |ctx, request, responder| {
+            let app = ctx.app_handle().clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                responder.respond(protocol::handle(&app, &request));
+            });
         })
         .invoke_handler(tauri::generate_handler![
             commands::app_info,
