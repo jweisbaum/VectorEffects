@@ -599,7 +599,16 @@ invalidates every tile of the imported field and re-renders every panel, and
 a slider that wrote per tick moved a round trip and a viewport of tiles
 behind the hand. The thumb is local state for the length of the drag and the
 map is not asked to keep up; the release writes the band once, and that is
-the history entry — one per release, with nothing to coalesce.
+the history entry — one per release, with nothing to coalesce. The thumb
+keeps showing the released band until that write has come back: the document
+still holds the old band for the length of the round trip, and a thumb that
+went back to showing the document at release sat at the old value and then
+jumped to the new one. **A dragged thumb stops at the other one.** Each
+slider is a controlled input, so a thumb pushed past the other cannot go
+there; what the browser did instead was pin the thumb under the hand and move
+the *other* one to the pointer, which looked like the two sliders being tied
+together whenever they came close. A typed value may still cross, and is
+ordered.
 
 **Levels.** A file often carries wind at several heights. The 10 m wind
 (surface type 103 at 10 m) is taken when present, other heights only when it

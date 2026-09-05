@@ -1,15 +1,13 @@
 import { useEffect, useState } from "react";
 
-import type { GribLayerInfo } from "../generated/GribLayerInfo";
 import { reportError } from "../hint";
 import { api } from "../ipc";
 import type { DocumentTree } from "../generated/DocumentTree";
 import type { ProjectSummary } from "../generated/ProjectSummary";
-import NumberField from "../NumberField";
-import { knotsFromMps, mpsFromKnots } from "../project/format";
 import type { ImageLayerView } from "../generated/ImageLayerView";
 import { pickGribToImport, pickImageToImport } from "../project/dialogs";
 import { EyeIcon } from "./EyeIcon";
+import SpeedFilter from "./SpeedFilter";
 
 /** What is being dragged, while a reorder is in progress. */
 type Dragging =
@@ -81,7 +79,7 @@ export default function LayerPanel({
 
   const run = (action: Promise<ProjectSummary>, done?: () => void) => {
     setError(null);
-    action
+    return action
       .then(onChanged)
       .catch((err: unknown) => setError(String(err)))
       .finally(() => done?.());
@@ -435,124 +433,6 @@ export default function LayerPanel({
         })}
       </ul>
 
-    </div>
-  );
-}
-
-/**
- * The band of speeds an imported field keeps (spec.md 4.8).
- *
- * A forecast is easier to read one band at a time: the calms, the gale, the
- * jet. A sample outside the band is dropped exactly as a missing one is, so
- * what is beneath shows through — including the layer's own painted objects,
- * which is what makes this a filter on the *import* and not on the layer.
- *
- * Two sliders and two fields, not a dual-thumb control: the two ends are two
- * numbers, they are often typed rather than dragged, and a slider whose thumbs
- * can cross is a puzzle. Crossing them is allowed and simply orders them —
- * dragging the low end past the high one is a gesture, not a mistake.
- */
-function SpeedFilter({
-  grib,
-  onChange,
-}: {
-  grib: GribLayerInfo;
-  /**
-   * One write per release, per typed value, or per checkbox: `gesture` is
-   * always null now and stays in the signature for the command, which still
-   * coalesces under a key for any caller that has a reason to.
-   */
-  onChange: (minMps: number | null, maxMps: number | null, gesture: string | null) => void;
-}) {
-  const ceiling = Math.max(5, Math.ceil(knotsFromMps(grib.speed_ceiling_mps)));
-  const on = grib.speed_min_mps !== null && grib.speed_max_mps !== null;
-  const stored: [number, number] = [
-    on ? knotsFromMps(grib.speed_min_mps ?? 0) : 0,
-    on ? knotsFromMps(grib.speed_max_mps ?? 0) : ceiling,
-  ];
-  /**
-   * The band while the thumb is down.
-   *
-   * **Nothing is written until the pointer comes up.** Every tick used to be
-   * a document write, and a write invalidates every tile of the imported
-   * field and re-renders every panel — so the thumb moved a round trip and a
-   * viewport of tiles behind the hand. The thumb is local state now, the
-   * map and the panels are left alone for the length of the drag, and the
-   * release writes the band once: one history entry per release, with no
-   * coalescing key because there is nothing to coalesce.
-   */
-  const [dragging, setDragging] = useState<[number, number] | null>(null);
-  const [low, high] = dragging ?? stored;
-
-  const set = (nextLow: number, nextHigh: number) =>
-    onChange(mpsFromKnots(nextLow), mpsFromKnots(nextHigh), null);
-  const drag = (band: [number, number]) => setDragging(band);
-  const endDrag = () => {
-    const last = dragging;
-    if (last === null) return;
-    setDragging(null);
-    // The document's band as the pointer let go of it. Ordered here as the
-    // backend orders it, so the local thumbs and the written band agree.
-    set(Math.min(last[0], last[1]), Math.max(last[0], last[1]));
-  };
-
-  return (
-    <div className="grib-filter">
-      <label title="Keep only the speeds inside this band; the rest of the imported field is dropped, and whatever is beneath it shows through.">
-        <input
-          type="checkbox"
-          checked={on}
-          onChange={(e) => (e.target.checked ? set(0, ceiling) : onChange(null, null, null))}
-        />
-        Speed filter
-      </label>
-      {on && (
-        <div className="grib-filter-band">
-          <span className="grib-filter-row">
-            <input
-              type="range"
-              min={0}
-              max={ceiling}
-              step={1}
-              value={Math.min(low, high)}
-              onChange={(e) => drag([Number(e.target.value), high])}
-              onPointerUp={endDrag}
-              onKeyUp={endDrag}
-              onBlur={endDrag}
-              title="Slowest speed kept"
-            />
-            <NumberField
-              min={0}
-              max={ceiling}
-              value={low}
-              format={(v) => String(Math.round(v))}
-              onCommit={(next) => set(next, high)}
-            />
-          </span>
-          <span className="grib-filter-row">
-            <input
-              type="range"
-              min={0}
-              max={ceiling}
-              step={1}
-              value={Math.max(low, high)}
-              onChange={(e) => drag([low, Number(e.target.value)])}
-              onPointerUp={endDrag}
-              onKeyUp={endDrag}
-              onBlur={endDrag}
-              title="Fastest speed kept"
-            />
-            <NumberField
-              min={0}
-              max={ceiling}
-              value={high}
-              format={(v) => String(Math.round(v))}
-              onCommit={(next) => set(low, next)}
-            />
-          </span>
-          <span className="muted">kt, of {ceiling} in the file</span>
-        </div>
-      )}
     </div>
   );
 }

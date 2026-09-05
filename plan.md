@@ -2278,7 +2278,15 @@ back until the document returned. The thumb follows the hand now and
 band once, one history entry per release. A first attempt kept one write in
 flight during the drag, latest wins; the user found the thumb still
 lagging, because every write that did go out re-rendered the panels and
-the tiles under it, so the drag now writes nothing at all. The
+the tiles under it, so the drag now writes nothing at all. Found by hand
+after that: the two thumbs were tied together near each other, and the thumb
+jumped back at release. Each slider showed the *ordered* band, so a thumb
+pushed past the other was pinned there and the other one followed the
+pointer; and the local band was dropped at release, a round trip before the
+document had the new one. A dragged thumb stops at the other now, and the
+released band is shown until its write settles (`SpeedFilter.tsx`, with the
+first component test in the frontend — under happy-dom, since jsdom 27
+cannot load on the Node 21 this is developed on). The
 release-to-last-tile time was not measured: it is the tile cost times the
 viewport, unchanged by this milestone. The
 offline check gained one allowance, the SVG XML namespace, which the M24

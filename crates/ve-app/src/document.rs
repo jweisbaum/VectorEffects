@@ -742,9 +742,10 @@ pub fn layer_speed_range(
 ) -> Result<ProjectSummary> {
     let after = match (min_mps, max_mps) {
         (Some(min), Some(max)) if min.is_finite() && max.is_finite() => {
-            // Ordered here rather than refused: the panel has two fields and a
-            // slider apiece, and dragging the low end past the high one is a
-            // gesture, not a mistake.
+            // Ordered here rather than refused: the panel has a field for each
+            // end, and a low end typed above the high one is a band written
+            // backwards, not a mistake. (The sliders cannot cross: a dragged
+            // thumb stops at the other one.)
             Some(ve_core::document::SpeedRange {
                 min_mps: min.min(max).max(0.0),
                 max_mps: max.max(min),

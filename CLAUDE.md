@@ -490,7 +490,11 @@ to the hash input is a correctness bug that shows up as stale frames.
 - `ve-app` ships two binaries, so `default-run = "ve-app"` is required or
   `tauri dev`'s bare `cargo run` cannot choose between them.
 - Frontend tests default to the `node` environment. Component tests needing a
-  DOM opt in per file with `// @vitest-environment jsdom`.
+  DOM opt in per file with `// @vitest-environment happy-dom`
+  (`SpeedFilter.test.tsx` is the pattern: `react-dom/client` and React's own
+  `act`, no testing library). happy-dom and not jsdom: jsdom 27's CSS parser
+  `require()`s an ES module, which Node 21 — this machine — cannot do, and
+  vitest resolves its own nested jsdom, so no override reaches it.
 - This machine has Homebrew Rust rather than rustup, so `rustup target add`
   is unavailable. macOS universal builds (M10) will need rustup installed.
 - **`[profile.dev.package.ve-app] opt-level = 0` is load-bearing, not laziness.**
