@@ -3,8 +3,9 @@ import { describe, expect, it } from "vitest";
 import type { Region } from "./region";
 import { normalizeLon } from "./camera";
 import {
-  fillGesture,
+  editsRegion,
   recentred,
+  regionGesture,
   regionBounds,
   regionContains,
   regionFromDrag,
@@ -178,42 +179,6 @@ describe("regionContains", () => {
   });
 });
 
-describe("fillGesture", () => {
-  it("makes a rectangle region the shape fill's rectangle preset", () => {
-    const { gesture, shapeSource } = fillGesture({
-      kind: "rect",
-      centre: [10, 20],
-      halfWidthDeg: 3,
-      halfHeightDeg: 2,
-    });
-    expect(shapeSource).toBe(2);
-    expect(gesture).toEqual({ kind: "extent", centre: [10, 20], rim: [13, 22] });
-  });
-
-  it("makes a circle region its circle preset, rim due north", () => {
-    // Due north keeps the two half-extents equal, which is what the backend's
-    // hypot reads back as the radius.
-    const { gesture, shapeSource } = fillGesture({
-      kind: "disc",
-      centre: [0, 45],
-      radiusDeg: 4,
-    });
-    expect(shapeSource).toBe(3);
-    expect(gesture).toEqual({ kind: "extent", centre: [0, 45], rim: [0, 49] });
-  });
-
-  it("makes a lasso its freehand polygon", () => {
-    const points: Array<[number, number]> = [
-      [0, 0],
-      [1, 0],
-      [1, 1],
-    ];
-    const { gesture, shapeSource } = fillGesture({ kind: "polygon", points });
-    expect(shapeSource).toBe(0);
-    expect(gesture).toEqual({ kind: "ring", points });
-  });
-});
-
 describe("recentred", () => {
   it("moves a rectangle and a disc by their own centre", () => {
     // A capture's region is placed per frame and the map has to draw it where
@@ -280,5 +245,50 @@ describe("recentred", () => {
     // and is now at the origin, which is what the backend was told.
     const shift = normalizeLon(moved.points[0]![0] - ring[0]![0]);
     expect(shift).toBeCloseTo(normalizeLon(-180), 9);
+  });
+});
+
+describe("regionGesture", () => {
+  // The operators have no shape_source, so on their side an extent can only
+  // mean a disc: a rectangle therefore goes as its four corners, which is
+  // exact, and only a circle goes as an extent (spec.md 8.2).
+  it("sends a rectangle as a ring of its corners", () => {
+    const gesture = regionGesture({
+      kind: "rect",
+      centre: [10, 20],
+      halfWidthDeg: 5,
+      halfHeightDeg: 2,
+    });
+    expect(gesture.kind).toBe("ring");
+    if (gesture.kind !== "ring") return;
+    expect(gesture.points).toHaveLength(4);
+    expect(gesture.points).toContainEqual([5, 18]);
+    expect(gesture.points).toContainEqual([15, 22]);
+  });
+
+  it("sends a circle as an extent with its rim due north", () => {
+    const gesture = regionGesture({ kind: "disc", centre: [0, 0], radiusDeg: 3 });
+    expect(gesture).toEqual({ kind: "extent", centre: [0, 0], rim: [0, 3] });
+  });
+
+  it("sends a polygon as itself", () => {
+    const points: [number, number][] = [
+      [0, 0],
+      [4, 0],
+      [2, 3],
+    ];
+    expect(regionGesture({ kind: "polygon", points })).toEqual({ kind: "ring", points });
+  });
+
+  it("names the brush and the four operators, and not the ones measured from an anchor", () => {
+    for (const tool of ["brush", "mask", "intensity", "divergence", "turn"]) {
+      expect(editsRegion(tool), tool).toBe(true);
+    }
+    // The clone stamp and the warp read from their anchor to somewhere else,
+    // and a region does not say where; the shape fill is drawn with its own
+    // presets rather than applied to a selection.
+    for (const tool of ["clone_stamp", "warp", "shape_fill", "curve"]) {
+      expect(editsRegion(tool), tool).toBe(false);
+    }
   });
 });

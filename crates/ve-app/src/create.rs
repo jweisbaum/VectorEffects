@@ -379,6 +379,48 @@ fn geometry_of(
     };
 
     match (tool, gesture) {
+        // The brush and four of the operators also take a *region* (spec.md
+        // 8.2): with one selected, a click inside it makes that kind of object
+        // from the region's boundary — a brush paints the region, a mask masks
+        // it. The geometry is the region's own — a polygon, or a disc — and the
+        // evaluator keys on geometry rather than on tool, so a brush that is a
+        // polygon paints a polygon and a mask that is one masks one.
+        //
+        // A rectangle arrives as a ring of its four corners, so an extent here
+        // can only mean a disc: these tools have no `shape_source` to say
+        // otherwise, and giving them one would be a control for a single
+        // gesture. The clone stamp and the warp are left out on purpose — both
+        // are measured from their anchor to somewhere else, and "the region"
+        // does not say where.
+        (
+            ToolKind::Brush
+            | ToolKind::Mask
+            | ToolKind::Intensity
+            | ToolKind::Divergence
+            | ToolKind::Turn,
+            Gesture::Ring { points: raw },
+        ) => ring_geometry(raw, props, tool),
+        (
+            ToolKind::Brush
+            | ToolKind::Mask
+            | ToolKind::Intensity
+            | ToolKind::Divergence
+            | ToolKind::Turn,
+            Gesture::Extent { centre, rim },
+        ) => {
+            let anchor = point(*centre)?;
+            let edge = point(*rim)?;
+            let frame = frame_at(anchor, props, tool);
+            let [dx, dy] = frame.to_local(edge);
+            Ok((
+                anchor,
+                Geometry::Disc {
+                    radius_m: Some(dx.hypot(dy)),
+                },
+                vec![anchor, edge],
+            ))
+        }
+
         // Every painted tool, sharing one gesture and therefore one geometry:
         // the brush, the mask, the clone stamp and the four modifiers. Their
         // anchor is where the gesture began.
@@ -483,6 +525,31 @@ fn centroid_of(positions: &[LonLat], props: &PropertyMap, tool: ToolKind) -> Lon
     anchor
 }
 
+/// A polygon from a ring of placed vertices, for any tool that takes one.
+///
+/// Its anchor is the mean of its vertices, so that a shape drawn anywhere turns
+/// about its own middle rather than about whichever corner happened to be
+/// clicked first. The points are re-expressed in the frame that anchor builds,
+/// not shifted within the first vertex's frame: the two differ by the AEQD
+/// distortion between the points, which is what would otherwise pull a large
+/// polygon out of shape.
+fn ring_geometry(
+    raw: &[[f64; 2]],
+    props: &PropertyMap,
+    tool: ToolKind,
+) -> Result<(LonLat, Geometry, Vec<LonLat>)> {
+    let positions = points(raw, 3, "points")?;
+    let anchor = centroid_of(&positions, props, tool);
+    let frame = frame_at(anchor, props, tool);
+    Ok((
+        anchor,
+        Geometry::Polygon {
+            points: local_chain(&frame, &positions),
+        },
+        positions,
+    ))
+}
+
 /// The shape fill's geometry, which its `shape_source` decides.
 ///
 /// The freehand polygon and the three presets are different geometries drawn in
@@ -500,23 +567,7 @@ fn shape_fill_geometry(
         // A freehand polygon. Its anchor is the mean of its vertices, so that a
         // shape drawn anywhere turns about its own middle rather than about
         // whichever corner happened to be clicked first.
-        (0, Gesture::Ring { points: raw }) => {
-            let positions = points(raw, 3, "points")?;
-            let anchor = centroid_of(&positions, props, tool);
-
-            // Re-expressed in the frame the anchor actually builds, not shifted
-            // within the first vertex's frame: the two differ by the AEQD
-            // distortion between the points, which is what would otherwise pull
-            // a large polygon out of shape.
-            let frame = frame_at(anchor, props, tool);
-            Ok((
-                anchor,
-                Geometry::Polygon {
-                    points: local_chain(&frame, &positions),
-                },
-                positions,
-            ))
-        }
+        (0, Gesture::Ring { points: raw }) => ring_geometry(raw, props, tool),
 
         (1..=3, Gesture::Extent { centre, rim }) => {
             let anchor = point(*centre)?;

@@ -18,7 +18,7 @@
 
 import type { ReactElement } from "react";
 
-import { CAPTURE, FILL, HAND, INSERT, MEASURE, SELECT, type ActiveTool } from "./tools";
+import { CAPTURE, HAND, INSERT, MEASURE, SELECT, type ActiveTool } from "./tools";
 
 /** One icon: the geometry inside a `0 0 24 24` box. */
 type Icon = readonly ReactElement[];
@@ -73,12 +73,6 @@ const ICONS: Record<ActiveTool, Icon> = {
     line("M4 9h11v11H4z", "front"),
     line("M7 6h11v11h-3", "middle"),
     line("M10 3h11v11h-3", "back"),
-  ],
-  // The fill tool: a bucket tipped over what it fills.
-  [FILL]: [
-    line("M11 4 4 11a2 2 0 0 0 0 3l5 5a2 2 0 0 0 3 0l7-7z", "bucket"),
-    line("M5.2 10.4h13.2", "rim"),
-    line("M20 15c1.2 1.6 1.8 2.6 1.8 3.4A1.8 1.8 0 0 1 18.2 18.4c0-.8.6-1.8 1.8-3.4z", "drip"),
   ],
   // The capture tool: a frame with a record dot in it. Recording a run of
   // frames is what it does, and a bare dot would read as a brush.

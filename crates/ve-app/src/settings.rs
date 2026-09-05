@@ -152,7 +152,6 @@ pub fn default_shortcuts() -> Vec<Shortcut> {
         plain(ShortcutAction::ZoomOut, "-"),
         tool("hand", "v"),
         tool("select", "m"),
-        tool("fill", "g"),
         tool("brush", "p"),
         tool("circle", "c"),
         tool("shape_fill", "f"),

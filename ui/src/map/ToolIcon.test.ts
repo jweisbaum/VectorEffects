@@ -14,7 +14,7 @@
 import { describe, expect, it } from "vitest";
 
 import { ICON_TOOLS, iconFor } from "./ToolIcon";
-import { CAPTURE, FILL, HAND, INSERT, MEASURE, SELECT } from "./tools";
+import { CAPTURE, HAND, INSERT, MEASURE, SELECT } from "./tools";
 
 /** The attributes a `<path>` in the set carries. */
 interface PathProps {
@@ -36,7 +36,7 @@ function paths(tool: (typeof ICON_TOOLS)[number]): string[] {
 
 describe("the icon set", () => {
   /**
-   * Eighteen: the hand, the two region tools of 8.2, the measure tool of 10,
+   * Seventeen: the hand, the select tool of 8.2, the measure tool of 10,
    * the two macro tools of 8.7,
    * the six tools of spec 6.2, the four modifiers of 6.3, and the patch of 8.5
    * and the macro of 8.7 — neither drawn from the palette, and both needing a
@@ -44,7 +44,7 @@ describe("the icon set", () => {
    * the palette arrives over IPC and a test that compared the two would only
    * be comparing the frontend to itself.
    */
-  it("covers the hand, the region and measure tools and every drawing tool", () => {
+  it("covers the hand, the select and measure tools and every drawing tool", () => {
     expect([...ICON_TOOLS].sort()).toEqual(
       [
         "brush",
@@ -59,7 +59,6 @@ describe("the icon set", () => {
         "turn",
         "warp",
         SELECT,
-        FILL,
         // Draws no object at all: it lays a measurement over the map
         // (spec.md 10, M8).
         MEASURE,

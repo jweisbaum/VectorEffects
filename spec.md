@@ -1967,16 +1967,30 @@ nothing else, so it cannot be mistaken for a selected object's edge.
 with the whole map, and `Cmd`-`D` or the bar's **Deselect** clears it. None of
 those three keys was bound before.
 
-The **fill tool** (`G`, the paint bucket's key) acts on the current region: a
-click makes a **shape fill** whose geometry is the region's shape. Its bar is
-the shape fill's own and the object it makes is a shape fill and nothing else,
-so §6.1's shared rules cover it with no new case. With no region it is inert
-and says so.
+**A selection is a footprint.** With a region selected, a click *inside* it
+with the **brush** or with the **mask**, the **intensity**, the **divergence**
+or the **turn** makes that kind of object from the region's boundary: one
+object, with the region's own geometry — a polygon, or a disc — as a projected
+stamp (D55). A brush paints the region with the bar's speed and direction; a
+mask masks it; the modifiers act on what it covers. Inside, and not anywhere:
+a click outside the region is the ordinary painted stroke, so a region left
+selected does not turn every stroke into a region.
 
-Neither tool appears in the palette §6.2 describes, and deliberately: that
-palette describes vector-creation tools, every entry of which maps to a kind
-an object can be made of. The select tool makes no object at all, and the fill
-tool makes somebody else's.
+There is no separate fill tool. There was one (M14), which turned the region
+into a shape fill; it was withdrawn because it was one more button for a
+gesture every painting tool now has (D64). The **shape fill** in the palette
+is unchanged — it is *drawn*, with its own presets, not applied to a
+selection.
+
+The clone stamp and the warp are left out deliberately: both are measured from
+their anchor to somewhere *else*, and a region does not say where. A
+region-made object never merges with a painted one — the merge rule accepts
+only swept strokes — so the two stay the two objects they are.
+
+The select tool does not appear in the palette §6.2 describes, and
+deliberately: that palette describes vector-creation tools, every entry of
+which maps to a kind an object can be made of, and the select tool makes no
+object at all.
 
 ### 8.3 Objects are pinned to the earth
 

@@ -44,16 +44,6 @@ export const HAND = "hand" as const;
 export const SELECT = "select" as const;
 
 /**
- * The fill tool: it turns the current region into a shape fill.
- *
- * Frontend-only for the same reason, but its *bar* is the shape fill's own,
- * fetched from the palette like any other — the object it makes is a shape
- * fill and nothing else, so the seven shared-rule tests cover it with no new
- * case (M14).
- */
-export const FILL = "fill" as const;
-
-/**
  * The measurement tool: it draws an *annotation* over the map (spec.md 10, M8).
  *
  * Frontend-only for the third time, and for the plainest reason yet: a
@@ -87,7 +77,6 @@ export const INSERT = "insert" as const;
 export type ActiveTool =
   | typeof HAND
   | typeof SELECT
-  | typeof FILL
   | typeof MEASURE
   | typeof CAPTURE
   | typeof INSERT
@@ -98,7 +87,6 @@ export function drawsObjects(tool: ActiveTool): tool is Tool {
   return (
     tool !== HAND &&
     tool !== SELECT &&
-    tool !== FILL &&
     tool !== MEASURE &&
     tool !== CAPTURE &&
     tool !== INSERT
@@ -443,6 +431,18 @@ export function footprintOf(
         space,
       );
       if (halfWidthKm <= 0 && halfHeightKm <= 0) return null;
+
+      // Only the shape fill has a `shape_source`. For every other tool an
+      // extent is a disc — a selected circle applied with an operator
+      // (spec.md 8.2) — and the preview has to say the same as the backend.
+      if (tool !== "shape_fill") {
+        return {
+          kind: "disc",
+          centre: [lon, lat],
+          radiusKm: Math.hypot(halfWidthKm, halfHeightKm),
+          space,
+        };
+      }
 
       // Shape source 1 square, 2 rectangle, 3 circle.
       switch (choiceOf(state.values, "ShapeSource")) {

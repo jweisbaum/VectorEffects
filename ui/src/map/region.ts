@@ -265,52 +265,41 @@ export function regionContains(region: Region, lon: number, lat: number): boolea
 }
 
 /**
- * The gesture and shape option that make a shape fill of a region (M14).
+ * The tools that make an object from a selected region on one click
+ * (spec.md 8.2).
  *
- * The fill tool needs no gesture of its own and the backend needs no new
- * shape: a region is already one of the three things the shape fill draws, so
- * a rectangle region is its rectangle preset, a circle its circle, and a lasso
- * its freehand polygon. That is what keeps the object a shape fill and nothing
- * else, and the seven shared-rule tests covering it with no new case.
- *
- * The `rim` of an extent gesture is a point on the shape's edge, and the
- * backend measures the drag in *map space* for a projected stamp — which is
- * what a region is — so the offsets here are plain degrees.
+ * The brush and the four operators: with a region selected, clicking inside
+ * it makes that kind of object from the region's boundary — a brush paints the
+ * region, a mask masks it, and so on. The clone stamp and the warp are left
+ * out on purpose: both are measured from their anchor to somewhere *else*,
+ * and "the region" does not say where. The shape fill keeps its own presets
+ * and is drawn, not applied.
  */
-export function fillGesture(region: Region): {
-  gesture: RegionGesture;
-  /** The index `ShapeSource` must hold: 0 polygon, 2 rectangle, 3 circle. */
-  shapeSource: number;
-} {
+export const REGION_EDIT_TOOLS = ["brush", "mask", "intensity", "divergence", "turn"] as const;
+
+/** Whether a tool makes its object from a selected region on a click inside it. */
+export function editsRegion(tool: string): tool is (typeof REGION_EDIT_TOOLS)[number] {
+  return (REGION_EDIT_TOOLS as readonly string[]).includes(tool);
+}
+
+/**
+ * A region as the gesture the brush and the operators take (spec.md 8.2).
+ *
+ * A rectangle goes as a ring of its four corners and a polygon as itself; only
+ * a circle goes as an extent. None of these tools has a `shape_source` to say
+ * what an extent means, so on their side an extent can only mean a disc — and
+ * a rectangle as four corners is exact anyway.
+ */
+export function regionGesture(region: Region): RegionGesture {
   switch (region.kind) {
     case "rect":
-      return {
-        gesture: {
-          kind: "extent",
-          centre: [region.centre[0], region.centre[1]],
-          rim: [
-            region.centre[0] + region.halfWidthDeg,
-            region.centre[1] + region.halfHeightDeg,
-          ],
-        },
-        shapeSource: 2,
-      };
-    case "disc":
-      // A circle's rim is any point at the radius; due north keeps the two
-      // half-extents equal, which is what the backend's hypot then reads back
-      // as the radius.
-      return {
-        gesture: {
-          kind: "extent",
-          centre: [region.centre[0], region.centre[1]],
-          rim: [region.centre[0], region.centre[1] + region.radiusDeg],
-        },
-        shapeSource: 3,
-      };
     case "polygon":
+      return { kind: "ring", points: regionRing(region) };
+    case "disc":
       return {
-        gesture: { kind: "ring", points: region.points.map((p) => [p[0], p[1]]) },
-        shapeSource: 0,
+        kind: "extent",
+        centre: [region.centre[0], region.centre[1]],
+        rim: [region.centre[0], region.centre[1] + region.radiusDeg],
       };
   }
 }

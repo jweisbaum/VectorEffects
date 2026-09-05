@@ -107,7 +107,6 @@ import {
   cloneSourceCamera,
   defaultState,
   drawsObjects,
-  FILL,
   liveOptions,
   footprintOf,
   gestureKind,
@@ -120,9 +119,11 @@ import {
   type ToolState,
 } from "./tools";
 import {
-  fillGesture,
   type Region,
+  editsRegion,
   recentred,
+  regionContains,
+  regionGesture,
   regionShape,
   type RegionMode,
   regionFromDrag,
@@ -722,14 +723,8 @@ export default function MapView({
     crossLayer: boolean;
   } | null>(null);
 
-  /** The active tool's description, or null while the hand tool is chosen. */
-  // The schema is a *drawing* tool's. The fill tool borrows the shape fill's,
-  // because the object it makes is a shape fill and nothing else (M14).
-  const schemaTool: Tool | null = drawsObjects(tool)
-    ? tool
-    : tool === FILL
-      ? "shape_fill"
-      : null;
+  /** The active tool's description, or null while a non-drawing tool is chosen. */
+  const schemaTool: Tool | null = drawsObjects(tool) ? tool : null;
   const schema = palette.find((entry) => entry.tool === schemaTool) ?? null;
 
   /**
@@ -2542,26 +2537,6 @@ export default function MapView({
       return;
     }
 
-    // The fill tool turns the current region into a shape fill (spec.md 8.2,
-    // M14). One click, one object: the region already *is* one of the three
-    // things the shape fill draws, so the gesture is the shape fill's own and
-    // the object is a shape fill and nothing else.
-    if (tool === FILL) {
-      if (region === null || !schema) return;
-      const { gesture, shapeSource } = fillGesture(region);
-      const state: ToolState = {
-        // A region is map space, so what is made from it is a projected stamp
-        // (D28, D55) — which is what the px unit selects.
-        unit: "px",
-        values: {
-          ...toolState.values,
-          ShapeSource: { kind: "choice", index: shapeSource },
-        },
-      };
-      void commitGesture(gesture, state, schema, "shape_fill");
-      return;
-    }
-
     // An image layer's control point, whatever the tool (spec.md 4.9, M18).
     // A handle takes precedence over what is under it — the same rule the
     // transform handles and the placed markers follow — and only the active
@@ -2776,6 +2751,17 @@ export default function MapView({
         onSelect([grabbed.object]);
         pushDrag.current = { object: grabbed.object, from: grabbed.anchor, to: geo };
         requestOverlay();
+        return;
+      }
+
+      // With a region selected, a click *inside* it with the brush or one of
+      // the four operators makes that object from the region's boundary
+      // (spec.md 8.2). Inside, and not anywhere: a click outside is the
+      // ordinary stroke, so a region left selected does not turn every stroke
+      // into a region. A region is map space, so what is made from it is a
+      // projected stamp (D55) — the px unit.
+      if (region !== null && editsRegion(tool) && regionContains(region, geo.lon, geo.lat)) {
+        void commitGesture(regionGesture(region), { ...toolState, unit: "px" }, schema, tool);
         return;
       }
 
@@ -3732,11 +3718,10 @@ export default function MapView({
             <ToolIcon tool={HAND} />
           </button>
           {/*
-            The two tools that act on a *region* rather than on objects
-            (spec.md 8.2, M14). Not in the backend's palette: it describes
-            vector-creation tools, and neither of these is one — the select
-            tool makes no object at all, and the fill tool makes a shape fill,
-            whose bar it borrows.
+            The tool that draws a *region* rather than an object (spec.md 8.2,
+            M14). Not in the backend's palette: it describes vector-creation
+            tools, and the select tool makes no object at all — what it makes
+            is the footprint the brush and the operators then apply to.
           */}
           <button
             className={tool === SELECT ? "icon active" : "icon"}
@@ -3746,15 +3731,6 @@ export default function MapView({
             title={`Select (${chord("select")}) · drag a region of the map · cmd-A selects the view, cmd-shift-A the whole map, cmd-D clears`}
           >
             <ToolIcon tool={SELECT} />
-          </button>
-          <button
-            className={tool === FILL ? "icon active" : "icon"}
-            onClick={() => setTool(FILL)}
-            aria-label="Fill"
-            aria-pressed={tool === FILL}
-            title={`Fill (${chord("fill")}) · fill the selected region with a vector field`}
-          >
-            <ToolIcon tool={FILL} />
           </button>
           {/*
             The measurement tools (spec.md 10, M8). Not in the backend's
@@ -4094,18 +4070,11 @@ export default function MapView({
           </div>
         )}
 
-        {tool === FILL && region === null && (
-          <div className="tool-options" role="group" aria-label="Fill options">
-            <span className="muted">Select a region first — the fill takes its shape.</span>
-          </div>
-        )}
-
         {schema &&
           tool !== MEASURE &&
           tool !== CAPTURE &&
           tool !== INSERT &&
-          recording === null &&
-          (tool !== FILL || region !== null) && (
+          recording === null && (
           <ToolOptions
             schema={schema}
             state={toolState}
