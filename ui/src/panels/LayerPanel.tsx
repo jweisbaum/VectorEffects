@@ -274,7 +274,9 @@ export default function LayerPanel({
               {layer.grib?.loaded && (
                 <SpeedFilter
                   grib={layer.grib}
-                  onChange={(min, max) => run(api.setLayerSpeedRange(layer.id, min, max))}
+                  onChange={(min, max, gesture) =>
+                    run(api.setLayerSpeedRange(layer.id, min, max, gesture))
+                  }
                 />
               )}
 
@@ -420,15 +422,26 @@ function SpeedFilter({
   onChange,
 }: {
   grib: GribLayerInfo;
-  onChange: (minMps: number | null, maxMps: number | null) => void;
+  /**
+   * `gesture` names a drag in progress so its ticks coalesce into one history
+   * entry; a typed value or the checkbox passes null and stands alone.
+   */
+  onChange: (minMps: number | null, maxMps: number | null, gesture: string | null) => void;
 }) {
   const ceiling = Math.max(5, Math.ceil(knotsFromMps(grib.speed_ceiling_mps)));
   const on = grib.speed_min_mps !== null && grib.speed_max_mps !== null;
   const low = on ? knotsFromMps(grib.speed_min_mps ?? 0) : 0;
   const high = on ? knotsFromMps(grib.speed_max_mps ?? 0) : ceiling;
 
-  const set = (nextLow: number, nextHigh: number) =>
-    onChange(mpsFromKnots(nextLow), mpsFromKnots(nextHigh));
+  const set = (nextLow: number, nextHigh: number, gesture: string | null = null) =>
+    onChange(mpsFromKnots(nextLow), mpsFromKnots(nextHigh), gesture);
+  /**
+   * A slider drag is one gesture: every tick sends the same key, and the
+   * release ends it so the next drag is its own undo. Without this a drag
+   * across the slider was a history entry per tick.
+   */
+  const dragKey = `grib-speed:${grib.path}`;
+  const endDrag = () => void api.endGesture().catch(() => undefined);
 
   return (
     <div className="grib-filter">
@@ -436,7 +449,7 @@ function SpeedFilter({
         <input
           type="checkbox"
           checked={on}
-          onChange={(e) => (e.target.checked ? set(0, ceiling) : onChange(null, null))}
+          onChange={(e) => (e.target.checked ? set(0, ceiling) : onChange(null, null, null))}
         />
         Speed filter
       </label>
@@ -449,7 +462,9 @@ function SpeedFilter({
               max={ceiling}
               step={1}
               value={Math.min(low, high)}
-              onChange={(e) => set(Number(e.target.value), high)}
+              onChange={(e) => set(Number(e.target.value), high, dragKey)}
+              onPointerUp={endDrag}
+              onKeyUp={endDrag}
               title="Slowest speed kept"
             />
             <NumberField
@@ -467,7 +482,9 @@ function SpeedFilter({
               max={ceiling}
               step={1}
               value={Math.max(low, high)}
-              onChange={(e) => set(low, Number(e.target.value))}
+              onChange={(e) => set(low, Number(e.target.value), dragKey)}
+              onPointerUp={endDrag}
+              onKeyUp={endDrag}
               title="Fastest speed kept"
             />
             <NumberField

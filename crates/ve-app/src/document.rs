@@ -539,11 +539,23 @@ fn apply(
     state: &AppState,
     build: impl FnOnce(&Project) -> Result<Command>,
 ) -> Result<ProjectSummary> {
+    apply_with(state, None, build)
+}
+
+/// [`apply`], with a coalescing key for an edit that is part of a drag.
+fn apply_with(
+    state: &AppState,
+    gesture: Option<String>,
+    build: impl FnOnce(&Project) -> Result<Command>,
+) -> Result<ProjectSummary> {
     with_session(state, |session| {
         let command = build(&session.require_open()?.project)?;
         let open = session.require_open()?;
         let (project, history) = (&mut open.project, &mut open.history);
-        history.push(project, command)?;
+        match gesture {
+            Some(key) => history.push_coalesced(project, command, key)?,
+            None => history.push(project, command)?,
+        }
         open.touch();
         Ok(ProjectSummary::of(session.require_open()?))
     })
@@ -643,16 +655,22 @@ pub fn set_layer_speed_range(
     layer: u64,
     min_mps: Option<f32>,
     max_mps: Option<f32>,
+    gesture: Option<String>,
 ) -> Result<ProjectSummary> {
-    layer_speed_range(&state, layer, min_mps, max_mps)
+    layer_speed_range(&state, layer, min_mps, max_mps, gesture)
 }
 
 /// Implementation of [`set_layer_speed_range`].
+///
+/// `gesture` is the coalescing key a slider drag sends on every tick, so the
+/// drag is one history entry and one undo returns the band to where the drag
+/// began; a typed value sends none and is its own entry.
 pub fn layer_speed_range(
     state: &AppState,
     layer: u64,
     min_mps: Option<f32>,
     max_mps: Option<f32>,
+    gesture: Option<String>,
 ) -> Result<ProjectSummary> {
     let after = match (min_mps, max_mps) {
         (Some(min), Some(max)) if min.is_finite() && max.is_finite() => {
@@ -666,7 +684,7 @@ pub fn layer_speed_range(
         }
         _ => None,
     };
-    apply(state, |project| {
+    apply_with(state, gesture, |project| {
         let found = project
             .layer(object_id(layer))
             .ok_or_else(|| missing_layer(layer))?;

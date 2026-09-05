@@ -742,6 +742,21 @@ impl Command {
                 *after = next_after.clone();
                 true
             }
+            // A speed-filter slider is dragged, and a drag is one entry: keep the
+            // first band, adopt the newest (spec.md 4.8).
+            (
+                Self::SetLayerSpeedRange {
+                    layer: a, after, ..
+                },
+                Self::SetLayerSpeedRange {
+                    layer: b,
+                    after: next,
+                    ..
+                },
+            ) if a == b => {
+                *after = *next;
+                true
+            }
             (Self::SetAnnotations { after, .. }, Self::SetAnnotations { after: next, .. }) => {
                 *after = next.clone();
                 true

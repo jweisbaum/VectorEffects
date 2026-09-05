@@ -335,8 +335,17 @@ export const api = {
    * m/s below the boundary and knots above it, like every other speed
    * (spec.md 3.4).
    */
-  setLayerSpeedRange: (layer: number, minMps: number | null, maxMps: number | null) =>
-    call<ProjectSummary>("set_layer_speed_range", { layer, minMps, maxMps }),
+  /**
+   * Which speeds an imported field keeps. `gesture` is the coalescing key a
+   * slider drag sends on every tick so the drag is one undo; a typed value
+   * sends null.
+   */
+  setLayerSpeedRange: (
+    layer: number,
+    minMps: number | null,
+    maxMps: number | null,
+    gesture: string | null = null,
+  ) => call<ProjectSummary>("set_layer_speed_range", { layer, minMps, maxMps, gesture }),
 
   setLayerVisible: (layer: number, visible: boolean) =>
     call<ProjectSummary>("set_layer_visible", { layer, visible }),

@@ -197,7 +197,7 @@ fn a_speed_filter_keeps_only_the_band_it_names() {
     assert!((u_at(&app, 1) - 3.0).abs() < 1e-3, "unfiltered");
 
     // A band above the file's speed keeps nothing.
-    ve_app::document::layer_speed_range(&app, layer, Some(10.0), Some(20.0)).expect("filter");
+    ve_app::document::layer_speed_range(&app, layer, Some(10.0), Some(20.0), None).expect("filter");
     assert!(
         u_at(&app, 1).abs() < 1e-6,
         "a sample outside the band must be dropped: {}",
@@ -205,18 +205,18 @@ fn a_speed_filter_keeps_only_the_band_it_names() {
     );
 
     // A band around it keeps it.
-    ve_app::document::layer_speed_range(&app, layer, Some(2.0), Some(4.0)).expect("filter");
+    ve_app::document::layer_speed_range(&app, layer, Some(2.0), Some(4.0), None).expect("filter");
     assert!((u_at(&app, 1) - 3.0).abs() < 1e-3);
 
     // Ends the wrong way round are ordered rather than refused: dragging the
     // low end past the high one is a gesture, not a mistake.
-    ve_app::document::layer_speed_range(&app, layer, Some(4.0), Some(2.0)).expect("filter");
+    ve_app::document::layer_speed_range(&app, layer, Some(4.0), Some(2.0), None).expect("filter");
     assert!((u_at(&app, 1) - 3.0).abs() < 1e-3);
 
     // Clearing it brings everything back, and undoes like any other edit —
     // back to the band that was dropping the sample.
-    ve_app::document::layer_speed_range(&app, layer, Some(10.0), Some(20.0)).expect("filter");
-    ve_app::document::layer_speed_range(&app, layer, None, None).expect("clear");
+    ve_app::document::layer_speed_range(&app, layer, Some(10.0), Some(20.0), None).expect("filter");
+    ve_app::document::layer_speed_range(&app, layer, None, None, None).expect("clear");
     assert!((u_at(&app, 1) - 3.0).abs() < 1e-3);
     ve_app::edit::undo_for_test(&app).expect("undo");
     assert!(

@@ -39,7 +39,11 @@ body {
   display: flex;
   flex-direction: column;
 }
-.sidebar.left { border-right: 1px solid var(--border); }
+/* The layer panel's header holds three buttons — add, import GRIB, import
+   image — which the default width scrolled sideways to reach. Wider, and the
+   header wraps rather than overflows, so no width ever hides a button. */
+.sidebar.left { flex-basis: 310px; width: 310px; border-right: 1px solid var(--border); }
+.layer-panel header { flex-wrap: wrap; row-gap: 6px; }
 .sidebar.right { border-left: 1px solid var(--border); }
 
 .map { position: relative; flex: 1; min-width: 0; min-height: 0; }
@@ -488,7 +492,8 @@ body {
 }
 
 .layer-panel header,
-.inspector header {
+.inspector header,
+.history-panel header {
   display: flex;
   align-items: center;
   gap: 8px;
