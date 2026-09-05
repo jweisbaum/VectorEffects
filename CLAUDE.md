@@ -513,6 +513,11 @@ to the hash input is a correctness bug that shows up as stale frames.
   frame is already pending (that frame draws the overlay). Pointer reports
   arrive faster than frames are shown; a synchronous `drawOverlay` per report
   drew the overlay twice per frame on a fast drag.
+- **The canvas cursor is `cursorFor` (`ui/src/map/cursor.ts`), written to the
+  element per pointer report.** Never a CSS rule and never a class on the
+  canvas: two of its inputs (inside the region, panning) change per pointer
+  move, and a class would re-render the map view at pointer rate. A new tool
+  gets a row in the table's test or falls to the crosshair.
 - **Nothing that changes per pointer move may be `MapView` state.** The cursor
   readout was, and every pointer report re-rendered two thousand lines of hooks
   and the whole toolbar to refresh four spans. It is an external store now

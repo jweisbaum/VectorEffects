@@ -96,12 +96,13 @@ const ICONS: Record<ActiveTool, Icon> = {
     line("M12.8 6.6 17.6 20.4", "right-leg"),
     line("M9.6 13.2h4.8", "brace"),
   ],
-  // The hand that pans, with the thumb and three fingers a hand icon needs to
-  // read as one at 18 pixels.
+  // The hand that pans: an open hand, palm out, four fingers and a thumb.
+  // The old one was a palm with three fingers and read as a pointer; a hand
+  // that pans is the whole hand (M24).
   [HAND]: [
     line(
-      "M9 11V5.5a1.5 1.5 0 0 1 3 0V11m0-1.5a1.5 1.5 0 0 1 3 0V11m0-1a1.5 1.5 0 0 1 3 0v5.5a5 5 0 0 1-5 5h-1.6a5 5 0 0 1-3.9-1.9L6 15.5a1.6 1.6 0 0 1 2.4-2.1L9 14",
-      "palm",
+      "M7.2 12.6V6.4a1.3 1.3 0 0 1 2.6 0v5.2m0-6.6a1.3 1.3 0 0 1 2.6 0v6.2m0-5.2a1.3 1.3 0 0 1 2.6 0v5.6m0-3.8a1.3 1.3 0 0 1 2.6 0v6.4a6.2 6.2 0 0 1-6.2 6.2h-1a6.2 6.2 0 0 1-5-2.5L3.1 13.9a1.5 1.5 0 0 1 2.3-1.9l1.8 2.2",
+      "hand",
     ),
   ],
 
@@ -197,6 +198,28 @@ const ICONS: Record<ActiveTool, Icon> = {
     line("M4 16.4c4-3.6 12 3.6 16 0", "lower"),
   ],
 };
+
+/**
+ * The eyedropper, for the option bar's sample button (M24): a dropper held
+ * at an angle, bulb up, tip down where the sample is taken.
+ *
+ * Not in `ICONS`: it is not a tool, and the record over the tool union has
+ * to stay exactly the tools.
+ */
+export const EYEDROPPER_ICON: Icon = [
+  line("M15.8 3.6a2.2 2.2 0 0 1 3.1 0l1.5 1.5a2.2 2.2 0 0 1 0 3.1l-2.2 2.2-4.6-4.6z", "bulb", true),
+  line("M13.6 5.8 18.2 10.4 9.4 19.2a2 2 0 0 1-1.4.6H5.6l-1.4 1.4-1-1 1.4-1.4V16.4a2 2 0 0 1 .6-1.4z", "barrel"),
+  line("M12 7.4 16.6 12", "tip"),
+];
+
+/** An icon as an SVG, for a button that is not a tool. */
+export function IconSvg({ icon }: { icon: Icon }): ReactElement {
+  return (
+    <svg className="tool-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
+      {icon}
+    </svg>
+  );
+}
 
 /** One tool's geometry. Every tool has some; this is for the tests. */
 export function iconFor(tool: ActiveTool): Icon {

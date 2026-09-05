@@ -592,7 +592,7 @@ M0 ─ M1 ─ M2 ─ M3 ─ M4 ══ walking skeleton complete
                                        M10 ── hardening & release            ✓ (less signing)
                                         │
                     ├─ M23 ────── selection, clipboard, deletion (bugs)     ✓
-                    ├─ M24 ────── cursors, hover and outlines
+                    ├─ M24 ────── cursors, hover and outlines             ✓
                     ├─ M25 ────── chrome: top row, status bar, panels, timeline
                     └─ M26 ────── macro recording as keyframes, with a preview
 ```
@@ -2150,10 +2150,27 @@ and the bake moves off the command thread behind a progress event.
 
 ---
 
-### M24 — Cursors, hover and outlines
+### M24 — Cursors, hover and outlines · **complete**
 
 **Goal:** the pointer says what a click will do, and a selected or dragged
 object is outlined by its perimeter.
+
+**Delivered 2026-09-05.** Everything below. `cursorFor` in
+`ui/src/map/cursor.ts` is the table, tested for every tool and both
+overrides; the map writes it to the element per pointer report rather than
+rendering a class, for the reason the readout store exists. The eyedropper's
+magnifier reads the readout store's sample and the store now carries the
+stored azimuth beside the displayed direction, so the glyph is drawn from
+the same number the click will take. The curve's hover needed one change in
+the footprint builder — its stamp's size is `WidthKm`, not `SizeKm` — and
+the palette's `has_hover` flag; spec §6.2's "none, deliberately" for the
+curve is reversed and says why. `MacroEntry` gained `outline` and `track`,
+read from the file's shape and frames by the library scan that already
+opens each file. The drag outline goes through `drawEdgeBand` and the
+static selected band no longer excludes the brush; while a drag is live the
+static band stands down so the moving one is the only edge. The `VE_CAPTURE`
+check of the magnifier was not run: it needs the running app, and the
+numbers it would log are the readout's, which the readout already logs.
 
 The findings: 2, 10, 11, 15, 16, 17, 18, 19, 20, 21.
 

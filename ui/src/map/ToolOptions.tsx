@@ -20,6 +20,7 @@ import type { ToolOptionSpec } from "../generated/ToolOptionSpec";
 import type { ToolSchema } from "../generated/ToolSchema";
 import { knotsFromMps, mpsFromKnots } from "../project/format";
 import type { Camera } from "./camera";
+import { EYEDROPPER_ICON, IconSvg } from "./ToolIcon";
 import {
   convertSizes,
   liveOptions,
@@ -121,9 +122,14 @@ function ToolOptions({
         <button
           className={sampling ? "active" : ""}
           onClick={() => onSample(!sampling)}
-          title="Take the speed and direction from a point on the map. Only what is visible is sampled: a hidden layer contributes nothing."
+          title={
+            sampling
+              ? "Click the map to take the speed and direction from the field there."
+              : "Eyedropper: take the speed and direction from a point on the map. Only what is visible is sampled: a hidden layer contributes nothing."
+          }
+          aria-label={sampling ? "Sampling: click the map" : "Sample the field"}
         >
-          {sampling ? "Click the map…" : "⌖ Sample field"}
+          <IconSvg icon={EYEDROPPER_ICON} />
         </button>
       )}
 

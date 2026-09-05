@@ -72,6 +72,74 @@ pub struct MacroEntry {
     pub size_bytes: u64,
     /// Whether any frame's region moved: a macro that records movement.
     pub moves: bool,
+    /// The region's shape about its centre, in degrees of the map, so the
+    /// insert tool can show where the macro will land before the click
+    /// (M24).
+    pub outline: MacroOutline,
+    /// Where each frame's region sat relative to the first frame's, as
+    /// `[dx, dy]` in degrees — the recorded movement, for the hover to draw
+    /// as a track. Every entry is `[0, 0]` for a static macro.
+    pub track: Vec<[f64; 2]>,
+}
+
+/// A macro's region, about its centre, in degrees of the map.
+///
+/// The capture stores its shape in the local metres a projected frame
+/// measures in (D28, D55); this is that shape read back into the degrees the
+/// map draws in, which is what `Region` on the frontend is made of.
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[ts(export, export_to = "MacroOutline.ts")]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum MacroOutline {
+    /// A rectangle about the centre.
+    Rect {
+        /// Half-extent east-west.
+        half_width_deg: f64,
+        /// Half-extent north-south.
+        half_height_deg: f64,
+    },
+    /// A circle, round on the map.
+    Disc {
+        /// Radius.
+        radius_deg: f64,
+    },
+    /// A freehand ring, as offsets from the centre.
+    Polygon {
+        /// Vertices in order, `[dx, dy]`.
+        points: Vec<[f64; 2]>,
+    },
+}
+
+impl MacroOutline {
+    /// Reads a capture's shape back into map degrees.
+    fn of(shape: &ve_core::document::Geometry) -> Self {
+        use ve_core::document::Geometry;
+        use ve_render::aeqd::M_PER_DEGREE;
+        match shape {
+            Geometry::Rect {
+                half_width_m,
+                half_height_m,
+            } => Self::Rect {
+                half_width_deg: half_width_m / M_PER_DEGREE,
+                half_height_deg: half_height_m / M_PER_DEGREE,
+            },
+            Geometry::Disc { radius_m } => Self::Disc {
+                radius_deg: radius_m.unwrap_or(0.0) / M_PER_DEGREE,
+            },
+            Geometry::Polygon { points } => Self::Polygon {
+                points: points
+                    .iter()
+                    .map(|p| [p.x / M_PER_DEGREE, p.y / M_PER_DEGREE])
+                    .collect(),
+            },
+            // A capture's shape is one of the three above (`region_geometry`);
+            // anything else is a file from a build that does not exist, and a
+            // point outline is the honest answer.
+            Geometry::Stroke { .. } | Geometry::Path { .. } | Geometry::Smear { .. } => {
+                Self::Disc { radius_deg: 0.0 }
+            }
+        }
+    }
 }
 
 /// The library's contents, for the insert bar and the settings dialog.
@@ -111,6 +179,12 @@ fn entry_of(path: &Path) -> Option<MacroEntry> {
             .frames
             .iter()
             .any(|f| f.dx_deg != 0.0 || f.dy_deg != 0.0),
+        outline: MacroOutline::of(&capture.shape),
+        track: capture
+            .frames
+            .iter()
+            .map(|f| [f.dx_deg, f.dy_deg])
+            .collect(),
     })
 }
 

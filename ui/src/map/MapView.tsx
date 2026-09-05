@@ -20,9 +20,11 @@ import type { Tool } from "../generated/Tool";
 import type { AppSettings } from "../generated/AppSettings";
 import type { CaptureMode } from "../generated/CaptureMode";
 import type { MacroLibrary } from "../generated/MacroLibrary";
+import type { MacroOutline } from "../generated/MacroOutline";
 import type { ShortcutAction } from "../generated/ShortcutAction";
 import type { ToolSchema } from "../generated/ToolSchema";
 import { actionFor, chordOf, toolChord } from "../settings/bindings";
+import { cursorFor } from "./cursor";
 import type { PositionPick } from "../picking";
 import type { SelectionTransform } from "../generated/SelectionTransform";
 import type { TransformPreview } from "../generated/TransformPreview";
@@ -154,6 +156,8 @@ interface Readout {
   speedKnots: number;
   /** Direction, already converted to the project's convention. */
   directionDeg: number;
+  /** The stored azimuth, toward, for drawing a glyph (spec.md 3.3). */
+  azimuthTowardDeg: number;
 }
 
 /** What the readout shows: the sample under the cursor, and the zoom. */
@@ -189,6 +193,30 @@ function createReadoutStore() {
 }
 
 type ReadoutStore = ReturnType<typeof createReadoutStore>;
+
+/**
+ * A macro's outline as a region centred at a position, for the insert hover
+ * (M24). The outline is degrees about its centre; a region is degrees on the
+ * map — the same thing, so the region's own ring builder draws it.
+ */
+function macroRegion(outline: MacroOutline, lon: number, lat: number): Region {
+  switch (outline.kind) {
+    case "rect":
+      return {
+        kind: "rect",
+        centre: [lon, lat],
+        halfWidthDeg: outline.half_width_deg,
+        halfHeightDeg: outline.half_height_deg,
+      };
+    case "disc":
+      return { kind: "disc", centre: [lon, lat], radiusDeg: outline.radius_deg };
+    case "polygon":
+      return {
+        kind: "polygon",
+        points: outline.points.map(([dx, dy]) => [lon + dx, lat + dy]),
+      };
+  }
+}
 
 /** How far one nudge moves the selection, in CSS pixels (spec.md 8.2, M23). */
 const NUDGE_PX_CSS = 8;
@@ -684,6 +712,8 @@ export default function MapView({
    * direction from the field rather than painting (spec.md 6.1).
    */
   const [eyedropper, setEyedropper] = useState(false);
+  const eyedropperRef = useRef(false);
+  eyedropperRef.current = eyedropper;
   const [busy, setBusy] = useState(false);
   /**
    * Where the selection's handles go.
@@ -1923,25 +1953,22 @@ export default function MapView({
    */
   const drawDragOutlines = useCallback(
     (context: CanvasRenderingContext2D, outlines: ObjectOutline[], dpr: number) => {
-      const camera = cameraRef.current;
-      const view = viewRef.current;
-
-      const silhouette = new Path2D();
+      // The perimeter, as a band (M24). Stroking the silhouette traced every
+      // stamp of a swept chain — the ring trail the static outline was cured
+      // of — so the drag outline goes through the same band: the union's
+      // boundary, and nothing inside it. Bands use `destination-out`, so they
+      // are drawn before the faint fill that says which side is the object.
       for (const outline of outlines) {
-        for (const footprint of footprintOfOutline(outline)) {
-          buildFootprintPath(silhouette, camera, view, footprint);
-        }
+        drawEdgeBand(context, outline, "rgba(255, 214, 102, 0.85)", 1.5, dpr);
       }
-
       context.save();
-      context.fillStyle = "rgba(255, 214, 102, 0.18)";
-      context.fill(silhouette);
-      context.strokeStyle = "rgba(255, 214, 102, 0.75)";
-      context.lineWidth = Math.max(1, dpr);
-      context.stroke(silhouette);
+      context.fillStyle = "rgba(255, 214, 102, 0.14)";
+      for (const outline of outlines) {
+        context.fill(maskPath(outline, Math.max(1, 1.5 * dpr) / 2));
+      }
       context.restore();
     },
-    [],
+    [drawEdgeBand, maskPath],
   );
 
   /**
@@ -1983,11 +2010,18 @@ export default function MapView({
     // **Drawn first, on the cleared canvas, deliberately.** An edge band is
     // made by knocking an inset copy out of a filled footprint, and
     // `destination-out` erases whatever is already on the canvas — first is the
-    // one place where that is only ever the band's own interior.
+    // one place where that is only ever the band's own interior. A drag's
+    // outlines are bands too, so they come first of all.
+    const live = dragPreview.current ?? settlingDrag.current;
+    const dragLive = live !== null;
+    if (live) drawDragOutlines(context, live.outlines, dpr);
     for (const outlined of outlineList) {
       const hovered = hoveredOperator.current === outlined.object;
-      const selected =
-        selection.includes(outlined.object) && outlined.tool !== "brush";
+      // The brush included: its field says roughly where it is, but a
+      // selected stroke gets the same edge every other tool gets (M24).
+      // While a drag is live the moving outline stands in for the selected
+      // edge, which would otherwise mark where the object *was*.
+      const selected = selection.includes(outlined.object) && !dragLive;
       if (!hovered && !selected) continue;
       // Pink for the edge under the pointer: a colour used for nothing else on
       // this map, so "the tool has found an edge" cannot be mistaken for a
@@ -2044,8 +2078,6 @@ export default function MapView({
 
     // While a drag is in flight the handles follow it rather than the document,
     // which is deliberately not being written until the pointer comes up.
-    const live = dragPreview.current ?? settlingDrag.current;
-    if (live) drawDragOutlines(context, live.outlines, window.devicePixelRatio || 1);
     // The same answer the hit test uses, so a handle is grabbed where it is drawn.
     const transform = shownTransform();
 
@@ -2373,12 +2405,115 @@ export default function MapView({
         context.stroke(tip);
       }
     }
+
+    // The insert tool's hover (M24): the macro's region outline at the
+    // pointer, in the region's own colour, and for a macro that recorded
+    // movement the track its centre will follow — one dot per frame.
+    const macro = library?.entries.find((entry) => entry.id === macroId) ?? null;
+    if (cursor && tool === INSERT && recording === null && macro !== null) {
+      const at = unproject(camera, view, cursor);
+      const ring = regionRing(macroRegion(macro.outline, at.lon, at.lat)).map((p) =>
+        toScreen(camera, view, { lon: p[0], lat: p[1] }),
+      );
+      const first = ring[0];
+      if (first) {
+        context.save();
+        context.beginPath();
+        context.moveTo(first.x, first.y);
+        for (const point of ring.slice(1)) context.lineTo(point.x, point.y);
+        context.closePath();
+        context.fillStyle = "rgba(140, 255, 190, 0.08)";
+        context.fill();
+        context.strokeStyle = "rgba(150, 255, 200, 0.95)";
+        context.lineWidth = Math.max(1, dpr);
+        context.setLineDash([6 * dpr, 4 * dpr]);
+        context.stroke();
+        context.setLineDash([]);
+        if (macro.moves) {
+          const track = macro.track.map(([dx, dy]) =>
+            toScreen(camera, view, { lon: at.lon + dx, lat: at.lat + dy }),
+          );
+          const start = track[0];
+          if (start) {
+            context.beginPath();
+            context.moveTo(start.x, start.y);
+            for (const point of track.slice(1)) context.lineTo(point.x, point.y);
+            context.strokeStyle = "rgba(150, 255, 200, 0.75)";
+            context.lineWidth = Math.max(1, dpr);
+            context.stroke();
+            context.fillStyle = "rgba(150, 255, 200, 0.95)";
+            for (const point of track) {
+              context.beginPath();
+              context.arc(point.x, point.y, 2.5 * dpr, 0, Math.PI * 2);
+              context.fill();
+            }
+          }
+        }
+        context.restore();
+      }
+    }
+
+    // The eyedropper's magnifier (M24): a ring with a plus at the pointer,
+    // the field there as the project's glyph, and the numbers the click will
+    // take. The numbers are the readout's — one sample in flight, the newest
+    // position waiting — so arming the eyedropper costs no second stream.
+    if (cursor && eyedropper) {
+      const sample = readoutStore.current?.get().sample ?? null;
+      const radius = 22 * dpr;
+      context.save();
+      context.strokeStyle = "rgba(255, 255, 255, 0.95)";
+      context.lineWidth = Math.max(1, 1.5 * dpr);
+      context.beginPath();
+      context.arc(cursor.x, cursor.y, radius, 0, Math.PI * 2);
+      context.stroke();
+      context.strokeStyle = "rgba(20, 28, 44, 0.9)";
+      context.lineWidth = Math.max(1, 3.5 * dpr);
+      context.beginPath();
+      context.arc(cursor.x, cursor.y, radius + 2.5 * dpr, 0, Math.PI * 2);
+      context.stroke();
+      const arm = 6 * dpr;
+      context.strokeStyle = "rgba(255, 255, 255, 0.95)";
+      context.lineWidth = Math.max(1, dpr);
+      context.beginPath();
+      context.moveTo(cursor.x - arm, cursor.y);
+      context.lineTo(cursor.x + arm, cursor.y);
+      context.moveTo(cursor.x, cursor.y - arm);
+      context.lineTo(cursor.x, cursor.y + arm);
+      context.stroke();
+      if (sample) {
+        const here = unproject(camera, view, cursor);
+        if (sample.speedKnots > 0.05) {
+          drawGlyphs(
+            context,
+            [[here.lon, here.lat]],
+            sample.speedKnots,
+            () => sample.azimuthTowardDeg,
+            dpr,
+          );
+        }
+        context.font = `${11 * dpr}px system-ui, sans-serif`;
+        context.textAlign = "left";
+        context.textBaseline = "top";
+        const text = `${sample.speedKnots.toFixed(1)} kt · ${Math.round(sample.directionDeg)}°`;
+        const x = cursor.x + radius + 6 * dpr;
+        const y = cursor.y - 7 * dpr;
+        const width = context.measureText(text).width;
+        context.fillStyle = "rgba(20, 28, 44, 0.85)";
+        context.fillRect(x - 3 * dpr, y - 2 * dpr, width + 6 * dpr, 15 * dpr);
+        context.fillStyle = "rgba(255, 255, 255, 0.95)";
+        context.fillText(text, x, y);
+      }
+      context.restore();
+    }
   }, [
     drawDragOutlines,
     drawGlyphs,
     drawFieldPreview,
     drawPlacedPoints,
+    eyedropper,
     glyphStyle,
+    library,
+    macroId,
     near,
     rampMax,
     schema,
@@ -2618,6 +2753,34 @@ export default function MapView({
     }
     return null;
   };
+
+  /**
+   * Applies the cursor rule (`cursorFor`) to the canvas.
+   *
+   * Written to the element rather than rendered as a class: the two inputs
+   * that change per pointer report — inside the region, panning — would
+   * otherwise re-render the map view at pointer rate, which is the failure
+   * `createReadoutStore` exists to prevent.
+   */
+  const applyCursor = useCallback(
+    (insideRegion: boolean, panning: boolean) => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const wanted = cursorFor({
+        tool,
+        eyedropper,
+        picking: picking !== null || toolPick !== null,
+        insideRegion,
+        panning,
+        recording: recording !== null,
+      });
+      if (canvas.style.cursor !== wanted) canvas.style.cursor = wanted;
+    },
+    [eyedropper, picking, recording, tool, toolPick],
+  );
+  useEffect(() => {
+    applyCursor(false, dragging.current !== null);
+  }, [applyCursor]);
 
   const onPointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -2918,6 +3081,7 @@ export default function MapView({
 
     dragging.current = point;
     pressOrigin.current = point;
+    applyCursor(false, true);
 
     // Dragging a selected object moves it; dragging empty map pans (spec.md
     // 8.1). Which of the two this is takes a hit test, and a hit test is a
@@ -2981,6 +3145,20 @@ export default function MapView({
   const onPointerMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
     const point = toDevice(event);
     cursorRef.current = point;
+
+    // The cursor says what a click here would do: a bucket inside a selected
+    // region with a tool that fills one — the same predicate the click uses —
+    // and the tool's own cursor everywhere else (M24).
+    {
+      const geo = unproject(cameraRef.current, viewRef.current, point);
+      applyCursor(
+        region !== null &&
+          drawsObjects(tool) &&
+          editsRegion(tool) &&
+          regionContains(region, geo.lon, geo.lat),
+        dragging.current !== null,
+      );
+    }
 
     // A region being drawn follows the pointer. The lasso keeps every
     // coalesced position — a fast curve loses its corners otherwise, the same
@@ -3257,9 +3435,15 @@ export default function MapView({
               projectRef.current.direction_convention,
               sample.azimuth_toward_deg,
             ),
+            azimuthTowardDeg: sample.azimuth_toward_deg,
           },
         }),
       )
+      // The eyedropper's magnifier shows this sample at the pointer, so it
+      // is redrawn when the number lands rather than a pointer report later.
+      .then(() => {
+        if (eyedropperRef.current) requestOverlay();
+      })
       .catch(() => store?.set({ sample: null }))
       .finally(() => {
         state.inFlight = false;
@@ -3575,6 +3759,7 @@ export default function MapView({
       }
     }
     dragging.current = null;
+    applyCursor(false, false);
 
     // A gesture that ends with the pointer is finished here; one built up click
     // by click keeps going until it is closed or cancelled.
@@ -3830,9 +4015,7 @@ export default function MapView({
     <div className="map">
       <canvas
         ref={canvasRef}
-        className={
-          picking !== null || tool === "brush" ? "map-canvas painting" : "map-canvas"
-        }
+        className="map-canvas"
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={endDrag}

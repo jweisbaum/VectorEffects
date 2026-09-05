@@ -393,8 +393,9 @@ export function footprintOf(
       if (first === undefined) return null;
       // Resolved at the stroke's first point, which is the latitude the commit
       // will use — so what is previewed is what gets painted, rather than a
-      // footprint that changes as the drag moves north.
-      const radiusKm = size("SizeKm", first[1]) / 2;
+      // footprint that changes as the drag moves north. A curve's hover is a
+      // one-point stroke too, and its stamp's size is its width (M24).
+      const radiusKm = size(tool === "curve" ? "WidthKm" : "SizeKm", first[1]) / 2;
       return {
         kind: "swept",
         points: gesture.points,

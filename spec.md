@@ -1360,8 +1360,10 @@ A polyline or cubic-Bézier path with a vector field along it.
 | `width_km` | f32 | Corridor half-width; px or km input, so `stamp_space` applies (§3.5). |
 | `feather` | f32 0–1 | Across the corridor width. |
 
-Hover: **none**, deliberately: a curve is built node by node, so a single click
-produces no footprint to preview.
+Hover: **the nib** — the stamp the path will be swept with, at the pointer,
+as a one-point sweep. A curve is built node by node, so a click produces no
+object to preview, but the nib says how wide the corridor will be, which is
+what the brush's hover says too.
 
 ### 6.3 Field modifiers
 
@@ -1904,6 +1906,19 @@ label and, with the shortcut, in its tooltip. Replacing a word with a picture
 must not take the word away from anyone reading the page with something other
 than their eyes.
 
+**The cursor is one rule** (`cursorFor`), applied per pointer report, never a
+stylesheet: the hand is an open hand, closed while panning; the select,
+capture and insert tools are the arrow; every tool that draws or measures is
+a crosshair whose centre is the click, with the tool's hover footprint drawn
+around it where it has one; a pick is a crosshair ahead of everything; inside
+a selected region with a tool that would fill it the cursor is a **paint
+bucket**, by the same predicate the click uses; while the eyedropper is armed
+the cursor hides and the overlay draws a **magnifier** at the pointer — a ring
+with a plus, the field there as the project's glyph, and the speed and
+direction the click will take, from the readout's own sample. Every custom
+cursor is an inline SVG data URI (invariant 5). The option bar's sample
+button is an eyedropper icon.
+
 The hand tool is the prominent default and the one the app returns to on
 `Escape`. In it, dragging empty map pans; dragging a *selected* object moves it;
 dragging a handle rotates, scales, or repositions the anchor. Whether a press
@@ -1984,7 +1999,11 @@ front of every pan.
   The field itself is not previewed. A drag shows the footprint moving over a
   field that has not moved yet, which is the same bargain §1.5's third invariant
   makes everywhere: the view is a proxy, and evaluating one at pointer rate is
-  the thing that cannot be afforded.
+  the thing that cannot be afforded. **The moving outline is the perimeter**,
+  drawn as the same edge band the static outline is: a swept stroke is a union
+  of stamps, and stroking it traced every stamp's ring. A selected object of
+  every tool — the brush included — is outlined in the selection colour; while
+  a drag is live the moving outline stands in for it.
 - **Selection changes are not undo history entries** (standard editor
   convention).
 
@@ -2220,7 +2239,10 @@ the interface would leave whichever one was missed writing during a capture,
 with nothing to say so until the macro came out wrong. Cancel writes nothing
 and restores everything.
 
-**Insert.** Pick a macro, click the map, and a macro object lands with its
+**Insert.** Pick a macro, and before the click the pointer carries the macro's
+**region outline**, in the region's colour, and for a macro that recorded
+movement the **track** its centre will follow, one dot per frame. Click the
+map, and a macro object lands with its
 region centred on the click, **in the active layer, beginning at the current
 step**: its active range starts there, which is where its frames are measured
 from, so a macro placed at step 12 plays from step 12 rather than having ended

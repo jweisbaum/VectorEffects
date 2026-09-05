@@ -284,10 +284,14 @@ fn has_hover(tool: ToolKind) -> bool {
         | ToolKind::Turn
         | ToolKind::Warp
         | ToolKind::Liquify => true,
-        // Stated, not omitted: a polygon is built vertex by vertex and a curve
-        // node by node, so a single click produces no footprint to show, and
-        // a patch is never under the cursor before it exists.
-        ToolKind::ShapeFill | ToolKind::Curve | ToolKind::Patch => false,
+        // A curve is built node by node, so a click produces no *object* to
+        // preview — but it is swept with a stamp, and the nib says how wide
+        // (M24). The hover is the nib, a one-point sweep at the pointer.
+        ToolKind::Curve => true,
+        // Stated, not omitted: a polygon is built vertex by vertex, so a
+        // single click produces no footprint to show, and a patch is never
+        // under the cursor before it exists.
+        ToolKind::ShapeFill | ToolKind::Patch => false,
         // A macro's footprint is the library entry's shape, which the bar
         // knows and the backend does not until the click lands.
         ToolKind::Macro => false,

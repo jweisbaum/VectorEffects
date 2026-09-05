@@ -86,7 +86,8 @@ A GRIB layer's frames show on the timeline as marks; select marks and
 the macro library: draw a region, press **Start capture**, scrub the ruler,
 drag the region into place at each frame, then **Finish** and name it.
 **Insert** (`N`) puts a macro back down anywhere, in any project, in the
-active layer, playing from the step it was placed at. The library's location
+active layer, playing from the step it was placed at; the pointer shows the
+macro's outline, and its track if it moves, before the click. The library's location
 is in Settings.
 
 ## Measurement
