@@ -718,7 +718,12 @@ struct Placement {
 
 fn motion_of(gesture: &TransformGesture, pointer: LonLat) -> Motion {
     match gesture.kind {
-        TransformKind::Move => Motion::Rigid(SphereRotation::carrying(gesture.pivot, pointer)),
+        // The rotation carries the point that was **pressed** to the pointer,
+        // not the pivot: a body drag starts wherever the object was grabbed,
+        // and carrying the centroid there instead jumped the whole selection
+        // the moment a member away from the centroid was clicked. For the
+        // centre handle the press *is* the pivot and nothing changes.
+        TransformKind::Move => Motion::Rigid(SphereRotation::carrying(gesture.pointer, pointer)),
         TransformKind::Rotate => Motion::Turn(
             bearing_or(gesture.pivot, pointer, gesture.pointer_bearing) - gesture.pointer_bearing,
         ),

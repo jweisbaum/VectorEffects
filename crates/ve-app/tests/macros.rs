@@ -165,7 +165,7 @@ fn a_static_capture_of_a_followed_stroke_stands_still() {
 
     // Insert somewhere else entirely: every step shows the stroke at the same
     // place, because the region followed it and the macro did not record that.
-    macros::macro_insert(&app, &entry.id, 100.0, 0.0).expect("insert");
+    macros::macro_insert(&app, &entry.id, 100.0, 0.0, 0, None).expect("insert");
     for step in 0..3 {
         let (u, _) = field(&app, step, 100.0, 0.0);
         assert!(
@@ -173,6 +173,48 @@ fn a_static_capture_of_a_followed_stroke_stands_still() {
             "step {step} of a static macro should be the stroke, got {u}"
         );
     }
+}
+
+/// A macro begins at the step it was placed (M23).
+///
+/// Its frames run from the object's first active step, and a new object's
+/// range began at 0 whatever step the click was made at — so a three-frame
+/// macro placed at step 3 had already ended, and the click made an object
+/// that showed nothing.
+#[test]
+fn a_macro_placed_at_a_later_step_begins_there() {
+    let root = TempRoot::new("later-step");
+    let app = app(&root);
+    travelling_stroke(&app, 18.0);
+    macros::capture_start(&app, region(0.0, 0.0), 0, false).expect("start");
+    macros::capture_place(&app, 1, 10.0, 0.0).expect("place");
+    macros::capture_place(&app, 2, 20.0, 0.0).expect("place");
+    let library = macros::capture_finish(&app, "Later".to_owned(), 2).expect("finish");
+    let entry = &library.entries[0];
+
+    // Into a second layer, to check the layer is honoured too (D66).
+    ve_app::document::layer_add(&app, "Upper".to_owned()).expect("layer");
+    let upper = ve_app::document::tree(&app, 0).expect("tree").layers[1].id;
+    macros::macro_insert(&app, &entry.id, 100.0, 0.0, 3, Some(upper)).expect("insert");
+
+    assert!(
+        field(&app, 2, 100.0, 0.0).0.abs() < 0.6,
+        "nothing before the step it was placed at"
+    );
+    for step in 3..6 {
+        let (u, _) = field(&app, step, 100.0, 0.0);
+        assert!(
+            (u - 18.0).abs() < 0.6,
+            "step {step} should show the macro, got {u}"
+        );
+    }
+    let tree = ve_app::document::tree(&app, 3).expect("tree");
+    assert_eq!(
+        tree.layers[1].objects.len(),
+        1,
+        "it joined the layer it was aimed at"
+    );
+    assert_eq!(tree.layers[1].objects[0].start_step, 3);
 }
 
 /// And the other half: with **record movement** and the region left alone, the
@@ -193,7 +235,7 @@ fn a_recorded_capture_moves_the_way_the_original_did() {
         "record movement stores each frame's displacement"
     );
 
-    macros::macro_insert(&app, &entry.id, 100.0, 0.0).expect("insert");
+    macros::macro_insert(&app, &entry.id, 100.0, 0.0, 0, None).expect("insert");
     // Step 0 at the insert point; step 2 twenty degrees east of it, because
     // the recorded region moved twenty degrees.
     assert!((field(&app, 0, 100.0, 0.0).0 - 18.0).abs() < 0.6);
@@ -311,7 +353,7 @@ fn deleting_the_library_leaves_inserted_macros_working() {
     travelling_stroke(&app, 15.0);
     macros::capture_start(&app, region(0.0, 0.0), 0, false).expect("start");
     let library = macros::capture_finish(&app, "Kept".to_owned(), 1).expect("finish");
-    macros::macro_insert(&app, &library.entries[0].id, 60.0, 0.0).expect("insert");
+    macros::macro_insert(&app, &library.entries[0].id, 60.0, 0.0, 0, None).expect("insert");
     let before = field(&app, 0, 60.0, 0.0);
     assert!((before.0 - 15.0).abs() < 0.6);
 
@@ -344,8 +386,8 @@ fn two_inserts_share_one_entry() {
     macros::capture_start(&app, region(0.0, 0.0), 0, false).expect("start");
     let library = macros::capture_finish(&app, "Twice".to_owned(), 1).expect("finish");
     let id = &library.entries[0].id;
-    macros::macro_insert(&app, id, 60.0, 0.0).expect("insert");
-    macros::macro_insert(&app, id, 80.0, 0.0).expect("insert");
+    macros::macro_insert(&app, id, 60.0, 0.0, 0, None).expect("insert");
+    macros::macro_insert(&app, id, 80.0, 0.0, 0, None).expect("insert");
     let session = app.session.lock().expect("lock");
     let project = &session.open.as_ref().expect("open").project;
     assert_eq!(project.captures.len(), 1, "one capture, two objects");

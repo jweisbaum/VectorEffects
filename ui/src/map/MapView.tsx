@@ -190,6 +190,9 @@ function createReadoutStore() {
 
 type ReadoutStore = ReturnType<typeof createReadoutStore>;
 
+/** How far one nudge moves the selection, in CSS pixels (spec.md 8.2, M23). */
+const NUDGE_PX_CSS = 8;
+
 /** The cursor readout: position, field, zoom. */
 function MapReadout({ store, convention }: { store: ReadoutStore; convention: string }) {
   const { sample, zoomPercent } = useSyncExternalStore(store.subscribe, store.get);
@@ -327,6 +330,24 @@ export interface MapHandle {
    * only thing that knows where it is looking.
    */
   bounds(): [number, number, number, number] | null;
+  /**
+   * Drops the selected region. Object selection and region selection are
+   * mutually exclusive (spec.md 8.2, M23): the app calls this when objects
+   * are selected, and the map clears the objects when a region is drawn.
+   */
+  clearRegion(): void;
+  /**
+   * `Cmd`-`C` with a region selected: captures the field inside it and says
+   * so. False when there is no region, in which case the key means the
+   * objects and the app copies them (spec.md 8.5).
+   */
+  copyRegion(): boolean;
+  /**
+   * `Cmd`-`V` when the clipboard holds a captured field: pastes it under the
+   * pointer when the pointer is over the map, otherwise back where it was
+   * taken, into `layer`.
+   */
+  pasteCapture(layer: number | null): void;
 }
 
 export default function MapView({
@@ -338,7 +359,6 @@ export default function MapView({
   picking,
   onPicked,
   onProjectChanged,
-  onRegionActive,
   settings,
   onSettings,
   onRecording,
@@ -356,12 +376,6 @@ export default function MapView({
   picking: PositionPick | null;
   onPicked: () => void;
   onProjectChanged: (project: ProjectSummary) => void;
-  /**
-   * Whether a region is selected or a captured field is held, so the app's own
-   * copy and paste stand down: with a region, both belong to the field
-   * (spec.md 8.5, M14).
-   */
-  onRegionActive: (active: boolean) => void;
   /**
    * The application's bindings table (spec.md 8.6, M15). Null until it has
    * loaded, in which case no shortcut fires — which is better than firing the
@@ -603,8 +617,19 @@ export default function MapView({
     and pointing is not an edit.
   */
   const [region, setRegion] = useState<Region | null>(null);
-  /** Whether a captured field is waiting to be pasted (spec.md 8.5, M14). */
-  const [captured, setCaptured] = useState(false);
+  /**
+   * Selects a region, and with it deselects every object: the two are
+   * mutually exclusive (spec.md 8.2, M23). The app does the converse when an
+   * object is selected, through `MapHandle.clearRegion`. Clearing a region
+   * leaves the objects alone.
+   */
+  const selectRegion = useCallback(
+    (next: Region | null) => {
+      setRegion(next);
+      if (next !== null) onSelect([]);
+    },
+    [onSelect],
+  );
   /**
    * The macro capture in progress, if any (spec.md 8.7, M16).
    *
@@ -624,9 +649,6 @@ export default function MapView({
   const [macroId, setMacroId] = useState<string | null>(null);
   /** The name being typed for a capture being finished. */
   const [captureName, setCaptureName] = useState<string | null>(null);
-  useEffect(() => {
-    onRegionActive(region !== null || captured);
-  }, [region, captured, onRegionActive]);
   const [regionMode, setRegionMode] = useState<RegionMode>("rect");
   /** The region drag in flight, in geographic degrees. */
   const regionDrag = useRef<{ from: [number, number]; points: Array<[number, number]> } | null>(
@@ -1240,26 +1262,55 @@ export default function MapView({
     [requestDraw],
   );
 
+  /** The actions that move the selection rather than the camera. */
+  const NUDGE = new Set<ShortcutAction>(["nudge_left", "nudge_right", "nudge_up", "nudge_down"]);
+
   /**
-   * Whether a captured field is already held, asked once on mount.
+   * Moves the selection one step across the screen by a keystroke (spec.md
+   * 8.2, M23).
    *
-   * The capture lives in the session, not in this component: it survives a
-   * remount, a project change and a reload of the view. Assuming there is none
-   * left a field that had been copied unpasteable, with nothing on screen
-   * saying why (spec.md 8.5, M14).
+   * With a region selected the region moves; otherwise the selected objects
+   * do, as one rigid move through the same transform a drag is — begin at
+   * the pivot, drag to the pivot plus the step, end the gesture — so each
+   * press is one history entry and a follower goes where its primary does. A
+   * screen distance rather than degrees, so a press moves the same amount of
+   * what you can see at every zoom and every latitude.
    */
-  useEffect(() => {
-    let live = true;
-    void api
-      .captureState()
-      .then((held) => {
-        if (live) setCaptured(held.has_capture);
-      })
-      .catch(() => undefined);
-    return () => {
-      live = false;
-    };
-  }, []);
+  const nudgeSelection = useCallback(
+    (action: ShortcutAction) => {
+      const dpr = window.devicePixelRatio || 1;
+      const px = NUDGE_PX_CSS * dpr;
+      const dx = action === "nudge_right" ? px : action === "nudge_left" ? -px : 0;
+      const dy = action === "nudge_down" ? px : action === "nudge_up" ? -px : 0;
+      const camera = cameraRef.current;
+      const view = viewRef.current;
+      const shifted = (lon: number, lat: number) => {
+        const at = toScreen(camera, view, { lon, lat });
+        return unproject(camera, view, { x: at.x + dx, y: at.y + dy });
+      };
+      if (region !== null) {
+        const anchor = regionAnchor(region);
+        if (anchor === null) return;
+        const moved = shifted(anchor[0], anchor[1]);
+        setRegion(recentred(region, moved.lon, moved.lat));
+        requestOverlay();
+        return;
+      }
+      const pivot = committedTransform;
+      if (pivot === null || selection.length === 0 || handleDrag.current !== null) return;
+      const to = shifted(pivot.lon, pivot.lat);
+      void api
+        .beginTransform(selection, step, "move", pivot.lon, pivot.lat, autoKey)
+        .then(() => api.dragTransform(to.lon, to.lat))
+        .then((summary) => {
+          onProjectChanged(summary);
+          requestDraw();
+        })
+        .catch((err: unknown) => void api.frontendLog("error", `nudge failed: ${String(err)}`))
+        .finally(() => void api.endGesture());
+    },
+    [autoKey, committedTransform, onProjectChanged, region, requestDraw, requestOverlay, selection, step],
+  );
 
   /**
    * Whether a macro capture is running (spec.md 8.7, M16).
@@ -1393,7 +1444,7 @@ export default function MapView({
         if (key === "a") {
           event.preventDefault();
           setTool(SELECT);
-          setRegion(
+          selectRegion(
             event.shiftKey
               ? wholeMap()
               : regionOfView(cameraRef.current, viewRef.current.width, viewRef.current.height),
@@ -1403,37 +1454,16 @@ export default function MapView({
         }
         if (key === "d") {
           event.preventDefault();
-          setRegion(null);
+          selectRegion(null);
           requestOverlay();
           return;
         }
-        // With a region active, copy takes the *field* inside it and paste
-        // puts it down as a patch (spec.md 8.5, M14). With no region, both
-        // belong to the object clipboard and the app's own handler has them.
-        if (key === "c" && region !== null) {
-          event.preventDefault();
-          void api
-            .captureRegion(regionShape(region), stepRef.current)
-            .then((held) => setCaptured(held.has_capture))
-            .catch((err: unknown) => setError(String(err)));
-          return;
-        }
-        if (key === "v" && captured) {
-          event.preventDefault();
-          // Under the pointer when it is over the map, because that is where
-          // the user is pointing; otherwise back where it was taken, nudged.
-          const at = cursorRef.current
-            ? unproject(cameraRef.current, viewRef.current, cursorRef.current)
-            : null;
-          void api
-            .pasteCapture(at?.lon ?? null, at?.lat ?? null, stepRef.current)
-            .then(onProjectChanged)
-            .catch((err: unknown) => setError(String(err)));
-          return;
-        }
+        // Copy and paste are the app's (spec.md 8.5): it asks this map to
+        // copy the region through `MapHandle.copyRegion` and to paste a
+        // capture through `MapHandle.pasteCapture`, so one key press can
+        // never mean two things.
         return;
       }
-      if (event.altKey) return;
 
       // Every binding comes from one table, which the settings dialog edits
       // and the tooltips read (spec.md 8.6, M15) — so a rebound key selects
@@ -1449,6 +1479,11 @@ export default function MapView({
       if (bound !== null && PAN_ZOOM.has(bound.action)) {
         event.preventDefault();
         nudgeCamera(bound.action);
+        return;
+      }
+      if (bound !== null && NUDGE.has(bound.action)) {
+        event.preventDefault();
+        nudgeSelection(bound.action);
         return;
       }
 
@@ -1498,14 +1533,13 @@ export default function MapView({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [
-    captured,
     endMeasuring,
     recording,
     nudgeCamera,
-    onProjectChanged,
+    nudgeSelection,
     palette,
-    region,
     requestOverlay,
+    selectRegion,
     settings,
   ]);
 
@@ -1617,7 +1651,40 @@ export default function MapView({
     const seen = visibleBounds(cameraRef.current, view);
     return [seen.west, seen.north, seen.east, seen.south];
   }, []);
-  useImperativeHandle(ref, () => ({ warm, bounds }), [bounds, warm]);
+  const clearRegion = useCallback(() => {
+    setRegion((current) => {
+      if (current !== null) requestOverlay();
+      return null;
+    });
+  }, [requestOverlay]);
+  const copyRegion = useCallback((): boolean => {
+    if (region === null) return false;
+    // The visible composite inside the region, from this step to the end of
+    // the timeline (spec.md 8.5, D65).
+    void api
+      .captureRegion(regionShape(region), stepRef.current)
+      .catch((err: unknown) => setError(String(err)));
+    return true;
+  }, [region]);
+  const pasteCapture = useCallback(
+    (layer: number | null) => {
+      // Under the pointer when it is over the map, because that is where the
+      // user is pointing; otherwise back where it was taken, nudged.
+      const at = cursorRef.current
+        ? unproject(cameraRef.current, viewRef.current, cursorRef.current)
+        : null;
+      void api
+        .pasteCapture(at?.lon ?? null, at?.lat ?? null, stepRef.current, layer)
+        .then(onProjectChanged)
+        .catch((err: unknown) => setError(String(err)));
+    },
+    [onProjectChanged],
+  );
+  useImperativeHandle(
+    ref,
+    () => ({ warm, bounds, clearRegion, copyRegion, pasteCapture }),
+    [bounds, clearRegion, copyRegion, pasteCapture, warm],
+  );
 
   // A project change can shorten the timeline or forbid barbs.
   useEffect(() => {
@@ -2619,7 +2686,7 @@ export default function MapView({
       if (macroId === null) return;
       const geo = unproject(cameraRef.current, viewRef.current, point);
       void api
-        .insertMacro(macroId, geo.lon, geo.lat)
+        .insertMacro(macroId, geo.lon, geo.lat, stepRef.current, activeLayer)
         .then(onProjectChanged)
         .catch((err: unknown) => setError(String(err)));
       return;
@@ -2857,7 +2924,11 @@ export default function MapView({
     // round trip — so panning starts immediately and converts to a move if the
     // answer comes back before the pointer has actually gone anywhere. Waiting
     // for the answer instead would put IPC latency in front of every pan.
-    if (tool === "hand" && selection.length > 0) {
+    // A modifier click is a selection edit — add this one, drop that one —
+    // and never the start of a move: the hit test below would otherwise
+    // begin a drag of the whole selection on a `Cmd`-click meant to toggle
+    // one member of it (M23).
+    if (tool === "hand" && selection.length > 0 && !(event.metaKey || event.ctrlKey)) {
       const slack = 4 * (window.devicePixelRatio || 1);
       void api
         .objectAt(geo.lon, geo.lat, step)
@@ -3380,7 +3451,7 @@ export default function MapView({
     if (drawn) {
       regionDrag.current = null;
       const last = drawn.points[drawn.points.length - 1] ?? drawn.from;
-      setRegion(
+      selectRegion(
         regionMode === "lasso"
           ? regionFromLasso(drawn.points)
           : regionFromDrag(regionMode, drawn.from, last),

@@ -79,6 +79,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ve_app::transform::ObjectOutline::export_all(&cfg)?;
     ve_app::transform::OperatorOutline::export_all(&cfg)?;
     ClipboardState::export_all(&cfg)?;
+    ve_app::document::ClipboardKind::export_all(&cfg)?;
     HistoryView::export_all(&cfg)?;
     HistoryEntry::export_all(&cfg)?;
     LayerNode::export_all(&cfg)?;

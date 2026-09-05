@@ -120,6 +120,69 @@ fn rect(lon: f64, lat: f64, half_w: f64, half_h: f64) -> RegionShape {
     }
 }
 
+/// A region copy carries the animation (D65, M23).
+///
+/// A stroke travels east through a fixed region — at 10° on step 1, 20° on
+/// step 2, 30° on step 3. Copied at step 1 and pasted at step 0 somewhere
+/// else, the patch shows at *its* step 0 what the source showed at step 1,
+/// carries on from there, and holds its last frame past the end.
+#[test]
+fn a_region_copy_carries_the_animation_from_the_copy_step() {
+    let (_root, app) = project("animated-copy");
+    let object = stroke(&app, 0.0, 0.0, 600.0, 18.0);
+    for (step, lon) in [(0u32, 0.0f64), (3, 30.0)] {
+        ve_app::animation::key_at(
+            &app,
+            object,
+            "Position",
+            step,
+            Some(PropertyValue::Position { lon, lat: 0.0 }),
+        )
+        .expect("key");
+    }
+    let at = |step: u32, lon: f64| {
+        let session = app.session.lock().expect("lock");
+        let project = &session.open.as_ref().expect("open").project;
+        sample_scene(&flatten(project, step), LonLat::new(lon, 0.0).unwrap()).u
+    };
+    assert!(
+        (at(1, 10.0) - 18.0).abs() < 0.6,
+        "the source is at 10° on step 1"
+    );
+
+    // The region spans 0°..30° about 15°, so every step's stroke is inside.
+    let held = capture::region_capture(&app, rect(15.0, 0.0, 20.0, 6.0), 1).expect("capture");
+    assert_eq!(held.frames, 3, "steps 1, 2 and 3 differ, so three frames");
+
+    // Pasted at step 0, centred at 115°: the source's 15° lands on 115°.
+    capture::capture_paste(&app, Some(115.0), Some(0.0), 0, None).expect("paste");
+    assert!(
+        (at(0, 110.0) - 18.0).abs() < 0.6,
+        "at its step 0 the patch shows the source's step 1 (stroke at 10°)"
+    );
+    assert!(
+        at(0, 130.0).abs() < 0.6,
+        "and nothing yet where the stroke will be on the last frame"
+    );
+    assert!(
+        (at(2, 130.0) - 18.0).abs() < 0.6,
+        "at step 2 the source's step 3 (stroke at 30°)"
+    );
+    assert!(
+        (at(3, 130.0) - 18.0).abs() < 0.6,
+        "past its last frame a patch holds it"
+    );
+}
+
+/// A still scene bakes one frame, however long the timeline is.
+#[test]
+fn a_still_region_copy_is_one_frame() {
+    let (_root, app) = project("still-copy");
+    stroke(&app, 0.0, 0.0, 600.0, 18.0);
+    let held = capture::region_capture(&app, rect(0.0, 0.0, 6.0, 6.0), 0).expect("capture");
+    assert_eq!(held.frames, 1);
+}
+
 /// The plan's acceptance, in one test.
 ///
 /// A region over a 20 m/s eastward stroke and open water, pasted somewhere
@@ -161,7 +224,7 @@ fn a_pasted_patch_paints_its_source_and_leaves_the_rest_alone() {
     let _ = elsewhere;
     assert!((field(&app, 100.0, 0.0).1 + 7.0).abs() < 0.5, "southward");
 
-    capture::capture_paste(&app, Some(100.0), Some(0.0), 0).expect("paste");
+    capture::capture_paste(&app, Some(100.0), Some(0.0), 0, None).expect("paste");
 
     // Where the stroke was, the patch paints the stroke.
     let (u, v) = field(&app, 94.0, 0.0);
@@ -189,7 +252,7 @@ fn a_paste_makes_one_patch_and_undoes() {
         let session = app.session.lock().expect("lock");
         session.open.as_ref().expect("open").project.object_count()
     };
-    capture::capture_paste(&app, Some(40.0), Some(0.0), 0).expect("paste");
+    capture::capture_paste(&app, Some(40.0), Some(0.0), 0, None).expect("paste");
     {
         let session = app.session.lock().expect("lock");
         let project = &session.open.as_ref().expect("open").project;
@@ -216,7 +279,7 @@ fn a_patch_survives_a_save_and_load_with_its_samples() {
     let (root, app) = project("roundtrip");
     stroke(&app, 0.0, 0.0, 800.0, 18.0);
     capture::region_capture(&app, rect(0.0, 0.0, 6.0, 6.0), 0).expect("capture");
-    capture::capture_paste(&app, Some(50.0), Some(0.0), 0).expect("paste");
+    capture::capture_paste(&app, Some(50.0), Some(0.0), 0, None).expect("paste");
     let before = field(&app, 50.0, 0.0);
     assert!((before.0 - 18.0).abs() < 0.6);
 
@@ -305,7 +368,7 @@ fn a_mask_leaves_a_hole_the_patch_does_not_fill() {
         },
     )
     .expect("a second stroke");
-    capture::capture_paste(&app, Some(100.0), Some(0.0), 0).expect("paste");
+    capture::capture_paste(&app, Some(100.0), Some(0.0), 0, None).expect("paste");
 
     // Under the masked hole the field beneath shows through, unchanged.
     let (u, v) = field(&app, 100.0, 0.0);
@@ -340,9 +403,60 @@ fn a_patch_appears_in_the_document_tree() {
     let (_root, app) = project("tree");
     stroke(&app, 0.0, 0.0, 800.0, 11.0);
     capture::region_capture(&app, rect(0.0, 0.0, 6.0, 6.0), 0).expect("capture");
-    capture::capture_paste(&app, Some(30.0), Some(0.0), 0).expect("paste");
+    capture::capture_paste(&app, Some(30.0), Some(0.0), 0, None).expect("paste");
     let tree = document::tree(&app, 0).expect("tree");
     let object = tree.layers[0].objects.last().expect("the patch");
     assert_eq!(object.tool, "patch");
     assert_eq!(object.tool_label, "Patch");
+}
+
+/// The cost of the whole-map animated copy the plan bounds (M23, D65):
+/// `Cmd`-`Shift`-`A` at 0.25° over 24 steps of a scene that changes every
+/// step. Ignored because it is a measurement, not an assertion; run it in
+/// release with `--nocapture` and put the number in the plan.
+#[test]
+#[ignore = "a measurement: cargo test -p ve-app --release --test capture -- --ignored --nocapture"]
+fn whole_map_animated_copy_cost() {
+    let root = TempRoot::new("copy-cost");
+    let app = AppState::new(AppPaths::in_directory(&root.0).expect("paths"));
+    projects::create(
+        &app,
+        NewProjectRequest {
+            name: "Cost".to_owned(),
+            field_kind: "wind".to_owned(),
+            resolution: "0.25".to_owned(),
+            step_hours: 3,
+            step_count: 24,
+        },
+        false,
+    )
+    .expect("create");
+    let object = stroke(&app, 0.0, 0.0, 2_000.0, 18.0);
+    for (step, lon) in [(0u32, -60.0f64), (23, 60.0)] {
+        ve_app::animation::key_at(
+            &app,
+            object,
+            "Position",
+            step,
+            Some(PropertyValue::Position { lon, lat: 0.0 }),
+        )
+        .expect("key");
+    }
+    let started = std::time::Instant::now();
+    let held = capture::region_capture(&app, rect(0.0, 0.0, 180.0, 90.0), 0).expect("capture");
+    let elapsed = started.elapsed();
+    println!(
+        "whole-map copy at 0.25° over 24 animated steps: {} frames of {}x{} in {:.2} s",
+        held.frames,
+        held.ni,
+        held.nj,
+        elapsed.as_secs_f64()
+    );
+    let started = std::time::Instant::now();
+    let still = capture::region_capture(&app, rect(0.0, 0.0, 180.0, 90.0), 23).expect("capture");
+    println!(
+        "the same region at the last step (one frame): {} frame in {:.2} s",
+        still.frames,
+        started.elapsed().as_secs_f64()
+    );
 }

@@ -58,11 +58,14 @@ export default function App() {
     framesSelected.current = active;
   }, []);
   /**
-   * Whether the map has a region selected or a captured field held, in which
-   * case copy and paste belong to the field and not to the object clipboard
-   * (spec.md 8.5, M14).
+   * Whether the timeline has keyframes selected, in which case `Delete`
+   * belongs to them and not to the objects (spec.md 9.3). A ref for the same
+   * reason `framesSelected` is.
    */
-  const regionActive = useRef(false);
+  const keysSelected = useRef(false);
+  const onKeysSelected = useCallback((active: boolean) => {
+    keysSelected.current = active;
+  }, []);
   /**
    * The application's settings, loaded once. Every key handler reads the
    * bindings from here, so a rebind changes the key everywhere (M15).
@@ -83,8 +86,16 @@ export default function App() {
     // refusing to start.
     void api.appSettings().then(setSettings).catch(() => undefined);
   }, []);
-  const onRegionActive = useCallback((active: boolean) => {
-    regionActive.current = active;
+  /**
+   * Selects objects — and drops the map's region, because the two are
+   * mutually exclusive (spec.md 8.2, M23): a region is a way of pointing at
+   * ground, and an object selection a way of pointing at things, and a
+   * gesture that means one cannot leave the other standing. The map does the
+   * converse when a region is drawn.
+   */
+  const selectObjects = useCallback((ids: number[]) => {
+    if (ids.length > 0) mapRef.current?.clearRegion();
+    setSelection(ids);
   }, []);
   // Which layer receives new objects, and what a plain marquee is scoped to
   // (spec.md 6.1, 8.2). Null means the top of the stack.
@@ -271,9 +282,29 @@ export default function App() {
       // A dialog is a decision in progress; undoing or saving behind it would
       // change the very thing being decided about.
       if (modal) return;
+      const target = event.target as HTMLElement | null;
+      const typing = target !== null && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName);
+      const key = event.key.toLowerCase();
+
+      // `Delete` removes the selection, from the map or the panel, as one
+      // history entry (spec.md 8.4, M23) — unless the timeline holds keys or
+      // frames, whose own `Delete` comes first, or the key is going into a
+      // text field.
+      if ((key === "delete" || key === "backspace") && !typing && !event.metaKey && !event.ctrlKey) {
+        if (selection.length === 0 || framesSelected.current || keysSelected.current) return;
+        event.preventDefault();
+        void api
+          .removeObjects(selection)
+          .then((next) => {
+            setSelection([]);
+            setProject(next);
+          })
+          .catch(report);
+        return;
+      }
+
       const accel = event.metaKey || event.ctrlKey;
       if (!accel) return;
-      const key = event.key.toLowerCase();
 
       if (key === "s") {
         event.preventDefault();
@@ -284,17 +315,20 @@ export default function App() {
       } else if (key === "o") {
         event.preventDefault();
         void openProject();
-      } else if (
-        (framesSelected.current || regionActive.current) &&
-        (key === "c" || key === "v")
-      ) {
+      } else if (framesSelected.current && (key === "c" || key === "v")) {
         // The timeline owns copy and paste while one of an imported layer's
-        // frames is selected (spec.md 4.8, M20), and the map owns them while a
-        // region is selected or a capture is held (spec.md 8.5, M14). Nothing
-        // to do here: their own handlers have already acted.
-      } else if (key === "c" && selection.length > 0) {
-        event.preventDefault();
-        void api.copyObjects(selection, step).catch(report);
+        // frames is selected (spec.md 4.8, M20). Nothing to do here: its own
+        // handler has already acted.
+      } else if (key === "c") {
+        // One clipboard (spec.md 8.5): a region selected means the field
+        // inside it, otherwise the selected objects. Either copy drops the
+        // other, so `Cmd`-`V` can ask what is held rather than remember.
+        if (mapRef.current?.copyRegion()) {
+          event.preventDefault();
+        } else if (selection.length > 0) {
+          event.preventDefault();
+          void api.copyObjects(selection, step).catch(report);
+        }
       } else if (key === "x" && selection.length > 0) {
         event.preventDefault();
         void api
@@ -306,9 +340,19 @@ export default function App() {
           .catch(report);
       } else if (key === "v") {
         event.preventDefault();
-        // Shift pastes at the original step numbers instead of moving the
-        // animation to the current one (spec.md 8.5).
-        void api.pasteObjects(null, step, event.shiftKey).then(setProject).catch(report);
+        // What is held decides what is pasted. Shift pastes objects at the
+        // original step numbers instead of moving the animation to the
+        // current one (spec.md 8.5). Both land in the active layer (D66).
+        const absolute = event.shiftKey;
+        void api
+          .clipboardKind()
+          .then((kind) => {
+            if (kind === "capture") mapRef.current?.pasteCapture(activeLayer);
+            else if (kind === "objects")
+              return api.pasteObjects(activeLayer, step, absolute).then(setProject);
+            return undefined;
+          })
+          .catch(report);
       } else if (key === ",") {
         event.preventDefault();
         setShowSettings(true);
@@ -321,7 +365,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [modal, openProject, save, saveAs, selection, startNewProject, step]);
+  }, [activeLayer, modal, openProject, save, saveAs, selection, startNewProject, step]);
 
   if (!project) {
     return <StartScreen onOpened={setProject} />;
@@ -374,7 +418,7 @@ export default function App() {
             step={step}
             selection={selection}
             activeLayer={activeLayer}
-            onSelect={setSelection}
+            onSelect={selectObjects}
             onActivateLayer={setActiveLayer}
             onChanged={setProject}
             viewBounds={viewBounds}
@@ -390,12 +434,11 @@ export default function App() {
           picking={picking}
           onPicked={() => setPicking(null)}
           onProjectChanged={setProject}
-          onRegionActive={onRegionActive}
           settings={settings}
           onSettings={setSettings}
           onRecording={setRecording}
           onStepChange={setStep}
-          onSelect={setSelection}
+          onSelect={selectObjects}
           onViewport={setViewport}
           autoKey={autoKey}
         />
@@ -419,13 +462,14 @@ export default function App() {
         step={step}
         onStepChange={setStep}
         selection={selection}
-        onSelect={setSelection}
+        onSelect={selectObjects}
         viewport={viewport}
         warm={warm}
         autoKey={autoKey}
         onAutoKey={setAutoKey}
         onChanged={setProject}
         onFramesSelected={onFramesSelected}
+        onKeysSelected={onKeysSelected}
         settings={settings}
         capture={recording}
       />

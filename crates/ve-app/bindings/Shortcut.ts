@@ -21,4 +21,13 @@ key: string,
 /**
  * Whether the binding wants shift held.
  */
-shift: boolean, };
+shift: boolean, 
+/**
+ * Whether the binding wants alt (option) held.
+ *
+ * Added with the nudge (D67): the arrows are the timeline's bare, the
+ * nudge's shifted, and the map's pan needed a third modifier that the
+ * window does not own. The chord spelling grows one word and the table
+ * stays one table with one collision rule.
+ */
+alt: boolean, };

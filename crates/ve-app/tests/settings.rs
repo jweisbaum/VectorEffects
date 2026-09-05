@@ -66,6 +66,7 @@ fn tool(name: &str, key: &str) -> Shortcut {
         tool: name.to_owned(),
         key: key.to_owned(),
         shift: false,
+        alt: false,
     }
 }
 

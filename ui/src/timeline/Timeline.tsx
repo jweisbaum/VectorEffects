@@ -130,6 +130,7 @@ export default function Timeline({
   onAutoKey,
   onChanged,
   onFramesSelected,
+  onKeysSelected,
   settings,
   capture,
 }: {
@@ -154,6 +155,11 @@ export default function Timeline({
    * stand down (spec.md 4.8, M20).
    */
   onFramesSelected: (active: boolean) => void;
+  /**
+   * Whether keyframes are selected here, so the app's own `Delete` stands
+   * down (spec.md 9.3, M23).
+   */
+  onKeysSelected: (active: boolean) => void;
   /** The application's bindings table (spec.md 8.6, M15). */
   settings: AppSettings | null;
   /**
@@ -612,6 +618,9 @@ export default function Timeline({
   useEffect(() => {
     onFramesSelected(frameSel !== null && frameSel.steps.size > 0);
   }, [frameSel, onFramesSelected]);
+  useEffect(() => {
+    onKeysSelected(selectedKeys.size > 0);
+  }, [onKeysSelected, selectedKeys]);
 
   // --- Pointer handling over the grid ---
   const onGridPointerMove = (event: React.PointerEvent) => {

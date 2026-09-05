@@ -573,6 +573,47 @@ fn missing_layer(raw: u64) -> AppError {
     AppError::Core(ve_core::CoreError::MissingLayer(raw))
 }
 
+/// The layer a new object joins (spec.md 6.1, D66).
+///
+/// **One rule for every path that adds an object** — creation, paste, the
+/// pasted patch, an inserted macro, a duplicate and the panel's drag-drop.
+/// Each of these chose a layer its own way before: the top of the stack, the
+/// active one, whatever it was handed. `None` means the top of the stack,
+/// which is where a project with no layer chosen puts things.
+///
+/// **An imported layer takes nothing.** A GRIB layer's field is its file, and
+/// an object composited above that file inside the same layer would be
+/// painted onto a forecast that is not the user's to paint on; the refusal
+/// names the layer so the hint area can say which one to pick instead. A
+/// locked layer is refused for the reason it is locked.
+pub(crate) fn creation_layer(project: &Project, layer: Option<u64>) -> Result<&Layer> {
+    let found = match layer {
+        Some(raw) => project
+            .layer(object_id(raw))
+            .ok_or_else(|| missing_layer(raw))?,
+        None => project
+            .layers
+            .last()
+            .ok_or_else(|| AppError::Internal("project has no layers".to_owned()))?,
+    };
+    if !found.source.is_painted() {
+        return Err(AppError::BadOption {
+            field: "layer",
+            value: format!(
+                "\"{}\" is an imported field and cannot hold objects; pick a painted layer",
+                found.name
+            ),
+        });
+    }
+    if found.locked {
+        return Err(AppError::BadOption {
+            field: "layer",
+            value: format!("\"{}\" is locked", found.name),
+        });
+    }
+    Ok(found)
+}
+
 /// Adds a layer above the current top.
 #[tauri::command]
 pub fn add_layer(state: tauri::State<'_, AppState>, name: String) -> Result<ProjectSummary> {
@@ -825,6 +866,66 @@ pub fn object_remove(state: &AppState, object: u64) -> Result<ProjectSummary> {
     })
 }
 
+/// Deletes several objects as one history entry.
+#[tauri::command]
+pub fn remove_objects(
+    state: tauri::State<'_, AppState>,
+    objects: Vec<u64>,
+) -> Result<ProjectSummary> {
+    objects_remove(&state, &objects)
+}
+
+/// Implementation of [`remove_objects`].
+///
+/// `Delete` on a selection: every member goes in one `Command::Batch`, so one
+/// undo returns all of them (spec.md 8.4), with their followers freed first
+/// as [`object_remove`] frees them. The removals are ordered **bottom of
+/// each layer last** — highest index first — because each one shifts the
+/// indices above it, and a batch applies in order.
+pub fn objects_remove(state: &AppState, objects: &[u64]) -> Result<ProjectSummary> {
+    if objects.is_empty() {
+        return with_session(state, |session| {
+            Ok(ProjectSummary::of(session.require_open()?))
+        });
+    }
+    apply(state, |project| {
+        let mut located = Vec::new();
+        for raw in objects {
+            let id = object_id(*raw);
+            let (layer_index, index) = project.locate(id).ok_or_else(|| missing_object(*raw))?;
+            if !located
+                .iter()
+                .any(|&(_, l, i)| (l, i) == (layer_index, index))
+            {
+                located.push((id, layer_index, index));
+            }
+        }
+        let mut commands = Vec::new();
+        for (id, _, _) in &located {
+            commands.extend(unlink_followers_of(project, *id));
+        }
+        located.sort_by_key(|entry| std::cmp::Reverse((entry.1, entry.2)));
+        for (_, layer_index, index) in located {
+            commands.push(Command::RemoveObject {
+                layer: project.layers[layer_index].id,
+                index,
+                object: Box::new(project.layers[layer_index].objects[index].clone()),
+            });
+        }
+        if commands.len() == 1 {
+            return Ok(commands.remove(0));
+        }
+        Ok(Command::Batch {
+            label: if objects.len() == 1 {
+                "Delete object".to_owned()
+            } else {
+                format!("Delete {} objects", objects.len())
+            },
+            commands,
+        })
+    })
+}
+
 /// The commands that free every follower of `primary`, holding each where it
 /// stands.
 ///
@@ -893,9 +994,10 @@ pub fn object_move(
     apply(state, |project| {
         let id = object_id(object);
         let (from_layer, from_index) = project.locate(id).ok_or_else(|| missing_object(object))?;
-        let destination = project
-            .layer(object_id(layer))
-            .ok_or_else(|| missing_layer(layer))?;
+        // The destination is a creation target like any other (D66): an
+        // object dragged onto an imported layer is refused the same way one
+        // painted onto it is.
+        let destination = creation_layer(project, Some(layer))?;
         Ok(Command::MoveObject {
             object: id,
             from: (project.layers[from_layer].id, from_index),
@@ -916,6 +1018,8 @@ pub fn object_duplicate(state: &AppState, object: u64) -> Result<ProjectSummary>
         let id = object_id(object);
         let (layer_index, index) = project.locate(id).ok_or_else(|| missing_object(object))?;
 
+        let target = creation_layer(project, Some(project.layers[layer_index].id.raw()))?;
+
         let mut copy = project.layers[layer_index].objects[index].clone();
         // A fresh identity, or the two would be the same object to every
         // command that follows.
@@ -923,7 +1027,7 @@ pub fn object_duplicate(state: &AppState, object: u64) -> Result<ProjectSummary>
         copy.name = format!("{} copy", copy.name);
 
         Ok(Command::AddObject {
-            layer: project.layers[layer_index].id,
+            layer: target.id,
             index: index + 1,
             object: Box::new(copy),
         })
@@ -1054,6 +1158,10 @@ pub fn clipboard_copy(state: &AppState, objects: &[u64], step: u32) -> Result<Cl
             .collect();
         let count = copied.len();
         session.clipboard = Clipboard::copy(copied, step);
+        // One clipboard (spec.md 8.5): what was copied last is what pastes.
+        // A capture taken earlier would otherwise keep answering `Cmd`-`V`
+        // for the rest of the session, which is how objects stopped copying.
+        session.capture.held = None;
         Ok(ClipboardState { count })
     })
 }
@@ -1117,16 +1225,7 @@ pub fn clipboard_paste(
 
         let (target, index, last_step) = {
             let project = &session.require_open()?.project;
-            let target = match layer {
-                Some(raw) => project
-                    .layer(object_id(raw))
-                    .ok_or_else(|| missing_layer(raw))?,
-                // No layer named: the top one, which is where a new object goes.
-                None => project
-                    .layers
-                    .last()
-                    .ok_or_else(|| AppError::Internal("project has no layers".to_owned()))?,
-            };
+            let target = creation_layer(project, layer)?;
             (target.id, target.objects.len(), project.last_step())
         };
 
@@ -1153,6 +1252,42 @@ pub fn clipboard_state(state: tauri::State<'_, AppState>) -> Result<ClipboardSta
     with_session(&state, |session| {
         Ok(ClipboardState {
             count: session.clipboard.len(),
+        })
+    })
+}
+
+/// Which of the two things `Cmd`-`V` can paste is held (spec.md 8.5).
+///
+/// One clipboard, two kinds of content: objects, or a field captured from a
+/// region. Copying either drops the other, so at most one is ever held and
+/// the key can ask rather than remember.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[ts(export, export_to = "ClipboardKind.ts")]
+#[serde(rename_all = "snake_case")]
+pub enum ClipboardKind {
+    /// Nothing to paste.
+    Empty,
+    /// Objects, keyframes and all.
+    Objects,
+    /// A captured field, pasted as a patch.
+    Capture,
+}
+
+/// What kind of thing a paste would put down.
+#[tauri::command]
+pub fn clipboard_kind(state: tauri::State<'_, AppState>) -> Result<ClipboardKind> {
+    kind_held(&state)
+}
+
+/// Implementation of [`clipboard_kind`].
+pub fn kind_held(state: &AppState) -> Result<ClipboardKind> {
+    with_session(state, |session| {
+        Ok(if session.capture.held.is_some() {
+            ClipboardKind::Capture
+        } else if session.clipboard.is_empty() {
+            ClipboardKind::Empty
+        } else {
+            ClipboardKind::Objects
         })
     })
 }

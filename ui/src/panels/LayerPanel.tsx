@@ -188,6 +188,10 @@ export default function LayerPanel({
                 onDragEnd={endDrag}
                 onDragOver={(e) => {
                   if (!dragging) return;
+                  // An imported layer takes no objects (D66): a layer can be
+                  // dropped beside it, but an object dropped onto it would be
+                  // refused, so the target is not offered.
+                  if (dragging.kind === "object" && layer.grib !== null) return;
                   e.preventDefault();
                   e.dataTransfer.dropEffect = "move";
                   setDropTarget(layer.id);
@@ -291,7 +295,7 @@ export default function LayerPanel({
               <ul
                 className="objects"
                 onDragOver={(e) => {
-                  if (dragging?.kind !== "object") return;
+                  if (dragging?.kind !== "object" || layer.grib !== null) return;
                   e.preventDefault();
                   e.dataTransfer.dropEffect = "move";
                 }}

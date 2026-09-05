@@ -21,7 +21,8 @@ project has unsaved changes and removed when it is saved or closed.
 
 ## The map
 
-Drag with the hand tool (`V`) to pan, wheel to zoom. **Projection** in the
+Drag with the hand tool (`V`) to pan, wheel to zoom, `Alt`+arrows to pan by
+the keyboard. **Projection** in the
 map's toolbar switches between equirectangular (the default — the map is 1:1
 with the grid), Mercator (a bearing drawn on it is the bearing sailed) and
 Miller. A projection is a view setting: it changes nothing stored or exported.
@@ -56,8 +57,14 @@ nothing on empty ocean.
 **Selections.** The select tool (`M`) draws a region — rectangle, circle or
 lasso. With a region selected, clicking inside it with the brush, mask,
 intensify, diverge or rotate tool makes that object from the region's
-boundary; `Cmd`-`C` copies the field inside it and `Cmd`-`V` pastes it back
-down as a patch.
+boundary; `Cmd`-`C` copies the field inside it — from this step to the end
+of the timeline, so an animation stays one — and `Cmd`-`V` pastes it back
+down as a patch that plays from the step it was pasted at. Selecting a region
+deselects any objects, and selecting an object clears the region. With no
+region, `Cmd`-`C` and `Cmd`-`V` copy and paste the selected objects, keyframes
+included; `Delete` removes them; `Shift`+arrows nudge them (or the region)
+across the screen, one undo per press. New objects, pastes and macros go to
+the active layer, and an imported GRIB layer refuses them.
 
 Objects merge when two strokes of the same tool with the same settings
 overlap, so a swathe painted in three passes is one object. Undo is `Cmd`-`Z`.
@@ -78,8 +85,9 @@ A GRIB layer's frames show on the timeline as marks; select marks and
 **Capture** (`K`) records a region of the field over a run of frames into
 the macro library: draw a region, press **Start capture**, scrub the ruler,
 drag the region into place at each frame, then **Finish** and name it.
-**Insert** (`N`) puts a macro back down anywhere, in any project. The
-library's location is in Settings.
+**Insert** (`N`) puts a macro back down anywhere, in any project, in the
+active layer, playing from the step it was placed at. The library's location
+is in Settings.
 
 ## Measurement
 

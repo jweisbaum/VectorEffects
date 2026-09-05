@@ -236,7 +236,11 @@ fn past_the_last_message_the_imported_field_is_gone_and_the_painting_stays() {
     let path = write_file(&root, "short.grib2", &[FieldKind::Wind], &[0, 3]);
     import::grib_import(&app, path).expect("import");
 
-    // A stroke on the layer above the import, alive for the whole timeline.
+    // A stroke on a painted layer *above* the import, alive for the whole
+    // timeline. Its own layer, because an imported layer takes no objects
+    // (D66) and the import sits at the top of the stack when it lands.
+    document::layer_add(&app, "Above".to_owned()).expect("layer");
+    let painted = document::tree(&app, 0).expect("tree").layers[2].id;
     ve_app::edit::paint(
         &app,
         ve_app::edit::BrushStroke {
@@ -245,6 +249,7 @@ fn past_the_last_message_the_imported_field_is_gone_and_the_painting_stays() {
             speed_mps: 11.0,
             direction_toward_deg: 90.0,
             feather: 0.0,
+            layer: Some(painted),
             ..Default::default()
         },
     )
@@ -260,6 +265,69 @@ fn past_the_last_message_the_imported_field_is_gone_and_the_painting_stays() {
             "step {step}: the stroke reads {u} m/s"
         );
     }
+}
+
+/// An imported layer holds its file's field and nothing else (D66): every
+/// path that adds an object is refused by name when aimed at one, and the
+/// refusal says which layer to pick instead.
+#[test]
+fn an_imported_layer_takes_no_objects() {
+    let root = TempRoot::new("no-objects");
+    let app = state(&root, 3, 4);
+    let path = write_file(&root, "field.grib2", &[FieldKind::Wind], &[0]);
+    import::grib_import(&app, path).expect("import");
+    let tree = document::tree(&app, 0).expect("tree");
+    let painted = tree.layers[0].id;
+    let imported = tree.layers[1].id;
+    assert!(tree.layers[1].grib.is_some());
+
+    let stroke = |layer: Option<u64>| {
+        ve_app::edit::paint(
+            &app,
+            ve_app::edit::BrushStroke {
+                points: vec![[0.0, 0.0]],
+                size_km: 500.0,
+                speed_mps: 5.0,
+                direction_toward_deg: 90.0,
+                feather: 0.0,
+                layer,
+                ..Default::default()
+            },
+        )
+    };
+    // Painting onto it, and onto the top of the stack — which it is.
+    let refused = stroke(Some(imported)).expect_err("painted onto an import");
+    assert!(
+        format!("{refused}").contains("imported field"),
+        "the refusal should say why: {refused}"
+    );
+    assert!(stroke(None).is_err(), "the top of the stack is the import");
+    // Painting onto the painted layer beneath it is fine.
+    stroke(Some(painted)).expect("paint beneath");
+    let object = document::tree(&app, 0).expect("tree").layers[0].objects[0].id;
+
+    // Pasting, duplicating-by-move and inserting are refused the same way.
+    document::clipboard_copy(&app, &[object], 0).expect("copy");
+    assert!(document::clipboard_paste(&app, Some(imported), 0, false).is_err());
+    assert!(document::object_move(&app, object, imported, 0).is_err());
+    ve_app::capture::region_capture(
+        &app,
+        ve_app::capture::RegionShape::Rect {
+            centre: [0.0, 0.0],
+            half_width_deg: 5.0,
+            half_height_deg: 5.0,
+        },
+        0,
+    )
+    .expect("capture");
+    assert!(
+        ve_app::capture::capture_paste(&app, Some(20.0), Some(0.0), 0, Some(imported)).is_err()
+    );
+
+    // And nothing landed there.
+    let tree = document::tree(&app, 0).expect("tree");
+    assert_eq!(tree.layers[1].objects.len(), 0);
+    assert_eq!(tree.layers[0].objects.len(), 1);
 }
 
 #[test]

@@ -24,6 +24,7 @@ import type { Tool } from "./generated/Tool";
 import type { ToolSchema } from "./generated/ToolSchema";
 import type { DocumentTree } from "./generated/DocumentTree";
 import type { ClipboardState } from "./generated/ClipboardState";
+import type { ClipboardKind } from "./generated/ClipboardKind";
 import type { AppSettings } from "./generated/AppSettings";
 import type { CaptureMode } from "./generated/CaptureMode";
 import type { CaptureState } from "./generated/CaptureState";
@@ -356,6 +357,8 @@ export const api = {
   renameObject: (object: number, name: string) =>
     call<ProjectSummary>("rename_object", { object, name }),
   removeObject: (object: number) => call<ProjectSummary>("remove_object", { object }),
+  /** Deletes a whole selection as one history entry. */
+  removeObjects: (objects: number[]) => call<ProjectSummary>("remove_objects", { objects }),
   moveObject: (object: number, layer: number, index: number) =>
     call<ProjectSummary>("move_object", { object, layer, index }),
   duplicateObject: (object: number) => call<ProjectSummary>("duplicate_object", { object }),
@@ -413,9 +416,15 @@ export const api = {
    */
   captureRegion: (region: RegionShape, step: number) =>
     call<CaptureState>("capture_region", { region, step }),
-  /** Pastes the captured field as a patch, at a position or where it came from. */
-  pasteCapture: (lon: number | null, lat: number | null, step: number) =>
-    call<ProjectSummary>("paste_capture", { lon, lat, step }),
+  /**
+   * Pastes the captured field as a patch, at a position or where it came
+   * from, into `layer` (null: the top of the stack). Its run of frames begins
+   * at `step` (D65).
+   */
+  pasteCapture: (lon: number | null, lat: number | null, step: number, layer: number | null) =>
+    call<ProjectSummary>("paste_capture", { lon, lat, step, layer }),
+  /** Which of the two things a paste would put down: objects, or a captured field. */
+  clipboardKind: () => call<ClipboardKind>("clipboard_kind"),
   /** The application's settings: shortcuts, display defaults, macros (M15). */
   appSettings: () => call<AppSettings>("app_settings", {}),
   /** Rebinds one shortcut. A collision or a reserved key is refused. */
@@ -521,9 +530,12 @@ export const api = {
   /** Bakes the capture under a name. Creates no object. */
   finishCapture: (name: string, lastStep: number) =>
     call<MacroLibrary>("finish_capture", { name, lastStep }),
-  /** Inserts a library macro as an object, centred on a position. */
-  insertMacro: (id: string, lon: number, lat: number) =>
-    call<ProjectSummary>("insert_macro", { id, lon, lat }),
+  /**
+   * Inserts a library macro as an object, centred on a position, into
+   * `layer` (null: the top of the stack). Its frames run from `step`.
+   */
+  insertMacro: (id: string, lon: number, lat: number, step: number, layer: number | null) =>
+    call<ProjectSummary>("insert_macro", { id, lon, lat, step, layer }),
 
   /** What the capture clipboard holds. */
   captureState: () => call<CaptureState>("capture_state", {}),

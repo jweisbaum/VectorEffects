@@ -25,10 +25,11 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use ve_core::capture::{Capture, CaptureFrame, CaptureLattice, UNDEFINED};
-use ve_core::document::{Geometry, LocalPoint, Object};
+use ve_core::document::{Geometry, LocalPoint, Object, StepRange};
 use ve_core::schema::{PropId, ToolKind};
 use ve_core::{Command, LonLat, PropValue};
 use ve_render::aeqd::M_PER_DEGREE;
+use ve_render::cache::scene_hash;
 use ve_render::cpu::sample_scene_covered;
 use ve_render::scene::flatten;
 
@@ -219,24 +220,52 @@ pub fn region_capture(state: &AppState, region: RegionShape, step: u32) -> Resul
 
         // Evaluated through the CPU, like an export: this is a value the user
         // keeps, not a frame they are looking at (invariant 3).
-        let scene = flatten(project, step);
-        let mut uv = Vec::with_capacity(ni as usize * nj as usize);
-        for j in 0..nj {
-            let lat = anchor.lat + y0 - f64::from(j) * spacing;
-            for i in 0..ni {
-                let lon = anchor.lon + x0 + f64::from(i) * spacing;
-                let Ok(at) = LonLat::new(wrap180(lon), lat.clamp(-90.0, 90.0)) else {
-                    uv.push(UNDEFINED);
-                    continue;
-                };
-                // Undefined where nothing wrote, which is what makes a paste
-                // transparent exactly where its source was (D58).
-                uv.push(match sample_scene_covered(&scene, at) {
-                    Some(sample) => [sample.u, sample.v],
-                    None => UNDEFINED,
-                });
+        //
+        // **A run of frames, from the copy step to the end** (D65), so a
+        // copied animation is an animation when pasted rather than a still
+        // of the step it was copied at. Frames are kept only where the scene
+        // *changed*: two steps that flatten to the same hash draw the same
+        // field, so a still scene bakes one frame and holds it, and a scene
+        // that stops moving at step 8 stops baking there. The frame offsets
+        // carry the gaps, and the patch holds across them.
+        let hours_per_step = f64::from(project.settings.step_hours.hours());
+        let last_step = project.last_step();
+        let mut frames = Vec::new();
+        let mut previous_hash = None;
+        for at_step in step..=last_step {
+            let scene = flatten(project, at_step);
+            let hash = scene_hash(&scene);
+            if previous_hash == Some(hash) {
+                continue;
             }
+            previous_hash = Some(hash);
+            let mut uv = Vec::with_capacity(ni as usize * nj as usize);
+            for j in 0..nj {
+                let lat = anchor.lat + y0 - f64::from(j) * spacing;
+                for i in 0..ni {
+                    let lon = anchor.lon + x0 + f64::from(i) * spacing;
+                    let Ok(at) = LonLat::new(wrap180(lon), lat.clamp(-90.0, 90.0)) else {
+                        uv.push(UNDEFINED);
+                        continue;
+                    };
+                    // Undefined where nothing wrote, which is what makes a
+                    // paste transparent exactly where its source was (D58).
+                    uv.push(match sample_scene_covered(&scene, at) {
+                        Some(sample) => [sample.u, sample.v],
+                        None => UNDEFINED,
+                    });
+                }
+            }
+            frames.push(CaptureFrame::still(
+                f64::from(at_step - step) * hours_per_step,
+                uv,
+            ));
         }
+        let seconds_per_frame = if frames.len() > 1 {
+            hours_per_step * 3600.0
+        } else {
+            0.0
+        };
 
         let capture = Capture::new(
             project.settings.field_kind,
@@ -247,9 +276,9 @@ pub fn region_capture(state: &AppState, region: RegionShape, step: u32) -> Resul
                 x0_deg: x0,
                 y0_deg: y0,
             },
-            0.0,
+            seconds_per_frame,
             region.geometry(anchor),
-            vec![CaptureFrame::still(0.0, uv)],
+            frames,
         )
         .map_err(AppError::Core)?;
 
@@ -262,6 +291,9 @@ pub fn region_capture(state: &AppState, region: RegionShape, step: u32) -> Resul
         session.capture = CaptureClipboard {
             held: Some((Arc::new(capture), region)),
         };
+        // One clipboard (spec.md 8.5): a capture supersedes copied objects
+        // exactly as copying objects supersedes a capture.
+        session.clipboard = ve_core::clipboard::Clipboard::default();
         Ok(state)
     })
 }
@@ -281,8 +313,9 @@ pub fn paste_capture(
     lon: Option<f64>,
     lat: Option<f64>,
     step: u32,
+    layer: Option<u64>,
 ) -> Result<ProjectSummary> {
-    capture_paste(&state, lon, lat, step)
+    capture_paste(&state, lon, lat, step, layer)
 }
 
 /// Implementation of [`paste_capture`].
@@ -290,12 +323,16 @@ pub fn paste_capture(
 /// With a position it lands there — the pointer is over the map, and that is
 /// where the user is pointing. Without one it lands where it was taken, nudged
 /// like any pasted object so the copy is not hidden under its original
-/// (spec.md 8.5).
+/// (spec.md 8.5). It joins `layer` under the one creation rule (D66), and
+/// **its run of frames begins at `step`**: the patch's first active step is
+/// where `capture_of` measures the frames from, so what was copied at step 5
+/// and pasted at 12 shows at 12 what the source showed at 5 (D65).
 pub fn capture_paste(
     state: &AppState,
     lon: Option<f64>,
     lat: Option<f64>,
     step: u32,
+    layer: Option<u64>,
 ) -> Result<ProjectSummary> {
     with_session(state, |state_session| {
         let held = state_session.capture.held.clone();
@@ -314,7 +351,8 @@ pub fn capture_paste(
             _ => LonLat::new(wrap180(taken_at.lon + PASTE_NUDGE_DEG), taken_at.lat)?,
         };
 
-        let mut object = Object::new(ToolKind::Patch, "Patch", open.project.settings.step_count);
+        let step_count = open.project.settings.step_count;
+        let mut object = Object::new(ToolKind::Patch, "Patch", step_count);
         object.geometry = capture.shape.clone();
         object.capture = Some(capture.hash.clone());
         if let Some(anim) = object.props.get_mut(PropId::Position) {
@@ -325,19 +363,18 @@ pub fn capture_paste(
         if let Some(anim) = object.props.get_mut(PropId::StampSpace) {
             anim.set_base(PropValue::Enum(1));
         }
-        let _ = step;
+        // The frames run from here (D65). A still capture is one frame at
+        // every step and its range is left whole, so a still patch pasted at
+        // step 12 is not silently absent from the eleven steps before it.
+        if capture.frames.len() > 1 {
+            object.active_range = StepRange::new(
+                step.min(step_count.saturating_sub(1)),
+                step_count.saturating_sub(1),
+            );
+        }
 
-        let layer = open
-            .project
-            .layers
-            .last()
-            .map(|layer| layer.id)
-            .ok_or(AppError::Core(ve_core::CoreError::MissingLayer(0)))?;
-        let index = open
-            .project
-            .layer(layer)
-            .map(|layer| layer.objects.len())
-            .unwrap_or(0);
+        let target = crate::document::creation_layer(&open.project, layer)?;
+        let (layer, index) = (target.id, target.objects.len());
 
         // The samples go into the project *before* the command, so the object
         // the command adds already has a field to draw. They are keyed by

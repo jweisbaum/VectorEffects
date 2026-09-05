@@ -375,6 +375,68 @@ fn moving_a_group_keeps_its_shape() {
     );
 }
 
+/// A move carries the point that was **pressed**, not the centroid (M23).
+///
+/// A member grabbed 600 km from a group's centroid used to jump the whole
+/// group so the centroid landed under the pointer, before the pointer had
+/// moved at all — which is what a `Cmd`-click on a member did to a
+/// selection. Now a press moves nothing until the pointer does, and then
+/// every member moves by what the pointer moved.
+#[test]
+fn a_move_carries_the_press_point_and_not_the_centroid() {
+    let (_root, state) = project("press-point");
+    let a = dot(&state, 0.0, 0.0, 0.0);
+    let b = dot(&state, 10.0, 5.0, 90.0);
+    let (before_a, before_b) = (anchor(&state, a), anchor(&state, b));
+
+    // Press on `a`, well away from the centroid at about (5, 2.5).
+    transform::start_transform(&state, &[a, b], 0, TransformKind::Move, 0.0, 0.0, false)
+        .expect("begin");
+    let preview = transform::peek_transform(&state, 0.0, 0.0)
+        .expect("preview")
+        .expect("in progress");
+    for outline in &preview.outlines {
+        for point in outline_points(outline) {
+            let there = [point[0], point[1]];
+            let original = committed_or_baseline(&state, &[a, b]);
+            assert!(
+                original
+                    .iter()
+                    .any(|p| distance_m((p[0], p[1]), (there[0], there[1])) < 1.0),
+                "a press with no movement previewed a moved outline at {there:?}"
+            );
+        }
+    }
+
+    // Now the pointer goes one degree east: every member follows by that.
+    transform::update_transform(&state, 1.0, 0.0).expect("drag");
+    document::finish_gesture(&state).expect("end");
+    let (after_a, after_b) = (anchor(&state, a), anchor(&state, b));
+    let moved_a = distance_m(before_a, after_a);
+    let moved_b = distance_m(before_b, after_b);
+    let one_degree = distance_m((0.0, 0.0), (1.0, 0.0));
+    assert!(
+        (moved_a - one_degree).abs() < 200.0,
+        "a moved {moved_a} m for a {one_degree} m drag"
+    );
+    assert!(
+        (moved_b - one_degree * (5.0f64).to_radians().cos()).abs() < 2_000.0,
+        "b moved {moved_b} m; a rigid move carries it by the same rotation"
+    );
+    assert!(
+        (after_a.0 - 1.0).abs() < 1e-6 && after_a.1.abs() < 1e-6,
+        "the pressed point lands under the pointer, got {after_a:?}"
+    );
+}
+
+/// Every point of every member's committed outline, before any drag.
+fn committed_or_baseline(state: &AppState, objects: &[u64]) -> Vec<[f64; 2]> {
+    objects
+        .iter()
+        .flat_map(|object| committed_outline(state, *object))
+        .collect()
+}
+
 #[test]
 fn rotating_a_group_turns_it_about_the_centroid() {
     let (_root, state) = project("group-rotate");

@@ -616,6 +616,12 @@ body {
 }
 
 .objects { padding-left: 14px; }
+/* A shift-click builds a selection of rows, and the browser would otherwise
+   build a selection of *text* across them at the same time. */
+.object,
+.layer-header { user-select: none; }
+.object input,
+.layer-header input { user-select: text; }
 .object {
   display: flex;
   align-items: center;

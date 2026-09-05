@@ -184,6 +184,21 @@ tests and four hand-computed resample ones.
 
 **Every milestone is delivered; what remains needs a signing key or a screen (M10).**
 
+**Re-planned again on 2026-09-05, from the running app.** With every
+milestone delivered, the user worked through the app and handed over thirty
+numbered findings — bugs, missing affordances and a redesign of macro
+recording. They are sequenced below as **M23–M26**, bugs first: selection,
+clipboard and deletion (M23); every cursor and outline the map shows (M24);
+the chrome — the top row, the status bar, collapsible panels, the timeline's
+right-hand side, autosave and the speed filter (M25); and macro recording as
+keyframes with a preview mode (M26). The findings that turned out to be one
+bug are recorded as one: an object's keyframes were not lost on paste, the
+object was never copied at all, because a capture once taken kept the
+clipboard for the rest of the session; and a `Cmd`-click that moved the whole
+selection was a move that carried the *centroid* to the pointer rather than
+the point that was pressed. Section §2 has the milestones and §5 the decisions
+they raise, D65–D72.
+
 **Unplanned, after M7: GRIB import** (spec §4.8, D44). A GRIB2 file becomes a
 layer — two, when it holds both wind and currents — whose lattice is sampled
 by both kernels beneath the layer's own objects. The project keeps the path
@@ -575,7 +590,22 @@ M0 ─ M1 ─ M2 ─ M3 ─ M4 ══ walking skeleton complete
                     ├─ M8 ─────── measurement                            ✓
                                         │
                                        M10 ── hardening & release            ✓ (less signing)
+                                        │
+                    ├─ M23 ────── selection, clipboard, deletion (bugs)     ✓
+                    ├─ M24 ────── cursors, hover and outlines
+                    ├─ M25 ────── chrome: top row, status bar, panels, timeline
+                    └─ M26 ────── macro recording as keyframes, with a preview
 ```
+
+**M23–M26 (2026-09-05) go bugs first, then what each later one needs.** M23
+is where the data is wrong — a move that jumps, a copy that never happens, an
+object landing in a GRIB layer — and every fix in it is a rule the later
+milestones build on (one clipboard, one creation target, one selection). M24
+is the map's feedback layer and gives M26 its cursor rule and its hover
+outline. M25 builds the status-bar hint area and the panel dimming M26's
+recording mode shows through. M26 is last because it is the one redesign in
+the list and touches the backend session, the tile protocol and the timeline
+together.
 
 **The order of M12–M19 is dependency first, then risk.** M12 is small, fully
 specified by ten files on disk, and lets a real forecast be imported by hand
@@ -1989,6 +2019,340 @@ sequence.
 
 ---
 
+### M23 — Selection, clipboard and deletion · **complete**
+
+**Goal:** the things the user found *wrong* rather than missing. Every item
+here is a rule with one owner, so the later milestones can rely on it.
+
+**Delivered 2026-09-05.** Everything below, with these notes. The
+mutual-exclusion rule is two lines — `selectObjects` in `App` drops the
+region through `MapHandle.clearRegion`, `selectRegion` in the map drops the
+objects — and a pure reducer over them would have asserted only that the
+two lines exist, so the promised `selection.test.ts` was not written; the
+rule is stated in spec §8.2 instead. The multi-frame region copy measured
+**1.97 s for a whole-map `Cmd`-`Shift`-`A` at 0.25° over 24 steps** of a
+scene that changes every step — 24 frames of 1441 × 721 on the CPU, all of
+it in the bake — against **0.10 s for one frame** of the same region
+(`whole_map_animated_copy_cost` in `tests/capture.rs`, release). A still
+scene bakes one frame and costs what it did. It runs on the command thread;
+a 0.1° whole-map copy of a long animated timeline would be tens of seconds,
+and if that turns out to be wanted the bake moves behind a progress event. The
+timeline's own `Delete` (keys, GRIB frames) still comes first, through a
+second callback beside `onFramesSelected` rather than a listener-order
+assumption. The settings dialog's shortcut rows were also brought up to the
+catalogue: it listed a fill tool that no longer exists and none of liquify,
+measure, capture or insert.
+
+The findings, in the user's numbering: 1, 3, 4, 5, 6, 7, 9 (the half that is
+a bug), 25, 26, 30.
+
+**What was actually broken, from reading the code**
+
+- **A copied object's keyframes were not lost; the object was never copied
+  (3, 4).** `App` stands down from `Cmd`-`C`/`V` whenever the map reports a
+  region *or a held capture*, and `captured` is set when a region is copied
+  and never cleared — so after one region copy every later `Cmd`-`C` did
+  nothing and every `Cmd`-`V` pasted the same patch. The clipboard code
+  (`ve_core::clipboard`) carries keyframes and always did.
+- **`Cmd`-click moved the selection (5)** because two things line up. The
+  hand tool's pointer-down starts a *move* on any click on a selected object
+  once the hit test comes back, modifier or not; and a move is
+  `SphereRotation::carrying(pivot, pointer)` — it carries the selection's
+  **centroid** to the pointer, so a click anywhere on a member away from the
+  centroid jumps the whole group so its centroid lands under the click. The
+  same rotation is right for the centre handle, whose press *is* the pivot,
+  which is how it went unnoticed.
+- **A placed macro that did not appear (9)** is time, not drawing: a macro's
+  frames run from the object's first active step, which is 0 for every new
+  object, so a five-frame macro placed at step 12 has already ended unless
+  loop is on. It also lands in the *top* layer, not the active one, as does a
+  pasted patch (25).
+- **Nothing refuses a GRIB layer (26):** creation, paste, insert, duplicate
+  and the panel's drag-drop all take whatever layer they are given.
+
+**Deliverables**
+
+- **Object selection and region selection are mutually exclusive (1).**
+  Selecting an object — a map click, a marquee, a panel row — clears the
+  region; closing a region clears the selection. The region stays the map's
+  state; `App` wraps `setSelection` and asks the map to drop its region
+  through `MapHandle`, and the map calls `onSelect([])` when a region lands.
+  One rule, tested in `selection.test.ts` as a pure reducer over the two.
+- **One clipboard (3, 4).** The backend session owns the exclusivity:
+  `copy_objects` drops the held capture and `capture_region` drops the object
+  clipboard, and a `clipboard_kind` query says which is held. `Cmd`-`C` copies
+  the region if one is selected, otherwise the objects; `Cmd`-`V` asks the
+  backend what is held and pastes that. The `regionActive` and `captured`
+  refs go. Acceptance: copy an object with keys at 5 and 9, paste at 12, the
+  copy has keys at 12 and 16 (already asserted in `clipboard.rs`; now asserted
+  end to end through the command layer, which is where it failed).
+- **A region copy takes a run of frames (3).** `capture_region` bakes every
+  step from the copy step to the last one, exactly as `capture_finish` does
+  for a macro, and the pasted patch's active range **starts at the paste
+  step**, which `capture_of` already uses as the run's origin — so a field
+  copied at step 5 and pasted at 12 shows at 12 what the source showed at 5
+  and carries on from there, not in sync with its source and not meant to be.
+  Frames are **deduplicated by scene hash**: a still scene bakes one frame
+  and holds it, so the common case costs what it costs today. The bake runs
+  where the export does, on the CPU, and the whole-map `Cmd`-`Shift`-`A` case
+  is bounded by the timeline length; the cost at 0.25° over 24 steps is
+  measured and reported in this section when the milestone closes (D65).
+- **A move carries the press point (5).** `motion_of` for `Move` becomes
+  `carrying(gesture.pointer, pointer)`; the centre handle is unchanged, since
+  there the press is the pivot. And a modifier click is a selection edit, so
+  the hand tool never starts a move while `Cmd`/`Ctrl` is held. Acceptance: a
+  transform test that presses 300 km from a two-object centroid, previews at
+  the same point and asserts no member moved; and one that drags the body
+  100 km east and asserts each member moved 100 km east.
+- **`Delete` and `Backspace` remove the selection (6)**, from the map or the
+  panel, through one new `remove_objects` command that is a `Command::Batch`
+  so one undo returns all of them; a follower freed by a deleted primary is
+  in the same entry, as `remove_object` already does. The timeline's own
+  `Delete` wins while keys or GRIB frames are selected there, and a text
+  field never loses the key.
+- **Panel rows do not select text (7):** `user-select: none` on `.object` and
+  `.layer-header`, and the rename field keeps its own.
+- **Every path that adds an object takes the active layer, and none of them
+  takes a GRIB layer (9, 25, 26).** `paste_capture`, `insert_macro`,
+  `paste_objects` and `duplicate_object` gain the same `layer: Option<u64>`
+  `create_object` has; `move_object` and the panel's drop refuse a layer
+  whose `source` is a file. When the active layer is a GRIB layer, the
+  creation is **refused** and the hint area says why (M25 gives it the
+  place; until then the error reaches the status bar). The rule is one
+  function, `document::creation_layer`, and the seven shared-rule tests gain
+  an eighth: no tool, paste or insert can land in a raster layer (D66).
+- **A placed macro begins at the step it was placed (9).** `insert_macro`
+  takes `step` and sets the object's active range to start there, which is
+  what `capture_of` measures from. Acceptance: a three-frame macro inserted
+  at step 12 is visible at 12, 13 and 14 and not at 11.
+- **`Shift`+arrows nudge (30).** With objects selected, one step of the
+  selection by a screen distance — a `begin_transform`/`drag_transform`/
+  `end_gesture` round trip at the centroid, so it is the same rigid move a
+  drag is and one undo per press; with a region selected, the region moves
+  instead. The map's pan, which held `Shift`+arrows, moves to `Alt`+arrows;
+  the bindings table gains an `alt` modifier so it stays one table (D67).
+
+**Acceptance**
+
+- The reproductions above, as tests: the clipboard sequence (region copy,
+  then object copy, then paste yields the object); the centroid press; the
+  step-12 macro; a paste with a GRIB layer active landing in the painted
+  layer above it.
+- `Delete` on a three-object selection is one history entry; undo returns
+  three objects and their followers' links.
+- A region copy of a still scene bakes one frame; of a scene animated over
+  steps 5–8 bakes four distinct frames and holds the last.
+
+**Risks:** the multi-frame region copy is the one item with a cost, and it
+is bounded by the same lattice arithmetic the macro bake already runs. If the
+whole-map case at 0.1° exceeds a second, it is reported rather than hidden,
+and the bake moves off the command thread behind a progress event.
+
+---
+
+### M24 — Cursors, hover and outlines
+
+**Goal:** the pointer says what a click will do, and a selected or dragged
+object is outlined by its perimeter.
+
+The findings: 2, 10, 11, 15, 16, 17, 18, 19, 20, 21.
+
+Today the canvas has two cursors: `grab` everywhere and `crosshair` for the
+brush and a pick. Everything else the map shows about the tool in hand is
+drawn on the overlay. This milestone makes the cursor a rule with one owner —
+`cursorFor(tool, context)` in `ui/src/map/cursor.ts`, pure and tested — and
+the overlay's hover indicators a second table beside it.
+
+**Deliverables**
+
+- **The cursor table (16, 17, 19, 20).** Hand: an open hand, closed while
+  panning; the palette icon is redrawn as a full open hand rather than the
+  present palm-and-fingers. Select and capture: the arrow. Shape fill,
+  circle, the modifiers and the measurement tools: a crosshair whose centre
+  is the click. The curve: **the brush nib** — the tool's footprint at the
+  pointer, drawn by the hover path the brush already uses (`schema.hover`),
+  since a curve is painted with a stamp and the nib is what says how wide.
+  Every custom cursor is an inline SVG data URI in CSS — no file, no fetch
+  (invariant 5).
+- **The paint bucket (2).** With a region selected and the brush or one of
+  the four operators in hand, the pointer *inside* the region is a bucket,
+  and outside it is the tool's own cursor. It is the same predicate the click
+  uses (`editsRegion(tool) && regionContains(region, …)`), evaluated on
+  pointer move and nowhere else.
+- **The eyedropper (15, 21).** The option bar's "⌖ Sample field" becomes an
+  eyedropper icon. While it is armed the overlay draws, at the pointer, a
+  magnifier ring with a plus at its centre, the field's vector as the
+  project's glyph — barb or arrow — and the speed and direction in the
+  project's units and convention. The numbers come from the readout store the
+  cursor readout already keeps, one sample in flight, so arming the
+  eyedropper costs no second IPC stream. After the sample the tool's own
+  cursor returns.
+- **The insert hover (18).** The macro's region outline follows the pointer
+  before the click, and a macro that recorded movement draws its track —
+  the per-frame displacement as a polyline from the outline's centre, with a
+  dot per frame. `MacroEntry` gains the region's `shape` and its `track`;
+  both are read from the file's header and lattice, which the library scan
+  already opens.
+- **A dragged stroke is outlined by its perimeter (10).** `drawDragOutlines`
+  strokes each stamp of a swept chain today, which is the ring-trail bug the
+  edge band fixed for the static outline in a different function. The drag
+  outline goes through `buildFootprintPath` and `drawEdgeBand` like the
+  static one, so the union's boundary is what moves. `footprint.test.ts`
+  gains the case: a two-stamp chain's drag outline has one boundary.
+- **The brush is outlined when selected (11).** `drawOverlay` excludes
+  `tool === "brush"` from the selected band on the reasoning that its field
+  shows where it is; the user wants the edge, and every other tool has it.
+  The exclusion goes, and the hover band on the brush stays as it is.
+
+**Acceptance**
+
+- `cursor.test.ts` covers the table for every `ActiveTool`, the bucket
+  predicate inside and outside a region, and the eyedropper's precedence over
+  the tool's cursor.
+- The eyedropper overlay is checked the way the glyphs were: `VE_CAPTURE=1`
+  renders it over a known field and the log carries the sampled numbers.
+- A swept chain of 200 stamps dragged draws one band; a selected brush stroke
+  draws one yellow band.
+
+---
+
+### M25 — Chrome: the top row, the status bar, the panels and the timeline
+
+**Goal:** the controls that are not about painting move out of the painting
+toolbar, every panel can be put away, and two things that felt slow or
+unreachable are fixed.
+
+The findings: 8, 12, 13, 14, 22, 23, 24, 27, 28.
+
+**Deliverables**
+
+- **The top row (8).** The title bar gains a centred slot holding, from the
+  map's toolbar: the measure tool, the projection menu, the glyph menu, the
+  graticule switch, and undo and redo as icons. The **capture** tool moves to
+  the title bar beside the project buttons; the **insert** tool stays in the
+  palette. "Step n / m" leaves the toolbar; the timeline already says it. The
+  state stays where it is — `tool`, the glyph style and the graticule are the
+  map's — and the controls reach the title bar through a React portal into a
+  slot `App` owns, so nothing about the map is lifted for the sake of where a
+  button sits (D68).
+- **The timeline's right-hand side (12, 13, 14).** The start-time field and
+  its clear button go, and nothing replaces them: a start time exists only
+  where a file supplied one — a project opened from a GRIB or with one
+  imported — and is otherwise asked for at export, where it is needed
+  (D69). The ruler labels forecast hours until a file gives it a clock. The
+  loop button is drawn larger, as an icon.
+- **Collapsible panels (22).** The left sidebar, the right sidebar and the
+  timeline dock each collapse to a strip with a toggle; inside the right one,
+  properties and history collapse separately; and each layer's object list
+  folds under its header. What is open is remembered in `localStorage` — a
+  viewer's convenience, not a project's fact — and a collapsed map neighbour
+  changes the map's size, which goes through the existing resize path.
+- **Autosave is a setting (23).** `AppSettings.autosave` is one of `off`,
+  `recovery` (today's behaviour: a snapshot every 60 s or 50 edits, offered
+  back on the start screen) and `save` (the project file written in place on
+  the same cadence when it has a path, a recovery snapshot when it does not).
+  The thread reads the setting each tick. Default `recovery`, so nothing
+  changes for an existing install (D70).
+- **The speed filter follows the hand (24).** The slider's value is local
+  while the thumb is down, and the write is one in flight, latest wins — the
+  drag preview's pattern — with the release writing the final band under the
+  same coalescing key, so a drag is still one undo. Measured before and after
+  on the 0.25° reference file: reports per second the slider survives, and
+  the time from release to the last tile.
+- **The project is renamed in place (27).** Clicking the name in the title
+  bar edits it; `Command::SetProjectName` exists in `ve-core` and is exposed
+  as `rename_project`, undoable like a layer rename.
+- **A hint area (28).** The status bar's middle carries one line: the tool's
+  hint, or the last error, whichever is newer, from a store every panel and
+  the map write to (`createHintStore`, the readout store's shape). The capture
+  bar's "Draw a region first" moves there, and the map's, the timeline's and
+  the panels' error text with it.
+
+**Acceptance**
+
+- Every control that moved is reachable and does what it did: the
+  reachability check from the milestone workflow, plus `toolbar.test.ts`
+  asserting the slot's contents.
+- The speed-filter numbers, in this section, before and after.
+- Autosave `save` writes the file and leaves `dirty` false; `off` writes
+  nothing in a session of 200 edits; `recovery` is byte-for-byte today's.
+- A renamed project round-trips and undoes.
+
+---
+
+### M26 — Macro recording as keyframes, with a preview
+
+**Goal:** recording a macro is editing a position track, and what was
+recorded can be seen before it is kept.
+
+The finding: 29, with the remainder of 18 and the cursor rule from M24.
+
+Today a capture's positions are a map from step to place, held wherever the
+user did not drag, with no way to see or remove one, and finishing writes the
+file at once. This makes the positions **keyframes** in everything but the
+document, and adds a **preview** phase between recording and saving.
+
+**Deliverables**
+
+- **Positions are keys (29).** Every step the playhead visits while recording
+  gets a key at the region's current position; dragging the region at a step
+  sets that key; a key can be deleted, and the position **interpolates**
+  across the gap by great circle, which is what "jump forward and change the
+  position" asks for. `capture_finish` and `capture_mode(step)` both read
+  through one `position_at(step)`, so the bake and the map agree. A new
+  `unplace_capture(step)` removes a key; the first step's cannot be removed.
+- **The timeline shows the track.** While a capture runs a temporary row,
+  **selection position**, sits under the ruler with a diamond per key and the
+  dotted interpolated steps every other track has; `Delete` or `Alt`-click
+  removes a key. Steps **before the first step are dimmed and refused** —
+  the ruler will not scrub into them and the arrows stop at the first step.
+  The "● Recording" label stays through recording and leaves for the
+  preview. The position keys are session state and nothing else: not the
+  document, not history, not a `.veproj`.
+- **A preview phase (29).** Finishing a recording bakes the capture **into
+  the session** rather than to disk and enters preview: the map shows the
+  basemap and nothing else, the macro region highlighted in green, "Macro
+  Preview" in the map's bottom-right, tool selection disabled. A click stamps
+  the macro at the pointer and the timeline loops over its frames. The
+  buttons are **Save macro**, which writes the file and ends the session,
+  **Edit macro**, which returns to recording with the keys intact, and
+  **Cancel**. The preview is rendered by the tile pipeline from a **preview
+  scene** held in the session — the baked capture as one object at the
+  stamped anchor, on an empty project — served by `protocol::serve` under a
+  fresh revision, so the document is never written and nothing is hidden by
+  editing visibility while the history is locked (D71). Steps before the
+  first are dimmed in preview as in recording.
+- **The panels dim (29).** During recording and preview the left and right
+  sidebars are dimmed and dead to the pointer instead of showing refusal
+  text; the history lock is unchanged and still the thing that makes this
+  safe.
+- **The cursor during recording** is the selection cursor from M24's table.
+
+**Acceptance**
+
+- Keys at 3 and 7 with the region moved 5° east at 7: `position_at(5)` is on
+  the great circle between them; delete the key at 5 after placing one and
+  the position at 5 is interpolated again. A bake over 3–7 stores the
+  interpolated displacement per frame when movement is recorded and none when
+  static.
+- A preview never writes: the history's entry count before recording equals
+  the count after cancel, after edit, and after save; the document hash is
+  unchanged through all three.
+- Preview tiles are served without a document write: the project's revision
+  is unchanged while the preview's revision differs, and leaving the preview
+  restores the map without a re-render of a tile that was cached before it.
+- Scrubbing below the first step during recording leaves the playhead at the
+  first step.
+
+**Risks:** the preview scene is a second source of tiles, and every rule
+about tiles — one path through `protocol::serve`, content-hashed keys,
+readiness by cache probe — has to hold for it. It is kept small by being an
+ordinary `Project` value with one layer and one object, flattened by the same
+`flatten`, so the only new thing is which project the session hands the
+protocol.
+
+---
+
 ## 3. Testing strategy
 
 | Layer | Approach |
@@ -2102,6 +2466,14 @@ relitigated by accident.
 | D37 | The eraser and the clone stamp are previewed by operating on the map, not by drawing over it | Both are defined against what is already beneath them, so a coloured wash on the overlay would show something neither tool does — and an overlay cannot show a removal at all, being a canvas above the field that can add pixels and never take them away. A gesture with either one becomes a screen-space mask and the map is drawn through it: the eraser's region loses its field, the clone's loses it and gains the source's, through a camera shifted so the source lands under the brush. The basemap is never masked, since something has to be left to see. A tool declares *how* it previews (`PreviewKind`) and supplies a footprint; nothing else about it is per tool (spec §6.1) |
 | D36 | Values are quantised where they enter the document, not where they leave it | D17 quantises at the serialisation boundary, which covers a value the user typed and misses one the application computed — a polygon's centroid, a dragged anchor. `PropValue::canonical` now applies in `Animatable`'s writers, which is one place and off the evaluator's per-sample path. Doing it in `LonLat::new` instead would have put a rounding on the clone stamp's inner loop (`ve-core::canonical`) |
 | D17 | Document `f64` values are quantised at the serialisation boundary | `serde_json``s parser is one ULP off on ~10% of `f64` values, so raw floats do not round-trip and a project would not equal itself across save/load. Chosen precisions are far finer than anything observable; `f32` is unaffected (`ve-core::canonical`) |
+| D65 | A region copy captures a run of frames from the copy step, deduplicated by scene hash, and a pasted patch's time runs from its paste step | One frame made a copied animation a still; capturing the whole timeline from step 0 would put the wrong frame under the paste. The bake is the macro's, and `capture_of` already measures from the object's first active step, so the patch needs no new sampler. Dedupe is the "steps that look the same share their tiles" property applied to frames, so a still scene costs one frame (M23). Proposed 2026-09-05 |
+| D66 | One creation target, and never a GRIB layer: a creation aimed at one is refused with a hint | Creation, paste, insert, duplicate and drag-drop each chose a layer their own way — the top of the stack, the active one, whatever was given — and none refused an imported layer. One function decides, refusing a layer whose source is a file and saying so in the hint area, rather than quietly redirecting to another layer the user did not choose (M23). Settled with the user 2026-09-05 |
+| D67 | `Shift`+arrows nudge the selection; the map's pan moves to `Alt`+arrows, and the bindings table gains an `alt` modifier | The user asked for `Shift`+arrows by name, and it is the convention. Pan had the chord; rather than drop pan from the keyboard, the table's chord spelling grows one modifier so it stays one table with one collision rule (M23). Settled with the user 2026-09-05 |
+| D68 | The view controls reach the title bar through a portal, not by lifting the map's state | The tool, the glyph style and the graticule are the map's state and read by its draw loop; moving them to `App` for the sake of where a button sits would re-render the shell on every tool change, which is the class of bug the readout store was made to end (M25). Proposed 2026-09-05 |
+| D69 | A project has no start time of its own: one comes from a GRIB file, or is asked for at export | Until a forecast file gives the timeline a clock there is nothing to set — step 0 is "now" and the ruler counts hours. Opening a project from a GRIB or importing one derives the start from the file (§4.8), and the export dialog asks for the one the GRIB needs. The timeline's field and its clear button go, and no settings field replaces them (M25). Settled with the user 2026-09-05 |
+| D70 | Autosave is a three-way setting: off, recovery snapshots, or the file written in place; default recovery | "Auto-save" can mean the snapshot the app already takes or the project file itself. Offering both, with today's behaviour as the default, changes nothing for an existing install and lets a user who wants the file kept current have it (M25). Settled with the user 2026-09-05 |
+| D71 | A macro preview is a preview scene in the session, served by the tile pipeline under its own revision, never a document write | Hiding every layer to show the macro alone is a document write, and the history is locked while a capture runs for exactly the reason it must stay locked. A one-object project flattened by the same `flatten` and served by the same `protocol::serve` keeps every tile rule — one path, content-hashed keys, readiness by cache probe — and leaves the document untouched (M26). Proposed 2026-09-05 |
+| D72 | A capture's positions are keyframes in the session: visited steps are keyed, gaps interpolate by great circle, keys can be deleted | Holding the last position wherever the user did not drag made a moving system that was placed at 3 and 9 stand still until 9 and jump; keys with interpolation are what every other track does and what "jump forward and change the position" means. They stay session state — not document, not history — so a placement is still not an edit (M26). Proposed 2026-09-05 |
 
 ---
 
@@ -2114,3 +2486,12 @@ inside the project, D52 — takes effect in the commit that first writes a
 capture entry, and until then invariants 1 and 2 stand as written.
 
 Nothing blocks M12.
+
+**The 2026-09-05 re-plan (M23–M26) raised eight more, D65–D72.** Four were
+readings of a finding that could be read two ways and were put to the user
+the same day: a creation aimed at a GRIB layer is refused with a hint (D66);
+pan moves to `Alt`+arrows (D67); the start time exists only where a GRIB
+supplied one and is otherwise asked at export (D69); autosave is a
+three-way option (D70). The other four (D65, D68, D71, D72) are
+implementation choices with one sensible answer, recorded so they are not
+re-derived. Nothing blocks M23.

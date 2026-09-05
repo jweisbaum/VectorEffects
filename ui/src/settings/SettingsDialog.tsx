@@ -32,9 +32,12 @@ const ACTIONS: ReadonlyArray<{ action: Shortcut["action"]; tool: string; label: 
   { action: "pan_down", tool: "", label: "Pan down" },
   { action: "zoom_in", tool: "", label: "Zoom in" },
   { action: "zoom_out", tool: "", label: "Zoom out" },
+  { action: "nudge_left", tool: "", label: "Nudge selection left" },
+  { action: "nudge_right", tool: "", label: "Nudge selection right" },
+  { action: "nudge_up", tool: "", label: "Nudge selection up" },
+  { action: "nudge_down", tool: "", label: "Nudge selection down" },
   { action: "tool", tool: "hand", label: "Hand tool" },
   { action: "tool", tool: "select", label: "Select tool" },
-  { action: "tool", tool: "fill", label: "Fill tool" },
   { action: "tool", tool: "brush", label: "Brush" },
   { action: "tool", tool: "circle", label: "Circle" },
   { action: "tool", tool: "shape_fill", label: "Shape fill" },
@@ -44,7 +47,11 @@ const ACTIONS: ReadonlyArray<{ action: Shortcut["action"]; tool: string; label: 
   { action: "tool", tool: "intensity", label: "Intensify / reduce" },
   { action: "tool", tool: "divergence", label: "Diverge / converge" },
   { action: "tool", tool: "turn", label: "Rotate flow" },
-  { action: "tool", tool: "warp", label: "Warp / liquify" },
+  { action: "tool", tool: "warp", label: "Warp" },
+  { action: "tool", tool: "liquify", label: "Liquify" },
+  { action: "tool", tool: "measure", label: "Measure" },
+  { action: "tool", tool: "capture", label: "Capture a macro" },
+  { action: "tool", tool: "insert", label: "Insert a macro" },
 ];
 
 export default function SettingsDialog({
@@ -83,6 +90,7 @@ export default function SettingsDialog({
         tool: row.tool,
         key: event.key.toLowerCase(),
         shift: event.shiftKey,
+        alt: event.altKey,
       })
       .then(onSettings)
       .catch(report);
@@ -102,8 +110,8 @@ export default function SettingsDialog({
         <section>
           <h3>Shortcuts</h3>
           <p className="muted">
-            Click a key and press the one you want. A key that is already taken, or one
-            the window owns, is refused.
+            Click a key and press the one you want, with Shift or Alt held if you like.
+            A key that is already taken, or one the window owns, is refused.
           </p>
           <div className="shortcut-rows">
             {ACTIONS.map((row) => {

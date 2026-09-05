@@ -974,7 +974,17 @@ fn capture_of(project: &Project, object: &Object, step: u32) -> Option<FlatCaptu
         .value_at(object.tool, PropId::LoopMacro, step)
         .and_then(PropValue::as_bool)
         .unwrap_or(false);
-    let pick = capture.pick(elapsed, resample, looping)?;
+    // A patch is a copy of what was painted, and what was painted does not
+    // vanish when its run ends: past its last frame a patch holds that frame
+    // (D65). A macro is placed with a `loop` switch of its own and keeps
+    // spec.md 8.7's rule — nothing past the end unless it loops.
+    let pick = capture.pick(elapsed, resample, looping).or_else(|| {
+        (object.tool == ToolKind::Patch && elapsed >= 0.0).then(|| FramePick {
+            frame: capture.frames.len() - 1,
+            next: capture.frames.len() - 1,
+            blend: 0.0,
+        })
+    })?;
     let (dx, dy) = capture.displacement(pick);
     Some(FlatCapture {
         capture: Arc::clone(capture),

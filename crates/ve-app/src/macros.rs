@@ -519,8 +519,10 @@ pub fn insert_macro(
     id: String,
     lon: f64,
     lat: f64,
+    step: u32,
+    layer: Option<u64>,
 ) -> Result<ProjectSummary> {
-    macro_insert(&state, &id, lon, lat)
+    macro_insert(&state, &id, lon, lat, step, layer)
 }
 
 /// Implementation of [`insert_macro`].
@@ -528,7 +530,20 @@ pub fn insert_macro(
 /// The project takes **its own copy** of the frames, as a `captures/` entry
 /// keyed by content hash (D52) — so two inserts of one macro share one entry,
 /// and clearing the library leaves both working.
-pub fn macro_insert(state: &AppState, id: &str, lon: f64, lat: f64) -> Result<ProjectSummary> {
+///
+/// **The macro begins at `step`.** Its frames run from the object's first
+/// active step (spec.md 8.7), and a new object's range began at 0 whatever
+/// step it was placed at — so a five-frame macro placed at step 12 had
+/// already ended, and the click made an object that showed nothing. It joins
+/// `layer` under the one creation rule (D66).
+pub fn macro_insert(
+    state: &AppState,
+    id: &str,
+    lon: f64,
+    lat: f64,
+    step: u32,
+    layer: Option<u64>,
+) -> Result<ProjectSummary> {
     let configured = with_session(state, |session| {
         Ok(session.settings.macro_directory.clone())
     })?;
@@ -540,26 +555,20 @@ pub fn macro_insert(state: &AppState, id: &str, lon: f64, lat: f64) -> Result<Pr
 
     with_session(state, |session| {
         let open = session.require_open()?;
-        let mut object = Object::new(ToolKind::Macro, "Macro", open.project.settings.step_count);
+        let step_count = open.project.settings.step_count;
+        let last = step_count.saturating_sub(1);
+        let mut object = Object::new(ToolKind::Macro, "Macro", step_count);
         object.geometry = capture.shape.clone();
         object.capture = Some(capture.hash.clone());
+        object.active_range = ve_core::document::StepRange::new(step.min(last), last);
         if let Some(anim) = object.props.get_mut(PropId::Position) {
             anim.set_base(PropValue::LonLat(anchor));
         }
         if let Some(anim) = object.props.get_mut(PropId::StampSpace) {
             anim.set_base(PropValue::Enum(1));
         }
-        let layer = open
-            .project
-            .layers
-            .last()
-            .map(|layer| layer.id)
-            .ok_or(AppError::Core(ve_core::CoreError::MissingLayer(0)))?;
-        let index = open
-            .project
-            .layer(layer)
-            .map(|layer| layer.objects.len())
-            .unwrap_or(0);
+        let target = crate::document::creation_layer(&open.project, layer)?;
+        let (layer, index) = (target.id, target.objects.len());
         open.project
             .captures
             .entry(capture.hash.clone())

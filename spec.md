@@ -1012,7 +1012,12 @@ All tools produce **objects**. Common rules:
   it appears for every position property without the inspector knowing what any
   of them means, and an armed pick takes the click ahead of every tool.
 - Objects persist across all time steps within their `active_range` and belong
-  to exactly one layer — the layer selected when they were created.
+  to exactly one layer — the layer selected when they were created. **One
+  rule decides that layer for every path that adds an object** — a gesture, a
+  paste, a pasted patch, an inserted macro, a duplicate, the panel's
+  drag-drop — and **an imported layer takes nothing** (D66): a GRIB layer's
+  field is its file, and a creation aimed at one is refused with a hint
+  naming the layer rather than quietly landing somewhere else.
 - A layer holds an unlimited number of objects.
 - All objects support: rename, delete, duplicate, copy/paste, select and
   multi-select, enable/disable, move, rotate, scale.
@@ -1909,7 +1914,19 @@ front of every pan.
 
 ### 8.2 Selection
 
-- Click to select, `Cmd`/`Ctrl`-click to add or remove from the selection.
+- Click to select, `Cmd`/`Ctrl`-click to add or remove from the selection. A
+  modifier click is a selection edit and never the start of a move.
+- **Object selection and region selection are mutually exclusive.** Selecting
+  an object — a click, a marquee, a panel row — drops the region; drawing or
+  keying a region drops the objects. Each is a way of pointing, and a gesture
+  that means one cannot leave the other standing.
+- `Shift`+arrows **nudge** the selection one step across the screen — the
+  selected objects as one rigid move, or the region — one history entry per
+  press. A screen distance rather than degrees, so a press moves the same
+  amount of what you can see at every zoom and latitude. The map's pan is
+  `Alt`+arrows (D67).
+- `Delete` or `Backspace` removes the selection as one history entry, unless
+  the timeline holds keys or frames, whose own `Delete` comes first.
 - **`Shift`-drag on empty map** for a rubber band; add `Cmd`/`Ctrl` to reach
   across layers. The modifier is what reconciles this with §8.1: a plain drag on
   empty map has to keep panning, so the band needs one of its own. A band adds
@@ -1932,7 +1949,9 @@ front of every pan.
   and the object moves with it. A multi-selection has no anchor of its own, so
   its centre handle moves the group.
 - **A group transform is one rigid operation, not a per-object edit.** A move is
-  a rotation of the sphere carrying the pivot to the pointer; a rotate turns
+  a rotation of the sphere carrying **the point that was pressed** to the
+  pointer — the pivot for the centre handle, the grabbed spot for a body drag,
+  so a press moves nothing until the pointer does; a rotate turns
   every member about the pivot *and* adds the same angle to each member's own
   rotation; a scale multiplies both each member's distance from the pivot and
   its own scale. Distances within the selection survive all three. Offsetting
@@ -2049,6 +2068,8 @@ The clipboard holds fully serialised objects, including all keyframes.
 - Pasting into the same location offsets by a small delta so the copy is
   visible.
 - Object `Id`s are always regenerated on paste; names get a `copy` suffix.
+- A paste lands in the **active layer** (§6.1's one rule; an imported layer
+  refuses it).
 
 **Copying a region copies the field, not the objects.** With a region selected
 (§8.2), `Cmd`-`C` captures the **visible composite** inside it — what the map
@@ -2057,6 +2078,23 @@ is showing — onto the project's own lattice, and `Cmd`-`V` puts it down as a
 lands under the pointer when the pointer is over the map, and otherwise back
 where it was taken with the small offset every pasted object gets. With no
 region, both keys mean the objects, exactly as above.
+
+**One clipboard.** Copying objects drops a held capture and capturing a region
+drops the copied objects, so at most one is ever held and `Cmd`-`V` *asks*
+which rather than remembering. (A capture once taken used to answer every
+paste for the rest of the session, and objects stopped copying.)
+
+**A region copy is a run of frames** (D65). The capture bakes every step from
+the copy step to the end of the timeline, exactly as a macro does, keeping a
+frame only where the scene *changed* — two steps that flatten to the same
+hash draw the same field, so a still scene bakes one frame and a scene that
+stops moving stops baking. The pasted patch's first active step is the paste
+step, which is where its frames are measured from: a field copied at step 5
+and pasted at 12 shows at 12 what the source showed at 5 and carries on from
+there, not in sync with its source and not meant to be. Past its last frame a
+patch **holds** it — it is a copy of what was painted, and what was painted
+does not vanish — where a macro (§8.7) keeps its own `loop` rule. A still
+capture is one frame at every step and its range is left whole.
 
 A patch is an object like any other. It moves, rotates, scales, keys, feathers,
 edge-modes, takes §9.3's motion, and shows in the panels — it is simply not in
@@ -2115,10 +2153,13 @@ with a message naming what already has it: two bindings on one chord means one
 of them silently stops working, and which one would depend on the order of a
 list nobody can see. One button resets everything to the defaults.
 
-A shortcut is a bare key or a shifted one; anything with `Cmd`/`Ctrl` belongs
-to the application's own menu keys and is not offered. That is what lets the
-timeline keep the bare arrows for stepping and the map take `Shift`-arrows for
-panning: two chords, one table, no ambiguity.
+A shortcut is a key with `Shift`, `Alt`, both or neither; anything with
+`Cmd`/`Ctrl` belongs to the application's own menu keys and is not offered.
+That is what lets the timeline keep the bare arrows for stepping, the
+selection take `Shift`-arrows for nudging and the map take `Alt`-arrows for
+panning: three chords, one table, no ambiguity (D67). A stored binding that
+equals a *previous* build's default is that default and not a choice, so it
+gives way when the default moves; one the user set stands.
 
 **Display.** The colour scale is a **project** setting (§4.1, §5.3) — two
 people opening one file should see the same map — so the dialog edits the open
@@ -2180,7 +2221,10 @@ with nothing to say so until the macro came out wrong. Cancel writes nothing
 and restores everything.
 
 **Insert.** Pick a macro, click the map, and a macro object lands with its
-region centred on the click. It is an object like any other — keyable position,
+region centred on the click, **in the active layer, beginning at the current
+step**: its active range starts there, which is where its frames are measured
+from, so a macro placed at step 12 plays from step 12 rather than having ended
+at step 4. It is an object like any other — keyable position,
 rotation and scale, feather, edge mode, §9.3's motion — whose field is the
 capture's frames, sampled through §8.5's patch sampler in the object's own
 frame. A macro that recorded movement moves the **whole object**, anchor and

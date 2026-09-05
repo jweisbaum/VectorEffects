@@ -680,21 +680,9 @@ pub fn create(state: &AppState, new: NewObject) -> Result<ProjectSummary> {
         let step_count = open.project.settings.step_count;
 
         // A new object joins the layer that was selected when it was created
-        // (spec.md 6.1); with no selection that is the top of the stack.
-        let layer = match new.layer {
-            Some(raw) => open
-                .project
-                .layers
-                .iter()
-                .find(|layer| layer.id.raw() == raw)
-                .filter(|layer| !layer.locked)
-                .ok_or(AppError::Core(ve_core::CoreError::MissingLayer(raw)))?,
-            None => open
-                .project
-                .layers
-                .last()
-                .ok_or_else(|| AppError::Internal("project has no layers".to_owned()))?,
-        };
+        // (spec.md 6.1); with no selection that is the top of the stack. An
+        // imported layer refuses it (D66).
+        let layer = crate::document::creation_layer(&open.project, new.layer)?;
 
         let mut object = Object::new(tool, name_for(&open.project, new.tool), step_count);
         object.geometry = geometry;

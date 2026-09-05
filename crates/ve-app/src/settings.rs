@@ -47,6 +47,15 @@ pub enum ShortcutAction {
     ZoomIn,
     /// And out.
     ZoomOut,
+    /// Move the selected objects, or the selected region, a step west on
+    /// the screen (spec.md 8.2, M23).
+    NudgeLeft,
+    /// And the other three ways.
+    NudgeRight,
+    /// Up.
+    NudgeUp,
+    /// Down.
+    NudgeDown,
     /// Select a tool. The payload is the tool's wire name.
     Tool,
 }
@@ -66,16 +75,31 @@ pub struct Shortcut {
     /// Whether the binding wants shift held.
     #[serde(default)]
     pub shift: bool,
+    /// Whether the binding wants alt (option) held.
+    ///
+    /// Added with the nudge (D67): the arrows are the timeline's bare, the
+    /// nudge's shifted, and the map's pan needed a third modifier that the
+    /// window does not own. The chord spelling grows one word and the table
+    /// stays one table with one collision rule.
+    #[serde(default)]
+    pub alt: bool,
 }
 
 impl Shortcut {
     /// The chord, for comparing two bindings and for showing one.
+    ///
+    /// Modifiers in a fixed order — `alt+shift+key` — so a chord spelled by
+    /// the frontend and one spelled here compare equal.
     pub fn chord(&self) -> String {
-        if self.shift {
-            format!("shift+{}", self.key)
-        } else {
-            self.key.clone()
+        let mut chord = String::new();
+        if self.alt {
+            chord.push_str("alt+");
         }
+        if self.shift {
+            chord.push_str("shift+");
+        }
+        chord.push_str(&self.key);
+        chord
     }
 
     /// How the chord reads in a tooltip.
@@ -88,11 +112,15 @@ impl Shortcut {
             "arrowdown" => "↓".to_owned(),
             other => other.to_uppercase(),
         };
-        if self.shift {
-            format!("Shift-{key}")
-        } else {
-            key
+        let mut label = String::new();
+        if self.alt {
+            label.push_str("Alt-");
         }
+        if self.shift {
+            label.push_str("Shift-");
+        }
+        label.push_str(&key);
+        label
     }
 
     /// Which slot this binding fills: one per action, and one per *tool* for
@@ -119,6 +147,19 @@ const RESERVED: &[&str] = &[
     "contextmenu",
 ];
 
+/// Bindings a previous build shipped as defaults and this one does not.
+///
+/// A settings file holds whatever the defaults were when it was written, so
+/// a user who never rebound pan still has it on `Shift`+arrows — the chord
+/// the nudge now takes (D67). A stored binding that equals an old default is
+/// the old default, not a choice, and gives way; one the user set stands.
+const SUPERSEDED: &[(ShortcutAction, &str)] = &[
+    (ShortcutAction::PanLeft, "shift+arrowleft"),
+    (ShortcutAction::PanRight, "shift+arrowright"),
+    (ShortcutAction::PanUp, "shift+arrowup"),
+    (ShortcutAction::PanDown, "shift+arrowdown"),
+];
+
 /// The defaults, which are the keys the app had wired by hand before this.
 pub fn default_shortcuts() -> Vec<Shortcut> {
     let tool = |name: &str, key: &str| Shortcut {
@@ -126,28 +167,43 @@ pub fn default_shortcuts() -> Vec<Shortcut> {
         tool: name.to_owned(),
         key: key.to_owned(),
         shift: false,
+        alt: false,
     };
     let plain = |action: ShortcutAction, key: &str| Shortcut {
         action,
         tool: String::new(),
         key: key.to_owned(),
         shift: false,
+        alt: false,
     };
     let shifted = |action: ShortcutAction, key: &str| Shortcut {
         action,
         tool: String::new(),
         key: key.to_owned(),
         shift: true,
+        alt: false,
+    };
+    let alted = |action: ShortcutAction, key: &str| Shortcut {
+        action,
+        tool: String::new(),
+        key: key.to_owned(),
+        shift: false,
+        alt: true,
     };
     vec![
         plain(ShortcutAction::PlayPause, " "),
         plain(ShortcutAction::StepBack, "arrowleft"),
         plain(ShortcutAction::StepForward, "arrowright"),
-        // The bare arrows are the timeline's, so the map's pan takes shift.
-        shifted(ShortcutAction::PanLeft, "arrowleft"),
-        shifted(ShortcutAction::PanRight, "arrowright"),
-        shifted(ShortcutAction::PanUp, "arrowup"),
-        shifted(ShortcutAction::PanDown, "arrowdown"),
+        // The bare arrows are the timeline's, the shifted ones nudge the
+        // selection, and the map's pan takes alt (D67).
+        shifted(ShortcutAction::NudgeLeft, "arrowleft"),
+        shifted(ShortcutAction::NudgeRight, "arrowright"),
+        shifted(ShortcutAction::NudgeUp, "arrowup"),
+        shifted(ShortcutAction::NudgeDown, "arrowdown"),
+        alted(ShortcutAction::PanLeft, "arrowleft"),
+        alted(ShortcutAction::PanRight, "arrowright"),
+        alted(ShortcutAction::PanUp, "arrowup"),
+        alted(ShortcutAction::PanDown, "arrowdown"),
         plain(ShortcutAction::ZoomIn, "="),
         plain(ShortcutAction::ZoomOut, "-"),
         tool("hand", "v"),
@@ -279,6 +335,9 @@ impl AppSettings {
             let key = binding.key.to_lowercase();
             !key.trim().is_empty()
                 && !RESERVED.contains(&key.as_str())
+                && !SUPERSEDED
+                    .iter()
+                    .any(|(action, chord)| *action == binding.action && *chord == binding.chord())
                 && seen.insert(binding.chord(), ()).is_none()
         });
         for fallback in defaults {
@@ -310,6 +369,10 @@ fn describe(binding: &Shortcut) -> String {
         ShortcutAction::PanDown => "pan down".to_owned(),
         ShortcutAction::ZoomIn => "zoom in".to_owned(),
         ShortcutAction::ZoomOut => "zoom out".to_owned(),
+        ShortcutAction::NudgeLeft => "nudge left".to_owned(),
+        ShortcutAction::NudgeRight => "nudge right".to_owned(),
+        ShortcutAction::NudgeUp => "nudge up".to_owned(),
+        ShortcutAction::NudgeDown => "nudge down".to_owned(),
     }
 }
 
@@ -503,6 +566,7 @@ mod tests {
             tool: "circle".to_owned(),
             key: "p".to_owned(),
             shift: false,
+            alt: false,
         };
         let refused = settings.rebind(clash).expect_err("a collision");
         assert!(format!("{refused}").contains("brush"), "{refused}");
@@ -525,6 +589,7 @@ mod tests {
                         tool: "brush".to_owned(),
                         key: key.to_owned(),
                         shift: false,
+                        alt: false,
                     })
                     .is_err(),
                 "{key} should be reserved"
@@ -541,6 +606,7 @@ mod tests {
                 tool: "brush".to_owned(),
                 key: "q".to_owned(),
                 shift: false,
+                alt: false,
             })
             .expect("q is free");
         assert_eq!(
@@ -556,23 +622,84 @@ mod tests {
                 tool: "circle".to_owned(),
                 key: "p".to_owned(),
                 shift: false,
+                alt: false,
             })
             .expect("p is free now");
     }
 
-    /// A shifted binding is a different chord from the bare key, which is what
-    /// lets the map's pan share the arrows with the timeline's steps.
+    /// A modifier makes a different chord from the bare key, which is what
+    /// lets the timeline's steps, the nudge and the map's pan share one row
+    /// of arrows (D67).
     #[test]
-    fn shift_makes_a_different_chord() {
+    fn modifiers_make_different_chords() {
         let settings = AppSettings::default();
         let back = settings
             .binding(ShortcutAction::StepBack, "")
             .expect("step back");
+        let nudge = settings
+            .binding(ShortcutAction::NudgeLeft, "")
+            .expect("nudge left");
         let pan = settings
             .binding(ShortcutAction::PanLeft, "")
             .expect("pan left");
         assert_eq!(back.key, pan.key);
-        assert_ne!(back.chord(), pan.chord());
+        assert_eq!(back.key, nudge.key);
+        assert_eq!(nudge.chord(), "shift+arrowleft");
+        assert_eq!(pan.chord(), "alt+arrowleft");
+        assert_eq!(pan.label(), "Alt-←");
+    }
+
+    /// A settings file from before the nudge has pan on `Shift`+arrows as
+    /// its stored default. That is not a choice the user made, so it gives
+    /// way to the new defaults — and a chord the user *did* set stands.
+    #[test]
+    fn an_old_default_gives_way_and_a_chosen_chord_stands() {
+        let mut stored = AppSettings::default();
+        stored.shortcuts.retain(|s| {
+            !matches!(
+                s.action,
+                ShortcutAction::NudgeLeft
+                    | ShortcutAction::NudgeRight
+                    | ShortcutAction::NudgeUp
+                    | ShortcutAction::NudgeDown
+            )
+        });
+        for binding in &mut stored.shortcuts {
+            if matches!(
+                binding.action,
+                ShortcutAction::PanLeft | ShortcutAction::PanUp
+            ) {
+                binding.alt = false;
+                binding.shift = true;
+            }
+            if binding.action == ShortcutAction::PanRight {
+                // A chord the user chose: alt-shift-right.
+                binding.alt = true;
+                binding.shift = true;
+            }
+        }
+        let fixed = stored.normalised();
+        assert_eq!(
+            fixed
+                .binding(ShortcutAction::PanLeft, "")
+                .map(Shortcut::chord),
+            Some("alt+arrowleft".to_owned()),
+            "the old default gives way"
+        );
+        assert_eq!(
+            fixed
+                .binding(ShortcutAction::NudgeLeft, "")
+                .map(Shortcut::chord),
+            Some("shift+arrowleft".to_owned()),
+            "and the nudge takes the chord"
+        );
+        assert_eq!(
+            fixed
+                .binding(ShortcutAction::PanRight, "")
+                .map(Shortcut::chord),
+            Some("alt+shift+arrowright".to_owned()),
+            "a chosen chord stands"
+        );
     }
 
     /// A hand-edited file loses only what it got wrong.
@@ -585,6 +712,7 @@ mod tests {
             tool: "brush".to_owned(),
             key: "escape".to_owned(),
             shift: false,
+            alt: false,
         });
         settings.default_wind_scale_knots = -5.0;
         let fixed = settings.normalised();

@@ -22,17 +22,18 @@ export function chordOf(event: {
   ctrlKey: boolean;
   altKey: boolean;
 }): string | null {
-  // A shortcut is a bare key or a shifted one. Anything with a command or
-  // control modifier belongs to the application's own menu keys, and anything
-  // with alt is left alone.
-  if (event.metaKey || event.ctrlKey || event.altKey) return null;
+  // A shortcut is a key with shift, alt, both or neither. Anything with a
+  // command or control modifier belongs to the application's own menu keys.
+  // Modifiers are spelled in a fixed order — `alt+shift+key` — the same order
+  // the backend spells them, so the two tables compare equal.
+  if (event.metaKey || event.ctrlKey) return null;
   const key = event.key.toLowerCase();
-  return event.shiftKey ? `shift+${key}` : key;
+  return `${event.altKey ? "alt+" : ""}${event.shiftKey ? "shift+" : ""}${key}`;
 }
 
 /** The chord a binding is set to. */
 export function chordFor(binding: Shortcut): string {
-  return binding.shift ? `shift+${binding.key}` : binding.key;
+  return `${binding.alt ? "alt+" : ""}${binding.shift ? "shift+" : ""}${binding.key}`;
 }
 
 /** What a chord does, or nothing. */
@@ -72,7 +73,7 @@ export function chordLabel(binding: Shortcut | null): string {
     arrowdown: "↓",
   };
   const key = named[binding.key] ?? binding.key.toUpperCase();
-  return binding.shift ? `Shift-${key}` : key;
+  return `${binding.alt ? "Alt-" : ""}${binding.shift ? "Shift-" : ""}${key}`;
 }
 
 /** A tool's shortcut, for its palette button. */

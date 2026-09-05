@@ -691,6 +691,84 @@ fn cutting_copies_and_then_removes() {
     );
 }
 
+/// One clipboard (spec.md 8.5, M23): copying objects drops a held capture
+/// and capturing a region drops the copied objects, so `Cmd`-`V` can ask
+/// what is held. Before this a capture, once taken, answered every paste for
+/// the rest of the session and objects stopped copying.
+#[test]
+fn a_capture_and_an_object_copy_share_one_clipboard() {
+    use ve_app::capture::{self, RegionShape};
+    use ve_app::document::ClipboardKind;
+    let (_root, state) = painted("one-clipboard");
+    let id = first_object(&state);
+
+    assert_eq!(
+        document::kind_held(&state).expect("kind"),
+        ClipboardKind::Empty
+    );
+    document::clipboard_copy(&state, &[id], 0).expect("copy");
+    assert_eq!(
+        document::kind_held(&state).expect("kind"),
+        ClipboardKind::Objects
+    );
+
+    capture::region_capture(
+        &state,
+        RegionShape::Rect {
+            centre: [5.0, 2.0],
+            half_width_deg: 6.0,
+            half_height_deg: 4.0,
+        },
+        0,
+    )
+    .expect("capture");
+    assert_eq!(
+        document::kind_held(&state).expect("kind"),
+        ClipboardKind::Capture
+    );
+    assert!(
+        document::clipboard_paste(&state, None, 0, false).is_err(),
+        "the objects are gone from the clipboard"
+    );
+
+    document::clipboard_copy(&state, &[id], 0).expect("copy again");
+    assert_eq!(
+        document::kind_held(&state).expect("kind"),
+        ClipboardKind::Objects
+    );
+    assert!(!capture::capture_held(&state).expect("state").has_capture);
+    let after = document::clipboard_paste(&state, None, 0, false).expect("paste");
+    assert_eq!(after.object_count, 2, "and the objects paste, keys and all");
+}
+
+/// `Delete` on a selection is one history entry (M23).
+#[test]
+fn deleting_a_selection_is_one_undo() {
+    let (_root, state) = painted("delete-selection");
+    let id = first_object(&state);
+    document::object_duplicate(&state, id).expect("duplicate");
+    document::object_duplicate(&state, id).expect("duplicate");
+    let objects: Vec<u64> = document::tree(&state, 0).expect("tree").layers[0]
+        .objects
+        .iter()
+        .map(|o| o.id)
+        .collect();
+    assert_eq!(objects.len(), 3);
+
+    // In selection order, which is not stack order: the removal has to sort.
+    let after =
+        document::objects_remove(&state, &[objects[0], objects[2], objects[1]]).expect("remove");
+    assert_eq!(after.object_count, 0);
+
+    edit::undo_for_test(&state).expect("undo");
+    let back: Vec<u64> = document::tree(&state, 0).expect("tree").layers[0]
+        .objects
+        .iter()
+        .map(|o| o.id)
+        .collect();
+    assert_eq!(back, objects, "one undo returns all three, in their order");
+}
+
 #[test]
 fn pasting_an_empty_clipboard_is_refused() {
     let (_root, state) = painted("paste-empty");

@@ -159,6 +159,9 @@ They are specified in full in `spec.md` §3.
 | Z-order | Layer order, then object order within layer. Index 0 = bottom. |
 | Determinism | No `HashMap` iteration in any evaluation or export path. Use `Vec` or `IndexMap`. |
 | Project settings | The map takes its timeline length, direction convention, colour scale and glyph styles from `ProjectSummary`, never from constants. Nothing renders without an open project. |
+| Creation layer | Every path that adds an object — create, paste, paste_capture, insert_macro, duplicate, move_object — resolves its layer through `document::creation_layer`, which refuses an imported or locked layer (D66). A new path that picks `layers.last()` itself is the bug. |
+| One clipboard | `copy_objects` drops the held capture and `capture_region` drops the object clipboard; the frontend asks `clipboard_kind` on paste. Never a second flag in the frontend remembering which was copied. |
+| Move gesture | `motion_of` carries the **pressed point** to the pointer, never the pivot: a body grabbed away from the centroid must not jump. |
 | Grid resolution | Governs the export only. It must never reach the preview path — a 0.1° project pans and zooms exactly as fast as a 1° one. **Exception**: an import that is not on a lat/lon grid — unstructured or projected — is resampled onto it, since there is no other lattice to put the field on (spec §4.8). |
 | Document `f64` | Every `f64` that reaches a project file needs a `canonical::*_field` serde helper. `serde_json`'s parser is one ULP off on ~10% of values, so a raw `f64` does not round-trip. `f32` is unaffected. See `canonical.rs`. |
 
