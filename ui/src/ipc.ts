@@ -7,6 +7,8 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 
+import { beginBusy } from "./busy";
+
 import type { AppErrorPayload } from "./generated/AppErrorPayload";
 import type { AppInfo } from "./generated/AppInfo";
 import type { FieldSample } from "./generated/FieldSample";
@@ -69,13 +71,39 @@ export function isErrorPayload(value: unknown): value is AppErrorPayload {
   );
 }
 
+/**
+ * The commands that can take seconds, and what the status bar's spinner says
+ * while each runs. Everything else answers within a frame and is not shown:
+ * a spinner that spins for every hit test spins forever.
+ */
+const LONG_RUNNING: Readonly<Record<string, string>> = {
+  import_grib: "Importing GRIB",
+  new_project_from_grib: "Opening GRIB",
+  import_image: "Importing image",
+  open_project: "Opening project",
+  recover_autosave: "Recovering project",
+  save_project: "Saving",
+  save_project_as: "Saving",
+  export_grib: "Exporting GRIB",
+  capture_region: "Copying the field",
+  paste_capture: "Pasting the field",
+  preview_capture: "Baking the macro",
+  finish_capture: "Saving the macro",
+  insert_macro: "Inserting the macro",
+  set_step_count: "Changing the duration",
+};
+
 async function call<T>(command: string, args?: Record<string, unknown>): Promise<T> {
+  const label = LONG_RUNNING[command];
+  const done = label === undefined ? null : beginBusy(label);
   try {
     return await invoke<T>(command, args);
   } catch (raw) {
     if (isErrorPayload(raw)) throw new IpcError(raw);
     // A command that panicked, or a Tauri-level failure, arrives as a bare string.
     throw new IpcError({ kind: "unknown", message: String(raw) });
+  } finally {
+    done?.();
   }
 }
 

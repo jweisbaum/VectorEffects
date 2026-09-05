@@ -291,6 +291,27 @@ body {
 .view-controls button.icon.active .tool-icon { opacity: 1; }
 .view-controls button.active { background: #1d5a7a; border-color: #2b7ba4; }
 .view-controls button:disabled { opacity: 0.45; cursor: default; }
+/* The status bar's spinner: a ring with one bright arc, turning while a
+   long task runs. Kept in the layout when idle so the version number does
+   not shift when work starts. */
+.busy-spinner {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+.busy-spinner.on {
+  opacity: 1;
+  border-color: #24344f;
+  border-top-color: var(--accent);
+  animation: busy-turn 0.9s linear infinite;
+}
+@keyframes busy-turn {
+  to { transform: rotate(360deg); }
+}
 /* The status bar's middle: the hint, an error, or a flash (M25). */
 .statusbar .hint {
   flex: 0 1 auto;

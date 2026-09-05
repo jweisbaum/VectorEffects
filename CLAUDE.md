@@ -522,6 +522,10 @@ to the hash input is a correctness bug that shows up as stale frames.
   the same function, or playback would wait on the wrong scene's tiles.
   Nothing in the preview path may write the document: the history lock is
   what makes the capture's frames trustworthy.
+- **A long-running command gets a label in `LONG_RUNNING` in `ui/src/ipc.ts`**
+  and nothing else: the status bar's spinner counts those by name through
+  `ui/src/busy.ts`. Never start the spinner from a caller — two callers of
+  one command would show two spinners' worth of nothing.
 - **Hints and errors go to `ui/src/hint.ts`**, an external store the status
   bar's one span subscribes to. No panel renders an error line of its own and
   no tool bar carries help text; `reportError` and `setHint` are the whole

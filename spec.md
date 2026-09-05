@@ -933,7 +933,13 @@ the tool, the glyph style and the graticule stay the map's state.
 **The status bar's middle is one line**: the tool's hint, or the last error,
 whichever is newer, from a store every panel and the map write to. No panel
 keeps an error line of its own, and no bar carries help text beside its
-controls.
+controls. **Its left end is a spinner**, before the version number, turning
+while a long task runs — a GRIB or image import, a project opening or saving,
+an export, a capture's bake or paste, a macro's insert — and invisible
+otherwise; its tooltip names what is running. The ipc layer decides which
+commands count by name, so nothing that calls one needs to know. Tile
+rendering is not one of them: it is the map's own activity indicator, and a
+spinner that turned on every edit would say nothing.
 
 **Every panel can be put away.** The layer panel, the properties-and-history
 panel and the timeline dock each collapse to a strip with a toggle; inside

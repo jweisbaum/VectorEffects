@@ -13,6 +13,7 @@ import { mayReplaceProject, type UnsavedChoice } from "./project/saveGuard";
 import { pickProjectToOpen, pickProjectToSave } from "./project/dialogs";
 import { api, IpcError } from "./ipc";
 import { reportError, shown, useHint } from "./hint";
+import { isBusy, useBusy } from "./busy";
 import { type PanelState, loadPanels, savePanels, togglePanel } from "./panels/layout";
 import SettingsDialog from "./settings/SettingsDialog";
 import type { AppInfo } from "./generated/AppInfo";
@@ -639,6 +640,7 @@ export default function App() {
       )}
 
       <div className="statusbar">
+        <BusySpinner />
         {info && (
           <>
             <span className="muted">v{info.version}</span>
@@ -665,6 +667,28 @@ export default function App() {
         </button>
       </div>
     </div>
+  );
+}
+
+/**
+ * The status bar's spinner, left of the version: turning while a long task
+ * runs — a GRIB or image import, an open, a save, an export, a capture's
+ * bake — and invisible otherwise. The ipc layer decides which commands count,
+ * so a new long command needs a label there and nothing here. Its own
+ * component, subscribed to the busy store, so the shell does not re-render
+ * when work starts and ends.
+ */
+function BusySpinner() {
+  const busy = useBusy();
+  const on = isBusy(busy);
+  return (
+    <span
+      className={on ? "busy-spinner on" : "busy-spinner"}
+      role="status"
+      aria-live="polite"
+      aria-label={on ? busy.labels.join(", ") : "Idle"}
+      title={on ? busy.labels.join(" · ") : undefined}
+    />
   );
 }
 
