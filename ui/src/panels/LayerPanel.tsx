@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 import type { GribLayerInfo } from "../generated/GribLayerInfo";
 import { reportError } from "../hint";
@@ -308,8 +308,8 @@ export default function LayerPanel({
               {layer.grib?.loaded && (
                 <SpeedFilter
                   grib={layer.grib}
-                  onChange={(min, max, gesture, done) =>
-                    run(api.setLayerSpeedRange(layer.id, min, max, gesture), done)
+                  onChange={(min, max, gesture) =>
+                    run(api.setLayerSpeedRange(layer.id, min, max, gesture))
                   }
                 />
               )}
@@ -458,16 +458,11 @@ function SpeedFilter({
 }: {
   grib: GribLayerInfo;
   /**
-   * `gesture` names a drag in progress so its ticks coalesce into one history
-   * entry; a typed value or the checkbox passes null and stands alone.
-   * `done` is called once the write has landed, whichever way it went.
+   * One write per release, per typed value, or per checkbox: `gesture` is
+   * always null now and stays in the signature for the command, which still
+   * coalesces under a key for any caller that has a reason to.
    */
-  onChange: (
-    minMps: number | null,
-    maxMps: number | null,
-    gesture: string | null,
-    done?: () => void,
-  ) => void;
+  onChange: (minMps: number | null, maxMps: number | null, gesture: string | null) => void;
 }) {
   const ceiling = Math.max(5, Math.ceil(knotsFromMps(grib.speed_ceiling_mps)));
   const on = grib.speed_min_mps !== null && grib.speed_max_mps !== null;
@@ -476,60 +471,29 @@ function SpeedFilter({
     on ? knotsFromMps(grib.speed_max_mps ?? 0) : ceiling,
   ];
   /**
-   * The band while the thumb is down (M25). The slider used to show the
-   * *document's* band, which arrived a write and a re-render later than the
-   * pointer — and every tick was a write, each one invalidating every tile of
-   * the imported field. The thumb follows the hand now; the writes are one in
-   * flight, latest wins, the drag preview's pattern, so a fast drag sends a
-   * handful of them rather than one per report and the last one is the
-   * band the pointer let go at.
+   * The band while the thumb is down.
+   *
+   * **Nothing is written until the pointer comes up.** Every tick used to be
+   * a document write, and a write invalidates every tile of the imported
+   * field and re-renders every panel — so the thumb moved a round trip and a
+   * viewport of tiles behind the hand. The thumb is local state now, the
+   * map and the panels are left alone for the length of the drag, and the
+   * release writes the band once: one history entry per release, with no
+   * coalescing key because there is nothing to coalesce.
    */
   const [dragging, setDragging] = useState<[number, number] | null>(null);
-  const flight = useRef<{ inFlight: boolean; queued: [number, number] | null }>({
-    inFlight: false,
-    queued: null,
-  });
   const [low, high] = dragging ?? stored;
 
-  const set = (nextLow: number, nextHigh: number, gesture: string | null = null) =>
-    onChange(mpsFromKnots(nextLow), mpsFromKnots(nextHigh), gesture);
-  /**
-   * A slider drag is one gesture: every tick sends the same key, and the
-   * release ends it so the next drag is its own undo. Without this a drag
-   * across the slider was a history entry per tick.
-   */
-  const dragKey = `grib-speed:${grib.path}`;
-  const send = (band: [number, number]) => {
-    const state = flight.current;
-    if (state.inFlight) {
-      state.queued = band;
-      return;
-    }
-    state.inFlight = true;
-    state.queued = null;
-    onChange(mpsFromKnots(band[0]), mpsFromKnots(band[1]), dragKey, () => {
-      state.inFlight = false;
-      const next = state.queued;
-      if (next !== null) send(next);
-    });
-  };
-  const drag = (band: [number, number]) => {
-    setDragging(band);
-    send(band);
-  };
+  const set = (nextLow: number, nextHigh: number) =>
+    onChange(mpsFromKnots(nextLow), mpsFromKnots(nextHigh), null);
+  const drag = (band: [number, number]) => setDragging(band);
   const endDrag = () => {
-    // The band the pointer let go at, then the end of the gesture — after
-    // the write, so the last tick's coalescing key is still open when it
-    // lands.
     const last = dragging;
+    if (last === null) return;
     setDragging(null);
-    flight.current.queued = null;
-    const settle = () => void api.endGesture().catch(() => undefined);
-    if (last === null) {
-      settle();
-      return;
-    }
-    onChange(mpsFromKnots(last[0]), mpsFromKnots(last[1]), dragKey, settle);
+    // The document's band as the pointer let go of it. Ordered here as the
+    // backend orders it, so the local thumbs and the written band agree.
+    set(Math.min(last[0], last[1]), Math.max(last[0], last[1]));
   };
 
   return (
@@ -554,6 +518,7 @@ function SpeedFilter({
               onChange={(e) => drag([Number(e.target.value), high])}
               onPointerUp={endDrag}
               onKeyUp={endDrag}
+              onBlur={endDrag}
               title="Slowest speed kept"
             />
             <NumberField
@@ -574,6 +539,7 @@ function SpeedFilter({
               onChange={(e) => drag([low, Number(e.target.value)])}
               onPointerUp={endDrag}
               onKeyUp={endDrag}
+              onBlur={endDrag}
               title="Fastest speed kept"
             />
             <NumberField

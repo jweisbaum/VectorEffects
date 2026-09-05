@@ -594,6 +594,13 @@ Both kernels apply it, in the same place: after the lattice is sampled and
 before it is written into the buffer. The scale the slider runs to is the file's
 own fastest sample, since a filter is set by looking at the field.
 
+**The slider writes on release, never while the thumb is down.** A write
+invalidates every tile of the imported field and re-renders every panel, and
+a slider that wrote per tick moved a round trip and a viewport of tiles
+behind the hand. The thumb is local state for the length of the drag and the
+map is not asked to keep up; the release writes the band once, and that is
+the history entry — one per release, with nothing to coalesce.
+
 **Levels.** A file often carries wind at several heights. The 10 m wind
 (surface type 103 at 10 m) is taken when present, other heights only when it
 is not; currents prefer the surface (type 160 at 0 m). Speed is m/s on the
