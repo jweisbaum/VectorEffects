@@ -37,6 +37,7 @@ import type { PropertyView } from "./generated/PropertyView";
 import type { ExportEstimate } from "./generated/ExportEstimate";
 import type { ExportRequest } from "./generated/ExportRequest";
 import type { ExportResult } from "./generated/ExportResult";
+import type { Autosave } from "./generated/Autosave";
 import type { MeasurementKind } from "./generated/MeasurementKind";
 import type { MeasurementView } from "./generated/MeasurementView";
 import type { NewMeasurement } from "./generated/NewMeasurement";
@@ -415,6 +416,15 @@ export const api = {
   /** The colour-ramp top a *new* project of each kind gets, in knots. */
   setDefaultScales: (windKnots: number, currentKnots: number) =>
     call<AppSettings>("set_default_scales", { windKnots, currentKnots }),
+  // --- Crash recovery (spec.md 4.2, M10) ---
+  /** Snapshots of unsaved work left by an unclean shutdown, newest first. */
+  autosaves: () => call<Autosave[]>("autosaves"),
+  /** Opens a snapshot as the project it was taken from: dirty, at its old path. */
+  recoverAutosave: (id: number, discardUnsaved: boolean) =>
+    call<ProjectSummary>("recover_autosave", { id, discardUnsaved }),
+  /** Drops a snapshot the user does not want back. */
+  discardAutosave: (id: number) => call<Autosave[]>("discard_autosave", { id }),
+
   // --- Image layers (spec.md 4.9, M18) ---
   /**
    * Adds a georeferenced image under the field.

@@ -73,7 +73,8 @@ crates/
                unstructured-grid definitions. `reader` is the writer's
                test-only verifier.
   ve-app/      Tauri app: IPC commands, app state, background workers,
-               custom URI scheme, autosave. `image` decodes and georeferences
+               custom URI scheme, autosave (`autosave`: a snapshot of unsaved
+               work every 60 s or 50 edits, offered back on the start screen). `image` decodes and georeferences
                the picture layers of spec 4.9; `measure` is the measurement
                tools of spec 10
 ui/            React + TypeScript + Vite frontend (npm workspace member)
@@ -115,7 +116,13 @@ npm run check:offline       # invariant 5
 # Focused
 cargo test -p ve-render parity   # GPU/CPU parity suite
 cargo test -p ve-grib            # round-trip; external decoders run in CI
-cargo bench -p ve-render         # perf budgets from spec.md 13
+cargo test -p ve-render --release --test tile_cost -- --nocapture
+                                 # the tile budget from spec.md 13
+cargo test -p ve-app --release --test stress -- --nocapture
+                                 # 5,000 objects x 240 steps against the
+                                 # open budget from spec.md 13
+cargo run -p ve-app --example make_samples -- assets/samples
+                                 # regenerate the sample projects
 cargo test -p ve-grib --release --test resample_cost -- --nocapture
                                  # cost of putting a projected grid on the
                                  # project's lattice

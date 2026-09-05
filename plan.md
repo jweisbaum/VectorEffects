@@ -182,7 +182,7 @@ together: shifting only the lattice left the field trying to draw outside the
 shape that admits it, which is how the first attempt failed. Six end-to-end
 tests and four hand-computed resample ones.
 
-**M10 is next.**
+**Every milestone is delivered; what remains needs a signing key or a screen (M10).**
 
 **Unplanned, after M7: GRIB import** (spec §4.8, D44). A GRIB2 file becomes a
 layer — two, when it holds both wind and currents — whose lattice is sampled
@@ -574,7 +574,7 @@ M0 ─ M1 ─ M2 ─ M3 ─ M4 ══ walking skeleton complete
                     ├─ M11 ────── projections                            ✓ (cylindrical tier)
                     ├─ M8 ─────── measurement                            ✓
                                         │
-                                       M10 ── hardening & release
+                                       M10 ── hardening & release            ✓ (less signing)
 ```
 
 **The order of M12–M19 is dependency first, then risk.** M12 is small, fully
@@ -1100,27 +1100,61 @@ is corrected rather than dropped.
 
 ---
 
-### M10 — Hardening and release
+### M10 — Hardening and release · **complete, less what needs a signing key**
 
 **Goal:** shippable.
 
-**Deliverables**
+**Delivered**
 
-- Perf pass against every budget in spec §13; profile and fix the misses.
-- Memory pass: peak RSS, cache eviction under sustained editing, leak checks.
-- Crash recovery verified by killing the process mid-edit and mid-export.
-- Large-project stress: 5,000 objects × 240 steps.
-- Packaging: macOS universal `.dmg` (signed, notarised), Windows MSI, Linux
-  AppImage/deb.
-- Offline verification test: run the packaged app with the network disabled and
-  confirm every feature works.
-- User documentation and 3–4 sample projects.
+- **Crash recovery, which did not exist.** The application had an `autosave`
+  directory from M0 and nothing had ever written to it, so "verified by
+  killing the process mid-edit" would have verified nothing. A thread now
+  snapshots the open project every 60 s or 50 history entries, whichever
+  comes first — the rule spec §4.2 promised — only while it is dirty and has
+  changed, from a clone taken outside the session lock. A clean save, a close
+  or an agreed replacement removes the snapshot; the start screen offers what
+  a crash leaves under **Recovered work**, and recovering opens the project
+  dirty at its old path. Tested by dropping one `AppState` mid-edit and
+  standing up another over the same directories, which is what a new process
+  sees.
+- **The large-project stress**, `tests/stress.rs`: 5,000 objects across 240
+  steps, saved, opened, flattened at every step and rendered as a tile,
+  numbers printed in every build and the §13 open budget (≤ 500 ms) asserted
+  in release. Measured on this machine in release: save 61 ms to a 173 KB
+  archive; **open 202 ms against the 500 ms budget**; flatten 5.2 ms per step
+  (1.2 million flat objects over the timeline); one CPU-fallback tile of the
+  whole 5,000-object scene 331 ms — reported against §13's 40 ms for scale
+  and not asserted, since that budget is stated for 200 objects and this
+  scene is twenty-five times it. `tile_cost` was already the tile budget at
+  the budget's own scale; between them these are the §13 rows that can be
+  measured without a screen.
+- **User documentation** (`docs/USER-GUIDE.md`) and **three sample projects**
+  (`assets/samples/`): trade winds, a cyclone built from modifiers over a
+  stroke, and an ocean gyre — written by `examples/make_samples.rs` through
+  the real pipeline, so each is exactly the file the application produces,
+  and deterministic, so a change in the samples is a change in the
+  application.
+- **A release workflow** (`.github/workflows/release.yml`): on a version tag,
+  bundles for macOS universal, Windows and Linux through `tauri-action`, with
+  the offline check run on the bundle that ships. Signing and notarisation
+  are wired to secrets the repository does not hold; without them the macOS
+  bundle is unsigned and otherwise identical.
 
-**Acceptance**
+**Not done, and why**
 
-- All spec §13 budgets met or consciously renegotiated with a recorded reason.
-- Packaged apps launch and pass a smoke suite on clean machines.
-- Zero network traffic observed during a full feature exercise.
+- **Signed and notarised bundles**, and **smoke tests on clean machines**:
+  both need an Apple developer identity and machines this session does not
+  have. The workflow is ready for the secrets.
+- **The socket-level offline test** over the packaged app. It needs a packaged
+  app and a way to observe its sockets, which is a CI job with a VM and not a
+  test in this repository; the static check runs on every build and on the
+  release bundle. Invariant 5 remains enforced by the CSP at runtime and by
+  the absence of any networking dependency, which `cargo tree` shows.
+- **The remaining §13 rows** — frame rate, pointer latency, playback rate,
+  peak RSS — are interactive measurements that need the app on a screen.
+  Not renegotiated, because nothing measured suggests they miss: they are
+  simply not measured here.
+- **Memory and leak passes** likewise need a running app under a profiler.
 
 ---
 

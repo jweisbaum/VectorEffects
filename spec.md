@@ -456,13 +456,19 @@ with migration. The one foreign format that can be imported is GRIB2, as a
 layer rather than as a project (§4.8).
 
 **Autosave** writes a recovery copy to the app data directory every 60 s and on
-every 50 history entries, whichever comes first. On launch, an unclean shutdown
-offers recovery.
+every 50 history entries, whichever comes first (M10). Only while the project is
+dirty and has changed since the last copy: a snapshot of nothing new is a write
+for nothing. The copy is a full `.veproj` beside a manifest naming where the
+project lived, taken from a clone of the document so the session is never held
+for the write. A clean save, a deliberate close and a replacement the user
+agreed to remove it; a crash leaves it, and the start screen offers it back
+under **Recovered work** — opened as the project it was taken from, dirty, at
+its old path so the next Save goes where it should, or with no path if it had
+never been saved. A snapshot is never read for any other purpose.
 
 **Replacing the open project.** New and Open each replace what is open, as does
-`close_project` — which the app no longer offers a button for, the window's own
-close being the way out; the command stays because opening and creating are
-built on it. When it has unsaved changes the user is asked first, with three
+Close, which returns to the start screen — and which is guarded like the other
+two, by the backend, so a frontend that forgot to ask still cannot drop work. When it has unsaved changes the user is asked first, with three
 answers — **Save**, **Don't save**, **Cancel** — not the two a plain confirm can
 offer: making saving the thing the user has to think of *before* reaching for
 the action is how work gets lost. Cancel is the default, taken by Escape and by

@@ -4,6 +4,7 @@
 //! frontend can reach goes through [`commands`].
 
 pub mod animation;
+pub mod autosave;
 pub mod capture;
 pub mod commands;
 pub mod create;
@@ -64,6 +65,9 @@ pub fn run() -> anyhow::Result<()> {
                 let _ = handle.emit("render://progress", progress);
             });
             pool.start(app.handle().clone());
+            // Crash recovery: a snapshot of unsaved work every minute or fifty
+            // edits, offered back on the start screen (spec.md 4.2, M10).
+            autosave::start(app.handle().clone());
             Ok(())
         })
         .register_uri_scheme_protocol(protocol::SCHEME, |ctx, request| {
@@ -126,6 +130,9 @@ pub fn run() -> anyhow::Result<()> {
             settings::set_default_scales,
             settings::set_macro_directory,
             settings::set_projection,
+            autosave::autosaves,
+            autosave::recover_autosave,
+            autosave::discard_autosave,
             image::import_image,
             image::set_image_corners,
             image::set_image_opacity,

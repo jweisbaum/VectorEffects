@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { api, IpcError } from "../ipc";
 import type { NewProjectRequest } from "../generated/NewProjectRequest";
 import type { ProjectSummary } from "../generated/ProjectSummary";
+import type { Autosave } from "../generated/Autosave";
 import type { RecentProject } from "../generated/RecentProject";
 import NewProjectForm from "./NewProjectForm";
 import { pickGribToImport, pickProjectToOpen } from "./dialogs";
@@ -20,11 +21,14 @@ export default function StartScreen({
   onOpened: (project: ProjectSummary) => void;
 }) {
   const [recent, setRecent] = useState<RecentProject[]>([]);
+  /** Unsaved work an unclean shutdown left behind (spec.md 4.2, M10). */
+  const [autosaves, setAutosaves] = useState<Autosave[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     api.recentProjects().then(setRecent).catch(() => setRecent([]));
+    api.autosaves().then(setAutosaves).catch(() => setAutosaves([]));
   }, []);
 
   const run = async (action: () => Promise<ProjectSummary>) => {
@@ -68,6 +72,44 @@ export default function StartScreen({
           <h2>New project</h2>
           <NewProjectForm disabled={busy} submitLabel="Create project" onSubmit={create} />
         </section>
+
+        {autosaves.length > 0 && (
+          <section className="start-recover">
+            <h2>Recovered work</h2>
+            <p className="muted">
+              The application did not close cleanly. These are snapshots of unsaved work,
+              taken every minute or fifty edits; recovering one opens it as the project it
+              came from, unsaved.
+            </p>
+            <ul className="recent">
+              {autosaves.map((entry) => (
+                <li key={entry.id}>
+                  <button
+                    className="recent-item"
+                    disabled={busy}
+                    onClick={() => void run(() => api.recoverAutosave(entry.id, false))}
+                    title={entry.original_path ?? "never saved"}
+                  >
+                    <span className="recent-name">{entry.name}</span>
+                    <span className="recent-path muted">
+                      {entry.original_path ?? "never saved"} ·{" "}
+                      {new Date(entry.saved_unix_s * 1000).toLocaleString()}
+                    </span>
+                  </button>
+                  <button
+                    disabled={busy}
+                    onClick={() =>
+                      void api.discardAutosave(entry.id).then(setAutosaves).catch(() => undefined)
+                    }
+                    title="Drop this snapshot"
+                  >
+                    Discard
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
 
         <section className="start-open">
           <h2>Open</h2>

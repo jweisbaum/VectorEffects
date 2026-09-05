@@ -228,6 +228,9 @@ pub fn create(
 
     with_session(state, |session| {
         refuse_to_discard(session, discard_unsaved)?;
+        if let Some(replaced) = &session.open {
+            crate::autosave::forget(state, replaced.project.id.raw());
+        }
         // A new project takes the colour scale the user prefers for its kind
         // (spec.md 8.6, M15). The scale then belongs to the project: changing
         // the preference later leaves existing projects alone.
@@ -278,6 +281,9 @@ pub fn open(state: &AppState, path: String, discard_unsaved: bool) -> Result<Pro
     let settings_file = state.paths.settings_file();
     with_session(state, |session| {
         refuse_to_discard(session, discard_unsaved)?;
+        if let Some(replaced) = &session.open {
+            crate::autosave::forget(state, replaced.project.id.raw());
+        }
         session.open = Some(OpenProject::loaded(project, path.clone()));
         session.remember(&path);
         // A failure to persist the recent list must not fail the open itself.
@@ -309,6 +315,8 @@ pub fn save(state: &AppState) -> Result<ProjectSummary> {
             tracing::warn!(%err, "could not write the recent list");
         }
         let open = session.require_open()?;
+        // Saved cleanly: there is nothing to recover (spec.md 4.2, M10).
+        crate::autosave::forget(state, open.project.id.raw());
         Ok(ProjectSummary::of(open))
     })
 }
@@ -336,6 +344,7 @@ pub fn save_as(state: &AppState, path: String) -> Result<ProjectSummary> {
         }
         tracing::info!(path = %path.display(), "saved project");
         let open = session.require_open()?;
+        crate::autosave::forget(state, open.project.id.raw());
         Ok(ProjectSummary::of(open))
     })
 }
@@ -355,6 +364,10 @@ pub fn close_project(state: tauri::State<'_, AppState>, discard_unsaved: bool) -
 pub fn close_open(state: &AppState, discard_unsaved: bool) -> Result<()> {
     with_session(state, |session| {
         refuse_to_discard(session, discard_unsaved)?;
+        // What the user chose to put down is not offered back (spec.md 4.2).
+        if let Some(open) = &session.open {
+            crate::autosave::forget(state, open.project.id.raw());
+        }
         session.open = None;
         Ok(())
     })

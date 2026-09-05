@@ -92,6 +92,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ve_app::measure::MeasuredPathView::export_all(&cfg)?;
     ve_app::measure::MeasurementView::export_all(&cfg)?;
     ve_app::measure::NewMeasurement::export_all(&cfg)?;
+    ve_app::autosave::Autosave::export_all(&cfg)?;
     ve_app::settings::AppSettings::export_all(&cfg)?;
     ve_app::settings::Shortcut::export_all(&cfg)?;
     ve_app::settings::ShortcutAction::export_all(&cfg)?;
