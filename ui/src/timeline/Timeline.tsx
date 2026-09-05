@@ -17,6 +17,7 @@ import { listen } from "@tauri-apps/api/event";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { AppSettings } from "../generated/AppSettings";
+import type { CaptureMode } from "../generated/CaptureMode";
 import type { DocumentTree } from "../generated/DocumentTree";
 import { actionFor, chordOf } from "../settings/bindings";
 import type { InterpolationView } from "../generated/InterpolationView";
@@ -130,6 +131,7 @@ export default function Timeline({
   onChanged,
   onFramesSelected,
   settings,
+  capture,
 }: {
   project: ProjectSummary;
   step: number;
@@ -154,7 +156,18 @@ export default function Timeline({
   onFramesSelected: (active: boolean) => void;
   /** The application's bindings table (spec.md 8.6, M15). */
   settings: AppSettings | null;
+  /**
+   * The macro capture in progress, if any (spec.md 8.7, M16).
+   *
+   * While it runs the timeline is a ruler and nothing else: every edit is
+   * refused by the backend, so rather than let a drag fire and fail, the rows
+   * and the transport are greyed out and dead to the pointer. The ruler stays
+   * live — scrubbing is how the frames get visited — and marks the ones that
+   * have been.
+   */
+  capture: CaptureMode | null;
 }) {
+  const capturing = capture !== null && capture.active;
   const last = Math.max(0, project.step_count - 1);
   const steps = last + 1;
 
@@ -524,6 +537,10 @@ export default function Timeline({
       // sends every other combination to the app's own handler. A selected
       // mark is what makes this a frame gesture rather than an object one
       // (M20); App skips its object copy while one is selected.
+      // During a capture only the arrows do anything here: the frames are
+      // visited by scrubbing, and every other key is an edit the backend would
+      // refuse (spec.md 8.7).
+      if (capturing && !(event.key === "ArrowLeft" || event.key === "ArrowRight")) return;
       if ((event.metaKey || event.ctrlKey) && !event.altKey) {
         const key = event.key.toLowerCase();
         if (key === "c" && frameSel && frameSel.steps.size > 0) {
@@ -577,6 +594,7 @@ export default function Timeline({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [
+    capturing,
     copyFrames,
     deleteFrames,
     deleteSelected,
@@ -765,7 +783,7 @@ export default function Timeline({
     utcLabel(s, project.step_hours, project.start_unix_s) ?? forecastLabel(s, project.step_hours);
 
   return (
-    <div className="timeline">
+    <div className={capturing ? "timeline tl-capturing" : "timeline"}>
       <div className="tl-transport">
         <button onClick={() => setPlaying((on) => !on)} title="Play / pause (Space)">
           {playing ? "❚❚" : "▶"}
@@ -847,7 +865,9 @@ export default function Timeline({
       >
         {/* The ruler: ticks, labels, readiness, and the playhead. */}
         <div className="tl-row tl-ruler">
-          <div className="tl-labels tl-ruler-label">Time</div>
+          <div className="tl-labels tl-ruler-label">
+            {capturing ? <span className="tl-recording">● Recording</span> : "Time"}
+          </div>
           <div
             className="tl-grid"
             style={{ width: gridWidth }}
@@ -867,9 +887,20 @@ export default function Timeline({
             {Array.from({ length: steps }, (_, s) => (
               <div
                 key={s}
-                className={`tl-tick ${states[s] ?? "empty"}`}
+                className={[
+                  "tl-tick",
+                  states[s] ?? "empty",
+                  // A frame the capture has placed its region at, and the one
+                  // it began at: what the user has done and where it started.
+                  capturing && capture.visited.includes(s) ? "tl-visited" : "",
+                  capturing && capture.first_step === s ? "tl-capture-origin" : "",
+                ].join(" ")}
                 style={{ left: s * pxPerStep, width: pxPerStep }}
-                title={`${tickLabel(s)} · ${states[s] ?? "not rendered"}`}
+                title={
+                  capturing
+                    ? `${tickLabel(s)} · ${capture.visited.includes(s) ? "region placed here" : "region where it was drawn"}`
+                    : `${tickLabel(s)} · ${states[s] ?? "not rendered"}`
+                }
               >
                 {s % every === 0 && <span className="tl-tick-label">{tickLabel(s)}</span>}
                 <span
@@ -1302,7 +1333,7 @@ export default function Timeline({
         )}
       </div>
 
-      {error && <div className="tl-error">{error}</div>}
+      {error && !capturing && <div className="tl-error">{error}</div>}
 
       {menu && (
         <div

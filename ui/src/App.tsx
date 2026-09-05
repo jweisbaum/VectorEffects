@@ -15,6 +15,7 @@ import { api, IpcError } from "./ipc";
 import SettingsDialog from "./settings/SettingsDialog";
 import type { AppInfo } from "./generated/AppInfo";
 import type { AppSettings } from "./generated/AppSettings";
+import type { CaptureMode } from "./generated/CaptureMode";
 import type { ProjectSummary } from "./generated/ProjectSummary";
 import type { TileAddress } from "./generated/TileAddress";
 import type { PositionPick } from "./picking";
@@ -68,6 +69,13 @@ export default function App() {
    */
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  /**
+   * The macro capture in progress, reported by the map (spec.md 8.7, M16).
+   *
+   * While one runs every document write is refused, so the edit shortcuts
+   * stand down here rather than firing and being refused with an error.
+   */
+  const [recording, setRecording] = useState<CaptureMode | null>(null);
   useEffect(() => {
     // A settings file that will not load costs the preferences and not the
     // launch: the backend already falls back to the defaults, so a failure
@@ -257,7 +265,7 @@ export default function App() {
   }, [mayReplace]);
 
   // Standard shortcuts, so saving does not require reaching for the toolbar.
-  const modal = exporting || creating !== null || askUnsaved !== null;
+  const modal = exporting || creating !== null || askUnsaved !== null || recording !== null;
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       // A dialog is a decision in progress; undoing or saving behind it would
@@ -385,6 +393,7 @@ export default function App() {
           onRegionActive={onRegionActive}
           settings={settings}
           onSettings={setSettings}
+          onRecording={setRecording}
           onStepChange={setStep}
           onSelect={setSelection}
           onViewport={setViewport}
@@ -418,6 +427,7 @@ export default function App() {
         onChanged={setProject}
         onFramesSelected={onFramesSelected}
         settings={settings}
+        capture={recording}
       />
 
       {showSettings && settings !== null && (

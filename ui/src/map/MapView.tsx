@@ -122,6 +122,7 @@ import {
   type Region,
   editsRegion,
   recentred,
+  regionAnchor,
   regionContains,
   regionGesture,
   regionShape,
@@ -340,6 +341,7 @@ export default function MapView({
   onRegionActive,
   settings,
   onSettings,
+  onRecording,
   onStepChange,
   onSelect,
   onViewport,
@@ -368,6 +370,14 @@ export default function MapView({
   settings: AppSettings | null;
   /** Called when the map changes a view preference — the projection (M11). */
   onSettings: (settings: AppSettings) => void;
+  /**
+   * Called whenever a macro capture starts, changes or ends (spec.md 8.7).
+   *
+   * The timeline greys itself out and marks the visited frames from this; the
+   * app stands its edit shortcuts down. The map owns the capture because the
+   * map is where the region is placed.
+   */
+  onRecording: (mode: CaptureMode | null) => void;
   onStepChange: (step: number) => void;
   onSelect: (objects: number[]) => void;
   /**
@@ -521,6 +531,22 @@ export default function MapView({
    * pointer-up to end it.
    */
   const openChain = useRef<number | null>(null);
+  /**
+   * The capture region being dragged, while a capture runs (spec.md 8.7).
+   *
+   * A *drag*, by delta from where the pointer went down, and not a click that
+   * recentres the region on the pointer: the region has to follow the hand at
+   * pointer resolution, and a click-to-centre jumps the whole region to
+   * wherever the click landed.
+   */
+  const captureDrag = useRef<{ pointer: [number, number]; anchor: [number, number] } | null>(
+    null,
+  );
+  /** The placement in flight, and the one waiting behind it. */
+  const captureMove = useRef<{ inFlight: boolean; queued: [number, number] | null }>({
+    inFlight: false,
+    queued: null,
+  });
   /** The image control point being dragged (spec.md 4.9, M18). */
   const cornerDrag = useRef<CornerPick | null>(null);
   /** The placement in flight, and the one waiting behind it. */
@@ -587,6 +613,9 @@ export default function MapView({
    * at each step, and to offer the two ways out.
    */
   const [recording, setRecording] = useState<CaptureMode | null>(null);
+  useEffect(() => {
+    onRecording(recording);
+  }, [onRecording, recording]);
   /** Whether movement is recorded by the *next* capture. */
   const [recordMovement, setRecordMovement] = useState(false);
   /** The macro library, for the insert tool's bar. */
@@ -2558,27 +2587,17 @@ export default function MapView({
       }
     }
 
-    // While a capture is running the click places its region at this step
-    // (spec.md 8.7, M16). Each frame holds its own position, so this moves the
-    // step being viewed and no other — and it is capture state, never the
-    // document, which is why it is not an edit and not undoable.
+    // While a capture runs, the region can be *dragged* — and nothing else on
+    // the map does anything (spec.md 8.7). By delta from where the pointer
+    // went down, at pointer resolution: each frame holds its own position,
+    // and this moves the step being viewed and no other. It is capture state,
+    // never the document, which is why it is not an edit and not undoable.
     if (recording !== null) {
       const geo = unproject(cameraRef.current, viewRef.current, point);
-      void api
-        .placeCapture(stepRef.current, geo.lon, geo.lat)
-        .then((mode) => {
-          setRecording(mode.active ? mode : null);
-          // The drawn region follows: what is recorded at this frame is what
-          // the map is showing, and a region that stayed where it was drawn
-          // would be a promise the bake does not keep.
-          setRegion((current) =>
-            current === null || mode.position === null
-              ? current
-              : recentred(current, mode.position[0], mode.position[1]),
-          );
-          requestOverlay();
-        })
-        .catch((err: unknown) => setError(String(err)));
+      const anchor = region === null ? null : regionAnchor(region);
+      if (region !== null && anchor !== null && regionContains(region, geo.lon, geo.lat)) {
+        captureDrag.current = { pointer: [geo.lon, geo.lat], anchor };
+      }
       return;
     }
 
@@ -3000,6 +3019,41 @@ export default function MapView({
       return;
     }
 
+    // The capture region following the hand (spec.md 8.7). The local region
+    // moves *now*, from the pointer's own delta, so there is no jump and no
+    // wait on the wire; the backend is told one request at a time, latest
+    // wins, and the reply is not used to move anything — it would arrive late
+    // and put the region a report behind the hand.
+    if (captureDrag.current) {
+      const drag = captureDrag.current;
+      const geo = unproject(cameraRef.current, viewRef.current, point);
+      const lon = drag.anchor[0] + normalizeLon(geo.lon - drag.pointer[0]);
+      const lat = Math.max(-90, Math.min(90, drag.anchor[1] + (geo.lat - drag.pointer[1])));
+      setRegion((current) => (current === null ? current : recentred(current, lon, lat)));
+      requestOverlay();
+
+      const flight = captureMove.current;
+      flight.queued = [lon, lat];
+      if (!flight.inFlight) {
+        const send = () => {
+          const next = flight.queued;
+          flight.queued = null;
+          if (next === null) {
+            flight.inFlight = false;
+            return;
+          }
+          flight.inFlight = true;
+          void api
+            .placeCapture(stepRef.current, next[0], next[1])
+            .then((mode) => setRecording(mode.active ? mode : null))
+            .catch(() => undefined)
+            .finally(send);
+        };
+        send();
+      }
+      return;
+    }
+
     // An image control point being dragged (spec.md 4.9, M18). One request in
     // flight, latest wins, and the same coalescing key throughout — so the
     // whole drag is one undo and the picture follows the hand.
@@ -3281,6 +3335,14 @@ export default function MapView({
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
+    // The capture region lets go. Nothing to end on the backend: a placement
+    // is capture state, not a history entry.
+    if (captureDrag.current) {
+      captureDrag.current = null;
+      requestOverlay();
+      return;
+    }
+
     // An image control point lets go: the coalescing group ends, so the next
     // drag of the same corner is its own undo entry (spec.md 4.9, M18).
     if (cornerDrag.current) {
@@ -3872,8 +3934,8 @@ export default function MapView({
                   {recording.record_movement ? " · movement" : " · static"}
                 </span>
                 <span className="muted">
-                  Scrub the timeline and click the map to place the region at each step. Every
-                  edit is refused until this ends.
+                  Scrub the ruler and drag the region into place at each step. Everything
+                  else is off until this ends.
                 </span>
                 {captureName === null ? (
                   <button onClick={() => setCaptureName(`Macro ${library?.entries.length ?? 0}`)}>

@@ -758,6 +758,31 @@ body {
   font: inherit;
 }
 .tl-position { color: var(--text); }
+
+/* A macro capture in progress (spec.md 8.7, M16): the timeline is a ruler and
+   nothing else. The rows and the transport are greyed and dead to the pointer
+   rather than left live to fire edits the backend refuses; the ruler stays
+   live because scrubbing is how the frames get visited. */
+.timeline.tl-capturing .tl-transport,
+.timeline.tl-capturing .tl-layer {
+  opacity: 0.35;
+  pointer-events: none;
+}
+.timeline.tl-capturing .tl-ruler { background: #16203a; }
+.tl-recording { color: #d9a0ff; font-weight: 600; }
+/* A frame the capture has placed its region at: a bar along the bottom of the
+   tick in the capture's own colour, so it reads as a different fact from the
+   readiness strip above it. */
+.tl-tick.tl-visited::after {
+  content: "";
+  position: absolute;
+  left: 1px;
+  right: 1px;
+  bottom: 0;
+  height: 4px;
+  background: #c6aaff;
+}
+.tl-tick.tl-capture-origin::after { background: #ffd678; }
 .tl-buffering { color: #ffd678; }
 
 /* Rows share one horizontal scroll; the labels column is sticky. */

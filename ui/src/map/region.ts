@@ -134,6 +134,20 @@ export function recentred(region: Region, lon: number, lat: number): Region {
 }
 
 /**
+ * The point the backend places a region by: its centre, or a polygon's
+ * bounding-box centre (`RegionShape::anchor`).
+ */
+export function regionAnchor(region: Region): [number, number] | null {
+  switch (region.kind) {
+    case "rect":
+    case "disc":
+      return [region.centre[0], region.centre[1]];
+    case "polygon":
+      return polygonAnchor(region.points);
+  }
+}
+
+/**
  * A polygon's anchor: the centre of its bounding box.
  *
  * Longitudes are carried the short way from the first point, so a ring across

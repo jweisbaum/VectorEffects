@@ -242,6 +242,11 @@ pub struct CaptureMode {
     pub placed_steps: u32,
     /// Whether movement is being recorded.
     pub record_movement: bool,
+    /// The steps the region has been placed at, in order.
+    ///
+    /// The timeline marks them, so the user can see which frames the capture
+    /// has visited and which still hold the position the region was drawn at.
+    pub visited: Vec<u32>,
     /// Where the region sits at the step that was asked about, as `[lon, lat]`.
     ///
     /// The map draws the region while a capture runs, and each frame holds its
@@ -258,6 +263,7 @@ fn mode_of(session: &CaptureSession, step: Option<u32>) -> CaptureMode {
             first_step: active.first_step,
             placed_steps: active.positions.len() as u32,
             record_movement: active.record_movement,
+            visited: active.positions.keys().copied().collect(),
             // A step never visited keeps the position the region was drawn at,
             // which is the same rule the bake follows.
             position: step.map(|step| {
@@ -273,6 +279,7 @@ fn mode_of(session: &CaptureSession, step: Option<u32>) -> CaptureMode {
             first_step: 0,
             placed_steps: 0,
             record_movement: false,
+            visited: Vec::new(),
             position: None,
         },
     }

@@ -22,6 +22,13 @@ placed_steps: number,
  */
 record_movement: boolean, 
 /**
+ * The steps the region has been placed at, in order.
+ *
+ * The timeline marks them, so the user can see which frames the capture
+ * has visited and which still hold the position the region was drawn at.
+ */
+visited: Array<number>, 
+/**
  * Where the region sits at the step that was asked about, as `[lon, lat]`.
  *
  * The map draws the region while a capture runs, and each frame holds its

@@ -2131,10 +2131,17 @@ a setting (§8.6); a file in it that will not decode is skipped rather than
 emptying the list.
 
 **Capture.** Draw a region, press **Start capture**, and the timeline enters
-capture mode. At each step the region may be dragged, and **each frame holds
+capture mode: the rows and the transport grey out and go dead to the pointer,
+the app's edit shortcuts stand down, and only the ruler — and the arrow keys —
+still move the playhead, because scrubbing is how the frames get visited. The
+ruler marks every frame the region has been placed at, and the frame the
+capture began on in its own colour. At each step the region may be **dragged**
+— by delta from where the pointer went down, at pointer resolution, never a
+click that recentres it on the pointer, which jumped — and **each frame holds
 its own position**, initialised to where the region was drawn: moving it at
 frame 3 moves frame 3 and no other. Those positions are capture state — not
-keyframes, not the document, not history. **Finish** asks for a name and bakes:
+keyframes, not the document, not history — so a placement is not an edit and
+not undoable, and a click outside the region does nothing at all. **Finish** asks for a name and bakes:
 for each frame, the visible composite inside *that frame's* region, evaluated
 with `CpuEvaluator` at the project's grid spacing, undefined kept distinct from
 calm. **Record movement** stores each frame's displacement from the first;

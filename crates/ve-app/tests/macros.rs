@@ -225,6 +225,13 @@ fn capture_mode_refuses_every_write_and_cancel_restores() {
         at_first.position.is_some(),
         "a running capture has a position"
     );
+    // The timeline marks the frames the region has been placed at; before any
+    // placement that is the one the capture began on, and nothing else.
+    assert_eq!(
+        at_first.visited,
+        vec![0],
+        "only the first step is visited yet"
+    );
     let unvisited = macros::mode(&app, Some(1)).expect("mode");
     assert_eq!(
         unvisited.position, at_first.position,
