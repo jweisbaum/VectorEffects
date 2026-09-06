@@ -2008,7 +2008,7 @@ front of every pan.
   an object — a click, a marquee, a panel row — drops the region; drawing or
   keying a region drops the objects. Each is a way of pointing, and a gesture
   that means one cannot leave the other standing.
-- `Shift`+arrows **nudge** the selection one step across the screen — the
+- `Shift`+arrows **nudge** the selection 3 CSS px across the screen — the
   selected objects as one rigid move, or the region — one history entry per
   press. A screen distance rather than degrees, so a press moves the same
   amount of what you can see at every zoom and latitude. The map's pan is

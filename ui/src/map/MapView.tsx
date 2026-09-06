@@ -222,8 +222,14 @@ function macroRegion(outline: MacroOutline, lon: number, lat: number): Region {
   }
 }
 
-/** How far one nudge moves the selection, in CSS pixels (spec.md 8.2, M23). */
-const NUDGE_PX_CSS = 8;
+/**
+ * How far one nudge moves the selection, in CSS pixels (spec.md 8.2, M23).
+ *
+ * Three, down from eight (M27): a nudge is for the last few pixels of a
+ * placement, and eight was most of the way to a drag. Holding the key
+ * repeats it, so a long way is still reachable.
+ */
+const NUDGE_PX_CSS = 3;
 
 /** The cursor readout: position, field, zoom. */
 function MapReadout({ store, convention }: { store: ReadoutStore; convention: string }) {

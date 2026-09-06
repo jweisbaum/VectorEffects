@@ -2493,7 +2493,7 @@ anything not done recorded here with its reason.
    back on for the panels), and the map's chrome is inset by `--dock-left`,
    `--dock-right` and `--dock-bottom`, which `App` sets from the panel
    state. A fold no longer resizes the canvas, so nothing re-renders.
-8. **Smaller `Shift`-arrow nudges.** Pending.
+8. **Smaller `Shift`-arrow nudges.** Delivered: 3 CSS px a press, from 8.
 9. **Capture, measure, undo and redo buttons alike and aligned.** Pending.
 10. **Panel toggles on the border, still.** Pending.
 11. **The rendering count moves to the status bar.** Pending.
