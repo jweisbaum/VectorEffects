@@ -772,8 +772,20 @@ body {
   gap: 3px;
   padding: 5px 8px;
   font-size: 12px;
+  /* WebKit starts a drag from an element only when told it is one; without
+     this a row with no selectable text had nothing to pick up (M29). */
+  -webkit-user-drag: element;
 }
-.layer-header .name { font-weight: 600; cursor: text; }
+.layer-header .name { font-weight: 600; cursor: grab; }
+/* The grip: a place that is plainly for picking the row up. */
+.layer-header .grip,
+.object .grip { color: var(--muted); opacity: 0.55; cursor: grab; letter-spacing: -2px; font-size: 11px; }
+.layer-header:active .grip, .object:active .grip { cursor: grabbing; }
+/* A layer drop lands above or below the row the pointer is over: a line on
+   that edge says which (M29). */
+.layer-header.drop-above { box-shadow: inset 0 2px 0 0 var(--accent); }
+.layer-header.drop-below { box-shadow: inset 0 -2px 0 0 var(--accent); }
+.layer-header.drop-into { outline: 1px dashed var(--accent); outline-offset: -1px; }
 /* The active layer receives new objects and scopes a plain marquee, so it has
    to be visible at a glance rather than inferred from the selection. */
 .layer-header.active { background: #16263d; border-left: 2px solid var(--accent); }
@@ -809,6 +821,7 @@ body {
   font-size: 12px;
   cursor: pointer;
   border-left: 2px solid transparent;
+  -webkit-user-drag: element;
 }
 .object:hover { background: #141f34; }
 .object.selected {

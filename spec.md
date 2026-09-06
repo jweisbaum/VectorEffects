@@ -1099,7 +1099,10 @@ All tools produce **objects**. Common rules:
   paste, a pasted patch, an inserted macro, a duplicate, the panel's
   drag-drop — and **an imported layer takes nothing** (D66): a GRIB layer's
   field is its file, and a creation aimed at one is refused with a hint
-  naming the layer rather than quietly landing somewhere else.
+  naming the layer rather than quietly landing somewhere else. **A layer is
+  dragged above or below any other** (M29): the drop lands on whichever
+  half of the target row the pointer let go on, a line on that edge says so
+  beforehand, and each row carries a grip to pick it up by.
 - A layer holds an unlimited number of objects.
 - All objects support: rename, delete, duplicate, copy/paste, select and
   multi-select, enable/disable, move, rotate, scale.

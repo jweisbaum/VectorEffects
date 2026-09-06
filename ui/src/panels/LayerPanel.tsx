@@ -7,7 +7,11 @@ import type { ProjectSummary } from "../generated/ProjectSummary";
 import type { ImageLayerView } from "../generated/ImageLayerView";
 import { pickGribToImport, pickImageToImport } from "../project/dialogs";
 import { EyeIcon } from "./EyeIcon";
+import { layerDropIndex } from "./reorder";
 import SpeedFilter from "./SpeedFilter";
+
+/** Which side of a row a drop lands on: above or below a layer, or into it. */
+type DropWhere = "above" | "below" | "into";
 
 /** What is being dragged, while a reorder is in progress. */
 type Dragging =
@@ -57,7 +61,8 @@ export default function LayerPanel({
   const [renaming, setRenaming] = useState<number | null>(null);
   const [draft, setDraft] = useState("");
   const [dragging, setDragging] = useState<Dragging | null>(null);
-  const [dropTarget, setDropTarget] = useState<number | null>(null);
+  /** The row a drop would land on, and — for a layer — which side of it. */
+  const [dropTarget, setDropTarget] = useState<{ id: number; where: DropWhere } | null>(null);
   // Errors go to the status bar's hint area (M25), not a line of their own.
   const setError = reportError;
   /**
@@ -177,13 +182,19 @@ export default function LayerPanel({
   // Top of the stack first: index 0 is the bottom of the document.
   const layers = [...tree.layers].reverse();
 
-  /** Moves the dragged layer to where `targetIndex` currently sits. */
-  const dropOnLayer = (targetIndex: number, targetId: number) => {
+  /**
+   * Drops the dragged layer above or below the layer at `targetIndex`, or
+   * the dragged object into it (M29). Above and below are the halves of the
+   * row the pointer let go on, so a layer can be put on either side of any
+   * other in one drag.
+   */
+  const dropOnLayer = (targetIndex: number, targetId: number, where: DropWhere) => {
     const drag = dragging;
     endDrag();
     if (!drag) return;
     if (drag.kind === "layer") {
-      if (drag.index !== targetIndex) run(api.moveLayer(drag.index, targetIndex));
+      const to = layerDropIndex(drag.index, targetIndex, where !== "below");
+      if (drag.index !== to) run(api.moveLayer(drag.index, to));
       return;
     }
     // An object dropped on a layer header joins the top of that layer.
@@ -231,7 +242,7 @@ export default function LayerPanel({
                 className={[
                   "layer-header",
                   activeLayer === layer.id ? "active" : "",
-                  dropTarget === layer.id ? "drop-target" : "",
+                  dropTarget?.id === layer.id ? `drop-${dropTarget.where}` : "",
                 ]
                   .filter(Boolean)
                   .join(" ")}
@@ -254,14 +265,30 @@ export default function LayerPanel({
                   if (dragging.kind === "object" && layer.grib !== null) return;
                   e.preventDefault();
                   e.dataTransfer.dropEffect = "move";
-                  setDropTarget(layer.id);
+                  // A layer lands on the side of the row the pointer is over;
+                  // an object lands in the layer.
+                  const where: DropWhere =
+                    dragging.kind === "object"
+                      ? "into"
+                      : e.clientY < e.currentTarget.getBoundingClientRect().top +
+                          e.currentTarget.getBoundingClientRect().height / 2
+                        ? "above"
+                        : "below";
+                  setDropTarget((current) =>
+                    current?.id === layer.id && current.where === where
+                      ? current
+                      : { id: layer.id, where },
+                  );
                 }}
-                onDragLeave={() => setDropTarget((t) => (t === layer.id ? null : t))}
+                onDragLeave={() => setDropTarget((t) => (t?.id === layer.id ? null : t))}
                 onDrop={(e) => {
                   e.preventDefault();
-                  dropOnLayer(index, layer.id);
+                  dropOnLayer(index, layer.id, dropTarget?.id === layer.id ? dropTarget.where : "into");
                 }}
               >
+                <span className="grip" aria-hidden="true" title="Drag to reorder">
+                  ⋮⋮
+                </span>
                 <button
                   className={folded.has(layer.id) ? "fold" : "fold open"}
                   title={folded.has(layer.id) ? "Show this layer's objects" : "Hide this layer's objects"}
@@ -393,7 +420,7 @@ export default function LayerPanel({
                         "object",
                         selection.includes(object.id) ? "selected" : "",
                         object.active_here ? "" : "inactive",
-                        dropTarget === object.id ? "drop-target" : "",
+                        dropTarget?.id === object.id ? "drop-target" : "",
                       ]
                         .filter(Boolean)
                         .join(" ")}
@@ -411,10 +438,10 @@ export default function LayerPanel({
                         e.preventDefault();
                         e.stopPropagation();
                         e.dataTransfer.dropEffect = "move";
-                        setDropTarget(object.id);
+                        setDropTarget({ id: object.id, where: "into" });
                       }}
                       onDragLeave={() =>
-                        setDropTarget((t) => (t === object.id ? null : t))
+                        setDropTarget((t) => (t?.id === object.id ? null : t))
                       }
                       onDrop={(e) => {
                         e.preventDefault();

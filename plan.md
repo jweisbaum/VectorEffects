@@ -2592,6 +2592,37 @@ the eraser's sweep and the loupe in particular want a look in the app.
 
 ---
 
+### M29 — The fourth pass · **in progress**
+
+**Goal:** the fifteen findings the user handed over on 2026-09-06 after the
+M28 build, in order, one commit each, with anything scoped down recorded
+here with its reason. Two of them reopen recorded decisions on the user's
+instruction: 13 restores a start time to the timeline (D69), and 8 makes
+the field kind a property of the layer rather than of the project (§4.1).
+
+1. **Layers drag above and below other layers.** Delivered: a drop names
+   the half of the row it landed on, `layerDropIndex` (tested against the
+   order the panel would then show) turns that into the document index
+   `MoveLayer` wants, the row shows a line on the edge the drop will take,
+   and each row has a grip and WebKit's `-webkit-user-drag: element`, which
+   is what lets a row with no selectable text be picked up at all.
+2. **The dividers read out while the second point is chosen.** Pending.
+3. **The timeline lists layers and objects in the panel's order.** Pending.
+4. **A new object is the selection.** Pending.
+5. **The follow button does something on a click.** Pending.
+6. **Divergence strokes with the same settings merge.** Pending.
+7. **The motion button's help text.** Pending.
+8. **Field kind per layer, and a two-field export.** Pending.
+9. **The intensity slider.** Pending.
+10. **The divergence slider.** Pending.
+11. **The turn tool's direction and amount.** Pending.
+12. **The warp does something.** Pending.
+13. **A start time on the timeline.** Pending.
+14. **The macro preview places into a scene of its own.** Pending.
+15. **The eraser erases what it covers.** Pending.
+
+---
+
 ## 3. Testing strategy
 
 | Layer | Approach |
