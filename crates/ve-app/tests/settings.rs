@@ -189,14 +189,18 @@ fn the_preference_is_the_default_for_new_projects_only() {
     let wind = projects::current(&state).expect("summary").expect("open");
     assert!((wind.wind_scale_knots - 35.0).abs() < 1e-9);
 
-    // A current project takes the other default, since currents run an order
-    // of magnitude slower.
+    // Every project takes both defaults (M29): a project may hold wind and
+    // current layers together, and currents run an order of magnitude
+    // slower, so each kind has a scale of its own.
+    assert!((wind.current_scale_knots - 4.0).abs() < 1e-9);
     with_project(&state, "current");
     let current = projects::current(&state).expect("summary").expect("open");
-    assert!((current.wind_scale_knots - 4.0).abs() < 1e-9);
+    assert!((current.current_scale_knots - 4.0).abs() < 1e-9);
+    assert!((current.wind_scale_knots - 35.0).abs() < 1e-9);
 
     // Changing the preference afterwards leaves the open project alone.
     settings::default_scales_set(&state, 90.0, 9.0).expect("defaults");
     let unchanged = projects::current(&state).expect("summary").expect("open");
-    assert!((unchanged.wind_scale_knots - 4.0).abs() < 1e-9);
+    assert!((unchanged.wind_scale_knots - 35.0).abs() < 1e-9);
+    assert!((unchanged.current_scale_knots - 4.0).abs() < 1e-9);
 }
