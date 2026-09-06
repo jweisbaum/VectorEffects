@@ -2606,8 +2606,14 @@ the field kind a property of the layer rather than of the project (§4.1).
    `MoveLayer` wants, the row shows a line on the edge the drop will take,
    and each row has a grip and WebKit's `-webkit-user-drag: element`, which
    is what lets a row with no selectable text be picked up at all.
-2. **The dividers read out while the second point is chosen.** Pending.
-3. **The timeline lists layers and objects in the panel's order.** Pending.
+2. **The dividers read out while the second point is chosen.** Delivered:
+   `preview_measurement` builds the leg as `add_measurement` would and
+   returns its view without storing it; the map asks for it one-in-flight
+   as the pointer moves and draws it with the placed measurements. Tested
+   equal to the placed view.
+3. **The timeline lists layers and objects in the panel's order.**
+   Delivered: both loops reverse the document's bottom-first order, as the
+   layer panel does.
 4. **A new object is the selection.** Pending.
 5. **The follow button does something on a click.** Pending.
 6. **Divergence strokes with the same settings merge.** Pending.

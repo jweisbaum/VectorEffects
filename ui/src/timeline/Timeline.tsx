@@ -1059,8 +1059,12 @@ export default function Timeline({
           </div>
         )}
 
-        {/* The tree. */}
-        {tree?.layers.map((layer) => (
+        {/*
+          The tree, in the layer panel's order (M29): top of the stack first,
+          and within a layer the topmost object first, which is the reverse
+          of the document's bottom-first order both here and there.
+        */}
+        {[...(tree?.layers ?? [])].reverse().map((layer) => (
           <div key={layer.id} className="tl-layer">
             <div className="tl-row tl-layer-row">
               <div className="tl-labels">{layer.name}</div>
@@ -1102,7 +1106,7 @@ export default function Timeline({
                 })}
               </div>
             </div>
-            {layer.objects.map((object) => {
+            {[...layer.objects].reverse().map((object) => {
               const open = expanded.has(object.id);
               const entry = tracks.get(object.id);
               const drag = rangeDrag?.object === object.id ? rangeDrag : null;

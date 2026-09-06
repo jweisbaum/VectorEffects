@@ -2449,6 +2449,10 @@ showing a GRIB layer of the other kind is (§4.8); the list marks the kind.
 
 A bottom dock, resizable, with two coordinated regions:
 
+Layers and their objects are listed **in the layer panel's order** (M29):
+the top of the stack first, and within a layer the topmost object first —
+the reverse of the document's bottom-first order, reversed in both places.
+
 - **Ruler:** one tick per time step, labelled with the forecast hour and, once a
   GRIB file has given the project a start time (§4.8), the absolute UTC time.
   There is no field for the start time: a project has no clock of its own,
@@ -2651,6 +2655,12 @@ A worker pool renders frames ahead of the playhead.
 These are overlays. They never contribute to the field and never appear in the
 GRIB output. They are saved in `Project.annotations` so a measurement survives
 save/reopen. One tool, `T`, with three modes:
+
+**The leg being drawn reads out as it is drawn** (M29): from the first
+click, or the open chain's last point, to the pointer, the dividers show the
+distance and bearing the second click will keep — the same view the placed
+measurement gets, computed by the same code, so the two never disagree. One
+request in flight, the newest position waiting; nothing is stored by asking.
 
 | Mode | Behaviour |
 |---|---|
