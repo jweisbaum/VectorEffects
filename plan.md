@@ -2450,6 +2450,33 @@ protocol.
 
 ---
 
+### M27 — Polish from the second pass · **in progress**
+
+**Goal:** the thirteen findings the user handed over on 2026-09-06 after
+using the app with M23–M26 in it, delivered in order, one commit each, with
+anything not done recorded here with its reason.
+
+1. **Hover indicator stands down inside a selected region.** Delivered: the
+   footprint was drawn under the paint bucket, so a click that would fill
+   the region looked as though it would paint a spot. `showsHoverIndicator`
+   (`ui/src/map/hover.ts`) is the rule, pure and tested beside `cursorFor`,
+   and takes the same inside-the-region predicate the cursor and the click
+   use; every filling tool goes through it.
+2. **`Ctrl`-`Shift`-`V` pastes a still.** Pending.
+3. **Shift-click in the layer panel selects no text.** Pending.
+4. **The macro stamp's hover outline.** Pending.
+5. **The shape fill's click neither magnifies nor samples.** Pending.
+6. **The magnifier hides the tool's hover glyphs.** Pending.
+7. **The map is full-window behind the panels.** Pending.
+8. **Smaller `Shift`-arrow nudges.** Pending.
+9. **Capture, measure, undo and redo buttons alike and aligned.** Pending.
+10. **Panel toggles on the border, still.** Pending.
+11. **The rendering count moves to the status bar.** Pending.
+12. **Auto scale.** Pending.
+13. **The macro preview: frame, lockout, stamp cursor, autoplay, badge.** Pending.
+
+---
+
 ## 3. Testing strategy
 
 | Layer | Approach |

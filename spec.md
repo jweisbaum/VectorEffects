@@ -1966,7 +1966,10 @@ capture and insert tools are the arrow; every tool that draws or measures is
 a crosshair whose centre is the click, with the tool's hover footprint drawn
 around it where it has one; a pick is a crosshair ahead of everything; inside
 a selected region with a tool that would fill it the cursor is a **paint
-bucket**, by the same predicate the click uses; while the eyedropper is armed
+bucket**, by the same predicate the click uses, **and the tool's hover
+indicator is not drawn there** — the click makes the object from the region,
+and a footprint under the bucket said it would paint a spot instead
+(`showsHoverIndicator`, one rule beside the cursor's); while the eyedropper is armed
 the cursor hides and the overlay draws a **magnifier** at the pointer — a ring
 with a plus, the field there as the project's glyph, and the speed and
 direction the click will take, from the readout's own sample. Every custom

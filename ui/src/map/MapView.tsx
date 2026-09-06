@@ -81,6 +81,7 @@ import {
 } from "./measure";
 import type { MeasurementView } from "../generated/MeasurementView";
 import type { MeasurementKind } from "../generated/MeasurementKind";
+import { showsHoverIndicator } from "./hover";
 import { RAMP_STOPS, rampCss } from "./ramp";
 import { parseBasemap } from "./format";
 import { marqueeBounds } from "./marquee";
@@ -2504,9 +2505,24 @@ export default function MapView({
     // The hover indicator: the exact footprint a click would produce, in the
     // same colour and with the same glyph as the gesture preview (spec.md 6.1).
     // Only where the tool has one — a polygon and a curve are built up point by
-    // point, so a single click produces nothing to show (spec.md 6.2).
-    if (cursor && schema.hover && !toolPick && plan.nib) {
-      const geo = unproject(camera, view, cursor);
+    // point, so a single click produces nothing to show (spec.md 6.2) — and
+    // only where the click *would* produce it: inside a selected region the
+    // click fills the region and the cursor is the bucket (`showsHoverIndicator`).
+    const hoverGeo = cursor ? unproject(camera, view, cursor) : null;
+    const hoverShown =
+      hoverGeo !== null &&
+      showsHoverIndicator({
+        hasIndicator: schema.hover,
+        nib: plan.nib,
+        picking: toolPick !== null,
+        insideRegion:
+          region !== null &&
+          drawsObjects(tool) &&
+          editsRegion(tool) &&
+          regionContains(region, hoverGeo.lon, hoverGeo.lat),
+      });
+    if (hoverGeo && hoverShown) {
+      const geo = hoverGeo;
       const hovered =
         schemaTool === null
           ? null
