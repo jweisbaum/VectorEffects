@@ -2160,6 +2160,62 @@ export default function MapView({
    * nothing to do with the field: mixing it into the GL pass would mean
    * redrawing the whole map to move a cursor outline.
    */
+  /**
+   * A macro's footprint at a pointer: its region outline, dashed, and — for
+   * one that recorded movement — the track its centre will follow, one dot
+   * per frame. What the insert tool's hover and the preview's stamp hover
+   * both draw (spec.md 8.7, M27).
+   */
+  const drawMacroFootprint = useCallback(
+    (
+      context: CanvasRenderingContext2D,
+      ring: Array<[number, number]>,
+      track: Array<[number, number]> | null,
+      at: { lon: number; lat: number },
+      dpr: number,
+    ) => {
+      const camera = cameraRef.current;
+      const view = viewRef.current;
+      const outline = ring.map((p) => toScreen(camera, view, { lon: p[0], lat: p[1] }));
+      const first = outline[0];
+      if (!first) return;
+      context.save();
+      context.beginPath();
+      context.moveTo(first.x, first.y);
+      for (const point of outline.slice(1)) context.lineTo(point.x, point.y);
+      context.closePath();
+      context.fillStyle = "rgba(140, 255, 190, 0.08)";
+      context.fill();
+      context.strokeStyle = "rgba(150, 255, 200, 0.95)";
+      context.lineWidth = Math.max(1, dpr);
+      context.setLineDash([6 * dpr, 4 * dpr]);
+      context.stroke();
+      context.setLineDash([]);
+      if (track) {
+        const path = track.map(([dx, dy]) =>
+          toScreen(camera, view, { lon: at.lon + dx, lat: at.lat + dy }),
+        );
+        const start = path[0];
+        if (start) {
+          context.beginPath();
+          context.moveTo(start.x, start.y);
+          for (const point of path.slice(1)) context.lineTo(point.x, point.y);
+          context.strokeStyle = "rgba(150, 255, 200, 0.75)";
+          context.lineWidth = Math.max(1, dpr);
+          context.stroke();
+          context.fillStyle = "rgba(150, 255, 200, 0.95)";
+          for (const point of path) {
+            context.beginPath();
+            context.arc(point.x, point.y, 2.5 * dpr, 0, Math.PI * 2);
+            context.fill();
+          }
+        }
+      }
+      context.restore();
+    },
+    [],
+  );
+
   const drawOverlay = useCallback(() => {
     const canvas = overlayRef.current;
     const context = canvas?.getContext("2d");
@@ -2170,6 +2226,27 @@ export default function MapView({
 
     const camera = cameraRef.current;
     const dpr = window.devicePixelRatio || 1;
+
+    // The macro preview (spec.md 8.7, M27) shows the macro and nothing of the
+    // document: no edges, handles, measurements, image corners or region.
+    // The pointer carries the macro's region outline and its track, as the
+    // insert tool's does, since a click stamps it there; the green frame
+    // round the map is CSS.
+    const stamped = recordingRef.current;
+    if (stamped?.phase === "previewing") {
+      const at = cursorRef.current;
+      if (at && region !== null) {
+        const geo = unproject(camera, view, at);
+        drawMacroFootprint(
+          context,
+          regionRing(recentred(region, geo.lon, geo.lat)),
+          stamped.track.length > 1 ? stamped.track : null,
+          geo,
+          dpr,
+        );
+      }
+      return;
+    }
 
     // Object edges (spec.md 6.1, 6.2, 6.3): the one under the pointer, and any
     // selected object with no field of its own to show where it is.
@@ -2328,28 +2405,6 @@ export default function MapView({
     // as marching ants — the outline every paint application uses for "an
     // area, not a thing" — in a colour used for nothing else here, so a region
     // cannot be mistaken for a selected object's edge.
-    // The preview's region, at the stamp, in green: where the macro is
-    // (spec.md 8.7, M26). The recording's region is drawn below as usual.
-    const stamped = recordingRef.current;
-    if (stamped?.phase === "previewing" && stamped.stamp && region !== null) {
-      const ring = regionRing(recentred(region, stamped.stamp[0], stamped.stamp[1])).map((p) =>
-        toScreen(camera, view, { lon: p[0], lat: p[1] }),
-      );
-      const first = ring[0];
-      if (first) {
-        context.save();
-        context.beginPath();
-        context.moveTo(first.x, first.y);
-        for (const at of ring.slice(1)) context.lineTo(at.x, at.y);
-        context.closePath();
-        context.fillStyle = "rgba(63, 191, 127, 0.10)";
-        context.fill();
-        context.strokeStyle = "rgba(63, 191, 127, 0.95)";
-        context.lineWidth = Math.max(1.5, 1.5 * dpr);
-        context.stroke();
-        context.restore();
-      }
-    }
     const shaping = regionDrag.current;
     const shown: Region | null = previewing
       ? null
@@ -2503,45 +2558,13 @@ export default function MapView({
     const macro = library?.entries.find((entry) => entry.id === macroId) ?? null;
     if (cursor && tool === INSERT && recording === null && macro !== null) {
       const at = unproject(camera, view, cursor);
-      const ring = regionRing(macroRegion(macro.outline, at.lon, at.lat)).map((p) =>
-        toScreen(camera, view, { lon: p[0], lat: p[1] }),
+      drawMacroFootprint(
+        context,
+        regionRing(macroRegion(macro.outline, at.lon, at.lat)),
+        macro.moves ? macro.track : null,
+        at,
+        dpr,
       );
-      const first = ring[0];
-      if (first) {
-        context.save();
-        context.beginPath();
-        context.moveTo(first.x, first.y);
-        for (const point of ring.slice(1)) context.lineTo(point.x, point.y);
-        context.closePath();
-        context.fillStyle = "rgba(140, 255, 190, 0.08)";
-        context.fill();
-        context.strokeStyle = "rgba(150, 255, 200, 0.95)";
-        context.lineWidth = Math.max(1, dpr);
-        context.setLineDash([6 * dpr, 4 * dpr]);
-        context.stroke();
-        context.setLineDash([]);
-        if (macro.moves) {
-          const track = macro.track.map(([dx, dy]) =>
-            toScreen(camera, view, { lon: at.lon + dx, lat: at.lat + dy }),
-          );
-          const start = track[0];
-          if (start) {
-            context.beginPath();
-            context.moveTo(start.x, start.y);
-            for (const point of track.slice(1)) context.lineTo(point.x, point.y);
-            context.strokeStyle = "rgba(150, 255, 200, 0.75)";
-            context.lineWidth = Math.max(1, dpr);
-            context.stroke();
-            context.fillStyle = "rgba(150, 255, 200, 0.95)";
-            for (const point of track) {
-              context.beginPath();
-              context.arc(point.x, point.y, 2.5 * dpr, 0, Math.PI * 2);
-              context.fill();
-            }
-          }
-        }
-        context.restore();
-      }
     }
 
     if (tool === HAND || !schema) return;
@@ -2720,6 +2743,7 @@ export default function MapView({
     }
   }, [
     drawDragOutlines,
+    drawMacroFootprint,
     drawGlyphs,
     drawFieldPreview,
     drawPlacedPoints,
@@ -4258,6 +4282,7 @@ export default function MapView({
       <canvas ref={overlayRef} className="map-overlay" />
 
       {error === null && !ready && <div className="map-status">Loading basemap…</div>}
+      {previewing && <div className="map-preview-frame" aria-hidden="true" />}
       {previewing && <div className="map-preview-badge">Macro Preview</div>}
 
       <div className="map-toolbar">

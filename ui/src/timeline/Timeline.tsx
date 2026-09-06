@@ -135,6 +135,7 @@ export default function Timeline({
   onKeysSelected,
   settings,
   capture,
+  hidden = false,
   onCapture,
 }: {
   project: ProjectSummary;
@@ -181,6 +182,8 @@ export default function Timeline({
    * have been.
    */
   capture: CaptureMode | null;
+  /** Put away: not drawn, but mounted, so playback goes on (M27). */
+  hidden?: boolean;
 }) {
   const capturing = capture !== null && capture.active;
   const recordingPhase = capturing && capture.phase === "recording";
@@ -217,7 +220,10 @@ export default function Timeline({
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    const observer = new ResizeObserver(() => setDockWidth(el.clientWidth));
+    // A put-away timeline measures zero; the last real width stands.
+    const observer = new ResizeObserver(() => {
+      if (el.clientWidth > 0) setDockWidth(el.clientWidth);
+    });
     observer.observe(el);
     setDockWidth(el.clientWidth);
     return () => observer.disconnect();
@@ -868,7 +874,7 @@ export default function Timeline({
     utcLabel(s, project.step_hours, project.start_unix_s) ?? forecastLabel(s, project.step_hours);
 
   return (
-    <div className={capturing ? "timeline tl-capturing" : "timeline"}>
+    <div className={capturing ? "timeline tl-capturing" : "timeline"} hidden={hidden}>
       <div className="tl-transport">
         <button onClick={() => setPlaying((on) => !on)} title="Play / pause (Space)">
           {playing ? "❚❚" : "▶"}

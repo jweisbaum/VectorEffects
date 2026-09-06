@@ -427,6 +427,11 @@ pub struct CaptureMode {
     pub preview_revision: Option<u64>,
     /// Where the preview is stamped, `[lon, lat]`, while previewing.
     pub stamp: Option<[f64; 2]>,
+    /// While previewing, each baked frame's displacement from the first, in
+    /// degrees east and north — the track the macro's centre follows, one
+    /// entry per frame, for the stamp hover to draw (M27). Empty otherwise,
+    /// and one entry for a macro that recorded no movement.
+    pub track: Vec<[f64; 2]>,
 }
 
 fn mode_of(
@@ -449,6 +454,14 @@ fn mode_of(
             last_step: active.last_step,
             preview_revision: preview.map(|scene| scene.revision),
             stamp: (active.phase == CapturePhase::Previewing).then_some(active.stamp),
+            track: match (&active.baked, active.phase) {
+                (Some(baked), CapturePhase::Previewing) => baked
+                    .frames
+                    .iter()
+                    .map(|frame| [frame.dx_deg, frame.dy_deg])
+                    .collect(),
+                _ => Vec::new(),
+            },
         },
         None => CaptureMode {
             active: false,
@@ -462,6 +475,7 @@ fn mode_of(
             last_step: 0,
             preview_revision: None,
             stamp: None,
+            track: Vec::new(),
         },
     }
 }

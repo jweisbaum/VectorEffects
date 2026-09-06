@@ -567,8 +567,13 @@ export default function App() {
         )}
       </div>
 
-      {panels.bottom && (
-        <Timeline
+      {/*
+        Mounted whether or not it is shown: its playback loop is what plays a
+        macro preview (spec.md 8.7), and it has to keep playing with the
+        timeline put away (M27).
+      */}
+      <Timeline
+          hidden={!panels.bottom}
           project={project}
         step={step}
         onStepChange={setStep}
@@ -585,7 +590,6 @@ export default function App() {
         capture={recording}
         onCapture={(mode) => mapRef.current?.setCapture(mode)}
       />
-      )}
 
       {/*
         The three tabs sit on the stage's edges, on the border between a

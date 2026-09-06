@@ -59,4 +59,11 @@ preview_revision: number | null,
 /**
  * Where the preview is stamped, `[lon, lat]`, while previewing.
  */
-stamp: [number, number] | null, };
+stamp: [number, number] | null, 
+/**
+ * While previewing, each baked frame's displacement from the first, in
+ * degrees east and north — the track the macro's centre follows, one
+ * entry per frame, for the stamp hover to draw (M27). Empty otherwise,
+ * and one entry for a macro that recorded no movement.
+ */
+track: Array<[number, number]>, };

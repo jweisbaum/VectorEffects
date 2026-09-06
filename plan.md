@@ -2518,7 +2518,15 @@ anything not done recorded here with its reason.
     `rampMax` by closure, so a colour scale changed in the settings reached
     the map only when something else rebuilt the callback; both ends go
     through a ref now, with a redraw when either moves.
-13. **The macro preview: frame, lockout, stamp cursor, autoplay, badge.** Pending.
+13. **The macro preview: frame, lockout, stamp cursor, autoplay, badge.**
+    Delivered: a green `.map-preview-frame` round the visible map, inside
+    the docks, in place of the ring at the stamp; the overlay draws nothing
+    of the document while previewing — only the stamp hover, the macro's
+    region outline and track at the pointer, through the same
+    `drawMacroFootprint` the insert tool uses, with the track carried on
+    `CaptureMode.track`; the timeline stays mounted when put away, so the
+    preview's loop plays with it hidden; the badge sits at the bottom
+    centre, off the legend.
 
 ---
 

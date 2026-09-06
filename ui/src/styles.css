@@ -992,11 +992,25 @@ body {
   opacity: 0.7;
 }
 .tl-preview-label { color: #8cffbe; font-weight: 600; }
-/* The preview badge, bottom right of the map (spec.md 8.7, M26). */
+/* The preview's frame: a green border round the visible map, inside the
+   docked panels, saying the whole view is the preview (spec.md 8.7, M27). */
+.map-preview-frame {
+  position: absolute;
+  top: 0;
+  left: var(--dock-left, 0px);
+  right: var(--dock-right, 0px);
+  bottom: var(--dock-bottom, 0px);
+  box-sizing: border-box;
+  border: 3px solid rgba(63, 191, 127, 0.95);
+  pointer-events: none;
+}
+/* The preview badge, bottom centre of the visible map, between the readout
+   and the legend, which it used to sit over (spec.md 8.7, M26, M27). */
 .map-preview-badge {
   position: absolute;
-  right: calc(var(--dock-right, 0px) + 12px);
-  bottom: calc(var(--dock-bottom, 0px) + 48px);
+  left: calc(50% + (var(--dock-left, 0px) - var(--dock-right, 0px)) / 2);
+  transform: translateX(-50%);
+  bottom: calc(var(--dock-bottom, 0px) + 12px);
   padding: 4px 10px;
   border: 1px solid #3fbf7f;
   border-radius: 6px;
@@ -1007,6 +1021,7 @@ body {
   pointer-events: none;
 }
 .tl-buffering { color: #ffd678; }
+.timeline[hidden] { display: none; }
 
 /* Rows share one horizontal scroll; the labels column is sticky. */
 .tl-scroll { flex: 1; overflow: auto; position: relative; user-select: none; }

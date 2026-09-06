@@ -2347,9 +2347,16 @@ step of the run, the visible composite
 inside the region *where the region is at that step*, evaluated with
 `CpuEvaluator` at the project's grid spacing, undefined kept distinct from
 calm — and enters the **preview** (D71). The map shows the basemap and the
-macro alone, looping over its run, its region outlined in green and *Macro
-Preview* in the map's corner; a click stamps it somewhere else; the panels
-stay grey and the palette dead. The preview is a one-object project the
+macro alone, looping over its run — playing whether or not the timeline is
+shown, since the timeline stays mounted when put away — with **a green frame
+round the whole visible map** and *Macro Preview* at the bottom centre,
+between the readout and the legend (M27; the frame used to be round the
+stamped region, and the badge sat over the legend). Nothing of the document
+is drawn over it: no object edges, handles, measurements, image corners or
+selected region. **The pointer is the stamp**: it carries the macro's region
+outline and, for a recording with movement, its track, exactly as the insert
+tool's does, and a click stamps the macro there; the panels stay grey and the
+palette dead. The preview is a one-object project the
 session holds, served by the tile pipeline under a revision of its own:
 nothing is written to the document to show it, and the history lock stands
 throughout. **Save macro** asks for a name and writes what was looked at;
