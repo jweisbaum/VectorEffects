@@ -953,7 +953,10 @@ redrawn for a panel. The map's own chrome — the option bar, the legend, the
 readout, the preview badge — is inset by the docked panels' widths, so
 nothing the map draws for the user is under one. The cost is that tiles
 under a panel are rendered like any other; invariant 6 prefers that to a
-resize on every fold.
+resize on every fold. **Each panel's toggle is a tab on the border between
+the panel and the map** — centred top to bottom for the side panels, left
+to right for the timeline — and it stays there whether the panel is open or
+closed; a closed panel is gone, not a strip.
 
 **What the map is showing lives in the title bar; what is being painted lives
 over the map** (M25, D68). The title bar's centre holds the view controls —

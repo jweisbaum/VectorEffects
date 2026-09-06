@@ -484,36 +484,23 @@ export default function App() {
         className="stage"
         style={
           {
-            "--dock-left": panels.left ? "310px" : "22px",
-            "--dock-right": panels.right ? "250px" : "22px",
-            "--dock-bottom": panels.bottom ? "220px" : "28px",
+            "--dock-left": panels.left ? "310px" : "0px",
+            "--dock-right": panels.right ? "250px" : "0px",
+            "--dock-bottom": panels.bottom ? "220px" : "0px",
           } as CSSProperties
         }
       >
       <div className="workspace">
-        <aside
-          className={[
-            "sidebar left",
-            panels.left ? "" : "collapsed",
-            // Greyed out and dead to the pointer while a capture records or
-            // previews (spec.md 8.7, M26): every write is refused then, and a
-            // panel that looks live but refuses is worse than one that says
-            // it is off.
-            recording !== null ? "dimmed" : "",
-          ]
-            .filter(Boolean)
-            .join(" ")}
-        >
-          <button
-            className="panel-toggle"
-            onClick={() => toggle("left")}
-            title={panels.left ? "Hide the layer panel" : "Show the layer panel"}
-            aria-label={panels.left ? "Hide the layer panel" : "Show the layer panel"}
-            aria-expanded={panels.left}
-          >
-            {panels.left ? "◀" : "▶"}
-          </button>
-          {panels.left && (
+        {/*
+          A closed panel is gone, not a strip: its toggle is a tab on the
+          stage's edge (`DockToggle`), where it stays whether the panel is
+          open or closed (M27). Greyed out and dead to the pointer while a
+          capture records or previews (spec.md 8.7, M26): every write is
+          refused then, and a panel that looks live but refuses is worse than
+          one that says it is off.
+        */}
+        {panels.left ? (
+          <aside className={recording !== null ? "sidebar left dimmed" : "sidebar left"}>
             <LayerPanel
               project={project}
               step={step}
@@ -524,8 +511,10 @@ export default function App() {
               onChanged={setProject}
               viewBounds={viewBounds}
             />
-          )}
-        </aside>
+          </aside>
+        ) : (
+          <span className="dock-space" />
+        )}
 
         <MapView
           ref={mapRef}
@@ -546,26 +535,8 @@ export default function App() {
           viewSlot={viewSlot}
         />
 
-        <aside
-          className={[
-            "sidebar right",
-            panels.right ? "" : "collapsed",
-            recording !== null ? "dimmed" : "",
-          ]
-            .filter(Boolean)
-            .join(" ")}
-        >
-          <button
-            className="panel-toggle"
-            onClick={() => toggle("right")}
-            title={panels.right ? "Hide the properties and history" : "Show the properties and history"}
-            aria-label={panels.right ? "Hide the properties and history" : "Show the properties and history"}
-            aria-expanded={panels.right}
-          >
-            {panels.right ? "▶" : "◀"}
-          </button>
-          {panels.right && (
-            <>
+        {panels.right ? (
+          <aside className={recording !== null ? "sidebar right dimmed" : "sidebar right"}>
               <section className="panel-section">
                 <header onClick={() => toggle("properties")}>
                   <span className="disclose">{panels.properties ? "▾" : "▸"}</span>
@@ -590,12 +561,13 @@ export default function App() {
                 </header>
                 {panels.history && <HistoryPanel project={project} onChanged={setProject} />}
               </section>
-            </>
-          )}
-        </aside>
+          </aside>
+        ) : (
+          <span className="dock-space" />
+        )}
       </div>
 
-      {panels.bottom ? (
+      {panels.bottom && (
         <Timeline
           project={project}
         step={step}
@@ -611,26 +583,35 @@ export default function App() {
         onKeysSelected={onKeysSelected}
         settings={settings}
         capture={recording}
-        onCollapse={() => toggle("bottom")}
         onCapture={(mode) => mapRef.current?.setCapture(mode)}
       />
-      ) : (
-        <div className="timeline collapsed">
-          <button
-            className="panel-toggle"
-            onClick={() => toggle("bottom")}
-            title="Show the timeline"
-            aria-label="Show the timeline"
-            aria-expanded={false}
-          >
-            ▲ Timeline
-          </button>
-          <span className="muted">
-            Step {step} / {Math.max(0, project.step_count - 1)}
-          </span>
-        </div>
       )}
 
+      {/*
+        The three tabs sit on the stage's edges, on the border between a
+        panel and the map, and do not move when the panel opens or closes:
+        the side ones are centred top to bottom, the timeline's left to
+        right (M27). Before this each toggle was a strip inside its panel
+        that jumped from the panel's top to its middle as it folded.
+      */}
+      <DockToggle
+        side="left"
+        open={panels.left}
+        label="the layer panel"
+        onToggle={() => toggle("left")}
+      />
+      <DockToggle
+        side="right"
+        open={panels.right}
+        label="the properties and history"
+        onToggle={() => toggle("right")}
+      />
+      <DockToggle
+        side="bottom"
+        open={panels.bottom}
+        label="the timeline"
+        onToggle={() => toggle("bottom")}
+      />
       </div>
 
       {showSettings && settings !== null && (
@@ -694,6 +675,44 @@ export default function App() {
         </button>
       </div>
     </div>
+  );
+}
+
+/** The glyph a dock tab shows: pointing into the panel to open it, out to close it. */
+const DOCK_GLYPH = {
+  left: { open: "◀", closed: "▶" },
+  right: { open: "▶", closed: "◀" },
+  bottom: { open: "▼", closed: "▲" },
+} as const;
+
+/**
+ * A panel's toggle: a tab on the stage's edge, on the border between the
+ * panel and the map (M27). Positioned by the stage's dock variables, so it
+ * sits on the panel's inner edge while the panel is open and on the window's
+ * edge while it is closed, centred along that edge either way.
+ */
+function DockToggle({
+  side,
+  open,
+  label,
+  onToggle,
+}: {
+  side: "left" | "right" | "bottom";
+  open: boolean;
+  label: string;
+  onToggle: () => void;
+}) {
+  const verb = open ? "Hide" : "Show";
+  return (
+    <button
+      className={`dock-toggle ${side}`}
+      onClick={onToggle}
+      title={`${verb} ${label}`}
+      aria-label={`${verb} ${label}`}
+      aria-expanded={open}
+    >
+      {DOCK_GLYPH[side][open ? "open" : "closed"]}
+    </button>
   );
 }
 

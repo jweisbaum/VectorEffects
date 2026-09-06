@@ -135,7 +135,6 @@ export default function Timeline({
   onKeysSelected,
   settings,
   capture,
-  onCollapse,
   onCapture,
 }: {
   project: ProjectSummary;
@@ -164,8 +163,6 @@ export default function Timeline({
    * down (spec.md 9.3, M23).
    */
   onKeysSelected: (active: boolean) => void;
-  /** Folds the dock away to a strip (M25). */
-  onCollapse: () => void;
   /**
    * A capture command answered from here — a key removed from the
    * *selection position* row (D72) — handed back to the map, which owns
@@ -928,14 +925,6 @@ export default function Timeline({
             onCommit={changeStepCount}
           />
         </label>
-        <button
-          className="tl-collapse"
-          onClick={onCollapse}
-          title="Hide the timeline"
-          aria-label="Hide the timeline"
-        >
-          ▼
-        </button>
       </div>
 
       <div

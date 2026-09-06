@@ -2498,7 +2498,11 @@ anything not done recorded here with its reason.
    Delivered: the view controls' icon buttons are one fixed box, 30 by 26,
    icon centred, and the dividers stand the same height, so an SVG's own
    height no longer sets a button's and the row lines up.
-10. **Panel toggles on the border, still.** Pending.
+10. **Panel toggles on the border, still.** Delivered: `DockToggle`, one
+    tab per panel on the stage's edge, placed by the same dock variables
+    the map's chrome uses, centred along its edge; a closed panel renders
+    nothing, and the timeline's own collapse button and collapsed strip are
+    gone.
 11. **The rendering count moves to the status bar.** Pending.
 12. **Auto scale.** Pending.
 13. **The macro preview: frame, lockout, stamp cursor, autoplay, badge.** Pending.
