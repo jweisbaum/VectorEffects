@@ -225,6 +225,14 @@ function macroRegion(outline: MacroOutline, lon: number, lat: number): Region {
 }
 
 /**
+ * Whether a frame token names the macro preview's scene: its revision has
+ * bit 62 set (D71), which no document revision reaches.
+ */
+function isPreviewFrame(frame: string): boolean {
+  return Number(frame.split("/")[0]) >= 2 ** 62;
+}
+
+/**
  * The narrowest span the auto scale gives the ramp, m/s (spec.md 5.3, M27):
  * a field of one speed would otherwise put its whole range into one colour
  * stop, and a ramp that goes nowhere says nothing.
@@ -1083,7 +1091,13 @@ export default function MapView({
     // Revision then step: an edit changes the address, so a cached tile can
     // never show a field that no longer exists.
     const frame = `${frameRevision()}/${stepRef.current}`;
-    const shown = shownFrameRef.current;
+    // The last frame fully on screen stands in for this one's missing tiles —
+    // but never across the preview's boundary (M28): the document's tiles
+    // held under the preview kept every layer on the map until the first
+    // click, and the preview's under the document kept the macro alone.
+    const previous = shownFrameRef.current;
+    const shown =
+      previous !== null && isPreviewFrame(previous) === isPreviewFrame(frame) ? previous : null;
     const state: RenderState = {
       camera: cameraRef.current,
       view: viewRef.current,
@@ -1503,7 +1517,9 @@ export default function MapView({
     if (tool === CAPTURE && recording === null && region === null) {
       setHint("Draw a region first — it is what gets recorded.");
     } else if (recording !== null && recording.phase === "previewing") {
-      setHint("Click the map to stamp the macro somewhere else. Save keeps it; Edit goes back to recording.");
+      setHint(
+        "Click the map to place the macro there. Save keeps it in the library too; Edit goes back to recording; Cancel leaves what was placed.",
+      );
     } else if (recording !== null) {
       setHint(
         "Scrub the ruler and drag the region into place at each step; every step visited is a key.",
@@ -3120,12 +3136,16 @@ export default function MapView({
     // never the document, which is why it is not an edit and not undoable.
     if (recording !== null) {
       const geo = unproject(cameraRef.current, viewRef.current, point);
-      // In the preview a click stamps the macro there (spec.md 8.7, M26):
-      // the session rebuilds its one-object scene under a new revision.
+      // In the preview a click *places* the macro there (spec.md 8.7, M28):
+      // an object in the active layer from this step, and the preview's
+      // stamp moves with it so the loop shows it where it now is.
       if (recording.phase === "previewing") {
         void api
-          .stampPreview(geo.lon, geo.lat)
-          .then(setCapture)
+          .placePreview(geo.lon, geo.lat, stepRef.current, activeLayer)
+          .then((placed) => {
+            setCapture(placed.mode);
+            onProjectChanged(placed.project);
+          })
           .catch((err: unknown) => setError(String(err)));
         return;
       }

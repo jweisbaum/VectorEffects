@@ -170,7 +170,7 @@ pub fn run() -> anyhow::Result<()> {
             macros::visit_capture,
             macros::unplace_capture,
             macros::preview_capture,
-            macros::stamp_preview,
+            macros::place_preview,
             macros::edit_capture,
             macros::cancel_capture,
             macros::capture_mode,

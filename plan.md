@@ -2561,7 +2561,17 @@ M27 build, in order, one commit each.
    with `Ctrl` a `SetProperty` batch keying each object's `Enabled` off at
    the step alone (`hide_at`, with keys either side so the switch holds
    where it was). Three tests in `editing.rs`.
-2. **The preview places on click and hides the document at once.** Pending.
+2. **The preview places on click and hides the document at once.**
+   Delivered: `place_preview` replaces the stamp-only command — the baked
+   capture becomes a macro object in the document through `macro_object`,
+   the builder the library insert now shares, pushed through the lock
+   (unlocked for one push, relocked whatever happened) with the stamp moved
+   to the click; and the map holds a previous frame's tiles only from the
+   same scene, preview or document, so the layers vanish on entering the
+   preview rather than at the first click. The layers stayed because the
+   document's last frame was *held*, dimmed, under the preview until the
+   preview's own first frame had landed and been replaced. Test in
+   `macros.rs`.
 3. **Shift-click in the layer panel still selected text.** Pending.
 4. **The magnifier magnifies.** Pending.
 5. **Undo and redo sit level with capture and measure.** Pending.

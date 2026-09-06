@@ -649,14 +649,87 @@ pub fn capture_preview(state: &AppState, last_step: u32) -> Result<CaptureMode> 
     })
 }
 
-/// Moves the preview's stamp: the macro is shown centred there instead.
-#[tauri::command]
-pub fn stamp_preview(state: tauri::State<'_, AppState>, lon: f64, lat: f64) -> Result<CaptureMode> {
-    preview_stamp(&state, lon, lat)
+/// What a click in the preview returns: the capture mode, stamped where the
+/// click was, and the document, with the macro placed there (M28).
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export, export_to = "PlacedPreview.ts")]
+pub struct PlacedPreview {
+    /// The preview, moved to the click.
+    pub mode: CaptureMode,
+    /// The document, one macro object richer.
+    pub project: ProjectSummary,
 }
 
-/// Implementation of [`stamp_preview`]. A new revision, so the old stamp's
-/// tiles are unreachable rather than stale.
+/// A click in the preview (spec.md 8.7, M28): the macro is **placed** in the
+/// document there — in `layer` under the creation rule, beginning at
+/// `step`, exactly as the insert tool places one from the library — and the
+/// preview's stamp moves there too, so the loop shows it where it now is.
+#[tauri::command]
+pub fn place_preview(
+    state: tauri::State<'_, AppState>,
+    lon: f64,
+    lat: f64,
+    step: u32,
+    layer: Option<u64>,
+) -> Result<PlacedPreview> {
+    preview_place(&state, lon, lat, step, layer)
+}
+
+/// Implementation of [`place_preview`].
+///
+/// The one write the preview makes, and it goes **through** the lock rather
+/// than around it: the history is unlocked for the single push and locked
+/// again whatever the push did, so every other write path stays refused and
+/// the preview is otherwise what D71 says it is. The placed object is an
+/// ordinary edit — undoable, and left standing by Cancel, which drops the
+/// capture and not the document.
+pub fn preview_place(
+    state: &AppState,
+    lon: f64,
+    lat: f64,
+    step: u32,
+    layer: Option<u64>,
+) -> Result<PlacedPreview> {
+    let mode = preview_stamp(state, lon, lat)?;
+    with_session(state, |session| {
+        let baked = session
+            .capturing
+            .active
+            .as_ref()
+            .and_then(|active| active.baked.clone())
+            .ok_or(AppError::BadOption {
+                field: "capture",
+                value: "nothing is being previewed".to_owned(),
+            })?;
+        let anchor = LonLat::new(wrap180(lon), lat.clamp(-90.0, 90.0))?;
+        let open = session.require_open()?;
+        let step_count = open.project.settings.step_count;
+        let object = macro_object(&baked, anchor, step, step_count);
+        let target = crate::document::creation_layer(&open.project, layer)?;
+        let (layer, index) = (target.id, target.objects.len());
+        open.project
+            .captures
+            .entry(baked.hash.clone())
+            .or_insert_with(|| Arc::clone(&baked));
+        let command = Command::AddObject {
+            layer,
+            index,
+            object: Box::new(object),
+        };
+        open.history.unlock();
+        let pushed = open.history.push(&mut open.project, command);
+        open.history.lock();
+        pushed?;
+        open.touch();
+        Ok(PlacedPreview {
+            mode,
+            project: ProjectSummary::of(session.require_open()?),
+        })
+    })
+}
+
+/// Moves the preview's stamp: the macro is shown centred there instead. A
+/// new revision, so the old stamp's tiles are unreachable rather than stale.
 pub fn preview_stamp(state: &AppState, lon: f64, lat: f64) -> Result<CaptureMode> {
     with_session(state, |session| {
         let settings = session.require_open()?.project.settings;
@@ -963,17 +1036,7 @@ pub fn macro_insert(
     with_session(state, |session| {
         let open = session.require_open()?;
         let step_count = open.project.settings.step_count;
-        let last = step_count.saturating_sub(1);
-        let mut object = Object::new(ToolKind::Macro, "Macro", step_count);
-        object.geometry = capture.shape.clone();
-        object.capture = Some(capture.hash.clone());
-        object.active_range = ve_core::document::StepRange::new(step.min(last), last);
-        if let Some(anim) = object.props.get_mut(PropId::Position) {
-            anim.set_base(PropValue::LonLat(anchor));
-        }
-        if let Some(anim) = object.props.get_mut(PropId::StampSpace) {
-            anim.set_base(PropValue::Enum(1));
-        }
+        let object = macro_object(&capture, anchor, step, step_count);
         let target = crate::document::creation_layer(&open.project, layer)?;
         let (layer, index) = (target.id, target.objects.len());
         open.project
@@ -990,6 +1053,25 @@ pub fn macro_insert(
         open.touch();
         Ok(ProjectSummary::of(session.require_open()?))
     })
+}
+
+/// The macro object a capture becomes when it is placed, at `anchor` and
+/// beginning at `step` (spec.md 8.7). One builder for the library's insert
+/// and the preview's click, so the two place the same object.
+fn macro_object(capture: &Arc<Capture>, anchor: LonLat, step: u32, step_count: u32) -> Object {
+    let last = step_count.saturating_sub(1);
+    let mut object = Object::new(ToolKind::Macro, "Macro", step_count);
+    object.geometry = capture.shape.clone();
+    object.capture = Some(capture.hash.clone());
+    object.active_range = ve_core::document::StepRange::new(step.min(last), last);
+    if let Some(anim) = object.props.get_mut(PropId::Position) {
+        anim.set_base(PropValue::LonLat(anchor));
+    }
+    // A region is map space, so the macro is a projected stamp (D28, D55).
+    if let Some(anim) = object.props.get_mut(PropId::StampSpace) {
+        anim.set_base(PropValue::Enum(1));
+    }
+    object
 }
 
 /// A file stem from a name: readable, unique, and safe on every filesystem.

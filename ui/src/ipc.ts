@@ -30,6 +30,7 @@ import type { ClipboardKind } from "./generated/ClipboardKind";
 import type { AutosaveMode } from "./generated/AutosaveMode";
 import type { AppSettings } from "./generated/AppSettings";
 import type { CaptureMode } from "./generated/CaptureMode";
+import type { PlacedPreview } from "./generated/PlacedPreview";
 import type { CaptureState } from "./generated/CaptureState";
 import type { MacroLibrary } from "./generated/MacroLibrary";
 import type { Shortcut } from "./generated/Shortcut";
@@ -584,7 +585,12 @@ export const api = {
   /** Bakes the capture into the session and shows it alone on the map (D71). */
   previewCapture: (lastStep: number) => call<CaptureMode>("preview_capture", { lastStep }),
   /** Moves the preview's stamp. */
-  stampPreview: (lon: number, lat: number) => call<CaptureMode>("stamp_preview", { lon, lat }),
+  /**
+   * A click in the preview (spec.md 8.7, M28): places the macro in the
+   * document there, in `layer` from `step`, and moves the preview's stamp.
+   */
+  placePreview: (lon: number, lat: number, step: number, layer: number | null) =>
+    call<PlacedPreview>("place_preview", { lon, lat, step, layer }),
   /** Back from the preview to recording, keys intact. */
   editCapture: () => call<CaptureMode>("edit_capture", {}),
   /** Abandons a capture, writing nothing. */
