@@ -644,6 +644,12 @@ body {
   flex: 1;
 }
 
+/* A shift-click across rows extends the selection; without this the browser
+   also swept the rows' text into a text selection (M27). The rename field is
+   the one place text is meant to be selected. */
+.layer-panel .layers { user-select: none; }
+.layer-panel .layers input { user-select: text; }
+
 .layer-panel button,
 .inspector button {
   background: transparent;

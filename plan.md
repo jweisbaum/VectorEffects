@@ -2469,7 +2469,9 @@ anything not done recorded here with its reason.
    still is rebuilt as a one-frame capture with its own hash. The chord is
    `Ctrl`-`Shift`-`V` on a Mac and `Ctrl`-`Alt`-`Shift`-`V` elsewhere,
    where `Ctrl`-`Shift`-`V` already means absolute timing.
-3. **Shift-click in the layer panel selects no text.** Pending.
+3. **Shift-click in the layer panel selects no text.** Delivered: the
+   layer and object lists are `user-select: none`, the rename field alone
+   keeps text selection.
 4. **The macro stamp's hover outline.** Pending.
 5. **The shape fill's click neither magnifies nor samples.** Pending.
 6. **The magnifier hides the tool's hover glyphs.** Pending.
