@@ -2494,7 +2494,10 @@ anything not done recorded here with its reason.
    `--dock-right` and `--dock-bottom`, which `App` sets from the panel
    state. A fold no longer resizes the canvas, so nothing re-renders.
 8. **Smaller `Shift`-arrow nudges.** Delivered: 3 CSS px a press, from 8.
-9. **Capture, measure, undo and redo buttons alike and aligned.** Pending.
+9. **Capture, measure, undo and redo buttons alike and aligned.**
+   Delivered: the view controls' icon buttons are one fixed box, 30 by 26,
+   icon centred, and the dividers stand the same height, so an SVG's own
+   height no longer sets a button's and the row lines up.
 10. **Panel toggles on the border, still.** Pending.
 11. **The rendering count moves to the status bar.** Pending.
 12. **Auto scale.** Pending.

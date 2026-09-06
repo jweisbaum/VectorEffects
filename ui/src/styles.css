@@ -301,12 +301,19 @@ body {
   padding: 2px 6px;
   accent-color: var(--accent);
 }
-.view-controls .divider { width: 1px; height: 18px; background: var(--border); }
-.view-controls .history { display: flex; gap: 4px; }
+.view-controls .divider { width: 1px; height: 26px; background: var(--border); }
+.view-controls .history { display: flex; gap: 4px; align-items: center; }
+/* Capture, measure, undo and redo are one row of one size (M27): a fixed
+   box with the icon centred, so an SVG's own height never decides the
+   button's and the four line up top to bottom. */
 .view-controls button.icon {
-  padding: 3px 5px;
+  box-sizing: border-box;
+  width: 30px;
+  height: 26px;
+  padding: 0;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
 }
 .view-controls button.icon .tool-icon { opacity: 0.75; }
 .view-controls button.icon:hover .tool-icon,
