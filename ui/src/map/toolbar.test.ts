@@ -32,12 +32,14 @@ describe("the toolbar", () => {
   /**
    * Anchored to both edges rather than given a width: the bar is as wide as the
    * map at any window size, which is what leaves room for the options to wrap
-   * into instead of overflowing.
+   * into instead of overflowing. The edges are the *visible* map's: the map
+   * runs under the docked panels (spec.md 5.5, M27), so each side is inset by
+   * that side's dock variable.
    */
-  it("spans the map", () => {
+  it("spans the visible map", () => {
     const rule = block(".map-toolbar");
-    expect(rule).toMatch(/left:\s*12px/);
-    expect(rule).toMatch(/right:\s*12px/);
+    expect(rule).toMatch(/left:\s*calc\(var\(--dock-left, 0px\) \+ 12px\)/);
+    expect(rule).toMatch(/right:\s*calc\(var\(--dock-right, 0px\) \+ 12px\)/);
   });
 
   it("wraps rather than overflowing", () => {
