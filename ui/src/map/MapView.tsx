@@ -109,6 +109,7 @@ import ToolOptions, { type ToolPick } from "./ToolOptions";
 import {
   type ActiveTool,
   CAPTURE,
+  ERASE,
   INSERT,
   MEASURE,
   cloneSourceCamera,
@@ -1507,6 +1508,10 @@ export default function MapView({
       setHint(
         "Scrub the ruler and drag the region into place at each step; every step visited is a key.",
       );
+    } else if (tool === ERASE) {
+      setHint(
+        "Drag over objects in the active layer to erase them. Hold Ctrl to erase them from this frame only.",
+      );
     } else if (tool === INSERT && recording === null) {
       setHint(
         (library?.entries.length ?? 0) === 0
@@ -1776,14 +1781,17 @@ export default function MapView({
   // hand. Nothing else: the answer is bounded by one tool's objects rather than
   // by the size of the project.
   const hoverTool = drawsObjects(tool) && HOVER_TOOLS.has(tool) ? tool : null;
+  // The eraser acts on anything in the active layer, so it sees every object
+  // there, whatever its tool (spec.md 8.1, M28).
+  const erasing = tool === ERASE;
   useEffect(() => {
-    if (hoverTool === null && selection.length === 0) {
+    if (hoverTool === null && selection.length === 0 && !erasing) {
       setOutlineList([]);
       return;
     }
     let cancelled = false;
     api
-      .objectOutlines(step, hoverTool, selection)
+      .objectOutlines(step, hoverTool, selection, activeLayer, erasing)
       .then((outlines) => {
         if (!cancelled) setOutlineList(outlines);
       })
@@ -1793,7 +1801,7 @@ export default function MapView({
     };
     // `selectionKey` stands in for the array, which is new every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project.revision, step, hoverTool, selectionKey]);
+  }, [project.revision, step, hoverTool, selectionKey, erasing, activeLayer]);
 
   /**
    * The operator whose edge the pointer is on, if any.
@@ -1803,6 +1811,14 @@ export default function MapView({
    * overlay is asked to redraw when the answer actually changes.
    */
   const hoveredOperator = useRef<number | null>(null);
+  /**
+   * The eraser's sweep (spec.md 8.1, M28): every object the pointer has
+   * passed over since it went down, and whether `Ctrl` was held — this frame
+   * only — when it did. Committed as one write on release, so one undo
+   * returns the whole sweep; marked in pink meanwhile, so the hand sees what
+   * it has taken as it takes it.
+   */
+  const eraseDrag = useRef<{ hits: Set<number>; step: number | null } | null>(null);
   const operatorOutlinesRef = useRef<OperatorOutline[]>([]);
   operatorOutlinesRef.current = outlineList;
 
@@ -2282,15 +2298,24 @@ export default function MapView({
       // While a drag is live the moving outline stands in for the selected
       // edge, which would otherwise mark where the object *was*.
       const selected = selection.includes(outlined.object) && !dragLive;
-      if (!hovered && !selected) continue;
+      // Taken by the eraser's sweep so far: pink, filled, until the release
+      // writes it (M28).
+      const marked = eraseDrag.current?.hits.has(outlined.object) ?? false;
+      if (!hovered && !selected && !marked) continue;
+      if (marked) {
+        context.save();
+        context.fillStyle = "rgba(255, 110, 190, 0.22)";
+        context.fill(maskPath(outlined.outline));
+        context.restore();
+      }
       // Pink for the edge under the pointer: a colour used for nothing else on
       // this map, so "the tool has found an edge" cannot be mistaken for a
       // selection or a preview.
       drawEdgeBand(
         context,
         outlined.outline,
-        hovered ? "rgba(255, 110, 190, 0.95)" : "rgba(255, 214, 102, 0.85)",
-        hovered ? 2.5 : 1.5,
+        hovered || marked ? "rgba(255, 110, 190, 0.95)" : "rgba(255, 214, 102, 0.85)",
+        hovered || marked ? 2.5 : 1.5,
         dpr,
       );
       // An inverted mask covers everything *but* this, so a wide faint band
@@ -3114,6 +3139,17 @@ export default function MapView({
     // The insert tool puts a library macro down where it is clicked
     // (spec.md 8.7, M16). One click, one object, like the fill tool: the macro
     // carries its own frames, so there is nothing to drag out.
+    // The eraser (spec.md 8.1, M28): the sweep begins with whatever is under
+    // the press. `Ctrl` says this frame only.
+    if (tool === ERASE) {
+      const drag = { hits: new Set<number>(), step: event.ctrlKey ? stepRef.current : null };
+      const hit = objectUnder(point);
+      if (hit !== null) drag.hits.add(hit);
+      eraseDrag.current = drag;
+      requestOverlay();
+      return;
+    }
+
     if (tool === INSERT) {
       if (macroId === null) return;
       const geo = unproject(cameraRef.current, viewRef.current, point);
@@ -3413,6 +3449,32 @@ export default function MapView({
     return found;
   };
 
+  /**
+   * The topmost object of the outline list the pointer is on or in, for the
+   * eraser: inside the footprint or near its edge, since a sweep crosses
+   * bodies and a pointer parked on an edge means it too.
+   */
+  const objectUnder = (point: { x: number; y: number }): number | null => {
+    const canvas = overlayRef.current;
+    const context = canvas?.getContext("2d");
+    if (!context) return null;
+    const dpr = window.devicePixelRatio || 1;
+    context.save();
+    context.lineWidth = EDGE_GRAB_CSS * 2 * dpr;
+    let found: number | null = null;
+    for (let i = operatorOutlinesRef.current.length - 1; i >= 0; i -= 1) {
+      const entry = operatorOutlinesRef.current[i];
+      if (entry === undefined) continue;
+      const path = maskPath(entry.outline);
+      if (context.isPointInPath(path, point.x, point.y) || context.isPointInStroke(path, point.x, point.y)) {
+        found = entry.object;
+        break;
+      }
+    }
+    context.restore();
+    return found;
+  };
+
   const onPointerMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
     const point = toDevice(event);
     cursorRef.current = point;
@@ -3456,12 +3518,33 @@ export default function MapView({
       return;
     }
 
-    // An operator tool highlights the edge it is over (spec.md 6.2, 6.3). Kept
-    // in a ref and redrawn only when the answer changes: this runs on every
-    // pointer report, and a state change here would re-render the whole
-    // toolbar.
-    if (hoverTool !== null && !gestureRef.current) {
-      const over = operatorEdgeUnder(point);
+    // The eraser's sweep takes every object under every coalesced position,
+    // so a fast pass over a thin stroke does not step over it.
+    if (eraseDrag.current) {
+      const drag = eraseDrag.current;
+      const native = event.nativeEvent;
+      const samples =
+        typeof native.getCoalescedEvents === "function"
+          ? native.getCoalescedEvents()
+          : [native];
+      let changed = false;
+      for (const sample of samples) {
+        const hit = objectUnder(toDevice(sample));
+        if (hit !== null && !drag.hits.has(hit)) {
+          drag.hits.add(hit);
+          changed = true;
+        }
+      }
+      if (changed) requestOverlay();
+      return;
+    }
+
+    // An operator tool highlights the edge it is over (spec.md 6.2, 6.3), and
+    // the eraser the object it would take (M28). Kept in a ref and redrawn
+    // only when the answer changes: this runs on every pointer report, and a
+    // state change here would re-render the whole toolbar.
+    if ((hoverTool !== null || tool === ERASE) && !gestureRef.current) {
+      const over = tool === ERASE ? objectUnder(point) : operatorEdgeUnder(point);
       if (over !== hoveredOperator.current) {
         hoveredOperator.current = over;
         requestOverlay();
@@ -3872,6 +3955,22 @@ export default function MapView({
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
+    // The eraser's sweep lands as one write — one undo for the whole pass.
+    if (eraseDrag.current) {
+      const drag = eraseDrag.current;
+      eraseDrag.current = null;
+      const hits = [...drag.hits];
+      if (hits.length > 0) {
+        void api
+          .eraseObjects(hits, drag.step)
+          .then(onProjectChanged)
+          .catch((err: unknown) => setError(String(err)));
+      }
+      hoveredOperator.current = null;
+      requestOverlay();
+      return;
+    }
+
     // The capture region lets go. Nothing to end on the backend: a placement
     // is capture state, not a history entry.
     if (captureDrag.current) {
@@ -4333,6 +4432,21 @@ export default function MapView({
             title={`Select (${chord("select")}) · drag a region of the map · cmd-A selects the view, cmd-shift-A the whole map, cmd-D clears`}
           >
             <ToolIcon tool={SELECT} />
+          </button>
+          {/*
+            The eraser (spec.md 8.1, M28). Not in the backend's palette: it
+            makes no object, it takes them away — from every frame, or with
+            Ctrl from this one, through the Enabled switch.
+          */}
+          <button
+            className={tool === ERASE ? "icon active" : "icon"}
+            disabled={recording !== null}
+            onClick={() => setTool(ERASE)}
+            aria-label="Erase"
+            aria-pressed={tool === ERASE}
+            title={`Erase (${chord("erase")}) · drag over objects in the active layer to remove them · hold Ctrl to remove them from this frame only`}
+          >
+            <ToolIcon tool={ERASE} />
           </button>
           {/*
             The measurement tools (spec.md 10, M8). Not in the backend's

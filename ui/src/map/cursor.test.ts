@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { BUCKET_CURSOR, type CursorContext, cursorFor } from "./cursor";
-import { CAPTURE, HAND, INSERT, MEASURE, SELECT } from "./tools";
+import { CAPTURE, ERASE, HAND, INSERT, MEASURE, SELECT } from "./tools";
 
 const base: CursorContext = {
   tool: HAND,
@@ -25,7 +25,7 @@ describe("cursorFor", () => {
   });
 
   it("gives every drawing and measuring tool a crosshair on the click", () => {
-    for (const tool of ["brush", "shape_fill", "curve", "circle", "mask", MEASURE] as const) {
+    for (const tool of ["brush", "shape_fill", "curve", "circle", "mask", MEASURE, ERASE] as const) {
       expect(cursorFor({ ...base, tool })).toBe("crosshair");
     }
   });

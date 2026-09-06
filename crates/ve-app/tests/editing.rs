@@ -71,6 +71,66 @@ fn first_object(state: &AppState) -> u64 {
     document::tree(state, 0).expect("tree").layers[0].objects[0].id
 }
 
+// --- The eraser (spec.md 8.1, M28) -----------------------------------------
+
+/// Erased from one frame, the object is gone there and present on the frames
+/// either side exactly as before, and still in the document.
+#[test]
+fn an_erase_at_one_step_hides_the_object_there_and_nowhere_else() {
+    let (_root, state) = painted("erase-step");
+    let object = first_object(&state);
+    document::objects_erase(&state, &[object], Some(3)).expect("erase at 3");
+    let session = state.session.lock().expect("lock");
+    let project = &session.open.as_ref().expect("open").project;
+    let found = project
+        .object(ve_core::id::Id::from_raw(object))
+        .expect("still in the document");
+    assert!(found.is_active_at(0), "the frames before are untouched");
+    assert!(found.is_active_at(2));
+    assert!(!found.is_active_at(3), "gone from the erased frame");
+    assert!(found.is_active_at(4));
+    assert!(found.is_active_at(11), "and the frames after");
+}
+
+/// Erased from the first and the last frame, where there is no frame on one
+/// side: the switch still turns off there alone.
+#[test]
+fn an_erase_at_the_ends_stays_at_the_ends() {
+    let (_root, state) = painted("erase-ends");
+    let object = first_object(&state);
+    document::objects_erase(&state, &[object], Some(0)).expect("erase at 0");
+    document::objects_erase(&state, &[object], Some(11)).expect("erase at 11");
+    let session = state.session.lock().expect("lock");
+    let project = &session.open.as_ref().expect("open").project;
+    let found = project
+        .object(ve_core::id::Id::from_raw(object))
+        .expect("still in the document");
+    assert!(!found.is_active_at(0));
+    assert!(found.is_active_at(1));
+    assert!(found.is_active_at(10));
+    assert!(!found.is_active_at(11));
+}
+
+/// Without a step the eraser deletes, and one undo brings the sweep back.
+#[test]
+fn an_erase_without_a_step_removes_the_objects_as_one_entry() {
+    let (_root, state) = painted("erase-all");
+    let object = first_object(&state);
+    document::objects_erase(&state, &[object], None).expect("erase");
+    assert!(
+        document::tree(&state, 0).expect("tree").layers[0]
+            .objects
+            .is_empty()
+    );
+    edit::undo_for_test(&state).expect("undo");
+    assert_eq!(
+        document::tree(&state, 0).expect("tree").layers[0]
+            .objects
+            .len(),
+        1
+    );
+}
+
 // --- The tree ---------------------------------------------------------------
 
 #[test]

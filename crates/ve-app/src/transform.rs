@@ -396,20 +396,37 @@ pub fn object_outlines(
     step: u32,
     tool: Option<Tool>,
     objects: Vec<u64>,
+    layer: Option<u64>,
+    all_in_layer: bool,
 ) -> Result<Vec<OperatorOutline>> {
-    outlines_at(&state, step, tool, &objects)
+    outlines_at(&state, step, tool, &objects, layer, all_in_layer)
 }
 
 /// Implementation of [`object_outlines`], callable without a Tauri handle.
+///
+/// `all_in_layer` asks for every object of the creation layer — `layer`, or
+/// the one the creation rule picks (D66) — whatever its tool: what the
+/// eraser needs, since it acts on anything it passes over there (spec.md
+/// 8.1, M28). A layer the rule refuses, imported or locked, yields nothing,
+/// which is also what the eraser can do to it.
 pub fn outlines_at(
     state: &AppState,
     step: u32,
     tool: Option<Tool>,
     objects: &[u64],
+    layer: Option<u64>,
+    all_in_layer: bool,
 ) -> Result<Vec<OperatorOutline>> {
     let wanted = tool.map(Tool::kind);
     with_session(state, |session| {
         let project = &session.require_open()?.project;
+        let whole_layer = if all_in_layer {
+            crate::document::creation_layer(project, layer)
+                .ok()
+                .map(|found| found.id)
+        } else {
+            None
+        };
         // A follower is where its link puts it, not where its dormant keys
         // say (spec.md 9.3): the outline has to agree with the field.
         let links = ve_core::follow::resolve(project, step);
@@ -418,8 +435,9 @@ pub fn outlines_at(
             if !layer.visible {
                 continue;
             }
+            let all_here = whole_layer == Some(layer.id);
             for object in &layer.objects {
-                if Some(object.tool) != wanted && !objects.contains(&object.id.raw()) {
+                if !all_here && Some(object.tool) != wanted && !objects.contains(&object.id.raw()) {
                     continue;
                 }
                 let Some(flat) = flatten_object_at(object, step, links.of(object.id)) else {

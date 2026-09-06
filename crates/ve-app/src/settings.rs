@@ -226,6 +226,9 @@ pub fn default_shortcuts() -> Vec<Shortcut> {
         // put one back down (D54).
         tool("capture", "k"),
         tool("insert", "n"),
+        // The eraser (spec.md 8.1, M28). `E` is the mask's, which came first
+        // and is the eraser that keeps what it erased; `X` is free.
+        tool("erase", "x"),
     ]
 }
 

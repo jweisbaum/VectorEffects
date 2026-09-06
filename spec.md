@@ -1962,6 +1962,7 @@ Left-hand vertical palette, keyboard-shortcut per tool:
 | ≈ | Warp | `W` |
 | 〽 | Liquify | `L` |
 | 📏 | Measure (dividers / great circle / range rings) | `T` |
+| ◩ | Erase — remove what it passes over in the active layer | `X` |
 
 `P` for the brush and `B` for the curve follow the conventions of other paint
 applications — the brush is the *pen* tool and the curve the *Bézier* — rather
@@ -2127,6 +2128,20 @@ stamp (D55). A brush paints the region with the bar's speed and direction; a
 mask masks it; the modifiers act on what it covers. Inside, and not anywhere:
 a click outside the region is the ordinary painted stroke, so a region left
 selected does not turn every stroke into a region.
+
+**The eraser** (M28) makes no object: it takes them away. Dragged over the
+map it marks every object of the **active layer** it passes over — inside the
+footprint or on its edge, in pink, the colour the map uses for "the tool has
+found an edge" — and the release removes them all as **one history entry**,
+from every frame. With **`Ctrl`** held when the drag begins it removes them
+from **the current frame alone**, through the `Enabled` switch of §4.6: a key
+`false` at that step, the step before and after keyed to what they already
+show, so the object is there on either side exactly as it was, stays in the
+document and the panel, and shows the gap on its timeline bar. Hovering with
+the eraser highlights the object it would take. An imported or locked layer
+is not the eraser's to touch, by the creation rule (D66), so nothing in it is
+outlined or taken. The mask remains the eraser that *is* an object and keeps
+what it erased.
 
 There is no separate fill tool. There was one (M14), which turned the region
 into a shape fill; it was withdrawn because it was one more button for a

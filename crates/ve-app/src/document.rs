@@ -954,6 +954,109 @@ pub fn objects_remove(state: &AppState, objects: &[u64]) -> Result<ProjectSummar
     })
 }
 
+/// The eraser's write (spec.md 8.1, M28): the objects it passed over, gone
+/// from every frame — or, with `step`, from that frame alone.
+#[tauri::command]
+pub fn erase_objects(
+    state: tauri::State<'_, AppState>,
+    objects: Vec<u64>,
+    step: Option<u32>,
+) -> Result<ProjectSummary> {
+    objects_erase(&state, &objects, step)
+}
+
+/// Implementation of [`erase_objects`].
+///
+/// Without a step it is [`objects_remove`]: the object is deleted, followers
+/// freed, one history entry for the sweep. With a step it is a keyframe edit
+/// on each object's `Enabled` switch — the animatable per-step switch
+/// spec.md 4.6 names for exactly this — false at `step` and back to what it
+/// was at the step after, with a key at the step before so the switch does
+/// not fall before its first key: an object erased from frame 3 is there on
+/// frames 2 and 4 exactly as it was. The object stays in the document and in
+/// the panel, so the erase is undone by deleting the key like any other, and
+/// the frame it is missing from shows on its timeline bar.
+pub fn objects_erase(
+    state: &AppState,
+    objects: &[u64],
+    step: Option<u32>,
+) -> Result<ProjectSummary> {
+    let Some(step) = step else {
+        return objects_remove(state, objects);
+    };
+    if objects.is_empty() {
+        return with_session(state, |session| {
+            Ok(ProjectSummary::of(session.require_open()?))
+        });
+    }
+    apply(state, |project| {
+        let last = project.last_step();
+        if step > last {
+            return Err(AppError::BadOption {
+                field: "step",
+                value: format!("{step} is past the last step, {last}"),
+            });
+        }
+        let mut commands = Vec::new();
+        for raw in objects {
+            let id = object_id(*raw);
+            let object = project.object(id).ok_or_else(|| missing_object(*raw))?;
+            let Some(before) = object.props.get(PropId::Enabled) else {
+                continue;
+            };
+            let mut after = before.clone();
+            hide_at(&mut after, step, last);
+            if after == *before {
+                continue;
+            }
+            commands.push(Command::SetProperty {
+                object: id,
+                prop: PropId::Enabled,
+                before: Box::new(before.clone()),
+                after: Box::new(after),
+            });
+        }
+        Ok(Command::Batch {
+            label: if commands.len() == 1 {
+                format!("Erase object from step {step}")
+            } else {
+                format!("Erase {} objects from step {step}", commands.len())
+            },
+            commands,
+        })
+    })
+}
+
+/// Turns an `Enabled` animatable off at `step` and nowhere else.
+///
+/// Keys are held: a value before the first key is the first key's, and a
+/// `Step` key holds until the next. So the frame before gets a key with the
+/// value it already shows, unless it has one, the frame itself gets `false`,
+/// and the frame after gets the value it already shows, unless it has one or
+/// there is none.
+fn hide_at(anim: &mut ve_core::keyframe::Animatable, step: u32, last: u32) {
+    use ve_core::Interpolation::Step;
+    if anim.value_at(step) == PropValue::Bool(false) {
+        return;
+    }
+    let has_key = |anim: &ve_core::keyframe::Animatable, at: u32| {
+        anim.keys().iter().any(|key| key.step == at)
+    };
+    let before = step.checked_sub(1).map(|at| (at, anim.value_at(at)));
+    let after = (step < last).then(|| (step + 1, anim.value_at(step + 1)));
+    if let Some((at, value)) = before
+        && !has_key(anim, at)
+    {
+        anim.set_key(at, value, Step);
+    }
+    anim.set_key(step, PropValue::Bool(false), Step);
+    if let Some((at, value)) = after
+        && !has_key(anim, at)
+    {
+        anim.set_key(at, value, Step);
+    }
+}
+
 /// The commands that free every follower of `primary`, holding each where it
 /// stands.
 ///

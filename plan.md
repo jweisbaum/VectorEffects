@@ -2547,6 +2547,27 @@ the outline at each, fainter, behind the one at the pointer.
 
 ---
 
+### M28 — Polish from the third pass · **in progress**
+
+**Goal:** the five findings the user handed over on 2026-09-06 after the
+M27 build, in order, one commit each.
+
+1. **A real eraser.** Delivered: `ERASE`, a frontend-only tool with the
+   others of its kind, a palette button, `X`, an icon and a crosshair. It
+   sees every object of the creation layer through `object_outlines`'
+   new `all_in_layer` mode, highlights the one under the pointer in pink,
+   marks everything a drag passes over — coalesced positions included — and
+   on release calls `erase_objects`: `objects_remove` for every frame, or
+   with `Ctrl` a `SetProperty` batch keying each object's `Enabled` off at
+   the step alone (`hide_at`, with keys either side so the switch holds
+   where it was). Three tests in `editing.rs`.
+2. **The preview places on click and hides the document at once.** Pending.
+3. **Shift-click in the layer panel still selected text.** Pending.
+4. **The magnifier magnifies.** Pending.
+5. **Undo and redo sit level with capture and measure.** Pending.
+
+---
+
 ## 3. Testing strategy
 
 | Layer | Approach |

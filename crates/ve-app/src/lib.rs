@@ -137,6 +137,7 @@ pub fn run() -> anyhow::Result<()> {
             document::copy_objects,
             document::cut_objects,
             document::paste_objects,
+            document::erase_objects,
             document::clipboard_state,
             document::clipboard_kind,
             settings::app_settings,

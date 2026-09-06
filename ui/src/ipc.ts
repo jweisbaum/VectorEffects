@@ -309,8 +309,24 @@ export const api = {
    * Fetched per revision, step, tool and selection, never per frame: the hit
    * test that finds the edge under the pointer is the map's own.
    */
-  objectOutlines: (step: number, tool: Tool | null, objects: number[]) =>
-    call<OperatorOutline[]>("object_outlines", { step, tool, objects }),
+  /**
+   * `allInLayer` asks for every object of the creation layer — `layer`, or
+   * the one the creation rule picks — whatever its tool: the eraser's view.
+   */
+  objectOutlines: (
+    step: number,
+    tool: Tool | null,
+    objects: number[],
+    layer: number | null = null,
+    allInLayer = false,
+  ) =>
+    call<OperatorOutline[]>("object_outlines", { step, tool, objects, layer, allInLayer }),
+  /**
+   * The eraser's write (spec.md 8.1, M28): `objects` removed from every
+   * frame, or with `step` from that frame alone.
+   */
+  eraseObjects: (objects: number[], step: number | null) =>
+    call<ProjectSummary>("erase_objects", { objects, step }),
   /**
    * Captures the drag baseline. `lon`/`lat` is where the pointer went down, so
    * rotation and scale are measured from there rather than snapping.

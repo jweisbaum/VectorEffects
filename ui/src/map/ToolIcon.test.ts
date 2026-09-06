@@ -14,7 +14,7 @@
 import { describe, expect, it } from "vitest";
 
 import { ICON_TOOLS, iconFor } from "./ToolIcon";
-import { CAPTURE, HAND, INSERT, MEASURE, SELECT } from "./tools";
+import { CAPTURE, ERASE, HAND, INSERT, MEASURE, SELECT } from "./tools";
 
 /** The attributes a `<path>` in the set carries. */
 interface PathProps {
@@ -36,8 +36,8 @@ function paths(tool: (typeof ICON_TOOLS)[number]): string[] {
 
 describe("the icon set", () => {
   /**
-   * Eighteen: the hand, the select tool of 8.2, the measure tool of 10,
-   * the two macro tools of 8.7,
+   * Nineteen: the hand, the select tool of 8.2, the measure tool of 10,
+   * the two macro tools and the eraser of 8.7 and 8.1,
    * the six tools of spec 6.2, the four modifiers of 6.3, and the patch of 8.5
    * and the macro of 8.7 — neither drawn from the palette, and both needing a
    * mark all the same. Named rather than counted against the palette, because
@@ -69,6 +69,8 @@ describe("the icon set", () => {
         // here too and this one is not the same thing.
         CAPTURE,
         INSERT,
+        // The eraser (spec.md 8.1, M28): makes no object, takes them away.
+        ERASE,
         // Neither is in the palette, but every object is named by its tool
         // and the panels draw a mark beside it (spec.md 8.5, 8.7).
         "patch",

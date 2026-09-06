@@ -571,7 +571,7 @@ fn the_outlines_are_the_tools_own_objects_and_the_selection() {
     );
 
     let outlines_for = |tool: Option<Tool>, objects: &[u64]| {
-        ve_app::transform::outlines_at(&state, 0, tool, objects).expect("outlines")
+        ve_app::transform::outlines_at(&state, 0, tool, objects, None, false).expect("outlines")
     };
 
     let masks = outlines_for(Some(Tool::Mask), &[]);

@@ -18,7 +18,7 @@
 
 import type { ReactElement } from "react";
 
-import { CAPTURE, HAND, INSERT, MEASURE, SELECT, type ActiveTool } from "./tools";
+import { CAPTURE, ERASE, HAND, INSERT, MEASURE, SELECT, type ActiveTool } from "./tools";
 
 /** One icon: the geometry inside a `0 0 24 24` box. */
 type Icon = readonly ReactElement[];
@@ -87,6 +87,16 @@ const ICONS: Record<ActiveTool, Icon> = {
     line("M12 12.2v4.4", "stem"),
     line("M9.4 14.6 12 17.2l2.6-2.6", "point"),
     line("M4.5 20.4h15", "ground"),
+  ],
+  // The eraser: a rubber on the slant, its working end on a baseline, and
+  // the rubbed-out line stopping where it meets it.
+  [ERASE]: [
+    line(
+      "M13.6 4.4 20 10.8a1 1 0 0 1 0 1.4l-6.2 6.2a1 1 0 0 1-1.4 0L6 12a1 1 0 0 1 0-1.4l6.2-6.2a1 1 0 0 1 1.4 0z",
+      "rubber",
+    ),
+    line("M9.2 8.6 15.4 14.8", "split"),
+    line("M4 20.4h16", "ground"),
   ],
   // A pair of dividers, the instrument the tool is named for: two legs from a
   // hinge, points down on the chart.

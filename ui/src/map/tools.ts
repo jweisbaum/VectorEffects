@@ -72,14 +72,26 @@ export const CAPTURE = "capture" as const;
  */
 export const INSERT = "insert" as const;
 
+/**
+ * The eraser: it removes what it is dragged over in the active layer
+ * (spec.md 8.1, M28) — from every frame, or with `Ctrl` from the current
+ * frame alone, through the `Enabled` switch.
+ *
+ * Frontend-only like the others here: it makes no object. The mask is the
+ * eraser that *is* an object and keeps what it erased; this one takes the
+ * object away.
+ */
+export const ERASE = "erase" as const;
+
 /** What a pointer drag does: pan and select, draw a region, measure, capture,
- * insert, or draw with one of the tools. */
+ * insert, erase, or draw with one of the tools. */
 export type ActiveTool =
   | typeof HAND
   | typeof SELECT
   | typeof MEASURE
   | typeof CAPTURE
   | typeof INSERT
+  | typeof ERASE
   | Tool;
 
 /** Whether a tool draws or edits objects rather than pointing at ground. */
@@ -89,7 +101,8 @@ export function drawsObjects(tool: ActiveTool): tool is Tool {
     tool !== SELECT &&
     tool !== MEASURE &&
     tool !== CAPTURE &&
-    tool !== INSERT
+    tool !== INSERT &&
+    tool !== ERASE
   );
 }
 
