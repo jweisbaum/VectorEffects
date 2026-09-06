@@ -2450,11 +2450,20 @@ protocol.
 
 ---
 
-### M27 — Polish from the second pass · **in progress**
+### M27 — Polish from the second pass · **complete**
 
 **Goal:** the thirteen findings the user handed over on 2026-09-06 after
 using the app with M23–M26 in it, delivered in order, one commit each, with
 anything not done recorded here with its reason.
+
+**Delivered 2026-09-06**, thirteen commits `M27.1`–`M27.13` on main, plus a
+follow-up to 7 for the stylesheet test that asserted the old insets. The
+reachability sweep — every `api.*` method in `ui/src/ipc.ts` with no caller
+— finds only `setStartTime` (retired by D69) and three state queries that
+`clipboardKind` superseded; everything added here is reachable from the
+title bar, the map or a chord. **Not clicked through in the running app**:
+item 5 in particular is a fix for the one cause the code shows, and item 12
+was measured by its tests and not by eye.
 
 1. **Hover indicator stands down inside a selected region.** Delivered: the
    footprint was drawn under the paint bucket, so a click that would fill
