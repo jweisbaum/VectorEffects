@@ -350,6 +350,36 @@ pub fn measurement_added(
     state: &AppState,
     measurement: NewMeasurement,
 ) -> Result<Vec<MeasurementView>> {
+    let placed = placed(measurement)?;
+    write(state, None, |measurements| {
+        measurements.push(Annotation {
+            id: Id::new(),
+            measurement: placed,
+        });
+        Ok(())
+    })
+}
+
+/// The measurement a leg being drawn would be, read out as the placed one
+/// will read (spec.md 10, M29): the dividers' distance and bearing follow
+/// the pointer from the first click to the second. Nothing is stored and no
+/// lock is consulted; it is the same `view` the committed measurement gets,
+/// so what the pointer shows is exactly what the click will keep.
+#[tauri::command]
+pub fn preview_measurement(measurement: NewMeasurement) -> Result<MeasurementView> {
+    measurement_preview(measurement)
+}
+
+/// Implementation of [`preview_measurement`].
+pub fn measurement_preview(measurement: NewMeasurement) -> Result<MeasurementView> {
+    Ok(view(&Annotation {
+        id: Id::from_raw(0),
+        measurement: placed(measurement)?,
+    }))
+}
+
+/// A measurement from what the frontend sent, checked.
+fn placed(measurement: NewMeasurement) -> Result<Measurement> {
     let points: Vec<LonLat> = measurement
         .points
         .iter()
@@ -383,14 +413,7 @@ pub fn measurement_added(
             }
         }
     };
-
-    write(state, None, |measurements| {
-        measurements.push(Annotation {
-            id: Id::new(),
-            measurement: placed,
-        });
-        Ok(())
-    })
+    Ok(placed)
 }
 
 /// Moves one placed point. The drag path, so it coalesces.

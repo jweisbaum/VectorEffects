@@ -157,6 +157,7 @@ pub fn run() -> anyhow::Result<()> {
             image::reset_image_placement,
             measure::measurements,
             measure::add_measurement,
+            measure::preview_measurement,
             measure::move_measurement_handle,
             measure::extend_measurement,
             measure::set_measurement_rings,

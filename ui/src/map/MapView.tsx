@@ -81,6 +81,7 @@ import {
 } from "./measure";
 import type { MeasurementView } from "../generated/MeasurementView";
 import type { MeasurementKind } from "../generated/MeasurementKind";
+import type { NewMeasurement } from "../generated/NewMeasurement";
 import { showsHoverIndicator, showsMagnifier } from "./hover";
 import { trackKeyframes } from "./macroTrack";
 import { RAMP_STOPS, rampCss } from "./ramp";
@@ -609,6 +610,17 @@ export default function MapView({
   const [activeRings, setActiveRings] = useState<number | null>(null);
   /** A point placed but not yet joined to a second one. */
   const pendingPoint = useRef<[number, number] | null>(null);
+  /**
+   * The leg being drawn, read out as the placed one will be (spec.md 10,
+   * M29): from the pending point, or the open chain's last point, to the
+   * pointer. One request in flight, the newest position waiting — the
+   * readout's pattern — and the answer drawn with the placed measurements.
+   */
+  const measurePreview = useRef<MeasurementView | null>(null);
+  const measurePreviewFlight = useRef<{ inFlight: boolean; queued: NewMeasurement | null }>({
+    inFlight: false,
+    queued: null,
+  });
   /**
    * The chain still being built, so the next click extends it rather than
    * starting another.
@@ -2563,7 +2575,10 @@ export default function MapView({
     // the chart while the brush is in hand, which is the whole point of
     // saving them. Everything drawn here was computed and formatted by Rust.
     drawMeasurements(context, camera, view, dpr, {
-      views: measurementsRef.current,
+      views:
+        tool === MEASURE && measurePreview.current !== null
+          ? [...measurementsRef.current, measurePreview.current]
+          : measurementsRef.current,
       pending: tool === MEASURE ? pendingPoint.current : null,
       cursor: tool === MEASURE ? cursor : null,
       active: measureDrag.current?.id ?? openChain.current,
@@ -3279,6 +3294,7 @@ export default function MapView({
       // A chain already open takes the click as its next leg.
       const open = openChain.current;
       if (open !== null && measureKind === "dividers") {
+        measurePreview.current = null;
         void api.extendMeasurement(open, at).then(tookMeasurements).catch(() => undefined);
         return;
       }
@@ -3290,6 +3306,7 @@ export default function MapView({
         return;
       }
       pendingPoint.current = null;
+      measurePreview.current = null;
       const kind = measureKind;
       void api
         .addMeasurement({ kind, points: [pending, at], interval_km: 0, count: 0 })
@@ -3788,6 +3805,51 @@ export default function MapView({
         send();
       }
       return;
+    }
+
+    // The dividers' leg in progress reads out as it is drawn (M29): the
+    // backend measures from the first point, or the open chain's last, to
+    // the pointer, and the answer lands in the overlay with the rest.
+    if (tool === MEASURE && !measureDrag.current) {
+      const geo = unproject(cameraRef.current, viewRef.current, point);
+      const from =
+        pendingPoint.current ??
+        (openChain.current !== null
+          ? (measurementsRef.current.find((m) => m.id === openChain.current)?.handles.at(-1) ??
+            null)
+          : null);
+      if (from !== null && measureKind !== "rings") {
+        const leg: NewMeasurement = {
+          kind: openChain.current !== null ? "dividers" : measureKind,
+          points: [from, [geo.lon, geo.lat]],
+          interval_km: 0,
+          count: 0,
+        };
+        const flight = measurePreviewFlight.current;
+        flight.queued = leg;
+        if (!flight.inFlight) {
+          const send = () => {
+            const next = flight.queued;
+            flight.queued = null;
+            if (next === null) {
+              flight.inFlight = false;
+              return;
+            }
+            flight.inFlight = true;
+            void api
+              .previewMeasurement(next)
+              .then((view) => {
+                measurePreview.current = view;
+                requestOverlay();
+              })
+              .catch(() => undefined)
+              .finally(send);
+          };
+          send();
+        }
+      } else if (measurePreview.current !== null) {
+        measurePreview.current = null;
+      }
     }
 
     // A tool's hover indicator follows the cursor, and so does a pick's

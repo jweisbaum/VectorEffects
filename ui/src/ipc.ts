@@ -536,6 +536,12 @@ export const api = {
   /** Every measurement laid over the map, drawn and labelled by the backend. */
   measurements: () => call<MeasurementView[]>("measurements"),
   /** Places one. */
+  /**
+   * The measurement a leg being drawn would be, read out as the placed one
+   * will (spec.md 10, M29). Stores nothing.
+   */
+  previewMeasurement: (measurement: NewMeasurement) =>
+    call<MeasurementView>("preview_measurement", { measurement }),
   addMeasurement: (measurement: NewMeasurement) =>
     call<MeasurementView[]>("add_measurement", { measurement }),
   /** Moves one placed point. Coalesces, so a drag is one undo. */

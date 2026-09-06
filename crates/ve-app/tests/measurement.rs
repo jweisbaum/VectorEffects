@@ -64,6 +64,28 @@ fn dividers(points: Vec<[f64; 2]>) -> NewMeasurement {
 }
 
 /// A chain measures, extends, and totals what it measures.
+/// The leg the pointer is drawing reads exactly as the click will keep it
+/// (spec.md 10, M29): the same view, from the same numbers, and nothing
+/// stored by asking.
+#[test]
+fn a_leg_previews_as_it_will_be_placed() {
+    let root = TempRoot::new("preview-leg");
+    let state = app(&root);
+    open(&state);
+    let previewed =
+        measure::measurement_preview(dividers(vec![[0.0, 0.0], [10.0, 0.0]])).expect("preview");
+    assert!(
+        measure::measurements_of(&state).expect("list").is_empty(),
+        "nothing stored"
+    );
+    let placed =
+        measure::measurement_added(&state, dividers(vec![[0.0, 0.0], [10.0, 0.0]])).expect("place");
+    assert_eq!(previewed.paths.len(), 1);
+    assert_eq!(previewed.paths[0].label, placed[0].paths[0].label);
+    assert_eq!(previewed.paths[0].points, placed[0].paths[0].points);
+    assert_eq!(previewed.total, placed[0].total);
+}
+
 #[test]
 fn a_chain_measures_its_legs_and_extends() {
     let root = TempRoot::new("chain");
