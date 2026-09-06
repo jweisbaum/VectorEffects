@@ -2621,7 +2621,15 @@ the field kind a property of the layer rather than of the project (§4.1).
    drag source only. A click now arms the link — the matching rows light,
    the status bar says what to click — and the next click on another
    object's row of the same property completes it; the drag still works.
-6. **Divergence strokes with the same settings merge.** Pending.
+6. **Divergence strokes with the same settings merge.** Delivered — by
+   changing what a divergence radiates *from*: the anchor made a merge
+   change the field, so it was excluded. It radiates from the nearest point
+   of the stroke's own centreline now, on both backends, tapered to nothing
+   within 100 m of the line where a bearing is ill-conditioned, and joins
+   the merge list. The scene hash gained `EVALUATOR_VERSION`, since a
+   kernel's meaning changed with no byte of the scene changing. Two tests
+   in `merging.rs` against geometry: north of an east–west line, out is
+   north.
 7. **The motion button's help text.** Delivered: "Add velocity / rotational
    / scale vectors to the vector data." by track, and "Remove …" when on.
 8. **Field kind per layer, and a two-field export.** Pending.

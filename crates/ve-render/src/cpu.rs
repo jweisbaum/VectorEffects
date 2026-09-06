@@ -465,6 +465,10 @@ fn with_motion(object: &FlatObject, position: LonLat, vector: Uv) -> Uv {
 /// calm water leaves calm water: nothing here can conjure a field where there
 /// is none, which is what separates a modifier from a tool that paints
 /// (spec.md 6.3).
+/// Metres from a stroke's centreline over which a divergence fades in
+/// (spec.md 6.3, M29). Mirrored in `evaluate.wgsl`.
+const RADIAL_TAPER_M: f64 = 100.0;
+
 fn modified_vector(modifier: Modifier, object: &FlatObject, position: LonLat, beneath: Uv) -> Uv {
     match modifier {
         Modifier::Gain(gain) => {
@@ -474,14 +478,30 @@ fn modified_vector(modifier: Modifier, object: &FlatObject, position: LonLat, be
                 v: beneath.v * factor,
             }
         }
-        // Outward from the anchor, at a fraction of the local speed. The
-        // bearing is the frame's own radial one — the same the circle's
-        // rotation is a quarter turn off (spec.md 7.5) — so the two tools
-        // agree about which way "out" is at a given cell.
+        // Outward at a fraction of the local speed. For a swept footprint,
+        // outward from the nearest point of the stroke's own centreline
+        // (M29): a stroke diverges *from itself* all along its length, and
+        // measured from nothing but its own geometry, two strokes with the
+        // same settings can merge into one object without either changing
+        // what it paints (spec.md 6.3). For a stamp, from the anchor, which
+        // is its centre — the frame's radial bearing, the same the circle's
+        // rotation is a quarter turn off (spec.md 7.5). Within
+        // `RADIAL_TAPER_M` of the centreline the component fades to nothing:
+        // on the line itself there is no outward, and just beside it the
+        // bearing is too ill-conditioned for two backends to agree on.
         Modifier::Radial(fraction) => {
             let speed = f64::from(beneath.u.hypot(beneath.v));
-            let radial =
-                uv_from_speed_azimuth(speed * fraction, object.frame.radial_bearing(position));
+            let local = object.frame.to_local(position);
+            let (bearing, weight) = match object.shape.nearest_on_skeleton(local) {
+                Some(q) => {
+                    let apart = (local[0] - q[0]).hypot(local[1] - q[1]);
+                    let weight = (apart / RADIAL_TAPER_M).clamp(0.0, 1.0);
+                    let origin = object.frame.to_global(q);
+                    (origin.initial_bearing(position), weight)
+                }
+                None => (object.frame.radial_bearing(position), 1.0),
+            };
+            let radial = uv_from_speed_azimuth(speed * fraction * weight, bearing);
             Uv {
                 u: beneath.u + radial.u,
                 v: beneath.v + radial.v,

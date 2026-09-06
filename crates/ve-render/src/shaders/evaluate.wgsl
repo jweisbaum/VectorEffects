@@ -490,14 +490,56 @@ fn uv_from(speed: f32, bearing_deg: f32) -> vec2<f32> {
 // of sin(az + d) and cos(az + d) the CPU uses. A calm cell stays calm in all
 // three, which is why the turn is written out rather than routed through a
 // speed and an azimuth.
+// The nearest point of a swept shape's centreline to `p`, in the local
+// frame: the same walk over segment pairs the capsule distance makes, keeping
+// the point rather than the distance. `sdf::nearest_on_chains` is the
+// authority; this is its port.
+fn nearest_on_segments(object: Object, p: vec2<f32>) -> vec2<f32> {
+    let n = object.shape_count;
+    var best = 1e30;
+    var nearest = p;
+    for (var i = 0u; i + 1u < n; i = i + 2u) {
+        let a = points[object.shape_offset + i];
+        let b = points[object.shape_offset + i + 1u];
+        let ab = b - a;
+        let len2 = dot(ab, ab);
+        var t = 0.0;
+        if (len2 > 0.0) {
+            t = clamp(dot(p - a, ab) / len2, 0.0, 1.0);
+        }
+        let q = a + ab * t;
+        let d = distance(p, q);
+        if (d < best) {
+            best = d;
+            nearest = q;
+        }
+    }
+    return nearest;
+}
+
+// Metres from a stroke's centreline over which a divergence fades in
+// (spec.md 6.3, M29). Mirrors `RADIAL_TAPER_M` in cpu.rs.
+const RADIAL_TAPER_M: f32 = 100.0;
+
 fn modified_vector(object: Object, position: vec2<f32>, beneath: vec2<f32>) -> vec2<f32> {
     if (object.mod_kind == 1u) {
         return beneath * (1.0 + object.mod_a);
     }
     if (object.mod_kind == 2u) {
         let speed = length(beneath);
-        let radial = initial_bearing(object.anchor, position);
-        return beneath + uv_from(speed * object.mod_a, radial);
+        // Outward from a swept stroke's own centreline, tapered to nothing
+        // on it; from the anchor for a stamp (M29). Decision for decision the
+        // CPU's `Modifier::Radial` arm.
+        var origin = object.anchor;
+        var weight = 1.0;
+        if (object.shape_kind == 0u || object.shape_kind == 5u) {
+            let local = to_local(object, position);
+            let q = nearest_on_segments(object, local);
+            weight = clamp(distance(local, q) / RADIAL_TAPER_M, 0.0, 1.0);
+            origin = to_global(object, q);
+        }
+        let radial = initial_bearing(origin, position);
+        return beneath + uv_from(speed * object.mod_a * weight, radial);
     }
     if (object.mod_kind == 3u) {
         let theta = object.mod_a * DEG;

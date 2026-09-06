@@ -774,12 +774,13 @@ fn merge_into(
     // under the target's anchor. A tool whose field is measured from that
     // anchor would paint something different afterwards, which is the one thing
     // a merge may never do (spec.md 6.1): the clone stamp reads from a
-    // displacement off it, a divergence radiates from it, and a warp both
-    // twists about it and pushes from it. Two strokes of any of those stay two
-    // objects.
+    // displacement off it, and a warp both twists about it and pushes from it.
+    // Two strokes of either stay two objects.
     //
     // The rest are safe because nothing they do refers to the anchor: an
-    // intensity scales and a turn rotates, wherever the frame is centred.
+    // intensity scales and a turn rotates, wherever the frame is centred, and
+    // a divergence radiates from the stroke's own centreline (M29) — which is
+    // what let it join this list.
     // A warp is anchored in both of its modes now: a twist turns about the
     // anchor, and a push carries the field from the anchor to a place, so the
     // displacement is the offset between the two and moving the anchor changes
@@ -789,7 +790,7 @@ fn merge_into(
     // first's stamps (spec.md 6.3, M17).
     let anchored = matches!(
         object.tool,
-        ToolKind::CloneStamp | ToolKind::Divergence | ToolKind::Warp | ToolKind::Liquify
+        ToolKind::CloneStamp | ToolKind::Warp | ToolKind::Liquify
     );
     if anchored {
         return Ok(None);

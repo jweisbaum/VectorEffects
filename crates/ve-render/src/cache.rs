@@ -34,8 +34,16 @@ pub type SceneHash = [u8; 32];
 /// Everything that affects the rendered field is fed in, in z-order. Anything
 /// that does not affect it is absent, which is what stops an irrelevant edit
 /// from throwing away a cache.
+/// Bumped whenever the *meaning* of a scene changes with its bytes unchanged
+/// — a kernel that reads the same object differently. It is part of every
+/// key, so a tile rendered by an older evaluator is unreachable rather than
+/// served as this one's (spec.md 7.10). 2: divergence radiates from a
+/// stroke's centreline (M29).
+pub const EVALUATOR_VERSION: u32 = 2;
+
 pub fn scene_hash(scene: &Scene) -> SceneHash {
     let mut hasher = blake3::Hasher::new();
+    hasher.update(&EVALUATOR_VERSION.to_le_bytes());
     hasher.update(&(scene.objects.len() as u64).to_le_bytes());
     for object in &scene.objects {
         hash_object(&mut hasher, object);

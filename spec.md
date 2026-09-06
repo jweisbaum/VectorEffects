@@ -1465,7 +1465,7 @@ modifier cannot invent a wind, only change one.
 | Tool | Key | What it does |
 |---|---|---|
 | **Intensify / reduce** | `I` | Scales the speed by `1 + amount`, leaving the direction alone. `+100%` doubles it, `-100%` takes it to calm. |
-| **Diverge / converge** | `D` | Adds a radial component of `amount × local speed`, outward from the anchor when positive and inward when negative. |
+| **Diverge / converge** | `D` | Adds a radial component of `amount × local speed`: outward when positive and inward when negative — from the **stroke's own centreline** for a swept footprint (M29), fading to nothing within 100 m of the line, where there is no outward; from the anchor for a stamp. |
 | **Rotate flow** | `R` | Turns every vector by a fixed angle, clockwise for a positive amount. The speed is untouched. |
 | **Warp** | `W` | Reads the field from a displaced position: `push` drags the field under the anchor to a place, `twist` rotates it about the anchor. A *placed* region's field, moved as one block. Nothing about the vectors changes, only where they are read from. |
 | **Liquify** | `L` | The painted smear — a paint program's forward warp. Each stamp of the stroke carries the pointer's own movement into it, scaled by `strength`; at a cell the displacement is the feathered sum of the deltas of the stamps that cover it, and the field is read from the cell minus that. The field is dragged *along the hand* rather than moved as a block (M17, D56). |
@@ -1483,12 +1483,14 @@ and the modifier sweeps across the map. None carries `edge_mode`.
 re-expresses the new chain in the target's frame, and therefore under the
 target's anchor; a tool whose field is measured from that anchor would paint
 something different afterwards, which is the one thing a merge may never do
-(§6.1). That is the diverge/converge tool, which radiates from its anchor, and
-the warp, which both twists about it and pushes from it — the same rule that
-keeps two clone strokes apart. **A liquify never merges either**, for its own
-reason: its deltas are its geometry, and re-expressing two smears under one
-frame would add the second's movement to the first's stamps. Intensify and
-rotate refer to no anchor at all and merge freely.
+(§6.1). That is the warp, which both twists about its anchor and pushes from
+it — the same rule that keeps two clone strokes apart. **A liquify never
+merges either**, for its own reason: its deltas are its geometry, and
+re-expressing two smears under one frame would add the second's movement to
+the first's stamps. Intensify and rotate refer to no anchor at all and merge
+freely, and so does **diverge/converge** since M29: it radiates from the
+stroke's own centreline, which travels with the geometry, so two strokes with
+the same settings become one object and neither paints differently for it.
 
 | Option | Type | Tool |
 |---|---|---|

@@ -12,7 +12,8 @@
 //! painted on top of.
 
 use ve_app::commands::AppState;
-use ve_app::document;
+use ve_app::create::{self, Gesture, NewObject, Tool, ToolOption};
+use ve_app::document::{self, PropertyValue};
 use ve_app::edit::{self, BrushStroke};
 use ve_app::paths::AppPaths;
 use ve_app::projects::{self, NewProjectRequest};
@@ -98,6 +99,107 @@ fn geometries(root: &TempRoot, state: &AppState) -> Vec<Geometry> {
 
 fn chain_count(geometry: &Geometry) -> usize {
     geometry.stroke_chains().len()
+}
+
+fn number(property: &str, value: f64) -> ToolOption {
+    ToolOption {
+        property: property.to_owned(),
+        value: PropertyValue::Number { value },
+    }
+}
+
+/// A diverging stroke along `points`, 400 km wide, at +100%.
+fn diverge(state: &AppState, points: Vec<[f64; 2]>) {
+    create::create(
+        state,
+        NewObject {
+            tool: Tool::Divergence,
+            gesture: Gesture::Stroke { points },
+            options: vec![
+                number("SizeKm", 400.0),
+                number("Radial", 100.0),
+                number("Feather", 0.0),
+            ],
+            layer: None,
+        },
+    )
+    .expect("a divergence");
+}
+
+/// The field at a point on step 0.
+fn field(state: &AppState, lon: f64, lat: f64) -> (f32, f32) {
+    let session = state.session.lock().expect("lock");
+    let project = &session.open.as_ref().expect("open").project;
+    let uv = ve_render::cpu::sample_scene(
+        &ve_render::scene::flatten(project, 0),
+        ve_core::LonLat::new(lon, lat).unwrap(),
+    );
+    (uv.u, uv.v)
+}
+
+/// A divergence radiates from the stroke's own centreline (spec.md 6.3,
+/// M29): beside the *far* end of a long stroke it still points straight
+/// away from the line, where radiating from the anchor at the near end would
+/// have pointed along it. The reference is geometry: due north of an
+/// east–west line, "away from the line" is due north.
+#[test]
+fn a_divergence_radiates_from_its_own_centreline() {
+    let (_root, state) = project("diverge-centreline");
+    // A uniform eastward field for the divergence to act on.
+    paint(
+        &state,
+        BrushStroke {
+            points: vec![[-10.0, 0.0], [30.0, 0.0]],
+            size_km: 3_000.0,
+            ..stroke(vec![])
+        },
+    );
+    let (u0, v0) = field(&state, 18.0, 1.0);
+    assert!(
+        u0 > 10.0 && v0.abs() < 0.5,
+        "eastward beneath: ({u0}, {v0})"
+    );
+
+    diverge(&state, vec![[0.0, 0.0], [20.0, 0.0]]);
+    // 1° north of the stroke near its east end: the added component is
+    // northward, so v grows by about the local speed and u is untouched.
+    let (u, v) = field(&state, 18.0, 1.0);
+    assert!(
+        (u - u0).abs() < 0.5,
+        "outward is across the line, not along it: u went {u0} -> {u}"
+    );
+    assert!(v > u0 * 0.8, "and northward on the north side: v = {v}");
+    // South of it, southward.
+    let (_, v_south) = field(&state, 18.0, -1.0);
+    assert!(
+        v_south < -u0 * 0.8,
+        "southward on the south side: v = {v_south}"
+    );
+}
+
+/// Two diverging strokes with the same settings are one object, and the
+/// merge changes nothing either of them paints.
+#[test]
+fn identical_divergence_strokes_merge_without_changing_the_field() {
+    let (_root, state) = project("diverge-merge");
+    paint(
+        &state,
+        BrushStroke {
+            points: vec![[-10.0, 0.0], [40.0, 0.0]],
+            size_km: 3_000.0,
+            ..stroke(vec![])
+        },
+    );
+    diverge(&state, vec![[0.0, 0.0], [12.0, 0.0]]);
+    let before = object_count(&state);
+    // A second stroke overlapping the first's end, same settings.
+    diverge(&state, vec![[11.0, 0.0], [24.0, 0.0]]);
+    assert_eq!(object_count(&state), before, "the second joined the first");
+    let (u, v) = field(&state, 22.0, 1.0);
+    assert!(
+        v > u * 0.8,
+        "beside the second stroke the field still diverges from it: ({u}, {v})"
+    );
 }
 
 #[test]
