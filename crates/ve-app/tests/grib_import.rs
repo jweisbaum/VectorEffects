@@ -308,7 +308,7 @@ fn an_imported_layer_takes_no_objects() {
 
     // Pasting, duplicating-by-move and inserting are refused the same way.
     document::clipboard_copy(&app, &[object], 0).expect("copy");
-    assert!(document::clipboard_paste(&app, Some(imported), 0, false).is_err());
+    assert!(document::clipboard_paste(&app, Some(imported), 0, false, false).is_err());
     assert!(document::object_move(&app, object, imported, 0).is_err());
     ve_app::capture::region_capture(
         &app,
@@ -321,7 +321,8 @@ fn an_imported_layer_takes_no_objects() {
     )
     .expect("capture");
     assert!(
-        ve_app::capture::capture_paste(&app, Some(20.0), Some(0.0), 0, Some(imported)).is_err()
+        ve_app::capture::capture_paste(&app, Some(20.0), Some(0.0), 0, Some(imported), false)
+            .is_err()
     );
 
     // And nothing landed there.

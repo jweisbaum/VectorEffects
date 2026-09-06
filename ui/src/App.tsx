@@ -11,6 +11,7 @@ import StartScreen from "./project/StartScreen";
 import UnsavedChangesDialog from "./project/UnsavedChangesDialog";
 import { mayReplaceProject, type UnsavedChoice } from "./project/saveGuard";
 import { pickProjectToOpen, pickProjectToSave } from "./project/dialogs";
+import { stillPasteChord } from "./chords";
 import { api, IpcError } from "./ipc";
 import { reportError, shown, useHint } from "./hint";
 import { isBusy, useBusy } from "./busy";
@@ -364,14 +365,19 @@ export default function App() {
         event.preventDefault();
         // What is held decides what is pasted. Shift pastes objects at the
         // original step numbers instead of moving the animation to the
-        // current one (spec.md 8.5). Both land in the active layer (D66).
-        const absolute = event.shiftKey;
+        // current one (spec.md 8.5). A *still* paste — `Ctrl`-`Shift`-`V` on
+        // a Mac, where `Ctrl` is free, `Ctrl`-`Alt`-`Shift`-`V` elsewhere,
+        // where `Ctrl`-`Shift`-`V` is already the absolute one — pastes the
+        // copied frame alone, with no animation at all (M27). All land in
+        // the active layer (D66).
+        const still = stillPasteChord(event);
+        const absolute = event.shiftKey && !still;
         void api
           .clipboardKind()
           .then((kind) => {
-            if (kind === "capture") mapRef.current?.pasteCapture(activeLayer);
+            if (kind === "capture") mapRef.current?.pasteCapture(activeLayer, still);
             else if (kind === "objects")
-              return api.pasteObjects(activeLayer, step, absolute).then(setProject);
+              return api.pasteObjects(activeLayer, step, absolute, still).then(setProject);
             return undefined;
           })
           .catch(report);

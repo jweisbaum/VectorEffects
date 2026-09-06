@@ -377,9 +377,9 @@ export interface MapHandle {
   /**
    * `Cmd`-`V` when the clipboard holds a captured field: pastes it under the
    * pointer when the pointer is over the map, otherwise back where it was
-   * taken, into `layer`.
+   * taken, into `layer`. `still` keeps the copied frame alone (spec.md 8.5).
    */
-  pasteCapture(layer: number | null): void;
+  pasteCapture(layer: number | null, still: boolean): void;
   /** Takes a capture mode answered elsewhere — the timeline's key removal. */
   setCapture(mode: CaptureMode): void;
 }
@@ -1790,14 +1790,14 @@ export default function MapView({
     return true;
   }, [region]);
   const pasteCapture = useCallback(
-    (layer: number | null) => {
+    (layer: number | null, still: boolean) => {
       // Under the pointer when it is over the map, because that is where the
       // user is pointing; otherwise back where it was taken, nudged.
       const at = cursorRef.current
         ? unproject(cameraRef.current, viewRef.current, cursorRef.current)
         : null;
       void api
-        .pasteCapture(at?.lon ?? null, at?.lat ?? null, stepRef.current, layer)
+        .pasteCapture(at?.lon ?? null, at?.lat ?? null, stepRef.current, layer, still)
         .then(onProjectChanged)
         .catch((err: unknown) => setError(String(err)));
     },

@@ -9,8 +9,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::document::Object;
+use crate::document::{MotionFlags, Object, StepRange};
 use crate::id::Id;
+use crate::keyframe::Animatable;
 use crate::schema::PropId;
 use crate::value::PropValue;
 
@@ -23,6 +24,12 @@ pub enum PasteTiming {
     Relative,
     /// Keep the original step numbers.
     Absolute,
+    /// No animation at all: the copy as it was at the step it was copied
+    /// from, at every step (M27). Every property is frozen at that step's
+    /// value with its keys dropped, the motion switches are off, a follower
+    /// stands alone, and the range is the whole timeline — a still has no
+    /// timing to shift.
+    Still,
 }
 
 /// Degrees the anchor moves when a copy would land exactly on its original.
@@ -103,6 +110,14 @@ impl Clipboard {
                             None => animatable.set_follow(None),
                         }
                     }
+                }
+
+                if timing == PasteTiming::Still {
+                    for (_, animatable) in copy.props.iter_mut() {
+                        *animatable = Animatable::constant(animatable.value_at(self.source_step));
+                    }
+                    copy.motion = MotionFlags::default();
+                    copy.active_range = StepRange::new(0, last_step);
                 }
 
                 if timing == PasteTiming::Relative {
@@ -222,6 +237,23 @@ mod tests {
             .map(|k| k.step)
             .collect();
         assert_eq!(steps, vec![15, 20], "the keyframes travel with it");
+    }
+
+    /// A still paste is the copy as it was at the copy step, everywhere:
+    /// no keys, no motion, no timing, the whole timeline.
+    #[test]
+    fn a_still_paste_freezes_the_copy_at_the_step_it_was_copied_from() {
+        // Speed runs 5 -> 20 over steps 4..9, so at step 6 it is 11.
+        let mut source = object("a", 4, 9);
+        source.motion.position = true;
+        let clipboard = Clipboard::copy(vec![source], 6);
+        let pasted = clipboard.paste(15, PasteTiming::Still, 23, false);
+
+        let speed = pasted[0].props.get(PropId::Speed).expect("speed");
+        assert!(speed.keys().is_empty(), "no keys survive a still paste");
+        assert_eq!(speed.base(), PropValue::F32(11.0));
+        assert_eq!(pasted[0].active_range, StepRange::new(0, 23));
+        assert!(!pasted[0].motion.any(), "the motion switches are off");
     }
 
     /// Pasting near the end must not silently discard the animation.

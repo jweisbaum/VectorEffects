@@ -632,7 +632,7 @@ fn objects_can_be_copied_and_pasted() {
     let clipboard = document::clipboard_copy(&state, &[id], 0).expect("copy");
     assert_eq!(clipboard.count, 1);
 
-    let after = document::clipboard_paste(&state, None, 0, false).expect("paste");
+    let after = document::clipboard_paste(&state, None, 0, false, false).expect("paste");
     assert_eq!(after.object_count, 2);
 
     let objects = &document::tree(&state, 0).expect("tree").layers[0].objects;
@@ -656,7 +656,7 @@ fn a_paste_is_a_single_undo() {
         .map(|o| o.id)
         .collect();
     document::clipboard_copy(&state, &objects, 0).expect("copy");
-    document::clipboard_paste(&state, None, 0, false).expect("paste");
+    document::clipboard_paste(&state, None, 0, false, false).expect("paste");
     assert_eq!(
         document::tree(&state, 0).expect("tree").layers[0]
             .objects
@@ -682,7 +682,7 @@ fn cutting_copies_and_then_removes() {
     let after = document::clipboard_cut(&state, &[id], 0).expect("cut");
     assert_eq!(after.object_count, 0);
 
-    document::clipboard_paste(&state, None, 0, false).expect("paste");
+    document::clipboard_paste(&state, None, 0, false, false).expect("paste");
     assert_eq!(
         document::tree(&state, 0).expect("tree").layers[0]
             .objects
@@ -727,7 +727,7 @@ fn a_capture_and_an_object_copy_share_one_clipboard() {
         ClipboardKind::Capture
     );
     assert!(
-        document::clipboard_paste(&state, None, 0, false).is_err(),
+        document::clipboard_paste(&state, None, 0, false, false).is_err(),
         "the objects are gone from the clipboard"
     );
 
@@ -737,7 +737,7 @@ fn a_capture_and_an_object_copy_share_one_clipboard() {
         ClipboardKind::Objects
     );
     assert!(!capture::capture_held(&state).expect("state").has_capture);
-    let after = document::clipboard_paste(&state, None, 0, false).expect("paste");
+    let after = document::clipboard_paste(&state, None, 0, false, false).expect("paste");
     assert_eq!(after.object_count, 2, "and the objects paste, keys and all");
 }
 
@@ -772,7 +772,7 @@ fn deleting_a_selection_is_one_undo() {
 #[test]
 fn pasting_an_empty_clipboard_is_refused() {
     let (_root, state) = painted("paste-empty");
-    assert!(document::clipboard_paste(&state, None, 0, false).is_err());
+    assert!(document::clipboard_paste(&state, None, 0, false, false).is_err());
 }
 
 /// Pasting into another layer puts the copy there, not back where it came from.
@@ -784,7 +784,7 @@ fn a_paste_can_target_a_layer() {
     document::clipboard_copy(&state, &[id], 0).expect("copy");
 
     let upper = document::tree(&state, 0).expect("tree").layers[1].id;
-    document::clipboard_paste(&state, Some(upper), 0, false).expect("paste");
+    document::clipboard_paste(&state, Some(upper), 0, false, false).expect("paste");
 
     let tree = document::tree(&state, 0).expect("tree");
     assert_eq!(tree.layers[0].objects.len(), 1);
@@ -799,7 +799,7 @@ fn pasting_at_another_step_moves_the_lifetime() {
     document::object_range(&state, id, 0, 3).expect("range");
     document::clipboard_copy(&state, &[id], 0).expect("copy");
 
-    document::clipboard_paste(&state, None, 6, false).expect("paste");
+    document::clipboard_paste(&state, None, 6, false, false).expect("paste");
     let objects = &document::tree(&state, 6).expect("tree").layers[0].objects;
     let pasted = objects
         .iter()
@@ -808,7 +808,7 @@ fn pasting_at_another_step_moves_the_lifetime() {
     assert_eq!((pasted.start_step, pasted.end_step), (6, 9));
 
     // Absolute timing keeps the original steps instead.
-    document::clipboard_paste(&state, None, 6, true).expect("paste absolute");
+    document::clipboard_paste(&state, None, 6, true, false).expect("paste absolute");
     let objects = &document::tree(&state, 0).expect("tree").layers[0].objects;
     let absolute = objects.last().expect("last");
     assert_eq!((absolute.start_step, absolute.end_step), (0, 3));

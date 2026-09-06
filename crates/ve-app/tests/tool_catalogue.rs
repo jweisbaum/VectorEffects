@@ -1507,7 +1507,7 @@ fn every_tool_survives_a_copy_and_a_paste() {
 
         let original = document(&state).layers[0].objects[0].clone();
         ve_app::document::clipboard_copy(&state, &[original.id.raw()], 0).expect("copy");
-        ve_app::document::clipboard_paste(&state, None, 0, false).expect("paste");
+        ve_app::document::clipboard_paste(&state, None, 0, false, false).expect("paste");
 
         let objects = document(&state).layers[0].objects.clone();
         assert_eq!(objects.len(), 2, "{tool:?} did not paste");

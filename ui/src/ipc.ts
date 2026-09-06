@@ -407,8 +407,12 @@ export const api = {
   cutObjects: (objects: number[], step: number) =>
     call<ProjectSummary>("cut_objects", { objects, step }),
   /** `absoluteTiming` keeps the original step numbers instead of moving them. */
-  pasteObjects: (layer: number | null, step: number, absoluteTiming: boolean) =>
-    call<ProjectSummary>("paste_objects", { layer, step, absoluteTiming }),
+  /**
+   * `still` pastes the copy as it was at the step it was copied from, with no
+   * animation at all (spec.md 8.5, M27); it wins over `absoluteTiming`.
+   */
+  pasteObjects: (layer: number | null, step: number, absoluteTiming: boolean, still = false) =>
+    call<ProjectSummary>("paste_objects", { layer, step, absoluteTiming, still }),
 
   /**
    * Copies a run of an imported layer's steps (spec.md 4.8, M20). The layer
@@ -452,8 +456,13 @@ export const api = {
    * from, into `layer` (null: the top of the stack). Its run of frames begins
    * at `step` (D65).
    */
-  pasteCapture: (lon: number | null, lat: number | null, step: number, layer: number | null) =>
-    call<ProjectSummary>("paste_capture", { lon, lat, step, layer }),
+  pasteCapture: (
+    lon: number | null,
+    lat: number | null,
+    step: number,
+    layer: number | null,
+    still = false,
+  ) => call<ProjectSummary>("paste_capture", { lon, lat, step, layer, still }),
   /** Which of the two things a paste would put down: objects, or a captured field. */
   clipboardKind: () => call<ClipboardKind>("clipboard_kind"),
   /** The application's settings: shortcuts, display defaults, macros (M15). */

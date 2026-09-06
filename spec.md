@@ -2146,6 +2146,14 @@ The clipboard holds fully serialised objects, including all keyframes.
 - Object `Id`s are always regenerated on paste; names get a `copy` suffix.
 - A paste lands in the **active layer** (§6.1's one rule; an imported layer
   refuses it).
+- **A still paste** (M27) — `Ctrl`-`Shift`-`V` on a Mac, where `Ctrl` is
+  free, `Ctrl`-`Alt`-`Shift`-`V` where `Ctrl` is the command key — pastes the
+  copy **as it was at the step it was copied from, with no animation at
+  all**: every property frozen at that step's value and its keys dropped,
+  the motion switches off, a follower standing alone, the range the whole
+  timeline. A captured region pasted still keeps the copied frame alone, as
+  a still capture with its own hash. `Cmd`-`V` and `Cmd`-`Shift`-`V` are
+  unchanged and carry the animation.
 
 **Copying a region copies the field, not the objects.** With a region selected
 (§8.2), `Cmd`-`C` captures the **visible composite** inside it — what the map

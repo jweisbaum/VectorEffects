@@ -155,7 +155,7 @@ fn a_region_copy_carries_the_animation_from_the_copy_step() {
     assert_eq!(held.frames, 3, "steps 1, 2 and 3 differ, so three frames");
 
     // Pasted at step 0, centred at 115°: the source's 15° lands on 115°.
-    capture::capture_paste(&app, Some(115.0), Some(0.0), 0, None).expect("paste");
+    capture::capture_paste(&app, Some(115.0), Some(0.0), 0, None, false).expect("paste");
     assert!(
         (at(0, 110.0) - 18.0).abs() < 0.6,
         "at its step 0 the patch shows the source's step 1 (stroke at 10°)"
@@ -172,6 +172,50 @@ fn a_region_copy_carries_the_animation_from_the_copy_step() {
         (at(3, 130.0) - 18.0).abs() < 0.6,
         "past its last frame a patch holds it"
     );
+}
+
+/// A still paste of the same copy keeps the copied frame alone (M27): at
+/// every step the patch shows what the source showed on the copy step, and
+/// the later frames of the run are not in it.
+#[test]
+fn a_still_paste_of_an_animated_copy_keeps_the_copied_frame_alone() {
+    let (_root, app) = project("still-paste");
+    let object = stroke(&app, 0.0, 0.0, 600.0, 18.0);
+    for (step, lon) in [(0u32, 0.0f64), (3, 30.0)] {
+        ve_app::animation::key_at(
+            &app,
+            object,
+            "Position",
+            step,
+            Some(PropertyValue::Position { lon, lat: 0.0 }),
+        )
+        .expect("key");
+    }
+    let at = |step: u32, lon: f64| {
+        let session = app.session.lock().expect("lock");
+        let project = &session.open.as_ref().expect("open").project;
+        sample_scene(&flatten(project, step), LonLat::new(lon, 0.0).unwrap()).u
+    };
+    let held = capture::region_capture(&app, rect(15.0, 0.0, 20.0, 6.0), 1).expect("capture");
+    assert_eq!(held.frames, 3, "the clipboard holds the run");
+
+    capture::capture_paste(&app, Some(115.0), Some(0.0), 0, None, true).expect("still paste");
+    for step in [0u32, 2, 3] {
+        assert!(
+            (at(step, 110.0) - 18.0).abs() < 0.6,
+            "at step {step} the still shows the copy step's stroke at 10°"
+        );
+        assert!(
+            at(step, 130.0).abs() < 0.6,
+            "and never the run's last frame at 30° (step {step})"
+        );
+    }
+    let session = app.session.lock().expect("lock");
+    let project = &session.open.as_ref().expect("open").project;
+    let patch = project.layers[0].objects.last().expect("the patch");
+    let hash = patch.capture.as_ref().expect("its samples");
+    let kept = project.captures.get(hash).expect("in the project");
+    assert_eq!(kept.frames.len(), 1, "one frame, its own archive entry");
 }
 
 /// A still scene bakes one frame, however long the timeline is.
@@ -224,7 +268,7 @@ fn a_pasted_patch_paints_its_source_and_leaves_the_rest_alone() {
     let _ = elsewhere;
     assert!((field(&app, 100.0, 0.0).1 + 7.0).abs() < 0.5, "southward");
 
-    capture::capture_paste(&app, Some(100.0), Some(0.0), 0, None).expect("paste");
+    capture::capture_paste(&app, Some(100.0), Some(0.0), 0, None, false).expect("paste");
 
     // Where the stroke was, the patch paints the stroke.
     let (u, v) = field(&app, 94.0, 0.0);
@@ -252,7 +296,7 @@ fn a_paste_makes_one_patch_and_undoes() {
         let session = app.session.lock().expect("lock");
         session.open.as_ref().expect("open").project.object_count()
     };
-    capture::capture_paste(&app, Some(40.0), Some(0.0), 0, None).expect("paste");
+    capture::capture_paste(&app, Some(40.0), Some(0.0), 0, None, false).expect("paste");
     {
         let session = app.session.lock().expect("lock");
         let project = &session.open.as_ref().expect("open").project;
@@ -279,7 +323,7 @@ fn a_patch_survives_a_save_and_load_with_its_samples() {
     let (root, app) = project("roundtrip");
     stroke(&app, 0.0, 0.0, 800.0, 18.0);
     capture::region_capture(&app, rect(0.0, 0.0, 6.0, 6.0), 0).expect("capture");
-    capture::capture_paste(&app, Some(50.0), Some(0.0), 0, None).expect("paste");
+    capture::capture_paste(&app, Some(50.0), Some(0.0), 0, None, false).expect("paste");
     let before = field(&app, 50.0, 0.0);
     assert!((before.0 - 18.0).abs() < 0.6);
 
@@ -368,7 +412,7 @@ fn a_mask_leaves_a_hole_the_patch_does_not_fill() {
         },
     )
     .expect("a second stroke");
-    capture::capture_paste(&app, Some(100.0), Some(0.0), 0, None).expect("paste");
+    capture::capture_paste(&app, Some(100.0), Some(0.0), 0, None, false).expect("paste");
 
     // Under the masked hole the field beneath shows through, unchanged.
     let (u, v) = field(&app, 100.0, 0.0);
@@ -403,7 +447,7 @@ fn a_patch_appears_in_the_document_tree() {
     let (_root, app) = project("tree");
     stroke(&app, 0.0, 0.0, 800.0, 11.0);
     capture::region_capture(&app, rect(0.0, 0.0, 6.0, 6.0), 0).expect("capture");
-    capture::capture_paste(&app, Some(30.0), Some(0.0), 0, None).expect("paste");
+    capture::capture_paste(&app, Some(30.0), Some(0.0), 0, None, false).expect("paste");
     let tree = document::tree(&app, 0).expect("tree");
     let object = tree.layers[0].objects.last().expect("the patch");
     assert_eq!(object.tool, "patch");

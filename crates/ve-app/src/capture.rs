@@ -314,8 +314,9 @@ pub fn paste_capture(
     lat: Option<f64>,
     step: u32,
     layer: Option<u64>,
+    still: bool,
 ) -> Result<ProjectSummary> {
-    capture_paste(&state, lon, lat, step, layer)
+    capture_paste(&state, lon, lat, step, layer, still)
 }
 
 /// Implementation of [`paste_capture`].
@@ -327,18 +328,46 @@ pub fn paste_capture(
 /// **its run of frames begins at `step`**: the patch's first active step is
 /// where `capture_of` measures the frames from, so what was copied at step 5
 /// and pasted at 12 shows at 12 what the source showed at 5 (D65).
+///
+/// **`still` keeps the first frame only** (M27): the frame of the step the
+/// region was copied at, at every step, as a still capture — the run's
+/// later frames are what a still paste is asked to leave behind. It is a
+/// different capture with its own hash, so a still and a run pasted from
+/// the same copy are two archive entries, each what its object shows.
 pub fn capture_paste(
     state: &AppState,
     lon: Option<f64>,
     lat: Option<f64>,
     step: u32,
     layer: Option<u64>,
+    still: bool,
 ) -> Result<ProjectSummary> {
     with_session(state, |state_session| {
         let held = state_session.capture.held.clone();
         let open = state_session.require_open()?;
         let Some((capture, region)) = held else {
             return Ok(ProjectSummary::of(open));
+        };
+        let capture = if still && capture.frames.len() > 1 {
+            let first = capture.frames.first().ok_or(AppError::BadOption {
+                field: "capture",
+                value: "has no frames".to_owned(),
+            })?;
+            Arc::new(Capture::new(
+                capture.kind,
+                CaptureLattice {
+                    ni: capture.ni,
+                    nj: capture.nj,
+                    spacing_deg: capture.spacing_deg,
+                    x0_deg: capture.x0_deg,
+                    y0_deg: capture.y0_deg,
+                },
+                0.0,
+                capture.shape.clone(),
+                vec![CaptureFrame::still(0.0, first.uv.clone())],
+            )?)
+        } else {
+            capture
         };
         let taken_at = region.anchor().ok_or(AppError::BadOption {
             field: "region",

@@ -1226,23 +1226,31 @@ pub fn paste_objects(
     layer: Option<u64>,
     step: u32,
     absolute_timing: bool,
+    still: bool,
 ) -> Result<ProjectSummary> {
-    clipboard_paste(&state, layer, step, absolute_timing)
+    clipboard_paste(&state, layer, step, absolute_timing, still)
 }
 
 /// Implementation of [`paste_objects`], callable without a Tauri handle.
+///
+/// `still` pastes the copy as it was at the step it was copied from, with no
+/// animation at all (spec.md 8.5, M27); it wins over `absolute_timing`, since
+/// a still has no timing to keep.
 pub fn clipboard_paste(
     state: &AppState,
     layer: Option<u64>,
     step: u32,
     absolute_timing: bool,
+    still: bool,
 ) -> Result<ProjectSummary> {
     with_session(state, |session| {
         if session.clipboard.is_empty() {
             return Err(AppError::Internal("the clipboard is empty".to_owned()));
         }
 
-        let timing = if absolute_timing {
+        let timing = if still {
+            PasteTiming::Still
+        } else if absolute_timing {
             PasteTiming::Absolute
         } else {
             PasteTiming::Relative

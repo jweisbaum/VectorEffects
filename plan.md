@@ -2462,7 +2462,13 @@ anything not done recorded here with its reason.
    (`ui/src/map/hover.ts`) is the rule, pure and tested beside `cursorFor`,
    and takes the same inside-the-region predicate the cursor and the click
    use; every filling tool goes through it.
-2. **`Ctrl`-`Shift`-`V` pastes a still.** Pending.
+2. **`Ctrl`-`Shift`-`V` pastes a still.** Delivered: `PasteTiming::Still` in
+   `ve-core` freezes every property at the copy step (`value_at`), drops
+   keys, motion and links and gives the copy the whole timeline; the app's
+   two paste commands take a `still` flag, and a captured region pasted
+   still is rebuilt as a one-frame capture with its own hash. The chord is
+   `Ctrl`-`Shift`-`V` on a Mac and `Ctrl`-`Alt`-`Shift`-`V` elsewhere,
+   where `Ctrl`-`Shift`-`V` already means absolute timing.
 3. **Shift-click in the layer panel selects no text.** Pending.
 4. **The macro stamp's hover outline.** Pending.
 5. **The shape fill's click neither magnifies nor samples.** Pending.
