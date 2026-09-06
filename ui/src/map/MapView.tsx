@@ -3960,11 +3960,14 @@ export default function MapView({
 
       setBusy(true);
       try {
-        const summary = await api.createObject(
+        const created = await api.createObject(
           newObject(tool, gesture, state, schema, camera, lat, activeLayer),
         );
-        settled.revision = summary.revision;
-        onProjectChanged(summary);
+        settled.revision = created.project.revision;
+        onProjectChanged(created.project);
+        // What was just made is what the user is holding (M29): the panel
+        // and the inspector turn to it, as they do to a clicked object.
+        onSelect([created.object]);
         // The revision change re-addresses every tile, but if they were all
         // cached nothing else would schedule the draw that retires the preview.
         requestDraw();
@@ -3979,7 +3982,7 @@ export default function MapView({
         setBusy(false);
       }
     },
-    [activeLayer, onProjectChanged, rampMax, rampMin, requestDraw],
+    [activeLayer, onProjectChanged, onSelect, rampMax, rampMin, requestDraw],
   );
 
   /** Commits the gesture in progress, if it has enough placed to mean anything. */

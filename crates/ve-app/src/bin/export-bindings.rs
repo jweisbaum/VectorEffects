@@ -44,6 +44,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     FieldSample::export_all(&cfg)?;
     AppErrorPayload::export_all(&cfg)?;
     ProjectSummary::export_all(&cfg)?;
+    ve_app::create::Created::export_all(&cfg)?;
     RecentProject::export_all(&cfg)?;
     NewProjectRequest::export_all(&cfg)?;
     BrushStroke::export_all(&cfg)?;

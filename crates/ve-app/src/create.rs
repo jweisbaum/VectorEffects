@@ -229,11 +229,20 @@ pub struct NewObject {
 
 /// Adds an object drawn with any tool.
 #[tauri::command]
-pub fn create_object(
-    state: tauri::State<'_, AppState>,
-    object: NewObject,
-) -> Result<ProjectSummary> {
+pub fn create_object(state: tauri::State<'_, AppState>, object: NewObject) -> Result<Created> {
     create(&state, object)
+}
+
+/// What a gesture made: the document after it, and the object it left the
+/// user holding (M29) — the new object, or the one the gesture merged into,
+/// since that is the object that now has the stroke in it.
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export, export_to = "Created.ts")]
+pub struct Created {
+    /// The document after the gesture.
+    pub project: ProjectSummary,
+    /// The object the gesture made or grew, which becomes the selection.
+    pub object: u64,
 }
 
 /// Reads an enum option, falling back to the schema default.
@@ -662,7 +671,7 @@ fn shape_fill_geometry(
 
 /// Builds and commits an object. The implementation of [`create_object`],
 /// callable without a Tauri handle.
-pub fn create(state: &AppState, new: NewObject) -> Result<ProjectSummary> {
+pub fn create(state: &AppState, new: NewObject) -> Result<Created> {
     let tool = new.tool.kind();
     let props = resolve_options(tool, &new.options)?;
     check_modes(tool, &props, &new.options)?;
@@ -708,24 +717,35 @@ pub fn create(state: &AppState, new: NewObject) -> Result<ProjectSummary> {
             prop.set_base(PropValue::LonLat(anchor));
         }
 
-        let command = match merge_into(layer, &object, &positions)? {
-            Some((target, merged)) => Command::SetGeometry {
-                object: target,
-                before: Box::new(
-                    layer
-                        .objects
-                        .iter()
-                        .find(|o| o.id == target)
-                        .map(|o| o.geometry.clone())
-                        .ok_or_else(|| AppError::Internal("merge target vanished".to_owned()))?,
-                ),
-                after: Box::new(merged),
-            },
-            None => Command::AddObject {
-                layer: layer.id,
-                index: layer.objects.len(),
-                object: Box::new(object),
-            },
+        let (command, held) = match merge_into(layer, &object, &positions)? {
+            Some((target, merged)) => (
+                Command::SetGeometry {
+                    object: target,
+                    before: Box::new(
+                        layer
+                            .objects
+                            .iter()
+                            .find(|o| o.id == target)
+                            .map(|o| o.geometry.clone())
+                            .ok_or_else(|| {
+                                AppError::Internal("merge target vanished".to_owned())
+                            })?,
+                    ),
+                    after: Box::new(merged),
+                },
+                target.raw(),
+            ),
+            None => {
+                let id = object.id.raw();
+                (
+                    Command::AddObject {
+                        layer: layer.id,
+                        index: layer.objects.len(),
+                        object: Box::new(object),
+                    },
+                    id,
+                )
+            }
         };
 
         let open = session.require_open()?;
@@ -733,7 +753,10 @@ pub fn create(state: &AppState, new: NewObject) -> Result<ProjectSummary> {
         history.push(project, command)?;
         open.touch();
 
-        Ok(ProjectSummary::of(session.require_open()?))
+        Ok(Created {
+            project: ProjectSummary::of(session.require_open()?),
+            object: held,
+        })
     })
 }
 

@@ -26,6 +26,7 @@ import type { Tool } from "./generated/Tool";
 import type { ToolSchema } from "./generated/ToolSchema";
 import type { DocumentTree } from "./generated/DocumentTree";
 import type { ClipboardState } from "./generated/ClipboardState";
+import type { Created } from "./generated/Created";
 import type { ClipboardKind } from "./generated/ClipboardKind";
 import type { AutosaveMode } from "./generated/AutosaveMode";
 import type { AppSettings } from "./generated/AppSettings";
@@ -186,7 +187,8 @@ export const api = {
   toolPalette: () => call<ToolSchema[]>("tool_palette"),
 
   /** Adds an object drawn with any tool. */
-  createObject: (object: NewObject) => call<ProjectSummary>("create_object", { object }),
+  /** A gesture's object: the document after it, and the object it made or grew (M29). */
+  createObject: (object: NewObject) => call<Created>("create_object", { object }),
 
   /** Adds a painted stroke to the topmost layer. */
   addBrushStroke: (stroke: BrushStroke) =>

@@ -213,6 +213,7 @@ pub fn paint(state: &AppState, stroke: BrushStroke) -> Result<ProjectSummary> {
             layer: stroke.layer,
         },
     )
+    .map(|created| created.project)
 }
 
 /// One option, named the way the schema names it.

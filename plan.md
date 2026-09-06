@@ -2614,7 +2614,9 @@ the field kind a property of the layer rather than of the project (§4.1).
 3. **The timeline lists layers and objects in the panel's order.**
    Delivered: both loops reverse the document's bottom-first order, as the
    layer panel does.
-4. **A new object is the selection.** Pending.
+4. **A new object is the selection.** Delivered: `create_object` returns
+   `Created` — the summary and the object it made or merged into — and the
+   map selects it as the gesture lands.
 5. **The follow button does something on a click.** Pending.
 6. **Divergence strokes with the same settings merge.** Pending.
 7. **The motion button's help text.** Delivered: "Add velocity / rotational

@@ -1103,6 +1103,9 @@ All tools produce **objects**. Common rules:
   dragged above or below any other** (M29): the drop lands on whichever
   half of the target row the pointer let go on, a line on that edge says so
   beforehand, and each row carries a grip to pick it up by.
+- **What a gesture makes is the selection** (M29): the new object, or the
+  one the gesture merged into, is selected the moment it lands, so the panel
+  and the inspector turn to it as they do to a clicked object.
 - A layer holds an unlimited number of objects.
 - All objects support: rename, delete, duplicate, copy/paste, select and
   multi-select, enable/disable, move, rotate, scale.
