@@ -76,7 +76,12 @@ pub fn supports(scene: &Scene) -> bool {
             // is the clone stamp's, for the same reason and through the same
             // path.
             && object.capture.is_none()
-    }) && raster_bytes(scene) <= MAX_RASTER_BYTES
+            // The eraser's stamps are variable in number and shape and are
+            // evaluated on the CPU alone for now (M29): a scene with one
+            // takes the same fallback the patch takes, and cannot disagree.
+            && object.erased.is_empty()
+    }) && scene.rasters.iter().all(|raster| raster.erased.is_empty())
+        && raster_bytes(scene) <= MAX_RASTER_BYTES
 }
 
 /// A scene packed for the shader.

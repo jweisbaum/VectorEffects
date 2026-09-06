@@ -1024,107 +1024,315 @@ pub fn objects_remove(state: &AppState, objects: &[u64]) -> Result<ProjectSummar
     })
 }
 
-/// The eraser's write (spec.md 8.1, M28): the objects it passed over, gone
-/// from every frame — or, with `step`, from that frame alone.
-#[tauri::command]
-pub fn erase_objects(
-    state: tauri::State<'_, AppState>,
-    objects: Vec<u64>,
-    step: Option<u32>,
-) -> Result<ProjectSummary> {
-    objects_erase(&state, &objects, step)
+/// The eraser's stroke (spec.md 8.1, M29): a brush that takes away.
+#[derive(Debug, Clone, Deserialize, TS)]
+#[ts(export, export_to = "EraseStroke.ts")]
+pub struct EraseStroke {
+    /// Pointer positions as `[lon, lat]`, in the order they were drawn.
+    pub points: Vec<[f64; 2]>,
+    /// The stamp's radius on the ground, in kilometres. A size in pixels
+    /// has already become kilometres at the latitude the stroke began.
+    pub radius_km: f64,
+    /// A square stamp rather than a disc.
+    pub square: bool,
+    /// Edge falloff, 0 to 1.
+    pub feather: f32,
+    /// The one step to erase from, or every step.
+    pub step: Option<u32>,
+    /// The step the stroke was drawn at: the frame each object is measured
+    /// in, since an object that moves is somewhere else at every step.
+    pub at_step: u32,
+    /// The layer it acts on — the active one; the creation rule's when absent.
+    pub layer: Option<u64>,
 }
 
-/// Implementation of [`erase_objects`].
-///
-/// Without a step it is [`objects_remove`]: the object is deleted, followers
-/// freed, one history entry for the sweep. With a step it is a keyframe edit
-/// on each object's `Enabled` switch — the animatable per-step switch
-/// spec.md 4.6 names for exactly this — false at `step` and back to what it
-/// was at the step after, with a key at the step before so the switch does
-/// not fall before its first key: an object erased from frame 3 is there on
-/// frames 2 and 4 exactly as it was. The object stays in the document and in
-/// the panel, so the erase is undone by deleting the key like any other, and
-/// the frame it is missing from shows on its timeline bar.
-pub fn objects_erase(
-    state: &AppState,
-    objects: &[u64],
-    step: Option<u32>,
+/// Erases what the stroke covers in one layer (spec.md 8.1, M29).
+#[tauri::command(async)]
+pub fn erase_stroke(
+    state: tauri::State<'_, AppState>,
+    stroke: EraseStroke,
 ) -> Result<ProjectSummary> {
-    let Some(step) = step else {
-        return objects_remove(state, objects);
-    };
-    if objects.is_empty() {
+    stroke_erase(&state, stroke)
+}
+
+/// Implementation of [`erase_stroke`].
+///
+/// The eraser makes no object. What it does depends on what is under it:
+///
+/// - a **painted object** gains an [`Erasure`](ve_core::document::Erasure) —
+///   the stamp in the object's own frame, so it travels with the object —
+///   and its coverage is multiplied by what the erasures leave; an object
+///   with nothing left of it is **deleted** instead;
+/// - a **patch or macro** has its captured samples rewritten to undefined
+///   where the stamp falls, as a new capture with its own hash, so the erase
+///   is in the data and not layered over it;
+/// - an **imported layer** gains a stamp in geographic space, applied when
+///   its lattice is sampled, since its samples are its file's and are read
+///   back on open (invariants 1 and 2).
+///
+/// One `Batch` per sweep, so one undo returns the whole stroke.
+pub fn stroke_erase(state: &AppState, stroke: EraseStroke) -> Result<ProjectSummary> {
+    use ve_core::capture::{Capture, CaptureLattice, UNDEFINED};
+    use ve_core::document::{Erasure, LayerSource, LocalPoint, RasterErasure};
+    use ve_render::aeqd::M_PER_DEGREE;
+    use ve_render::cpu::{erased_factor, raster_erased};
+    use ve_render::scene::{FlatObject, FlatRasterErasure, flatten_object};
+
+    let points: Vec<LonLat> = stroke
+        .points
+        .iter()
+        .map(|pair| LonLat::new(pair[0], pair[1]).map_err(AppError::Core))
+        .collect::<Result<_>>()?;
+    let radius_m = stroke.radius_km * 1000.0;
+    if points.is_empty() || !radius_m.is_finite() || radius_m <= 0.0 {
         return with_session(state, |session| {
             Ok(ProjectSummary::of(session.require_open()?))
         });
     }
-    apply(state, |project| {
-        let last = project.last_step();
-        if step > last {
-            return Err(AppError::BadOption {
-                field: "step",
-                value: format!("{step} is past the last step, {last}"),
-            });
-        }
-        let mut commands = Vec::new();
-        for raw in objects {
-            let id = object_id(*raw);
-            let object = project.object(id).ok_or_else(|| missing_object(*raw))?;
-            let Some(before) = object.props.get(PropId::Enabled) else {
-                continue;
-            };
-            let mut after = before.clone();
-            hide_at(&mut after, step, last);
-            if after == *before {
-                continue;
-            }
-            commands.push(Command::SetProperty {
-                object: id,
-                prop: PropId::Enabled,
-                before: Box::new(before.clone()),
-                after: Box::new(after),
-            });
-        }
-        Ok(Command::Batch {
-            label: if commands.len() == 1 {
-                format!("Erase object from step {step}")
-            } else {
-                format!("Erase {} objects from step {step}", commands.len())
-            },
-            commands,
-        })
-    })
-}
+    let feather = stroke.feather.clamp(0.0, 1.0);
 
-/// Turns an `Enabled` animatable off at `step` and nowhere else.
-///
-/// Keys are held: a value before the first key is the first key's, and a
-/// `Step` key holds until the next. So the frame before gets a key with the
-/// value it already shows, unless it has one, the frame itself gets `false`,
-/// and the frame after gets the value it already shows, unless it has one or
-/// there is none.
-fn hide_at(anim: &mut ve_core::keyframe::Animatable, step: u32, last: u32) {
-    use ve_core::Interpolation::Step;
-    if anim.value_at(step) == PropValue::Bool(false) {
-        return;
+    /// Whether anything of the object is left: its footprint, sampled on a
+    /// lattice over its bounding radius, has no point the erasures leave
+    /// more than a trace of.
+    fn fully_erased(flat: &FlatObject) -> bool {
+        let reach = flat.shape.bounding_radius_m();
+        if !reach.is_finite() || reach <= 0.0 {
+            return true;
+        }
+        const N: i32 = 40;
+        for j in -N..=N {
+            for i in -N..=N {
+                let local = [
+                    f64::from(i) / f64::from(N) * reach,
+                    f64::from(j) / f64::from(N) * reach,
+                ];
+                if flat.shape.distance(local) <= 0.0 && erased_factor(&flat.erased, local) > 0.02 {
+                    return false;
+                }
+            }
+        }
+        true
     }
-    let has_key = |anim: &ve_core::keyframe::Animatable, at: u32| {
-        anim.keys().iter().any(|key| key.step == at)
-    };
-    let before = step.checked_sub(1).map(|at| (at, anim.value_at(at)));
-    let after = (step < last).then(|| (step + 1, anim.value_at(step + 1)));
-    if let Some((at, value)) = before
-        && !has_key(anim, at)
-    {
-        anim.set_key(at, value, Step);
-    }
-    anim.set_key(step, PropValue::Bool(false), Step);
-    if let Some((at, value)) = after
-        && !has_key(anim, at)
-    {
-        anim.set_key(at, value, Step);
-    }
+
+    with_session(state, |session| {
+        let open = session.require_open()?;
+        let (mut commands, mut removals, new_captures) = {
+            let project = &open.project;
+            let layer = match stroke.layer {
+                Some(raw) => project
+                    .layer(object_id(raw))
+                    .ok_or_else(|| missing_layer(raw))?,
+                None => creation_layer(project, None)?,
+            };
+            if layer.locked {
+                return Err(AppError::BadOption {
+                    field: "layer",
+                    value: format!("{} is locked", layer.name),
+                });
+            }
+            let mut commands = Vec::new();
+            let mut removals: Vec<(usize, Command)> = Vec::new();
+            let mut new_captures: Vec<std::sync::Arc<Capture>> = Vec::new();
+
+            if matches!(layer.source, LayerSource::Grib { .. }) {
+                let mut after = layer.erased.clone();
+                after.push(RasterErasure {
+                    chains: vec![points.clone()],
+                    radius_m,
+                    square: stroke.square,
+                    feather,
+                    step: stroke.step,
+                });
+                commands.push(Command::SetRasterErasures {
+                    layer: layer.id,
+                    before: layer.erased.clone(),
+                    after,
+                });
+            } else if !matches!(layer.source, LayerSource::Image { .. }) {
+                let on_ground = FlatRasterErasure {
+                    chains: vec![points.clone()],
+                    radius_m,
+                    square: stroke.square,
+                    feather: f64::from(feather),
+                };
+                for (index, object) in layer.objects.iter().enumerate() {
+                    let Some(flat) = flatten_object(object, stroke.at_step) else {
+                        continue;
+                    };
+                    if let Some(hash) = &object.capture {
+                        // A patch or a macro: the samples themselves.
+                        let Some(capture) = project.captures.get(hash) else {
+                            continue;
+                        };
+                        let hours = f64::from(project.settings.step_hours.hours());
+                        let only_offset = stroke.step.map(|at| {
+                            f64::from(at.saturating_sub(object.active_range.start)) * hours
+                        });
+                        let mut frames = capture.frames.clone();
+                        let mut touched = false;
+                        let mut anything_left = false;
+                        for frame in &mut frames {
+                            let this_frame = only_offset
+                                .is_none_or(|offset| (frame.offset_hours - offset).abs() < 1e-6);
+                            for j in 0..capture.nj {
+                                for i in 0..capture.ni {
+                                    let at = (j * capture.ni + i) as usize;
+                                    let Some(uv) = frame.uv.get_mut(at) else {
+                                        continue;
+                                    };
+                                    if this_frame {
+                                        let local = [
+                                            (capture.x0_deg + f64::from(i) * capture.spacing_deg)
+                                                * M_PER_DEGREE,
+                                            (capture.y0_deg - f64::from(j) * capture.spacing_deg)
+                                                * M_PER_DEGREE,
+                                        ];
+                                        let here = flat.frame.to_global(local);
+                                        if raster_erased(std::slice::from_ref(&on_ground), here)
+                                            && !uv[0].is_nan()
+                                        {
+                                            *uv = UNDEFINED;
+                                            touched = true;
+                                        }
+                                    }
+                                    if !uv[0].is_nan() {
+                                        anything_left = true;
+                                    }
+                                }
+                            }
+                        }
+                        if !touched {
+                            continue;
+                        }
+                        if !anything_left {
+                            removals.push((
+                                index,
+                                Command::RemoveObject {
+                                    layer: layer.id,
+                                    index,
+                                    object: Box::new(object.clone()),
+                                },
+                            ));
+                            continue;
+                        }
+                        let rewritten = Capture::new(
+                            capture.kind,
+                            CaptureLattice {
+                                ni: capture.ni,
+                                nj: capture.nj,
+                                spacing_deg: capture.spacing_deg,
+                                x0_deg: capture.x0_deg,
+                                y0_deg: capture.y0_deg,
+                            },
+                            capture.seconds_per_frame,
+                            capture.shape.clone(),
+                            frames,
+                        )
+                        .map_err(AppError::Core)?;
+                        commands.push(Command::SetCapture {
+                            object: object.id,
+                            before: Some(hash.clone()),
+                            after: Some(rewritten.hash.clone()),
+                        });
+                        new_captures.push(std::sync::Arc::new(rewritten));
+                        continue;
+                    }
+
+                    // A painted object: the stamp in its own frame.
+                    let chain: Vec<[f64; 2]> =
+                        points.iter().map(|p| flat.frame.to_local(*p)).collect();
+                    let radius_local = radius_m / flat.frame.scale;
+                    let reach = radius_local * (1.0 + f64::from(feather));
+                    // Touched if any point along the stroke, sampled at half a
+                    // radius, comes within the stamp of the footprint.
+                    let mut touched = false;
+                    'chain: for pair in chain
+                        .windows(2)
+                        .chain(std::iter::once(&chain[..1.min(chain.len())]))
+                    {
+                        let (a, b) = (pair[0], *pair.get(1).unwrap_or(&pair[0]));
+                        let length = (b[0] - a[0]).hypot(b[1] - a[1]);
+                        let steps = (length / (radius_local / 2.0)).ceil().max(1.0) as usize;
+                        for k in 0..=steps {
+                            let t = k as f64 / steps as f64;
+                            let q = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+                            if flat.shape.distance(q) <= reach {
+                                touched = true;
+                                break 'chain;
+                            }
+                        }
+                    }
+                    if !touched {
+                        continue;
+                    }
+                    let mut after = object.erased.clone();
+                    after.push(Erasure {
+                        chains: vec![
+                            chain
+                                .iter()
+                                .map(|p| LocalPoint { x: p[0], y: p[1] })
+                                .collect(),
+                        ],
+                        radius_m: radius_local,
+                        square: stroke.square,
+                        feather,
+                        step: stroke.step,
+                    });
+                    // Nothing left of it, at every step, is a deletion.
+                    let mut probe = object.clone();
+                    probe.erased = after.clone();
+                    let gone = stroke.step.is_none()
+                        && flatten_object(&probe, stroke.at_step).is_none_or(|f| fully_erased(&f));
+                    if gone {
+                        commands.extend(unlink_followers_of(project, object.id));
+                        removals.push((
+                            index,
+                            Command::RemoveObject {
+                                layer: layer.id,
+                                index,
+                                object: Box::new(object.clone()),
+                            },
+                        ));
+                    } else {
+                        commands.push(Command::SetErasures {
+                            object: object.id,
+                            before: object.erased.clone(),
+                            after,
+                        });
+                    }
+                }
+            }
+            (commands, removals, new_captures)
+        };
+
+        // Removals last and from the bottom of the layer up: each shifts the
+        // indices above it, and a batch applies in order.
+        removals.sort_by_key(|(index, _)| std::cmp::Reverse(*index));
+        commands.extend(removals.into_iter().map(|(_, command)| command));
+        if commands.is_empty() {
+            return Ok(ProjectSummary::of(session.require_open()?));
+        }
+        // The rewritten samples go into the project before the command that
+        // names them, keyed by hash, like a pasted capture's.
+        for capture in new_captures {
+            open.project
+                .captures
+                .entry(capture.hash.clone())
+                .or_insert(capture);
+        }
+        let command = if commands.len() == 1 {
+            commands.remove(0)
+        } else {
+            Command::Batch {
+                label: "Erase".to_owned(),
+                commands,
+            }
+        };
+        let (project, history) = (&mut open.project, &mut open.history);
+        history.push(project, command)?;
+        open.touch();
+        Ok(ProjectSummary::of(session.require_open()?))
+    })
 }
 
 /// The commands that free every follower of `primary`, holding each where it

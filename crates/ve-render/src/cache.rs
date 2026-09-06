@@ -59,6 +59,21 @@ pub fn scene_hash(scene: &Scene) -> SceneHash {
         // The speed band decides which of the lattice's samples are drawn at
         // all, so a tile keyed without it would be served from before the
         // filter was set (spec.md 7.10).
+        // And what the eraser has taken from the lattice (M29).
+        hasher.update(&(raster.erased.len() as u64).to_le_bytes());
+        for erasure in &raster.erased {
+            hash_f64(&mut hasher, erasure.radius_m);
+            hash_f64(&mut hasher, erasure.feather);
+            hasher.update(&[u8::from(erasure.square)]);
+            hasher.update(&(erasure.chains.len() as u64).to_le_bytes());
+            for chain in &erasure.chains {
+                hasher.update(&(chain.len() as u64).to_le_bytes());
+                for point in chain {
+                    hash_f64(&mut hasher, point.lon);
+                    hash_f64(&mut hasher, point.lat);
+                }
+            }
+        }
         match raster.speed_range {
             None => hasher.update(&[0]),
             Some(band) => {
@@ -94,6 +109,31 @@ fn hash_object(hasher: &mut blake3::Hasher, object: &FlatObject) {
         EdgeMode::Blend => 0,
         EdgeMode::Replace => 1,
     }]);
+    // What the eraser has taken changes what the object paints (M29).
+    hasher.update(&(object.erased.len() as u64).to_le_bytes());
+    for erasure in &object.erased {
+        hash_f64(hasher, erasure.radius_m);
+        hash_f64(hasher, erasure.feather);
+        match &erasure.shape {
+            Shape::Capsule { chains, .. } => {
+                hasher.update(&[0]);
+                hasher.update(&(chains.len() as u64).to_le_bytes());
+                for chain in chains {
+                    hash_points(hasher, chain);
+                }
+            }
+            Shape::SweptSquare { chains, .. } => {
+                hasher.update(&[1]);
+                hasher.update(&(chains.len() as u64).to_le_bytes());
+                for chain in chains {
+                    hash_points(hasher, chain);
+                }
+            }
+            _ => {
+                hasher.update(&[2]);
+            }
+        }
+    }
 
     match &object.shape {
         Shape::Capsule { chains, radius_m } => {
@@ -597,6 +637,7 @@ mod tests {
 
     fn object(speed: f64) -> FlatObject {
         FlatObject {
+            erased: Vec::new(),
             frame: Frame::new(
                 LonLat {
                     lon: 10.0,
@@ -653,6 +694,7 @@ mod tests {
             ve_core::raster::RasterGrid::new(4, 3, 0.0, 10.0, 1.0, 1.0, vec![[value, 0.0]; 12])
                 .expect("valid grid");
         crate::scene::FlatRaster {
+            erased: Vec::new(),
             z,
             grid: std::sync::Arc::new(grid),
             speed_range: None,

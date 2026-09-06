@@ -209,6 +209,34 @@ pub enum Command {
         /// New geometry.
         after: Box<Geometry>,
     },
+    /// Replaces where the eraser has been over an object (M29).
+    SetErasures {
+        /// Target object.
+        object: crate::id::Id,
+        /// Before.
+        before: Vec<crate::document::Erasure>,
+        /// After.
+        after: Vec<crate::document::Erasure>,
+    },
+    /// Replaces where the eraser has been over an imported layer (M29).
+    SetRasterErasures {
+        /// Target layer.
+        layer: crate::id::Id,
+        /// Before.
+        before: Vec<crate::document::RasterErasure>,
+        /// After.
+        after: Vec<crate::document::RasterErasure>,
+    },
+    /// Swaps a patch's samples for another set (M29): the eraser over a
+    /// patch rewrites the capture, and the hashes name the two.
+    SetCapture {
+        /// Target object.
+        object: crate::id::Id,
+        /// Before.
+        before: Option<String>,
+        /// After.
+        after: Option<String>,
+    },
     /// Replaces one property, including all of its keyframes.
     SetProperty {
         /// Target object.
@@ -383,6 +411,9 @@ impl Command {
             }
             Self::SetActiveRange { .. } => "Change active range".into(),
             Self::SetGeometry { .. } => "Edit shape".into(),
+            Self::SetErasures { .. } | Self::SetRasterErasures { .. } | Self::SetCapture { .. } => {
+                "Erase".into()
+            }
             Self::SetProperty { prop, .. } => format!("Change {prop:?}"),
             Self::SetProjectName { .. } => "Rename project".into(),
             Self::SetColourScale { .. } => "Change the colour scale".into(),
@@ -507,6 +538,18 @@ impl Command {
             }
             Self::SetGeometry { object, after, .. } => {
                 object_mut(project, *object)?.geometry = (**after).clone();
+                Ok(())
+            }
+            Self::SetErasures { object, after, .. } => {
+                object_mut(project, *object)?.erased = after.clone();
+                Ok(())
+            }
+            Self::SetRasterErasures { layer, after, .. } => {
+                layer_mut(project, *layer)?.erased = after.clone();
+                Ok(())
+            }
+            Self::SetCapture { object, after, .. } => {
+                object_mut(project, *object)?.capture = after.clone();
                 Ok(())
             }
             Self::SetProperty {
@@ -668,6 +711,18 @@ impl Command {
             }
             Self::SetGeometry { object, before, .. } => {
                 object_mut(project, *object)?.geometry = (**before).clone();
+                Ok(())
+            }
+            Self::SetErasures { object, before, .. } => {
+                object_mut(project, *object)?.erased = before.clone();
+                Ok(())
+            }
+            Self::SetRasterErasures { layer, before, .. } => {
+                layer_mut(project, *layer)?.erased = before.clone();
+                Ok(())
+            }
+            Self::SetCapture { object, before, .. } => {
+                object_mut(project, *object)?.capture = before.clone();
                 Ok(())
             }
             Self::SetProperty {

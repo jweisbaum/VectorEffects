@@ -359,6 +359,61 @@ pub struct Object {
     /// unchanged and needs no migration.
     #[serde(default, skip_serializing_if = "is_still")]
     pub motion: MotionFlags,
+    /// Where the eraser has been over this object (spec.md 8.1, M29): each
+    /// a swept stamp in the object's own frame, so it travels with the
+    /// object, and each taking away what it covers — from every frame, or
+    /// from one step alone. Never an object of its own: nothing in the panel
+    /// or the timeline lists one, and the only thing it shows is the part of
+    /// the object that is no longer there.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub erased: Vec<Erasure>,
+}
+
+/// One stroke of the eraser over an object (spec.md 8.1, M29).
+///
+/// In the object's local frame, like its geometry, in unscaled metres; the
+/// stamp is a disc or a square of `radius_m`, swept along `chains`, with the
+/// same feather ramp a stroke's edge has. `step` limits it to one frame.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Erasure {
+    /// The stroke's centreline, one or more polylines.
+    pub chains: Vec<Vec<LocalPoint>>,
+    /// The stamp's radius, or half-size for a square.
+    #[serde(with = "crate::canonical::metres_field")]
+    pub radius_m: f64,
+    /// A square stamp rather than a disc.
+    #[serde(default)]
+    pub square: bool,
+    /// Edge falloff, 0 to 1, as a fraction of the radius.
+    #[serde(default)]
+    pub feather: f32,
+    /// The one step it applies at, or every step.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub step: Option<u32>,
+}
+
+/// One stroke of the eraser over an imported layer (spec.md 8.1, M29).
+///
+/// A GRIB layer's samples are its file's and are read back on open
+/// (invariants 1 and 2), so what the eraser takes from one is kept beside
+/// the path as a stamp in geographic space and applied when the lattice is
+/// sampled: a covered node reads as undefined, as a missing one does.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RasterErasure {
+    /// The stroke's centreline on the globe.
+    pub chains: Vec<Vec<crate::geo::LonLat>>,
+    /// The stamp's radius on the ground, or half-size for a square.
+    #[serde(with = "crate::canonical::metres_field")]
+    pub radius_m: f64,
+    /// A square stamp rather than a disc.
+    #[serde(default)]
+    pub square: bool,
+    /// Edge falloff, 0 to 1, as a fraction of the radius.
+    #[serde(default)]
+    pub feather: f32,
+    /// The one step it applies at, or every step.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub step: Option<u32>,
 }
 
 /// Whether an object contributes no motion, for skipping the field on save.
@@ -378,6 +433,7 @@ impl Object {
             props: PropertyMap::for_tool(tool),
             capture: None,
             motion: MotionFlags::default(),
+            erased: Vec::new(),
         }
     }
 
@@ -423,6 +479,9 @@ pub struct Layer {
     /// field. Read through [`Layer::parameter`].
     #[serde(default)]
     pub parameter: crate::project::FieldKind,
+    /// Where the eraser has been over an imported layer's field (M29).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub erased: Vec<RasterErasure>,
     /// The decoded field of a [`LayerSource::Grib`] layer.
     ///
     /// **Never serialised** (invariants 1 and 2): the file keeps the path in
@@ -745,6 +804,7 @@ impl Layer {
             raster: None,
             speed_range: None,
             frame_overrides: Vec::new(),
+            erased: Vec::new(),
         }
     }
 
@@ -769,6 +829,7 @@ impl Layer {
             raster: Some(raster),
             speed_range: None,
             frame_overrides: Vec::new(),
+            erased: Vec::new(),
         }
     }
 

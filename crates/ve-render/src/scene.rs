@@ -254,9 +254,39 @@ pub struct FlatCapture {
     pub shift_deg: [f64; 2],
 }
 
+/// One stroke of the eraser over an object, ready to evaluate (M29): the
+/// stamp as a [`Shape`] in the object's frame, so the same signed distance
+/// the footprint uses says how far inside the erasure a point is, and the
+/// feather ramp runs over the radius as a stroke's runs over its width.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FlatErasure {
+    /// The swept stamp.
+    pub shape: Shape,
+    /// The stamp's radius, the feather's reference length.
+    pub radius_m: f64,
+    /// Edge falloff, 0 to 1.
+    pub feather: f64,
+}
+
+/// One stroke of the eraser over an imported layer, in geographic space (M29).
+#[derive(Debug, Clone, PartialEq)]
+pub struct FlatRasterErasure {
+    /// The stroke's centreline on the globe.
+    pub chains: Vec<Vec<LonLat>>,
+    /// The stamp's radius on the ground.
+    pub radius_m: f64,
+    /// A square stamp rather than a disc.
+    pub square: bool,
+    /// Edge falloff, 0 to 1.
+    pub feather: f64,
+}
+
 /// One object with every property resolved for a single time step.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FlatObject {
+    /// What the eraser has taken from it at this step (M29): coverage is
+    /// multiplied by what these leave.
+    pub erased: Vec<FlatErasure>,
     /// The object's local frame.
     pub frame: Frame,
     /// Its footprint, in local geometry units.
@@ -362,6 +392,9 @@ pub struct FlatRaster {
     /// the lattice, because the lattice is shared, content-hashed and re-read
     /// from the file — the band is a choice about what to show.
     pub speed_range: Option<SpeedRange>,
+    /// What the eraser has taken from the layer at this step (M29): a
+    /// covered node reads as undefined.
+    pub erased: Vec<FlatRasterErasure>,
 }
 
 /// A whole time step, ready to evaluate. Objects are in z-order, bottom first.
@@ -732,6 +765,33 @@ pub fn flatten_object_at(object: &Object, step: u32, derived: Derived) -> Option
     let extent = shape.bounding_radius_m();
 
     Some(FlatObject {
+        erased: object
+            .erased
+            .iter()
+            .filter(|erasure| erasure.step.is_none_or(|at| at == step))
+            .map(|erasure| {
+                let chains: Vec<Vec<Local>> = erasure
+                    .chains
+                    .iter()
+                    .map(|chain| chain.iter().map(|p| [p.x, p.y]).collect())
+                    .collect();
+                FlatErasure {
+                    shape: if erasure.square {
+                        Shape::SweptSquare {
+                            chains,
+                            half_size_m: erasure.radius_m,
+                        }
+                    } else {
+                        Shape::Capsule {
+                            chains,
+                            radius_m: erasure.radius_m,
+                        }
+                    },
+                    radius_m: erasure.radius_m,
+                    feather: f64::from(erasure.feather).clamp(0.0, 1.0),
+                }
+            })
+            .collect(),
         cap_radius_m: frame.reach_m(extent),
         speed: speed_of(object, step, extent),
         direction: direction_of(object, step, rotation),
@@ -1036,6 +1096,17 @@ pub fn flatten_kind(project: &Project, step: u32, kind: ve_core::project::FieldK
                 z: scene.objects.len(),
                 grid: Arc::clone(&frame.grid),
                 speed_range: layer.speed_range,
+                erased: layer
+                    .erased
+                    .iter()
+                    .filter(|erasure| erasure.step.is_none_or(|at| at == step))
+                    .map(|erasure| FlatRasterErasure {
+                        chains: erasure.chains.clone(),
+                        radius_m: erasure.radius_m,
+                        square: erasure.square,
+                        feather: f64::from(erasure.feather).clamp(0.0, 1.0),
+                    })
+                    .collect(),
             });
         }
         let hours = project.settings.step_hours.hours();

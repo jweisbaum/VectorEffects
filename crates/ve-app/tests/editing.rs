@@ -101,52 +101,69 @@ fn a_layer_takes_a_parameter_and_undo_gives_it_back() {
     assert!(document::layer_parameter(&state, layer, "temperature").is_err());
 }
 
-// --- The eraser (spec.md 8.1, M28) -----------------------------------------
+// --- The eraser (spec.md 8.1, M29) -----------------------------------------
 
-/// Erased from one frame, the object is gone there and present on the frames
-/// either side exactly as before, and still in the document.
-#[test]
-fn an_erase_at_one_step_hides_the_object_there_and_nowhere_else() {
-    let (_root, state) = painted("erase-step");
-    let object = first_object(&state);
-    document::objects_erase(&state, &[object], Some(3)).expect("erase at 3");
+/// What the eraser leaves at a point on a step, or nothing where nothing writes.
+fn covered_at(state: &AppState, lon: f64, lat: f64, step: u32) -> Option<f32> {
     let session = state.session.lock().expect("lock");
     let project = &session.open.as_ref().expect("open").project;
-    let found = project
-        .object(ve_core::id::Id::from_raw(object))
-        .expect("still in the document");
-    assert!(found.is_active_at(0), "the frames before are untouched");
-    assert!(found.is_active_at(2));
-    assert!(!found.is_active_at(3), "gone from the erased frame");
-    assert!(found.is_active_at(4));
-    assert!(found.is_active_at(11), "and the frames after");
+    let scene = ve_render::scene::flatten(project, step);
+    ve_render::cpu::sample_scene_covered(&scene, ve_core::LonLat::new(lon, lat).unwrap())
+        .map(|uv| uv.u.hypot(uv.v))
 }
 
-/// Erased from the first and the last frame, where there is no frame on one
-/// side: the switch still turns off there alone.
-#[test]
-fn an_erase_at_the_ends_stays_at_the_ends() {
-    let (_root, state) = painted("erase-ends");
-    let object = first_object(&state);
-    document::objects_erase(&state, &[object], Some(0)).expect("erase at 0");
-    document::objects_erase(&state, &[object], Some(11)).expect("erase at 11");
-    let session = state.session.lock().expect("lock");
-    let project = &session.open.as_ref().expect("open").project;
-    let found = project
-        .object(ve_core::id::Id::from_raw(object))
-        .expect("still in the document");
-    assert!(!found.is_active_at(0));
-    assert!(found.is_active_at(1));
-    assert!(found.is_active_at(10));
-    assert!(!found.is_active_at(11));
+fn erase(state: &AppState, points: Vec<[f64; 2]>, radius_km: f64, step: Option<u32>) {
+    document::stroke_erase(
+        state,
+        document::EraseStroke {
+            points,
+            radius_km,
+            square: false,
+            feather: 0.0,
+            step,
+            at_step: step.unwrap_or(0),
+            layer: None,
+        },
+    )
+    .expect("erase");
 }
 
-/// Without a step the eraser deletes, and one undo brings the sweep back.
+/// The eraser takes the part of an object it covers and nothing else: no
+/// object is made, the object stays, and undo puts the part back.
 #[test]
-fn an_erase_without_a_step_removes_the_objects_as_one_entry() {
+fn an_erase_stroke_takes_what_it_covers_and_leaves_the_rest() {
+    let (_root, state) = painted("erase-part");
+    // The painted stroke runs (0,0)–(10,5) at 800 km; (8,4) is on it.
+    assert!(covered_at(&state, 8.0, 4.0, 0).is_some_and(|speed| speed > 10.0));
+    erase(&state, vec![[8.0, 4.0]], 250.0, None);
+    assert_eq!(
+        document::tree(&state, 0).expect("tree").layers[0]
+            .objects
+            .len(),
+        1
+    );
+    assert!(
+        covered_at(&state, 8.0, 4.0, 0).is_none(),
+        "gone under the stamp"
+    );
+    assert!(
+        covered_at(&state, 1.0, 0.5, 0).is_some_and(|speed| speed > 10.0),
+        "the far end is untouched"
+    );
+    assert!(covered_at(&state, 8.0, 4.0, 5).is_none(), "on every frame");
+    edit::undo_for_test(&state).expect("undo");
+    assert!(
+        covered_at(&state, 8.0, 4.0, 0).is_some(),
+        "undo gives the part back"
+    );
+}
+
+/// An object with nothing left of it is deleted rather than kept as an
+/// empty shell.
+#[test]
+fn an_object_the_eraser_covers_entirely_is_deleted() {
     let (_root, state) = painted("erase-all");
-    let object = first_object(&state);
-    document::objects_erase(&state, &[object], None).expect("erase");
+    erase(&state, vec![[0.0, 0.0], [10.0, 5.0]], 1_500.0, None);
     assert!(
         document::tree(&state, 0).expect("tree").layers[0]
             .objects
@@ -158,6 +175,41 @@ fn an_erase_without_a_step_removes_the_objects_as_one_entry() {
             .objects
             .len(),
         1
+    );
+}
+
+/// With Shift held the erase is of the current frame alone.
+#[test]
+fn a_shift_erase_takes_one_frame_alone() {
+    let (_root, state) = painted("erase-frame");
+    erase(&state, vec![[8.0, 4.0]], 250.0, Some(2));
+    assert!(
+        covered_at(&state, 8.0, 4.0, 2).is_none(),
+        "gone on the frame it was erased on"
+    );
+    assert!(
+        covered_at(&state, 8.0, 4.0, 3).is_some(),
+        "there on the next"
+    );
+    assert!(
+        covered_at(&state, 8.0, 4.0, 1).is_some(),
+        "and on the one before"
+    );
+}
+
+/// A stroke that touches nothing writes nothing.
+#[test]
+fn an_erase_stroke_over_open_water_is_no_edit() {
+    let (_root, state) = painted("erase-miss");
+    let before = {
+        let session = state.session.lock().expect("lock");
+        session.open.as_ref().expect("open").history.entries().len()
+    };
+    erase(&state, vec![[60.0, -40.0]], 250.0, None);
+    let session = state.session.lock().expect("lock");
+    assert_eq!(
+        session.open.as_ref().expect("open").history.entries().len(),
+        before
     );
 }
 

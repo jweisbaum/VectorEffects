@@ -28,6 +28,7 @@ import type { DocumentTree } from "./generated/DocumentTree";
 import type { ClipboardState } from "./generated/ClipboardState";
 import type { FieldKindName } from "./kind";
 import type { Created } from "./generated/Created";
+import type { EraseStroke } from "./generated/EraseStroke";
 import type { ClipboardKind } from "./generated/ClipboardKind";
 import type { AutosaveMode } from "./generated/AutosaveMode";
 import type { AppSettings } from "./generated/AppSettings";
@@ -89,6 +90,7 @@ const LONG_RUNNING: Readonly<Record<string, string>> = {
   export_grib: "Exporting GRIB",
   capture_region: "Copying the field",
   paste_capture: "Pasting the field",
+  erase_stroke: "Erasing",
   preview_capture: "Baking the macro",
   finish_capture: "Saving the macro",
   insert_macro: "Inserting the macro",
@@ -324,12 +326,8 @@ export const api = {
     allInLayer = false,
   ) =>
     call<OperatorOutline[]>("object_outlines", { step, tool, objects, layer, allInLayer }),
-  /**
-   * The eraser's write (spec.md 8.1, M28): `objects` removed from every
-   * frame, or with `step` from that frame alone.
-   */
-  eraseObjects: (objects: number[], step: number | null) =>
-    call<ProjectSummary>("erase_objects", { objects, step }),
+  /** The eraser's stroke (spec.md 8.1, M29): takes what it covers in one layer. */
+  eraseStroke: (stroke: EraseStroke) => call<ProjectSummary>("erase_stroke", { stroke }),
   /**
    * Captures the drag baseline. `lon`/`lat` is where the pointer went down, so
    * rotation and scale are measured from there rather than snapping.

@@ -275,6 +275,7 @@ mod tests {
         Scene {
             rasters: Vec::new(),
             objects: vec![FlatObject {
+                erased: Vec::new(),
                 frame: crate::aeqd::Frame::new(centre, 0.0, 100.0),
                 shape: Shape::Disc {
                     radius_m: 400_000.0,
@@ -367,6 +368,7 @@ mod tests {
         let scene = Scene {
             rasters: Vec::new(),
             objects: vec![FlatObject {
+                erased: Vec::new(),
                 frame: crate::aeqd::Frame::new(centre, 0.0, 100.0),
                 shape: Shape::Disc {
                     radius_m: 5_000_000.0,

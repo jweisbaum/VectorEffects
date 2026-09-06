@@ -2592,13 +2592,18 @@ the eraser's sweep and the loupe in particular want a look in the app.
 
 ---
 
-### M29 — The fourth pass · **in progress**
+### M29 — The fourth pass · **complete**
 
 **Goal:** the fifteen findings the user handed over on 2026-09-06 after the
 M28 build, in order, one commit each, with anything scoped down recorded
 here with its reason. Two of them reopen recorded decisions on the user's
 instruction: 13 restores a start time to the timeline (D69), and 8 makes
 the field kind a property of the layer rather than of the project (§4.1).
+
+**Delivered 2026-09-06**, fifteen commits `M29.1`–`M29.15`. Two decisions
+were reopened on the user's instruction: D69 (13) and the project-level
+field kind of §4.1 (8). Not clicked through in the app; 8, 14 and 15 most
+want it.
 
 1. **Layers drag above and below other layers.** Delivered: a drop names
    the half of the row it landed on, `layerDropIndex` (tested against the
@@ -2685,7 +2690,21 @@ the field kind a property of the layer rather than of the project (§4.1).
     preview scene samples the macro at the stamp (the tests say so), so the
     remaining cause is in the running app and needs a look there — most
     likely playback waiting on tiles that take seconds a step on the CPU.
-15. **The eraser erases what it covers.** Pending.
+15. **The eraser erases what it covers.** Delivered, replacing M28.1's
+    whole-object eraser. `Object.erased` holds swept stamps in the object's
+    frame and `Layer.erased` holds them in geographic space for a GRIB
+    layer; the CPU multiplies coverage by what they leave and drops a
+    covered lattice node; the GPU declines a scene holding one, the patch's
+    fallback; the scene hash covers them. `erase_stroke` decides per thing
+    under the brush: an erasure on a painted object, deleted when a sampled
+    lattice over its footprint finds nothing left; a rewritten capture with
+    its own hash for a patch or macro; a raster stamp for an imported layer.
+    One batch per sweep. The map's eraser has the brush's bar — size in km
+    or px, shape, feather — a footprint preview, and `Shift` for one frame.
+    Tests in `evaluation.rs`, `fidelity.rs`, `editing.rs` and `capture.rs`.
+    **Not done as asked**: a GRIB layer's samples are not overwritten in the
+    file; the stamp is kept beside the path and applied on read, which is
+    what invariants 1 and 2 allow, and the user sees no object for it.
 
 ---
 

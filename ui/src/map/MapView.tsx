@@ -18,6 +18,7 @@ import type { ObjectOutline } from "../generated/ObjectOutline";
 import type { TileAddress } from "../generated/TileAddress";
 import type { Tool } from "../generated/Tool";
 import type { AppSettings } from "../generated/AppSettings";
+import type { BrushShape } from "../generated/BrushShape";
 import type { CaptureMode } from "../generated/CaptureMode";
 import type { MacroLibrary } from "../generated/MacroLibrary";
 import type { MacroOutline } from "../generated/MacroOutline";
@@ -49,8 +50,10 @@ import {
 } from "./camera";
 import {
   buildFootprintPath,
+  buildStrokePath,
   footprintOfOutline,
   extendStrokePath,
+  kmFromPixels,
   footprintHead,
   footprintRadii,
   freshSweptPath,
@@ -1556,7 +1559,7 @@ export default function MapView({
       );
     } else if (tool === ERASE) {
       setHint(
-        "Drag over objects in the active layer to erase them. Hold Ctrl to erase them from this frame only.",
+        "Drag to erase what the brush covers in the active layer. Hold Shift to erase from this frame only.",
       );
     } else if (tool === INSERT && recording === null) {
       setHint(
@@ -1864,7 +1867,25 @@ export default function MapView({
    * returns the whole sweep; marked in pink meanwhile, so the hand sees what
    * it has taken as it takes it.
    */
-  const eraseDrag = useRef<{ hits: Set<number>; step: number | null } | null>(null);
+  const eraseDrag = useRef<{
+    points: Array<[number, number]>;
+    step: number | null;
+    radiusKm: number;
+  } | null>(null);
+  /**
+   * The eraser's brush (spec.md 8.1, M29): a size in km or px, a disc or a
+   * square, a feather — the brush's own options, since the eraser is a
+   * brush that takes away. Local state: the eraser makes no object for a
+   * schema to describe.
+   */
+  const [eraser, setEraser] = useState<{
+    size: number;
+    unit: "km" | "px";
+    shape: BrushShape;
+    feather: number;
+  }>({ size: 400, unit: "km", shape: "circle", feather: 0.3 });
+  const eraserRef = useRef(eraser);
+  eraserRef.current = eraser;
   const operatorOutlinesRef = useRef<OperatorOutline[]>([]);
   operatorOutlinesRef.current = outlineList;
 
@@ -2344,24 +2365,15 @@ export default function MapView({
       // While a drag is live the moving outline stands in for the selected
       // edge, which would otherwise mark where the object *was*.
       const selected = selection.includes(outlined.object) && !dragLive;
-      // Taken by the eraser's sweep so far: pink, filled, until the release
-      // writes it (M28).
-      const marked = eraseDrag.current?.hits.has(outlined.object) ?? false;
-      if (!hovered && !selected && !marked) continue;
-      if (marked) {
-        context.save();
-        context.fillStyle = "rgba(255, 110, 190, 0.22)";
-        context.fill(maskPath(outlined.outline));
-        context.restore();
-      }
+      if (!hovered && !selected) continue;
       // Pink for the edge under the pointer: a colour used for nothing else on
       // this map, so "the tool has found an edge" cannot be mistaken for a
       // selection or a preview.
       drawEdgeBand(
         context,
         outlined.outline,
-        hovered || marked ? "rgba(255, 110, 190, 0.95)" : "rgba(255, 214, 102, 0.85)",
-        hovered || marked ? 2.5 : 1.5,
+        hovered ? "rgba(255, 110, 190, 0.95)" : "rgba(255, 214, 102, 0.85)",
+        hovered ? 2.5 : 1.5,
         dpr,
       );
       // An inverted mask covers everything *but* this, so a wide faint band
@@ -2655,6 +2667,34 @@ export default function MapView({
         at,
         dpr,
       );
+    }
+
+    // The eraser's footprint (spec.md 8.1, M29): the stamp at the pointer,
+    // or the whole swept stroke while the button is down, in pink — the
+    // colour of what the tool will take. Before the schema check, since the
+    // eraser has none.
+    if (tool === ERASE && recording === null) {
+      const drag = eraseDrag.current;
+      const brush = eraserRef.current;
+      const at = cursor ? unproject(camera, view, cursor) : null;
+      const points: Array<[number, number]> =
+        drag?.points ?? (at ? [[at.lon, at.lat]] : []);
+      if (points.length > 0) {
+        const first = points[0] as [number, number];
+        const radiusKm =
+          drag?.radiusKm ??
+          (brush.unit === "px" ? kmFromPixels(camera, first[1], brush.size) : brush.size) / 2;
+        const path = new Path2D();
+        buildStrokePath(path, camera, view, points, radiusKm, brush.shape, "geodesic");
+        context.save();
+        context.fillStyle = "rgba(255, 110, 190, 0.12)";
+        context.fill(path);
+        context.strokeStyle = "rgba(255, 110, 190, 0.95)";
+        context.lineWidth = Math.max(1, dpr);
+        context.setLineDash([5 * dpr, 4 * dpr]);
+        context.stroke(path);
+        context.restore();
+      }
     }
 
     if (tool === HAND || !schema) return;
@@ -3220,13 +3260,19 @@ export default function MapView({
     // The insert tool puts a library macro down where it is clicked
     // (spec.md 8.7, M16). One click, one object, like the fill tool: the macro
     // carries its own frames, so there is nothing to drag out.
-    // The eraser (spec.md 8.1, M28): the sweep begins with whatever is under
-    // the press. `Ctrl` says this frame only.
+    // The eraser (spec.md 8.1, M29): a brush stroke that takes away. `Shift`
+    // says this frame only. A size in pixels becomes kilometres here, at the
+    // latitude the stroke begins, as a brush's does.
     if (tool === ERASE) {
-      const drag = { hits: new Set<number>(), step: event.ctrlKey ? stepRef.current : null };
-      const hit = objectUnder(point);
-      if (hit !== null) drag.hits.add(hit);
-      eraseDrag.current = drag;
+      const geo = unproject(cameraRef.current, viewRef.current, point);
+      const brush = eraserRef.current;
+      const diameterKm =
+        brush.unit === "px" ? kmFromPixels(cameraRef.current, geo.lat, brush.size) : brush.size;
+      eraseDrag.current = {
+        points: [[geo.lon, geo.lat]],
+        step: event.shiftKey ? stepRef.current : null,
+        radiusKm: diameterKm / 2,
+      };
       requestOverlay();
       return;
     }
@@ -3601,8 +3647,8 @@ export default function MapView({
       return;
     }
 
-    // The eraser's sweep takes every object under every coalesced position,
-    // so a fast pass over a thin stroke does not step over it.
+    // The eraser's stroke gains a point per coalesced report, thinned like a
+    // brush stroke's, so a fast pass keeps its corners.
     if (eraseDrag.current) {
       const drag = eraseDrag.current;
       const native = event.nativeEvent;
@@ -3610,15 +3656,19 @@ export default function MapView({
         typeof native.getCoalescedEvents === "function"
           ? native.getCoalescedEvents()
           : [native];
-      let changed = false;
+      const spacing = 6 * (window.devicePixelRatio || 1);
       for (const sample of samples) {
-        const hit = objectUnder(toDevice(sample));
-        if (hit !== null && !drag.hits.has(hit)) {
-          drag.hits.add(hit);
-          changed = true;
-        }
+        const geo = unproject(cameraRef.current, viewRef.current, toDevice(sample));
+        const last = drag.points[drag.points.length - 1];
+        const moved =
+          last === undefined ||
+          Math.hypot(
+            normalizeLon(geo.lon - last[0]) * cameraRef.current.pxPerDeg,
+            (geo.lat - last[1]) * cameraRef.current.pxPerDeg,
+          ) > spacing;
+        if (moved) drag.points.push([geo.lon, geo.lat]);
       }
-      if (changed) requestOverlay();
+      requestOverlay();
       return;
     }
 
@@ -4089,17 +4139,23 @@ export default function MapView({
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
-    // The eraser's sweep lands as one write — one undo for the whole pass.
+    // The eraser's stroke lands as one write — one undo for the whole pass.
     if (eraseDrag.current) {
       const drag = eraseDrag.current;
       eraseDrag.current = null;
-      const hits = [...drag.hits];
-      if (hits.length > 0) {
-        void api
-          .eraseObjects(hits, drag.step)
-          .then(onProjectChanged)
-          .catch((err: unknown) => setError(String(err)));
-      }
+      const brush = eraserRef.current;
+      void api
+        .eraseStroke({
+          points: drag.points,
+          radius_km: drag.radiusKm,
+          square: brush.shape === "square",
+          feather: brush.feather,
+          step: drag.step,
+          at_step: stepRef.current,
+          layer: activeLayer,
+        })
+        .then(onProjectChanged)
+        .catch((err: unknown) => setError(String(err)));
       hoveredOperator.current = null;
       requestOverlay();
       return;
@@ -4802,6 +4858,57 @@ export default function MapView({
           own frames and its own size, so there is nothing to set — only which
           one, and where, and the map answers the second question.
         */}
+        {/*
+          The eraser's bar (spec.md 8.1, M29): the brush's options, because
+          the eraser is a brush that takes away. Hand-written, since the
+          eraser makes no object for a schema to describe.
+        */}
+        {tool === ERASE && recording === null && (
+          <div className="tool-options" role="group" aria-label="Eraser options">
+            <label>
+              Size
+              <NumberField
+                min={1}
+                max={eraser.unit === "px" ? 2000 : 20000}
+                step={eraser.unit === "px" ? 5 : 50}
+                value={eraser.size}
+                format={(v) => String(Math.round(v))}
+                onCommit={(size) => setEraser({ ...eraser, size })}
+              />
+              <select
+                value={eraser.unit}
+                onChange={(e) => setEraser({ ...eraser, unit: e.target.value === "px" ? "px" : "km" })}
+                title="A size in pixels is the same size on screen at any latitude; it becomes kilometres where the stroke begins."
+              >
+                <option value="km">km</option>
+                <option value="px">px</option>
+              </select>
+            </label>
+            <label>
+              Brush shape
+              <select
+                value={eraser.shape}
+                onChange={(e) =>
+                  setEraser({ ...eraser, shape: e.target.value === "square" ? "square" : "circle" })
+                }
+              >
+                <option value="circle">circle</option>
+                <option value="square">square</option>
+              </select>
+            </label>
+            <label>
+              Feather
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                value={eraser.feather}
+                onChange={(e) => setEraser({ ...eraser, feather: Number(e.target.value) })}
+              />
+            </label>
+          </div>
+        )}
         {tool === INSERT && recording === null && (
           <div className="tool-options" role="group" aria-label="Insert options">
             <label>

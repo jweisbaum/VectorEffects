@@ -506,3 +506,45 @@ fn whole_map_animated_copy_cost() {
         started.elapsed().as_secs_f64()
     );
 }
+
+/// The eraser over a patch rewrites its samples (spec.md 8.1, M29): where
+/// the stamp falls the patch is undefined and what is beneath shows through;
+/// the rest of the patch is as it was, and undo brings the samples back.
+#[test]
+fn the_eraser_sets_a_patch_undefined_where_it_falls() {
+    let (_root, app) = project("erase-patch");
+    stroke(&app, 0.0, 0.0, 800.0, 20.0);
+    capture::region_capture(&app, rect(0.0, 0.0, 10.0, 6.0), 0, None).expect("capture");
+    capture::capture_paste(&app, Some(100.0), Some(0.0), 0, None, false).expect("paste");
+    assert!(
+        (field(&app, 100.0, 0.0).0 - 20.0).abs() < 0.6,
+        "the patch at the paste"
+    );
+
+    document::stroke_erase(
+        &app,
+        document::EraseStroke {
+            points: vec![[100.0, 0.0]],
+            radius_km: 200.0,
+            square: false,
+            feather: 0.0,
+            step: None,
+            at_step: 0,
+            layer: None,
+        },
+    )
+    .expect("erase");
+    assert!(
+        field(&app, 100.0, 0.0).0.abs() < 1e-4,
+        "undefined under the stamp"
+    );
+    assert!(
+        (field(&app, 102.5, 0.0).0 - 20.0).abs() < 0.6,
+        "and the patch beyond the stamp is as it was"
+    );
+    edit::undo_for_test(&app).expect("undo");
+    assert!(
+        (field(&app, 100.0, 0.0).0 - 20.0).abs() < 0.6,
+        "undo brings the samples back"
+    );
+}

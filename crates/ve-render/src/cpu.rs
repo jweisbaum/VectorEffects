@@ -9,7 +9,7 @@ use ve_core::angle::Angle;
 use ve_core::vector::{Uv, uv_from_speed_azimuth};
 use ve_core::{LonLat, geo};
 
-use crate::aeqd::{Local, M_PER_DEGREE};
+use crate::aeqd::{Frame, Local, M_PER_DEGREE};
 use crate::error::Result;
 use crate::evaluator::{FieldEvaluator, SamplePoint};
 use crate::scene::{
@@ -199,7 +199,54 @@ fn coverage(object: &FlatObject, position: LonLat) -> Option<f64> {
         object.feather,
         object.shape.feather_reference_m(),
     );
-    Some(if object.invert { 1.0 - weight } else { weight })
+    let weight = if object.invert { 1.0 - weight } else { weight };
+    // What the eraser has left of it here (spec.md 8.1, M29).
+    Some(weight * erased_factor(&object.erased, local))
+}
+
+/// What the eraser has left at a local point: one, untouched; zero, gone;
+/// and the same feather ramp a stroke's edge has across each stamp's rim.
+/// Every erasure over the point compounds.
+pub fn erased_factor(erased: &[crate::scene::FlatErasure], local: Local) -> f64 {
+    erased.iter().fold(1.0, |kept, erasure| {
+        let signed_distance = erasure.shape.distance(local);
+        if signed_distance > 0.0 {
+            return kept;
+        }
+        kept * (1.0 - feather_weight(signed_distance, erasure.feather, erasure.radius_m))
+    })
+}
+
+/// Whether a raster erasure covers a position: the stroke measured on the
+/// ground in a frame at its first point, which for a stamp of a few
+/// hundred kilometres is the same answer to the metre. A feathered rim
+/// reads as undefined from halfway out, since a lattice node is or is not.
+pub fn raster_erased(erased: &[crate::scene::FlatRasterErasure], position: LonLat) -> bool {
+    erased.iter().any(|erasure| {
+        let Some(origin) = erasure.chains.iter().flatten().next().copied() else {
+            return false;
+        };
+        let frame = Frame::new(origin, 0.0, 100.0);
+        let chains: Vec<Vec<Local>> = erasure
+            .chains
+            .iter()
+            .map(|chain| chain.iter().map(|p| frame.to_local(*p)).collect())
+            .collect();
+        let shape = if erasure.square {
+            Shape::SweptSquare {
+                chains,
+                half_size_m: erasure.radius_m,
+            }
+        } else {
+            Shape::Capsule {
+                chains,
+                radius_m: erasure.radius_m,
+            }
+        };
+        let signed_distance = shape.distance(frame.to_local(position));
+        signed_distance <= 0.0
+            && feather_weight(signed_distance, erasure.feather, erasure.radius_m) >= 0.5
+    })
 }
 
 /// Evaluates a whole scene at one position.
@@ -250,6 +297,10 @@ fn sample_upto(scene: &Scene, position: LonLat, upto: usize, depth: u32) -> (Uv,
     let mut rasters = scene.rasters.iter().peekable();
     let mut apply_rasters_below = |z: usize, accumulated: &mut Uv, coverage: &mut f32| {
         while let Some(raster) = rasters.next_if(|r| r.z <= z) {
+            // A node the eraser took reads as undefined (M29).
+            if raster_erased(&raster.erased, position) {
+                continue;
+            }
             if let Some(uv) = raster.grid.sample(position.lon, position.lat) {
                 // A sample outside the layer's speed band is treated as a
                 // missing one, so the field beneath shows through exactly as it
@@ -607,6 +658,7 @@ mod smear_tests {
             radius_m: r,
         };
         FlatObject {
+            erased: Vec::new(),
             cap_radius_m: 1e7,
             speed: SpeedMode::Constant(0.0),
             direction: DirectionMode::Constant(ve_core::angle::Angle::new(0.0)),

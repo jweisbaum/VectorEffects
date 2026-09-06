@@ -1546,6 +1546,18 @@ mod tests {
                 },
             }));
 
+        // An erasure's radius and its centreline reach the file (M29).
+        object.erased.push(crate::document::Erasure {
+            chains: vec![vec![LocalPoint {
+                x: HOSTILE[1],
+                y: HOSTILE[0],
+            }]],
+            radius_m: HOSTILE[0],
+            square: true,
+            feather: 0.25,
+            step: Some(3),
+        });
+
         // A measurement's points and its ring interval reach the file too
         // (spec.md 10, M8).
         project.annotations.measurements = vec![

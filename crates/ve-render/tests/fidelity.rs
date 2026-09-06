@@ -266,6 +266,7 @@ fn object(rng: &mut Rng) -> FlatObject {
     };
 
     FlatObject {
+        erased: Vec::new(),
         modifier,
         smear: Vec::new(),
         invert,
@@ -328,6 +329,7 @@ fn raster(rng: &mut Rng, z: usize) -> FlatRaster {
     uv.truncate((ni * nj) as usize);
     let grid = RasterGrid::new(ni, nj, lon0, lat0, d, d, uv).expect("valid grid");
     FlatRaster {
+        erased: Vec::new(),
         z,
         grid: std::sync::Arc::new(grid),
         // A third of imported fields are filtered to a band of speeds
@@ -608,6 +610,25 @@ fn gpu_and_cpu_agree_within_the_preview_tolerance() {
 /// outright, like the clone stamp, rather than rendered without its warp — a
 /// preview that quietly dropped one object would be a proxy for a scene the
 /// user does not have.
+/// Spec 8.1 (M29): an object the eraser has been over is evaluated on the
+/// CPU alone for now, and a scene holding one is declined outright rather
+/// than rendered whole.
+#[test]
+fn an_erased_object_is_declined_by_the_gpu() {
+    let mut rng = Rng(23);
+    let mut scene = scene(&mut rng, 2);
+    assert!(ve_render::gpu::supports(&scene));
+    scene.objects[1].erased.push(ve_render::scene::FlatErasure {
+        shape: Shape::Capsule {
+            chains: vec![vec![[0.0, 0.0]]],
+            radius_m: 1_000.0,
+        },
+        radius_m: 1_000.0,
+        feather: 0.0,
+    });
+    assert!(!ve_render::gpu::supports(&scene));
+}
+
 #[test]
 fn a_warp_scene_is_reported_unsupported() {
     let mut rng = Rng(11);

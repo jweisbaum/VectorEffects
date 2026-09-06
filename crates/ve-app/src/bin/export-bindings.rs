@@ -108,6 +108,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ObjectNode::export_all(&cfg)?;
     PropertyView::export_all(&cfg)?;
     ve_app::document::SliderView::export_all(&cfg)?;
+    ve_app::document::EraseStroke::export_all(&cfg)?;
     PropertyValue::export_all(&cfg)?;
     ExportRequest::export_all(&cfg)?;
     ExportResult::export_all(&cfg)?;

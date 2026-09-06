@@ -892,6 +892,7 @@ fn an_imported_field_is_sampled_bilinearly_between_its_nodes() {
     let scene = Scene {
         objects: Vec::new(),
         rasters: vec![FlatRaster {
+            erased: Vec::new(),
             z: 0,
             grid: indexed_grid(),
             speed_range: None,
@@ -919,6 +920,7 @@ fn an_imported_field_overwrites_what_is_beneath_and_yields_to_what_is_above() {
     let above = Scene {
         objects: vec![painted.clone()],
         rasters: vec![FlatRaster {
+            erased: Vec::new(),
             z: 1,
             grid: atlantic(5.0, 0.0),
             speed_range: None,
@@ -932,6 +934,7 @@ fn an_imported_field_overwrites_what_is_beneath_and_yields_to_what_is_above() {
     let beneath = Scene {
         objects: vec![painted],
         rasters: vec![FlatRaster {
+            erased: Vec::new(),
             z: 0,
             grid: atlantic(5.0, 0.0),
             speed_range: None,
@@ -955,6 +958,7 @@ fn a_raster_beneath_a_clone_stamp_is_what_the_stamp_copies() {
     let scene = Scene {
         objects: vec![stamp],
         rasters: vec![FlatRaster {
+            erased: Vec::new(),
             z: 0,
             grid: atlantic(3.0, 4.0),
             speed_range: None,
@@ -1147,6 +1151,74 @@ fn diverging_bends_the_flow_outward_and_converging_bends_it_in() {
             "{percent}%: azimuth {azimuth}, expected {expected_azimuth}"
         );
     }
+}
+
+/// Spec 8.1 (M29): an erasure takes away what it covers and nothing else.
+/// A stamp of 400 km at 1,000 km east of a 4,000 km disc's centre leaves the
+/// disc's centre and its western half exactly as they were, and where the
+/// stamp is nothing writes at all — undefined, not calm.
+#[test]
+fn an_erasure_removes_what_it_covers_and_nothing_else() {
+    let anchor = ll(0.0, 0.0);
+    let mut object = brush(anchor, vec![[0.0, 0.0]], 4000.0, 12.0, 90.0);
+    object.erased.push(ve_core::document::Erasure {
+        chains: vec![vec![LocalPoint {
+            x: 1_000_000.0,
+            y: 0.0,
+        }]],
+        radius_m: 400_000.0,
+        square: false,
+        feather: 0.0,
+        step: None,
+    });
+    let scene = scene_of(vec![object]);
+    let east = anchor.destination(Angle::new(90.0), 1_000_000.0);
+    let west = anchor.destination(Angle::new(270.0), 1_000_000.0);
+    assert!(
+        ve_render::cpu::sample_scene_covered(&scene, east).is_none(),
+        "under the eraser nothing writes"
+    );
+    assert!(
+        (speed_at(&scene, anchor) - 12.0).abs() < 1e-3,
+        "the centre is untouched"
+    );
+    assert!(
+        (speed_at(&scene, west) - 12.0).abs() < 1e-3,
+        "and so is the far side"
+    );
+    // Just outside the stamp's rim the stroke is whole again.
+    let rim = anchor.destination(Angle::new(90.0), 1_450_000.0);
+    assert!((speed_at(&scene, rim) - 12.0).abs() < 1e-3);
+}
+
+/// An erasure made with the frame held applies at that step alone (M29).
+#[test]
+fn a_step_erasure_applies_at_its_step_alone() {
+    let anchor = ll(0.0, 0.0);
+    let mut object = brush(anchor, vec![[0.0, 0.0]], 4000.0, 12.0, 90.0);
+    object.erased.push(ve_core::document::Erasure {
+        chains: vec![vec![LocalPoint { x: 0.0, y: 0.0 }]],
+        radius_m: 3_000_000.0,
+        square: true,
+        feather: 0.0,
+        step: Some(3),
+    });
+    let at = |step: u32| Scene {
+        rasters: Vec::new(),
+        objects: flatten_object(&object, step).into_iter().collect(),
+    };
+    assert!(
+        ve_render::cpu::sample_scene_covered(&at(3), anchor).is_none(),
+        "gone at the step it was erased on"
+    );
+    assert!(
+        (speed_at(&at(4), anchor) - 12.0).abs() < 1e-3,
+        "there on the next"
+    );
+    assert!(
+        (speed_at(&at(2), anchor) - 12.0).abs() < 1e-3,
+        "and on the one before"
+    );
 }
 
 /// Spec 6.3: the turn modifier rotates every vector beneath it by a fixed

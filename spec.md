@@ -2163,19 +2163,31 @@ mask masks it; the modifiers act on what it covers. Inside, and not anywhere:
 a click outside the region is the ordinary painted stroke, so a region left
 selected does not turn every stroke into a region.
 
-**The eraser** (M28) makes no object: it takes them away. Dragged over the
-map it marks every object of the **active layer** it passes over — inside the
-footprint or on its edge, in pink, the colour the map uses for "the tool has
-found an edge" — and the release removes them all as **one history entry**,
-from every frame. With **`Ctrl`** held when the drag begins it removes them
-from **the current frame alone**, through the `Enabled` switch of §4.6: a key
-`false` at that step, the step before and after keyed to what they already
-show, so the object is there on either side exactly as it was, stays in the
-document and the panel, and shows the gap on its timeline bar. Hovering with
-the eraser highlights the object it would take. An imported or locked layer
-is not the eraser's to touch, by the creation rule (D66), so nothing in it is
-outlined or taken. The mask remains the eraser that *is* an object and keeps
-what it erased.
+**The eraser** (M28, reworked M29) is a brush that takes away. It has the
+brush's options — size in km or px, disc or square, feather — and makes
+**no object**: nothing in the panel, the timeline or the file lists what it
+did, only the part of each thing that is no longer there. A drag erases what
+the brush covers in the **active layer**, from every frame; with **`Shift`**
+held it erases from the current frame alone. What it does depends on what is
+under it:
+
+- a **painted object** — a stroke, a stamp, a shape fill, a clone, a curve,
+  a mask, a modifier — keeps an *erasure*: the stamp swept along the stroke,
+  in the object's own frame so it travels with the object, and its coverage
+  is multiplied by what the erasures leave, feather and all. An object with
+  nothing left of it is **deleted**;
+- a **patch or a macro** has its captured samples rewritten to undefined
+  where the stamp falls — a new capture, with its own hash, so the erase is
+  in the data;
+- an **imported layer** keeps the stamp in geographic space and applies it
+  when its lattice is sampled, a covered node reading as undefined, since its
+  samples are its file's and are read back on open (invariants 1 and 2).
+
+Every stroke is one history entry, undone and redone as a whole, and baked
+in once the project is saved and the history cleared. The erased object is
+evaluated on the CPU: a scene holding an erasure is declined by the GPU, the
+fallback a patch already takes. Hovering shows the brush's footprint at the
+pointer and highlights the object it is over.
 
 There is no separate fill tool. There was one (M14), which turned the region
 into a shape fill; it was withdrawn because it was one more button for a
