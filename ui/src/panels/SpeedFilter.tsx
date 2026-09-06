@@ -4,10 +4,18 @@ import type { GribLayerInfo } from "../generated/GribLayerInfo";
 import NumberField from "../NumberField";
 import { knotsFromMps, mpsFromKnots } from "../project/format";
 
-/** A band in knots, low end first. */
+/** A band in whole knots, low end first — the slider's own resolution. */
 type Band = [number, number];
 
 const same = (a: Band, b: Band) => a[0] === b[0] && a[1] === b[1];
+
+/**
+ * A band written at release, until the document is seen holding it.
+ *
+ * `revision` is the document revision the write returned, or null while
+ * the write is still in flight.
+ */
+type Pending = { band: Band; revision: number | null };
 
 /**
  * The band of speeds an imported field keeps (spec.md 4.8).
@@ -24,29 +32,46 @@ const same = (a: Band, b: Band) => a[0] === b[0] && a[1] === b[1];
  * the thumb under the hand and move the *other* one to the pointer, which
  * looked like the two sliders being tied together. A typed value may still
  * cross, and the backend orders it.
+ *
+ * **The control works in whole knots.** The document holds the band as f32
+ * metres per second, and 7 kt comes back from it as 7.00000017 kt: not the
+ * integer the slider sent, not equal to it, and not a value a step-1 slider
+ * can hold. The band read from the document is rounded to the step before
+ * anything compares or displays it, or a release that moved nothing is a
+ * write, and a clamped thumb sits on a value the browser then snaps away from.
  */
 export default function SpeedFilter({
   grib,
+  treeRevision,
   onChange,
 }: {
   grib: GribLayerInfo;
   /**
+   * The document revision `grib` was read at.
+   *
+   * The band in `grib` is one round trip behind the document: the summary a
+   * write returns carries the new revision, and the tree that carries the new
+   * band is fetched after it. This is how the component knows the tree has
+   * caught up with a write it made.
+   */
+  treeRevision: number;
+  /**
    * One write per release, per typed value, or per checkbox: `gesture` is
    * always null now and stays in the signature for the command, which still
-   * coalesces under a key for any caller that has a reason to. The promise
-   * is the write's round trip; the thumb holds its place until it settles.
+   * coalesces under a key for any caller that has a reason to. Resolves to
+   * the document revision after the write, or null if the write was refused.
    */
   onChange: (
     minMps: number | null,
     maxMps: number | null,
     gesture: string | null,
-  ) => Promise<unknown>;
+  ) => Promise<number | null>;
 }) {
   const ceiling = Math.max(5, Math.ceil(knotsFromMps(grib.speed_ceiling_mps)));
   const on = grib.speed_min_mps !== null && grib.speed_max_mps !== null;
   const stored: Band = [
-    on ? knotsFromMps(grib.speed_min_mps ?? 0) : 0,
-    on ? knotsFromMps(grib.speed_max_mps ?? 0) : ceiling,
+    on ? Math.round(knotsFromMps(grib.speed_min_mps ?? 0)) : 0,
+    on ? Math.round(knotsFromMps(grib.speed_max_mps ?? 0)) : ceiling,
   ];
   /**
    * The band while the thumb is down.
@@ -61,17 +86,23 @@ export default function SpeedFilter({
    */
   const [dragging, setDragging] = useState<Band | null>(null);
   /**
-   * The band a release wrote, until the document has it.
+   * The band a release wrote, until the document is seen holding it.
    *
-   * The write is a round trip, and the summary that carries the new band
-   * comes back after it. A thumb that went back to showing the document the
-   * moment the pointer came up sat at the old value for that round trip and
-   * then jumped to the released one. It shows the released band instead
-   * until the write settles — by then the document agrees, or the write
-   * failed and the old band is the truth again.
+   * The write is one round trip and the tree that carries the new band is a
+   * second one, after it. A thumb that went back to showing the document at
+   * release sat at the old value for both and then jumped to the released
+   * one; one that went back when the write settled still sat at the old value
+   * for the second. So the released band is shown until the tree fetched at
+   * the write's own revision (or a later one) has arrived — or the write was
+   * refused, and the old band is the truth again.
    */
-  const [pending, setPending] = useState<Band | null>(null);
-  const [low, high] = dragging ?? pending ?? stored;
+  const [pending, setPending] = useState<Pending | null>(null);
+  // The tree has caught up with the write: stop holding. Done in render, so
+  // no frame shows anything but the document from here on.
+  if (pending !== null && pending.revision !== null && treeRevision >= pending.revision) {
+    setPending(null);
+  }
+  const [low, high] = dragging ?? pending?.band ?? stored;
 
   const set = (nextLow: number, nextHigh: number) =>
     onChange(mpsFromKnots(nextLow), mpsFromKnots(nextHigh), null);
@@ -80,11 +111,16 @@ export default function SpeedFilter({
     if (band === null) return;
     setDragging(null);
     if (same(band, stored)) return;
-    setPending(band);
-    // A release that settles after a newer one must not put away the newer
-    // band: the identity check is what tells them apart.
-    const settle = () => setPending((current) => (current === band ? null : current));
-    set(band[0], band[1]).then(settle, settle);
+    setPending({ band, revision: null });
+    // A newer release replaces `pending` with its own band; the identity
+    // check keeps an older write's answer from touching it.
+    set(band[0], band[1]).then(
+      (revision) =>
+        setPending((current) =>
+          current?.band !== band ? current : revision === null ? null : { band, revision },
+        ),
+      () => setPending((current) => (current?.band === band ? null : current)),
+    );
   };
 
   return (

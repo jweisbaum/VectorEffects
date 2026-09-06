@@ -48,6 +48,12 @@ export default function LayerPanel({
   viewBounds?: () => [number, number, number, number] | null;
 }) {
   const [tree, setTree] = useState<DocumentTree | null>(null);
+  /**
+   * The revision `tree` was fetched at. The speed filter compares it with
+   * the revision its write returned, to know when the tree it is reading has
+   * caught up with the band it wrote.
+   */
+  const [treeRevision, setTreeRevision] = useState(0);
   const [renaming, setRenaming] = useState<number | null>(null);
   const [draft, setDraft] = useState("");
   const [dragging, setDragging] = useState<Dragging | null>(null);
@@ -69,19 +75,47 @@ export default function LayerPanel({
     });
 
   // The tree is derived from the document, so it is refetched whenever the
-  // revision moves rather than being patched in place.
+  // revision moves rather than being patched in place. A fetch overtaken by
+  // a newer one is dropped: two in flight are not guaranteed to answer in
+  // order, and the older tree landing last would show a band the document no
+  // longer holds.
   useEffect(() => {
+    let stale = false;
+    const revision = project.revision;
     api
       .documentTree(step)
-      .then(setTree)
-      .catch((err: unknown) => setError(String(err)));
+      .then((next) => {
+        if (stale) return;
+        setTree(next);
+        setTreeRevision(revision);
+      })
+      .catch((err: unknown) => {
+        if (!stale) setError(String(err));
+      });
+    return () => {
+      stale = true;
+    };
   }, [project.revision, step]);
 
-  const run = (action: Promise<ProjectSummary>, done?: () => void) => {
+  /**
+   * Runs a document write and hands the summary back to the app. Resolves to
+   * the summary, or null when the write was refused — the error has already
+   * gone to the status bar, so a caller that needs to know only needs that.
+   */
+  const run = (
+    action: Promise<ProjectSummary>,
+    done?: () => void,
+  ): Promise<ProjectSummary | null> => {
     setError(null);
     return action
-      .then(onChanged)
-      .catch((err: unknown) => setError(String(err)))
+      .then((summary) => {
+        onChanged(summary);
+        return summary;
+      })
+      .catch((err: unknown) => {
+        setError(String(err));
+        return null;
+      })
       .finally(() => done?.());
   };
 
@@ -306,8 +340,11 @@ export default function LayerPanel({
               {layer.grib?.loaded && (
                 <SpeedFilter
                   grib={layer.grib}
+                  treeRevision={treeRevision}
                   onChange={(min, max, gesture) =>
-                    run(api.setLayerSpeedRange(layer.id, min, max, gesture))
+                    run(api.setLayerSpeedRange(layer.id, min, max, gesture)).then(
+                      (summary) => summary?.revision ?? null,
+                    )
                   }
                 />
               )}

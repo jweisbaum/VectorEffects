@@ -2284,9 +2284,20 @@ jumped back at release. Each slider showed the *ordered* band, so a thumb
 pushed past the other was pinned there and the other one followed the
 pointer; and the local band was dropped at release, a round trip before the
 document had the new one. A dragged thumb stops at the other now, and the
-released band is shown until its write settles (`SpeedFilter.tsx`, with the
-first component test in the frontend — under happy-dom, since jsdom 27
-cannot load on the Node 21 this is developed on). The
+released band is shown until the panel has read it back (`SpeedFilter.tsx`,
+with the first component test in the frontend — under happy-dom, since
+jsdom 27 cannot load on the Node 21 this is developed on). The first cut of
+that held the band only until the write's promise settled, and the user
+still saw the jump: the band the panel shows comes from the layer tree,
+fetched *after* the summary, so the thumb fell back for one more round
+trip. A four-lens fan-out over the release path then found the guard
+against a no-op release was dead as well — the document's f32 m/s never
+equals the slider's integer knots — so every release wrote and the sliders
+held values a step-1 input snaps away from. The held band is keyed to the
+revision the write returns now and let go when the tree fetched at that
+revision lands; the stored band is rounded to the slider's step; the tree
+fetch drops a response a newer fetch has overtaken; and the test fixture
+goes through `Math.fround`, which is what let the old fixture pass. The
 release-to-last-tile time was not measured: it is the tile cost times the
 viewport, unchanged by this milestone. The
 offline check gained one allowance, the SVG XML namespace, which the M24
