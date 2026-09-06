@@ -290,13 +290,15 @@ export const api = {
   setStartTime: (startUnixS: number | null) =>
     call<ProjectSummary>("set_start_time", { startUnixS }),
 
-  /** Queues the viewport's tiles for the steps around the playhead (spec.md 9.5). */
-  renderAhead: (current: number, tiles: TileAddress[], kind: FieldKindName) =>
-    call<void>("render_ahead", { current, tiles, kind }),
+  /**
+   * Queues the viewport's tiles for the steps around the playhead (spec.md
+   * 9.5), of every kind the project holds (M30).
+   */
+  renderAhead: (current: number, tiles: TileAddress[]) =>
+    call<void>("render_ahead", { current, tiles }),
 
-  /** How ready every step is, for the viewport. */
-  frameReadiness: (tiles: TileAddress[], kind: FieldKindName) =>
-    call<TimelineReadiness>("frame_readiness", { tiles, kind }),
+  /** How ready every step is, for the viewport, across every kind on the map. */
+  frameReadiness: (tiles: TileAddress[]) => call<TimelineReadiness>("frame_readiness", { tiles }),
 
   endGesture: () => call<void>("end_gesture"),
 

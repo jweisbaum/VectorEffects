@@ -156,7 +156,7 @@ import {
   draggedCorners,
   hasArea,
 } from "./place";
-import { MapRenderer, type OperatorPreview, type RenderState } from "./renderer";
+import { type FieldPass, MapRenderer, type OperatorPreview, type RenderState } from "./renderer";
 import { uniqueTiles } from "../timeline/playback";
 import { TileCache } from "./tiles";
 
@@ -237,6 +237,43 @@ const MAGNIFIER_RADIUS_CSS = 44;
  * Whether a frame token names the macro preview's scene: its revision has
  * bit 62 set (D71), which no document revision reaches.
  */
+/** Wind is always drawn as barbs and a current always as arrows (M30). */
+function glyphStyleOf(kind: FieldKindName): "arrow" | "barb" {
+  return kind === "wind" ? "barb" : "arrow";
+}
+
+/** The range of speeds a kind's last frame drew, in m/s, or null for none. */
+type SeenRange = { min: number; max: number } | null;
+
+/** A kind's colour ramp, in m/s for the shader and whole knots for the legend. */
+interface Ramp {
+  min: number;
+  max: number;
+  minKnots: number;
+  maxKnots: number;
+  auto: boolean;
+}
+
+/**
+ * The ramp's span: the project's own scale from calm (spec.md 5.3, M15) —
+ * or, with the auto scale on (M27), the slowest to the fastest speed among
+ * the tiles the last frame drew of this kind. A frame that drew no field of
+ * the kind falls back to the project's scale rather than to nothing.
+ */
+function rampOf(scaleKnots: number, seen: SeenRange): Ramp {
+  if (seen === null) {
+    return { min: 0, max: mpsFromKnots(scaleKnots), minKnots: 0, maxKnots: scaleKnots, auto: false };
+  }
+  const max = Math.max(seen.max, seen.min + AUTO_SCALE_MIN_SPAN_MPS);
+  return {
+    min: seen.min,
+    max,
+    minKnots: Math.round(knotsFromMps(seen.min)),
+    maxKnots: Math.round(knotsFromMps(max)),
+    auto: true,
+  };
+}
+
 function isPreviewFrame(frame: string): boolean {
   return Number(frame.split("/")[0]) >= 2 ** 62;
 }
@@ -438,8 +475,7 @@ export default function MapView({
   onViewport,
   autoKey,
   viewSlot,
-  shownKind,
-  onShownKind,
+  activeKind,
 }: {
   ref?: Ref<MapHandle>;
   /**
@@ -449,10 +485,13 @@ export default function MapView({
    * the draw loop reads it; only the buttons move.
    */
   viewSlot: HTMLElement | null;
-  /** The kind of field the map shows (M29): wind or current layers. */
-  shownKind: FieldKindName;
-  /** The title bar's "Show" menu changed it. */
-  onShownKind: (kind: FieldKindName) => void;
+  /**
+   * The kind of field the active layer paints (M29, M30): what the
+   * eyedropper and the readout sample, what a region copy or a macro capture
+   * takes, and the glyph style of a gesture's preview. The map itself shows
+   * every kind the project holds.
+   */
+  activeKind: FieldKindName;
   project: ProjectSummary;
   step: number;
   selection: number[];
@@ -502,10 +541,14 @@ export default function MapView({
    */
   const imageLayersRef = useRef<ImageLayerView[]>([]);
   /**
-   * The last frame whose tiles were all on screen. A frame that is not yet
-   * draws its missing tiles from this one, dimmed, rather than blank.
+   * The last frame of each kind whose tiles were all on screen. A frame that
+   * is not yet draws its missing tiles from this one, dimmed, rather than
+   * blank. Per kind (M30): the wind and the current tiles land separately.
    */
-  const shownFrameRef = useRef<string | null>(null);
+  const shownFramesRef = useRef<Record<FieldKindName, string | null>>({
+    wind: null,
+    current: null,
+  });
   const cameraRef = useRef<Camera>({ centerLon: 0, centerLat: 20, pxPerDeg: 3 });
   const viewRef = useRef<Viewport>({ width: 1, height: 1 });
   /**
@@ -588,13 +631,17 @@ export default function MapView({
    * values rather than whatever its closure captured. Setting React state and
    * drawing in the same tick would otherwise render the previous options.
    */
-  const glyphStyleRef = useRef<"arrow" | "barb">("barb");
   const showGlyphsRef = useRef(true);
   const showGraticuleRef = useRef(true);
   const stepRef = useRef(0);
-  /** The kind on show, for the paths that read refs (M29). */
-  const shownKindRef = useRef(shownKind);
-  shownKindRef.current = shownKind;
+  /** The active layer's kind, for the paths that read refs (M29). */
+  const activeKindRef = useRef(activeKind);
+  activeKindRef.current = activeKind;
+  /**
+   * The kinds the map draws, wind first (M30): every kind a visible layer
+   * holds. Empty until the project has a field layer.
+   */
+  const kindsRef = useRef<FieldKindName[]>([]);
   const loggedDrawError = useRef(false);
 
   /**
@@ -689,7 +736,11 @@ export default function MapView({
     setErrorState(message);
     reportError(message);
   }, []);
-  const [glyphStyle, setGlyphStyle] = useState<"arrow" | "barb">("barb");
+  /**
+   * The glyph style of a gesture's preview: wind is always barbs and a
+   * current always arrows (M30), so it follows the layer being painted.
+   */
+  const glyphStyle: "arrow" | "barb" = glyphStyleOf(activeKind);
   const [showGlyphs, setShowGlyphs] = useState(true);
   const [showGraticule, setShowGraticule] = useState(true);
   const readoutStore = useRef<ReadoutStore | null>(null);
@@ -764,6 +815,24 @@ export default function MapView({
    */
   const frameRevision = () =>
     recordingRef.current?.preview_revision ?? projectRef.current.revision;
+  /**
+   * The kinds the map draws right now (M30): the preview's one kind while a
+   * macro preview is shown, every kind the project holds otherwise.
+   */
+  const kindsDrawn = (): FieldKindName[] => {
+    const capture = recordingRef.current;
+    if (capture?.preview_revision !== undefined && capture?.preview_revision !== null) {
+      return [kindOf(capture.kind)];
+    }
+    return kindsRef.current;
+  };
+  /**
+   * A tile frame's address: revision, then step, then kind. An edit changes
+   * the revision, so a cached tile can never show a field that no longer
+   * exists; the kind makes the wind and the current tiles different tiles.
+   */
+  const frameOf = (step: number, kind: FieldKindName): string =>
+    `${frameRevision()}/${step}/${kindLetter(kind)}`;
   /** Whether movement is recorded by the *next* capture. */
   const [recordMovement, setRecordMovement] = useState(false);
   /** The macro library, for the insert tool's bar. */
@@ -947,33 +1016,36 @@ export default function MapView({
    * and the next frame paints with. A frame that drew no field falls back
    * to the project's scale rather than to nothing.
    */
-  // The project's scale for the kind on show (M29): wind and current are an
-  // order of magnitude apart, and the ramp says which is meant.
-  const scaleKnots =
-    shownKind === "wind" ? project.wind_scale_knots : project.current_scale_knots;
+  // One ramp per kind (M29, M30): wind and current are an order of magnitude
+  // apart, and the map shows both, each on its own scale.
+  const kindsShown: FieldKindName[] = project.kinds_present.map(kindOf);
+  kindsRef.current = kindsShown;
+  const kindsKey = kindsShown.join(",");
   const autoScale = settings?.auto_scale ?? false;
-  const [seenRange, setSeenRange] = useState<{ min: number; max: number } | null>(null);
-  const autoRange = autoScale ? seenRange : null;
-  const rampMin = autoRange ? autoRange.min : 0;
-  const rampMax = autoRange
-    ? Math.max(autoRange.max, autoRange.min + AUTO_SCALE_MIN_SPAN_MPS)
-    : mpsFromKnots(scaleKnots);
-  const rampMinKnots = Math.round(knotsFromMps(rampMin));
-  const rampMaxKnots = autoRange ? Math.round(knotsFromMps(rampMax)) : scaleKnots;
+  const [seenRanges, setSeenRanges] = useState<Record<FieldKindName, SeenRange>>({
+    wind: null,
+    current: null,
+  });
+  const ramps: Record<FieldKindName, Ramp> = {
+    wind: rampOf(project.wind_scale_knots, autoScale ? seenRanges.wind : null),
+    current: rampOf(project.current_scale_knots, autoScale ? seenRanges.current : null),
+  };
+  // The active layer's ramp, which a gesture's preview paints with.
+  const rampMin = ramps[activeKind].min;
+  const rampMax = ramps[activeKind].max;
+  const rampsKey = KINDS.map((kind) => `${ramps[kind].min}/${ramps[kind].max}`).join(",");
   // What the last frame reported, to compare the next against without a
   // render in between: a change smaller than the eye can see is not applied,
   // or the ramp would breathe with every tile that lands.
-  const seenRef = useRef<{ min: number; max: number } | null>(null);
+  const seenRef = useRef<Record<FieldKindName, SeenRange>>({ wind: null, current: null });
   const autoScaleRef = useRef(autoScale);
   autoScaleRef.current = autoScale;
   // `draw` is built once and reads its inputs through refs; the ramp went in
   // by closure and so stood still after the first frame — a colour scale
   // changed in the settings reached the map only when something else rebuilt
   // the callback. Through a ref, with a redraw when either end moves (M27).
-  const rampRef = useRef({ min: rampMin, max: rampMax });
-  rampRef.current = { min: rampMin, max: rampMax };
-  // Barbs are a wind convention and are hidden for current projects (spec.md 5.3).
-  const barbsAvailable = shownKind === "wind";
+  const rampRef = useRef(ramps);
+  rampRef.current = ramps;
   const lastStep = Math.max(0, project.step_count - 1);
 
   /**
@@ -1121,26 +1193,35 @@ export default function MapView({
       overlayScheduled.current = null;
     }
 
-    // Revision then step: an edit changes the address, so a cached tile can
-    // never show a field that no longer exists.
-    const frame = `${frameRevision()}/${stepRef.current}/${kindLetter(shownKindRef.current)}`;
-    // The last frame fully on screen stands in for this one's missing tiles —
-    // but never across the preview's boundary (M28): the document's tiles
-    // held under the preview kept every layer on the map until the first
-    // click, and the preview's under the document kept the macro alone.
-    const previous = shownFrameRef.current;
-    const shown =
-      previous !== null && isPreviewFrame(previous) === isPreviewFrame(frame) ? previous : null;
+    // One pass per kind on the map (M30), each addressing its own tiles.
+    const kinds = kindsDrawn();
+    const fields: FieldPass[] = kinds.map((kind) => {
+      const frame = frameOf(stepRef.current, kind);
+      // The last frame of this kind fully on screen stands in for this one's
+      // missing tiles — but never across the preview's boundary (M28): the
+      // document's tiles held under the preview kept every layer on the map
+      // until the first click, and the preview's under the document kept the
+      // macro alone.
+      const previous = shownFramesRef.current[kind];
+      const shown =
+        previous !== null && isPreviewFrame(previous) === isPreviewFrame(frame)
+          ? previous
+          : null;
+      const ramp = rampRef.current[kind];
+      return {
+        frame,
+        heldFrame: shown !== null && shown !== frame ? shown : null,
+        glyphStyle: glyphStyleOf(kind),
+        rampMin: ramp.min,
+        rampMax: ramp.max,
+      };
+    });
     const state: RenderState = {
       camera: cameraRef.current,
       view: viewRef.current,
-      frame,
-      glyphStyle: glyphStyleRef.current,
+      fields,
       showGlyphs: showGlyphsRef.current,
       showGraticule: showGraticuleRef.current,
-      rampMin: rampRef.current.min,
-      rampMax: rampRef.current.max,
-      heldFrame: shown !== null && shown !== frame ? shown : null,
       pixelRatio: window.devicePixelRatio || 1,
       // The gesture's own operation while it is being drawn, and the one it
       // committed while its tiles are still on their way.
@@ -1167,27 +1248,38 @@ export default function MapView({
     }
 
     try {
-      const seen = renderer.render(state);
-      // The auto scale follows what was drawn (spec.md 5.3, M27). Applied
-      // only when it moved by more than the eye can see, and through state,
-      // so the next frame paints with it and the legend says so.
+      const ranges = renderer.render(state);
+      // The auto scale follows what was drawn (spec.md 5.3, M27), per kind
+      // (M30). Applied only when a range moved by more than the eye can see,
+      // and through state, so the next frame paints with it and the legend
+      // says so.
       if (autoScaleRef.current) {
-        const last = seenRef.current;
-        const moved =
-          seen === null
-            ? last !== null
-            : last === null ||
-              Math.abs(seen.min - last.min) > autoScaleTolerance(last) ||
-              Math.abs(seen.max - last.max) > autoScaleTolerance(last);
-        if (moved) {
-          seenRef.current = seen;
-          setSeenRange(seen);
-        }
+        let moved = false;
+        kinds.forEach((kind, index) => {
+          const seen = ranges[index] ?? null;
+          const last = seenRef.current[kind];
+          const changed =
+            seen === null
+              ? last !== null
+              : last === null ||
+                Math.abs(seen.min - last.min) > autoScaleTolerance(last) ||
+                Math.abs(seen.max - last.max) > autoScaleTolerance(last);
+          if (changed) {
+            seenRef.current[kind] = seen;
+            moved = true;
+          }
+        });
+        if (moved) setSeenRanges({ ...seenRef.current });
       }
-      // Once every tile of this frame is on screen it is the one to hold.
+      // Once every tile of a kind's frame is on screen it is the one to hold.
       const tiles = tilesRef.current;
-      if (tiles && tiles.residentCount(frame, unique) === unique.length) {
-        shownFrameRef.current = frame;
+      if (tiles) {
+        kinds.forEach((kind, index) => {
+          const frame = fields[index]?.frame;
+          if (frame !== undefined && tiles.residentCount(frame, unique) === unique.length) {
+            shownFramesRef.current[kind] = frame;
+          }
+        });
       }
     } catch (err) {
       // A GL failure inside an animation frame is easy to lose. Report it once
@@ -1916,8 +2008,14 @@ export default function MapView({
   const warm = useCallback((target: number): boolean => {
     const tiles = tilesRef.current;
     if (!tiles) return true;
-    const frame = `${frameRevision()}/${target}/${kindLetter(shownKindRef.current)}`;
-    return tiles.prefetch(frame, uniqueTiles(visibleTiles(cameraRef.current, viewRef.current)));
+    const unique = uniqueTiles(visibleTiles(cameraRef.current, viewRef.current));
+    // Every kind is asked for, resident or not: a step is ready only when the
+    // tiles of every kind on the map are (M30).
+    let resident = true;
+    for (const kind of kindsDrawn()) {
+      if (!tiles.prefetch(frameOf(target, kind), unique)) resident = false;
+    }
+    return resident;
   }, []);
   const bounds = useCallback((): [number, number, number, number] | null => {
     const view = viewRef.current;
@@ -1936,7 +2034,7 @@ export default function MapView({
     // The visible composite inside the region, from this step to the end of
     // the timeline (spec.md 8.5, D65).
     void api
-      .captureRegion(regionShape(region), stepRef.current, shownKindRef.current)
+      .captureRegion(regionShape(region), stepRef.current, activeKindRef.current)
       .catch((err: unknown) => setError(String(err)));
     return true;
   }, [region]);
@@ -1967,11 +2065,10 @@ export default function MapView({
     [bounds, clearRegion, copyRegion, pasteCapture, setCapture, warm],
   );
 
-  // A project change can shorten the timeline or forbid barbs.
+  // A project change can shorten the timeline.
   useEffect(() => {
     if (step > lastStep) onStepChange(lastStep);
-    if (!barbsAvailable) setGlyphStyle("arrow");
-  }, [barbsAvailable, lastStep, onStepChange, step]);
+  }, [lastStep, onStepChange, step]);
 
   /**
    * The map projection, taken from the settings onto the camera (M11).
@@ -1995,12 +2092,11 @@ export default function MapView({
 
   // Mirror display state into the refs `draw` reads, then redraw.
   useEffect(() => {
-    glyphStyleRef.current = glyphStyle;
     showGlyphsRef.current = showGlyphs;
     showGraticuleRef.current = showGraticule;
     stepRef.current = step;
     requestDraw();
-  }, [requestDraw, step, glyphStyle, showGlyphs, showGraticule]);
+  }, [requestDraw, step, showGlyphs, showGraticule]);
 
   /**
    * Draws preview glyphs at a set of geographic positions.
@@ -3180,11 +3276,11 @@ export default function MapView({
   // the colours are not.
   useEffect(() => {
     requestDraw();
-  }, [rampMin, rampMax, requestDraw]);
-  // A change of kind is a new frame of new tiles.
+  }, [rampsKey, requestDraw]);
+  // A kind arriving or leaving is a new pass of new tiles.
   useEffect(() => {
     requestDraw();
-  }, [shownKind, requestDraw]);
+  }, [kindsKey, requestDraw]);
 
   const onPointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -3424,7 +3520,7 @@ export default function MapView({
       if (schema && showsMagnifier({ eyedropper, building })) {
         setEyedropper(false);
         void api
-          .sampleField(geo.lon, geo.lat, stepRef.current, shownKindRef.current)
+          .sampleField(geo.lon, geo.lat, stepRef.current, activeKindRef.current)
           .then((sample) => setToolState(sampled(toolStateRef.current, schema, sample)))
           .catch(() => undefined);
         return;
@@ -3959,7 +4055,7 @@ export default function MapView({
     void api
       // Read from the refs rather than the closure: a queued request runs from
       // an earlier pointer report's promise, after the step may have moved.
-      .sampleField(geo.lon, geo.lat, stepRef.current, shownKindRef.current)
+      .sampleField(geo.lon, geo.lat, stepRef.current, activeKindRef.current)
       .then((sample) =>
         store?.set({
           sample: {
@@ -4454,19 +4550,16 @@ export default function MapView({
     const scenarios: Array<{
       name: string;
       camera: Camera;
-      style: "arrow" | "barb";
       probes: Array<{ lon: number; lat: number }>;
     }> = [
       {
-        name: "world-barbs",
+        name: "world",
         camera: { centerLon: 0, centerLat: 0, pxPerDeg: 8 },
-        style: "barb",
         probes: [],
       },
       {
-        name: "zoom-arrows",
+        name: "zoom",
         camera: { centerLon: -40, centerLat: 35, pxPerDeg: 60 },
-        style: "arrow",
         // The cyclone eye sits at -40, 35 at step 0. North and south of it the
         // rotation must be opposite; east and west likewise.
         probes: [
@@ -4483,13 +4576,11 @@ export default function MapView({
         // gaps at every tile boundary.
         name: "lattice",
         camera: { centerLon: -128, centerLat: 48, pxPerDeg: 34 },
-        style: "arrow",
         probes: [],
       },
       {
         name: "dateline",
         camera: { centerLon: 180, centerLat: 20, pxPerDeg: 24 },
-        style: "arrow",
         probes: [
           { lon: 179, lat: 20 },
           { lon: -179, lat: 20 },
@@ -4499,11 +4590,9 @@ export default function MapView({
 
     for (const scenario of scenarios) {
       cameraRef.current = clampCamera(scenario.camera, viewRef.current);
-      // Set the refs directly: state updates are async and would not reach the
+      // Set the ref directly: a state update is async and would not reach the
       // draw that follows on this tick.
-      glyphStyleRef.current = scenario.style;
       showGlyphsRef.current = true;
-      setGlyphStyle(scenario.style);
       requestDraw();
 
       for (const probe of scenario.probes) {
@@ -4536,9 +4625,16 @@ export default function MapView({
         renderer.render({
           camera: { ...base, centerLon: base.centerLon + i * 0.25 },
           view,
-          frame: `${projectRef.current.revision}/0`,
-          glyphStyle: "barb", showGlyphs: true,
-          showGraticule: true, rampMin, rampMax, heldFrame: null,
+          fields: [
+            {
+              frame: `${projectRef.current.revision}/0/w`,
+              heldFrame: null,
+              glyphStyle: "barb",
+              rampMin,
+              rampMax,
+            },
+          ],
+          showGlyphs: true, showGraticule: true,
           pixelRatio: window.devicePixelRatio || 1,
         });
       }
@@ -4548,9 +4644,16 @@ export default function MapView({
         renderer.render({
           camera: { ...base, centerLon: base.centerLon + i * 0.25 },
           view,
-          frame: `${projectRef.current.revision}/0`,
-          glyphStyle: "barb", showGlyphs: true,
-          showGraticule: true, rampMin, rampMax, heldFrame: null,
+          fields: [
+            {
+              frame: `${projectRef.current.revision}/0/w`,
+              heldFrame: null,
+              glyphStyle: "barb",
+              rampMin,
+              rampMax,
+            },
+          ],
+          showGlyphs: true, showGraticule: true,
           pixelRatio: window.devicePixelRatio || 1,
         });
       }
@@ -4743,7 +4846,7 @@ export default function MapView({
                   onClick={() => {
                     if (region === null) return;
                     void api
-                      .startCapture(regionShape(region), stepRef.current, recordMovement, shownKind)
+                      .startCapture(regionShape(region), stepRef.current, recordMovement, activeKind)
                       .then((mode) => setRecording(mode.active ? mode : null))
                       .catch((err: unknown) => setError(String(err)));
                   }}
@@ -5113,33 +5216,13 @@ export default function MapView({
         </div>
         <span className="divider" />
 
-        <label title="Which kind of field the map shows: a project may hold 10 m wind and surface current layers together, and the map shows one at a time. Follows the layer you make active.">
-          Show
-          <select value={shownKind} onChange={(e) => onShownKind(kindOf(e.target.value))}>
-            {KINDS.map((kind) => (
-              <option key={kind} value={kind}>
-                {KIND_LABELS[kind]}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
+        <label title="Direction glyphs: wind as barbs, currents as arrows. The colour ramp carries the speed either way.">
+          <input
+            type="checkbox"
+            checked={showGlyphs}
+            onChange={(e) => setShowGlyphs(e.target.checked)}
+          />
           Glyphs
-          <select
-            value={showGlyphs ? glyphStyle : "off"}
-            onChange={(e) => {
-              const value = e.target.value;
-              if (value === "off") setShowGlyphs(false);
-              else {
-                setShowGlyphs(true);
-                setGlyphStyle(value === "barb" ? "barb" : "arrow");
-              }
-            }}
-          >
-            {barbsAvailable && <option value="barb">Wind barbs</option>}
-            <option value="arrow">Arrows</option>
-            <option value="off">Off</option>
-          </select>
         </label>
         <label>
           Projection
@@ -5181,21 +5264,34 @@ export default function MapView({
           viewSlot,
         )}
 
-      <div className="map-legend">
-        <div
-          className="legend-bar"
-          style={{ background: `linear-gradient(to right, ${RAMP_STOPS.join(", ")})` }}
-        />
-        <div className="legend-labels">
-          <span>{rampMinKnots}</span>
-          {autoRange && (
-            <span className="legend-auto" title="Auto scale: the ramp spans the speeds in view">
-              auto
-            </span>
-          )}
-          <span>{rampMaxKnots} kt</span>
+      {kindsShown.length > 0 && (
+        <div className="map-legend">
+          {kindsShown.map((kind) => (
+            <div key={kind} className="legend-row">
+              <div className="legend-kind">
+                <span>{KIND_LABELS[kind]}</span>
+                <span className="muted">{kind === "wind" ? "barbs" : "arrows"}</span>
+              </div>
+              <div
+                className="legend-bar"
+                style={{ background: `linear-gradient(to right, ${RAMP_STOPS.join(", ")})` }}
+              />
+              <div className="legend-labels">
+                <span>{ramps[kind].minKnots}</span>
+                {ramps[kind].auto && (
+                  <span
+                    className="legend-auto"
+                    title="Auto scale: the ramp spans the speeds in view"
+                  >
+                    auto
+                  </span>
+                )}
+                <span>{ramps[kind].maxKnots} kt</span>
+              </div>
+            </div>
+          ))}
         </div>
-      </div>
+      )}
 
       <MapReadout store={readoutStore.current} convention={project.direction_convention} />
     </div>

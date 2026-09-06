@@ -108,11 +108,10 @@ export default function App() {
   // (spec.md 6.1, 8.2). Null means the top of the stack.
   const [activeLayer, setActiveLayer] = useState<number | null>(null);
   /**
-   * Which kind of field the map shows (M29): a project may hold wind and
-   * current layers together, and the map shows one at a time. Follows the
-   * active layer's kind, and the title bar's "Show" menu overrides it.
+   * The kind of field the active layer paints (M29, M30): what the eyedropper
+   * samples and a capture takes. The map shows every kind the project holds.
    */
-  const [shownKind, setShownKind] = useState<FieldKindName>("wind");
+  const [activeKind, setActiveKind] = useState<FieldKindName>("wind");
   // Armed by the inspector, answered by the map: the next map click places this
   // property of this object.
   const [picking, setPicking] = useState<PositionPick | null>(null);
@@ -514,7 +513,7 @@ export default function App() {
               activeLayer={activeLayer}
               onSelect={selectObjects}
               onActivateLayer={setActiveLayer}
-              onActiveKind={setShownKind}
+              onActiveKind={setActiveKind}
               onChanged={setProject}
               viewBounds={viewBounds}
             />
@@ -540,8 +539,7 @@ export default function App() {
           onViewport={setViewport}
           autoKey={autoKey}
           viewSlot={viewSlot}
-          shownKind={shownKind}
-          onShownKind={setShownKind}
+          activeKind={activeKind}
         />
 
         {panels.right ? (
@@ -597,7 +595,6 @@ export default function App() {
         onKeysSelected={onKeysSelected}
         settings={settings}
         capture={recording}
-        shownKind={shownKind}
         onCapture={(mode) => mapRef.current?.setCapture(mode)}
       />
 

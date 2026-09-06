@@ -111,6 +111,16 @@ struct Snapshot {
     steps: Mutex<Vec<[Option<Arc<Prepared>>; 2]>>,
 }
 
+/// The kinds a request or a readiness probe is about: the one named, or
+/// every kind a visible layer holds (M30). A project with no field layer yet
+/// wants nothing, and every step of it reads as ready.
+fn kinds_wanted(project: &Project, kind: Option<FieldKind>) -> Vec<FieldKind> {
+    match kind {
+        Some(kind) => vec![kind],
+        None => project.kinds_present(),
+    }
+}
+
 /// A kind's slot in a step's pair.
 fn kind_slot(kind: FieldKind) -> usize {
     match kind {
@@ -233,6 +243,9 @@ impl RenderPool {
     /// the workers render from it without the lock. The old queue is simply
     /// dropped — a unit in flight finishes into a key that is either still
     /// wanted or harmlessly unreachable.
+    ///
+    /// `kind` narrows the queue to one kind of field; `None` queues every
+    /// kind the project holds, which is what the map draws (M30).
     pub fn request(
         &self,
         state: &AppState,
@@ -240,7 +253,7 @@ impl RenderPool {
         tiles: &[TileAddress],
         kind: Option<FieldKind>,
     ) -> Result<()> {
-        let (snapshot, kind) = {
+        let (snapshot, kinds) = {
             let session = state
                 .session
                 .lock()
@@ -249,7 +262,7 @@ impl RenderPool {
                 self.clear();
                 return Ok(());
             };
-            let kind = kind.unwrap_or(open.project.settings.field_kind);
+            let kinds = kinds_wanted(&open.project, kind);
             // Reuse the snapshot if the document has not moved: the hashes it
             // has already computed are still right.
             let existing = self
@@ -262,7 +275,7 @@ impl RenderPool {
                 Some(snapshot) => snapshot,
                 None => Arc::new(Snapshot::of(open.revision, open.project.clone())),
             };
-            (snapshot, kind)
+            (snapshot, kinds)
         };
 
         let ids: Vec<TileId> = tiles
@@ -270,14 +283,16 @@ impl RenderPool {
             .filter_map(|t| TileId::new(t.z, t.x, t.y).ok())
             .collect();
         let last = snapshot.project.last_step();
-        let mut units = Vec::with_capacity(ids.len() * (last as usize + 1));
+        let mut units = Vec::with_capacity(ids.len() * kinds.len() * (last as usize + 1));
         for step in priority_order(current.min(last), last) {
-            for tile in &ids {
-                units.push(Unit {
-                    step,
-                    kind,
-                    tile: *tile,
-                });
+            for &kind in &kinds {
+                for tile in &ids {
+                    units.push(Unit {
+                        step,
+                        kind,
+                        tile: *tile,
+                    });
+                }
             }
         }
         // Reversed so the workers can pop from the back in priority order.
@@ -384,19 +399,22 @@ impl RenderPool {
     /// the timeline can ask often. The snapshot is taken or reused exactly as
     /// [`Self::request`] takes it, so the hashes the answer is built from are
     /// the hashes the pool is rendering under.
+    ///
+    /// `None` for the kind counts the tiles of every kind the project holds
+    /// (M30): a step is ready when the map has all of them.
     pub fn readiness(
         &self,
         state: &AppState,
         tiles: &[TileAddress],
         kind: Option<FieldKind>,
     ) -> Result<TimelineReadiness> {
-        let (snapshot, kind) = {
+        let (snapshot, kinds) = {
             let session = state
                 .session
                 .lock()
                 .map_err(|_| AppError::Internal("session lock was poisoned".to_owned()))?;
             let open = session.open.as_ref().ok_or(AppError::NoProjectOpen)?;
-            let kind = kind.unwrap_or(open.project.settings.field_kind);
+            let kinds = kinds_wanted(&open.project, kind);
             let existing = self
                 .queue
                 .lock()
@@ -413,21 +431,25 @@ impl RenderPool {
                     snapshot
                 }
             };
-            (snapshot, kind)
+            (snapshot, kinds)
         };
 
         let ids: Vec<TileId> = tiles
             .iter()
             .filter_map(|t| TileId::new(t.z, t.x, t.y).ok())
             .collect();
-        let total = ids.len() as u32;
+        let total = (ids.len() * kinds.len()) as u32;
         let steps = (0..snapshot.project.settings.step_count)
             .map(|step| {
-                let prepared = snapshot.prepared(state, step, kind);
-                let ready = ids
+                let ready = kinds
                     .iter()
-                    .filter(|tile| state.tiles.contains(&prepared.key(**tile)))
-                    .count() as u32;
+                    .map(|&kind| {
+                        let prepared = snapshot.prepared(state, step, kind);
+                        ids.iter()
+                            .filter(|tile| state.tiles.contains(&prepared.key(**tile)))
+                            .count() as u32
+                    })
+                    .sum();
                 StepReadiness { step, ready, total }
             })
             .collect();
@@ -481,7 +503,8 @@ pub fn render_ahead(
     pool.request(&state, current, &tiles, kind)
 }
 
-/// How ready every step is, for the viewport — of the kind the map shows.
+/// How ready every step is, for the viewport — of every kind the map shows,
+/// or of the one named.
 #[tauri::command]
 pub fn frame_readiness(
     state: tauri::State<'_, AppState>,

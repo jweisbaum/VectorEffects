@@ -943,24 +943,33 @@ anywhere in the UI.
   screen at every latitude, so nothing is lost by it; in the others its
   vertical spacing varies with latitude as the map itself does, and the step is
   chosen from the scale at the equator (§5.1).
-- **Two glyph styles ship in v1**, switchable from display settings:
+- **Two glyph styles ship in v1**, and the kind of field chooses between them
+  (M30): a glyph switch in the title bar shows or hides them, and nothing
+  picks a style.
   - **Arrows** — uniform instanced geometry, length optionally scaled by speed.
-    Available for both project kinds.
+    What a current is always drawn with.
   - **Wind barbs** — the meteorological idiom, quantised to the conventional
-    5 kt half-barb / 10 kt full barb / 50 kt pennant. Wind projects only;
-    hidden for current projects. Requires variable per-instance flag geometry
-    (see M2 in `plan.md`).
+    5 kt half-barb / 10 kt full barb / 50 kt pennant. What wind is always
+    drawn with. Requires variable per-instance flag geometry (see M2 in
+    `plan.md`).
   - Speed is always also carried by the colour ramp, continuously and without
     quantisation, so barbs never become the only speed reference.
 - Cursor readout: lon/lat, speed in the display unit, direction in the display
   convention, and the grid cell index under the cursor.
 
-**The map shows one kind of field at a time** (M29): the wind layers or the
-current layers, chosen by the title bar's *Show* menu and following the layer
-made active, since that is what a stroke in it will paint. A tile address
-carries the kind, so the two are different tiles; readiness, the render pool,
-the readout, the eyedropper, a region copy and a macro capture all take the
-kind on show. Wind barbs are offered when wind is shown.
+**The map shows every kind of field the project holds, together** (M30;
+M29 showed one at a time, chosen by a *Show* menu, and the menu is gone).
+The wind layers are drawn as one pass and the current layers as another
+above it, each on its own colour scale with its own legend entry — wind as
+barbs, currents as arrows, so the two are told apart at a glance. The
+raster's alpha follows the speed, so a current shows through calm wind and
+wind shows wherever no current is painted. A tile address carries the kind,
+so the two are different tiles; readiness and the render pool cover every
+kind present, and playback advances when the tiles of every kind are
+resident. The readout, the eyedropper, a region copy and a macro capture
+take the *active layer's* kind, since that is what a stroke in it will
+paint, and a gesture's preview draws that kind's glyph. A macro preview
+shows its one kind alone. The auto scale is kept per kind.
 
 ### 5.4 Stale-tile behaviour
 
@@ -991,12 +1000,12 @@ closed; a closed panel is gone, not a strip.
 
 **What the map is showing lives in the title bar; what is being painted lives
 over the map** (M25, D68). The title bar's centre holds the view controls —
-the capture and measure tools, the glyph and projection menus, the graticule
-switch, undo and redo as icons — beside the project's name, which is edited
-in place by clicking it. The option bar over the map holds the palette and
+the capture and measure tools, the glyph switch, the projection menu, the
+graticule switch, undo and redo as icons — beside the project's name, which
+is edited in place by clicking it. The option bar over the map holds the palette and
 the tool in hand's options and nothing about the view; the step is the
 timeline's to say. The controls are rendered by the map through a portal, so
-the tool, the glyph style and the graticule stay the map's state.
+the tool, the glyphs and the graticule stay the map's state.
 
 **The status bar's middle is one line**: the tool's hint, or the last error,
 whichever is newer, from a store every panel and the map write to. No panel

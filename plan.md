@@ -2706,6 +2706,29 @@ want it.
     file; the stamp is kept beside the path and applied on read, which is
     what invariants 1 and 2 allow, and the user sees no object for it.
 
+### M30 — Both kinds on the map · **complete**
+
+**Goal:** the user's instruction of 2026-09-06 after the M29 build: remove
+the title bar's 10 m wind / surface current selector, always show both
+kinds, always draw wind as barbs and currents as arrows.
+
+**Delivered 2026-09-06**, one commit. The renderer takes a list of field
+passes instead of one frame: each pass names its tiles, its held frame,
+its ramp and its glyph style, and the raster and glyph stages run once per
+pass, wind first and currents above. `MapView` builds one pass per kind in
+`kinds_present` — the preview's one kind while a macro preview is shown,
+which `CaptureMode.kind` now says — holds the last complete frame per kind,
+keeps the auto-scale range per kind, and shows a legend entry per kind
+with its own scale. `warm` prefetches every kind and reports resident only
+when all are; the render pool's `request` and `readiness` with no kind
+named cover every present kind, a step's total being tiles × kinds. The
+*Show* menu is gone, and the glyph menu is a switch: the kind chooses the
+style, and a gesture's preview draws the active layer's. The active layer's
+kind still steers the readout, the eyedropper, a region copy and a macro
+capture. Spec §5.3 and §5.5 rewritten. Not clicked through in the app: the
+composition of two rasters and two glyph sets over one another is the part
+most worth a look.
+
 ---
 
 ## 3. Testing strategy

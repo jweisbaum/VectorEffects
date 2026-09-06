@@ -204,6 +204,13 @@ body {
   border: 1px solid var(--border);
   border-radius: 8px;
 }
+.legend-row + .legend-row { margin-top: 8px; }
+.legend-kind {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  margin-bottom: 4px;
+}
 .legend-bar { height: 9px; border-radius: 3px; }
 .legend-auto { color: var(--accent); font-variant: small-caps; letter-spacing: 0.08em; }
 .legend-labels {
