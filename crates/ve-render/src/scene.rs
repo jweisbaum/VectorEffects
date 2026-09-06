@@ -645,7 +645,13 @@ fn modifier_of(object: &Object, step: u32) -> Option<Modifier> {
     match object.tool {
         ToolKind::Intensity => Some(Modifier::Gain(get(PropId::Gain) / 100.0)),
         ToolKind::Divergence => Some(Modifier::Radial(get(PropId::Radial) / 100.0)),
-        ToolKind::Turn => Some(Modifier::Turn(get(PropId::TurnDeg))),
+        // Clockwise is the positive sense (M29): a turn by `d` clockwise is
+        // what `Modifier::Turn(d)` does.
+        ToolKind::Turn => {
+            let amount = get(PropId::TurnAmountDeg);
+            let clockwise = choice(object, PropId::TurnSense, step) == 0;
+            Some(Modifier::Turn(if clockwise { amount } else { -amount }))
+        }
         ToolKind::Liquify => Some(Modifier::Smear),
         ToolKind::Warp => {
             // Mode 1 twists about the anchor; 0 pushes along a bearing.

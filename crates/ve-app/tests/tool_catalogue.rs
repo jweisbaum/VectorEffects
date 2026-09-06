@@ -208,7 +208,10 @@ fn catalogue() -> Vec<(Tool, Gesture, Vec<ToolOption>)> {
             Gesture::Stroke {
                 points: vec![[1.0, 0.0]],
             },
-            vec![number(PropId::SizeKm, 800.0), number(PropId::TurnDeg, 90.0)],
+            vec![
+                number(PropId::SizeKm, 800.0),
+                number(PropId::TurnAmountDeg, 90.0),
+            ],
         ),
         (
             Tool::Warp,
@@ -339,7 +342,7 @@ fn every_modifier_changes_the_field_beneath_it() {
         ),
         (
             Tool::Turn,
-            vec![number(PropId::TurnDeg, 90.0)],
+            vec![number(PropId::TurnAmountDeg, 90.0)],
             // The same speed, a quarter turn clockwise.
             (20.0, 180.0),
         ),

@@ -264,7 +264,10 @@ pub enum PropId {
     /// Its own id rather than a share of [`Self::RotationDeg`], which every
     /// object has and which turns the object's *frame*. Turning the frame of a
     /// disc does nothing at all; this turns the vectors.
-    TurnDeg,
+    /// Which way the turn tool turns: clockwise or counter-clockwise (M29).
+    TurnSense,
+    /// How far it turns, in degrees, `0..=180` (M29).
+    TurnAmountDeg,
     /// Whether a warp pushes the field to a place or twists it.
     WarpMode,
     /// Where a warp drags the field under its anchor to.
@@ -563,6 +566,10 @@ pub const OFFSET_MODES: &[&str] = &["aligned", "fixed"];
 /// index 0 was called `absolute` and is the same fixed bearing every other tool
 /// calls `constant`, which is what a reader of two option bars expects.
 pub const CURVE_DIRECTION_MODES: &[&str] = &["constant", "relative_to_path"];
+/// Variants of [`PropId::TurnSense`] (M29). Index 0 is clockwise, which is
+/// the positive sense the evaluator's `Modifier::Turn` turns for.
+pub const TURN_SENSES: &[&str] = &["clockwise", "counterclockwise"];
+
 /// Variants of [`PropId::WarpMode`].
 pub const WARP_MODES: &[&str] = &["push", "twist"];
 
@@ -668,11 +675,20 @@ const DIVERGENCE: &[PropSpec] = &[
 const TURN: &[PropSpec] = &[
     modifier_stamp!(),
     modifier_size!(),
-    // A number of degrees rather than an `Angle`, because it is an amount and
-    // not a bearing: it is signed, it may exceed a turn, and animating it from
-    // -170 to 170 should unwind through zero rather than take the short way
-    // round as a bearing would (spec.md 3.3).
-    num(PropId::TurnDeg, "Turn", 30.0, -180.0, 180.0, Unit::Degrees),
+    // A sense and an amount rather than one signed number (M29): "clockwise
+    // by 30°" is how a turn is said. The amount is a number of degrees and
+    // not an `Angle`, because it is an amount and not a bearing: animating it
+    // from 170 to 10 unwinds through the values between rather than taking
+    // the short way round as a bearing would (spec.md 3.3).
+    choice(PropId::TurnSense, "Turn", 0, TURN_SENSES),
+    num(
+        PropId::TurnAmountDeg,
+        "Amount",
+        30.0,
+        0.0,
+        180.0,
+        Unit::Degrees,
+    ),
     num(PropId::Feather, "Feather", 0.5, 0.0, 1.0, Unit::None),
 ];
 

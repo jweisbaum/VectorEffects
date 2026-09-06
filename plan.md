@@ -2658,7 +2658,11 @@ the field kind a property of the layer rather than of the project (§4.1).
     with *Divergence* and *Convergence* as its ends and 0 as the default;
     the readout names the side the value is on ("50% Divergence"), tested.
     The stored sign is untouched, so no migration and no kernel change.
-11. **The turn tool's direction and amount.** Pending.
+11. **The turn tool's direction and amount.** Delivered: `TurnSense`
+    (clockwise, counter-clockwise) and `TurnAmountDeg` (0–180) replace the
+    signed `TurnDeg`; the evaluator turns by the signed product, so no
+    kernel changed. Schema 12's migration splits every saved turn, keys
+    and all — a stepped sense key wherever the sign was — and is tested.
 12. **The warp does something.** Pending.
 13. **A start time on the timeline.** Pending.
 14. **The macro preview places into a scene of its own.** Pending.

@@ -40,7 +40,81 @@ const MIGRATIONS: &[(u32, Migration)] = &[
     (8, modifiers_are_painted_rather_than_stamped),
     (9, a_warp_pushes_to_a_place),
     (10, layers_carry_the_parameter),
+    (11, a_turn_has_a_sense_and_an_amount),
 ];
+
+/// Version 11 stored a turn as one signed number of degrees, `turn_deg`.
+///
+/// Version 12 stores the sense and the amount apart (M29): `turn_sense`, 0
+/// clockwise and 1 counter-clockwise, and `turn_amount_deg`, never negative.
+/// Every key travels: the amount keeps its interpolation on its magnitude,
+/// and the sense takes a stepped key wherever the sign was.
+fn a_turn_has_a_sense_and_an_amount(value: &mut Value) -> Result<()> {
+    fn split(signed: &Value) -> (Value, Value) {
+        let degrees = signed.get("f32").and_then(Value::as_f64).unwrap_or(0.0);
+        let sense = u8::from(degrees < 0.0);
+        (
+            serde_json::json!({ "enum": sense }),
+            serde_json::json!({ "f32": degrees.abs() }),
+        )
+    }
+    let Some(layers) = value.get_mut("layers").and_then(Value::as_array_mut) else {
+        return Ok(());
+    };
+    for layer in layers {
+        let Some(objects) = layer.get_mut("objects").and_then(Value::as_array_mut) else {
+            continue;
+        };
+        for object in objects {
+            if object.get("tool").and_then(Value::as_str) != Some("turn") {
+                continue;
+            }
+            let Some(props) = object.get_mut("props").and_then(Value::as_object_mut) else {
+                continue;
+            };
+            let Some(turn) = props.remove("turn_deg") else {
+                continue;
+            };
+            let base = turn.get("base").cloned().unwrap_or(Value::Null);
+            let (sense_base, amount_base) = split(&base);
+            let keys = turn
+                .get("keys")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            let mut sense_keys = Vec::new();
+            let mut amount_keys = Vec::new();
+            for key in keys {
+                let (sense, amount) = split(key.get("value").unwrap_or(&Value::Null));
+                let step = key.get("step").cloned().unwrap_or(Value::from(0));
+                let interp = key
+                    .get("interp")
+                    .cloned()
+                    .unwrap_or_else(|| Value::String("linear".to_owned()));
+                sense_keys
+                    .push(serde_json::json!({ "step": step, "value": sense, "interp": "step" }));
+                amount_keys
+                    .push(serde_json::json!({ "step": step, "value": amount, "interp": interp }));
+            }
+            let mut sense = serde_json::Map::new();
+            sense.insert("base".to_owned(), sense_base);
+            if !sense_keys.is_empty() {
+                sense.insert("keys".to_owned(), Value::Array(sense_keys));
+            }
+            let mut amount = serde_json::Map::new();
+            amount.insert("base".to_owned(), amount_base);
+            if !amount_keys.is_empty() {
+                amount.insert("keys".to_owned(), Value::Array(amount_keys));
+            }
+            if let Some(follow) = turn.get("follow").cloned() {
+                amount.insert("follow".to_owned(), follow);
+            }
+            props.insert("turn_sense".to_owned(), Value::Object(sense));
+            props.insert("turn_amount_deg".to_owned(), Value::Object(amount));
+        }
+    }
+    Ok(())
+}
 
 /// Version 10 kept the kind of field on the project and one colour scale.
 ///
@@ -1014,6 +1088,41 @@ mod tests {
 
     /// A version 1 document stored one polyline per stroke. Opening one must
     /// produce a single chain, not a stroke with no geometry at all.
+    /// A version-11 turn of −70° opens as a counter-clockwise turn of 70°,
+    /// keys and all (M29).
+    #[test]
+    fn a_version_11_turn_splits_into_a_sense_and_an_amount() {
+        let mut value: Value = serde_json::to_value(sample()).unwrap();
+        value["schema_version"] = Value::from(11);
+        let object = &mut value["layers"][0]["objects"][0];
+        object["tool"] = Value::String("turn".to_owned());
+        object["props"]["turn_deg"] = serde_json::json!({
+            "base": { "f32": -70.0 },
+            "keys": [
+                { "step": 0, "value": { "f32": -70.0 }, "interp": "linear" },
+                { "step": 5, "value": { "f32": 20.0 }, "interp": "linear" }
+            ]
+        });
+
+        let project = from_json(&serde_json::to_string(&value).unwrap()).expect("migrates");
+        let object = &project.layers[0].objects[0];
+        assert_eq!(object.tool, ToolKind::Turn);
+        let sense = object.props.get(PropId::TurnSense).expect("a sense");
+        let amount = object.props.get(PropId::TurnAmountDeg).expect("an amount");
+        assert_eq!(
+            sense.value_at(0),
+            crate::PropValue::Enum(1),
+            "counter-clockwise"
+        );
+        assert_eq!(
+            sense.value_at(5),
+            crate::PropValue::Enum(0),
+            "clockwise by step 5"
+        );
+        assert_eq!(amount.value_at(0), crate::PropValue::F32(70.0));
+        assert_eq!(amount.value_at(5), crate::PropValue::F32(20.0));
+    }
+
     /// A version-10 current project opens with every layer a current layer
     /// and its one scale become the pair's current end (M29).
     #[test]

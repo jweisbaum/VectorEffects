@@ -1095,7 +1095,7 @@ fn a_modifier_over_calm_water_leaves_calm_water() {
     for (tool, prop, amount) in [
         (ToolKind::Intensity, PropId::Gain, 300.0),
         (ToolKind::Divergence, PropId::Radial, 300.0),
-        (ToolKind::Turn, PropId::TurnDeg, 90.0),
+        (ToolKind::Turn, PropId::TurnAmountDeg, 90.0),
     ] {
         let mut object = modifier(tool, anchor, 2000.0);
         set_num(&mut object, prop, amount);
@@ -1150,14 +1150,20 @@ fn diverging_bends_the_flow_outward_and_converging_bends_it_in() {
 }
 
 /// Spec 6.3: the turn modifier rotates every vector beneath it by a fixed
-/// angle, clockwise for a positive amount, and does not touch the speed.
+/// angle, clockwise or counter-clockwise as its sense says (M29), and does
+/// not touch the speed.
 #[test]
 fn rotating_turns_the_flow_by_the_angle_it_is_given() {
     let anchor = ll(-30.0, 40.0);
     for (turn, expected) in [(30.0, 120.0), (-30.0, 60.0), (180.0, 270.0)] {
         let background = brush(anchor, vec![[0.0, 0.0]], 4000.0, 12.0, 90.0);
         let mut object = modifier(ToolKind::Turn, anchor, 1500.0);
-        set_num(&mut object, PropId::TurnDeg, turn);
+        set_num(&mut object, PropId::TurnAmountDeg, f32::abs(turn));
+        set(
+            &mut object,
+            PropId::TurnSense,
+            PropValue::Enum(u8::from(turn < 0.0)),
+        );
 
         let scene = scene_of(vec![background, object]);
         assert!(

@@ -1488,7 +1488,7 @@ modifier cannot invent a wind, only change one.
 |---|---|---|
 | **Intensify / reduce** | `I` | Scales the speed by `1 + amount`, leaving the direction alone. `+100%` doubles it, `-100%` takes it to calm. |
 | **Diverge / converge** | `D` | Adds a radial component of `amount × local speed`: outward when positive and inward when negative — from the **stroke's own centreline** for a swept footprint (M29), fading to nothing within 100 m of the line, where there is no outward; from the anchor for a stamp. |
-| **Rotate flow** | `R` | Turns every vector by a fixed angle, clockwise for a positive amount. The speed is untouched. |
+| **Rotate flow** | `R` | Turns every vector by an amount of 0–180°, clockwise or counter-clockwise as the tool says (M29). The speed is untouched. |
 | **Warp** | `W` | Reads the field from a displaced position: `push` drags the field under the anchor to a place, `twist` rotates it about the anchor. A *placed* region's field, moved as one block. Nothing about the vectors changes, only where they are read from. |
 | **Liquify** | `L` | The painted smear — a paint program's forward warp. Each stamp of the stroke carries the pointer's own movement into it, scaled by `strength`; at a cell the displacement is the feathered sum of the deltas of the stamps that cover it, and the field is read from the cell minus that. The field is dragged *along the hand* rather than moved as a block (M17, D56). |
 
@@ -1520,7 +1520,8 @@ the same settings become one object and neither paints differently for it.
 | `feather` | f32 0–1 | all four |
 | `gain` | f32 % (−100…200) | intensify / reduce — a **centred slider** (M29): 0, do nothing, in the middle and the default, −100% at the left end, +200% at the right |
 | `radial` | f32 % (−400…400) | diverge / converge — a **centred slider** (M29), *Divergence* at the left end and *Convergence* at the right, 0 — neither — in the middle and the default; the stored sign is untouched, positive diverging, the slider simply reversed |
-| `turn_deg` | f32 ° (−180…180) | rotate flow. A signed *amount*, not a bearing: it is not converted into the project's direction convention (§3.3), and animating it from −170 to 170 unwinds through zero rather than taking the short way round as a bearing would. |
+| `turn_sense` | enum `Clockwise` \| `Counterclockwise` | rotate flow (M29): which way. Index 0 is clockwise, the evaluator's positive sense. |
+| `turn_amount_deg` | f32 ° (0…180) | rotate flow (M29): how far. An *amount*, not a bearing: it is not converted into the project's direction convention (§3.3), and animating it from 170 to 10 unwinds through the values between rather than taking the short way round as a bearing would. Saved before M29 as one signed `turn_deg`, which the migration splits. |
 | `warp_mode` | enum `Push` \| `Twist` | warp |
 | `push_to` | LonLat | warp, `Push`: where the field under the anchor is dragged to |
 | `twist_deg` | f32 ° (−360…360) | warp, `Twist` |

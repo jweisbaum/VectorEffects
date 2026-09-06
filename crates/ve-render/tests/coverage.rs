@@ -123,7 +123,7 @@ fn a_mask_removes_coverage_rather_than_writing_a_zero() {
 #[test]
 fn a_modifier_over_nothing_covers_nothing() {
     let mut turn = stamp(ToolKind::Turn, at(0.0, 0.0), 600.0, 0.0);
-    set(&mut turn, PropId::TurnDeg, PropValue::F32(45.0));
+    set(&mut turn, PropId::TurnAmountDeg, PropValue::F32(45.0));
     let project = project(vec![turn]);
     let scene = flatten(&project, 0);
     assert!(

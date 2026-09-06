@@ -154,7 +154,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Tool::Turn,
                 vec![
                     number("SizeKm", 1_600.0),
-                    number("TurnDeg", -70.0),
+                    ToolOption {
+                        property: "TurnSense".to_owned(),
+                        value: PropertyValue::Choice { index: 1 },
+                    },
+                    number("TurnAmountDeg", 70.0),
                     number("Feather", 0.6),
                 ],
             ),
