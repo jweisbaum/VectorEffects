@@ -2617,7 +2617,10 @@ the field kind a property of the layer rather than of the project (§4.1).
 4. **A new object is the selection.** Delivered: `create_object` returns
    `Created` — the summary and the object it made or merged into — and the
    map selects it as the gesture lands.
-5. **The follow button does something on a click.** Pending.
+5. **The follow button does something on a click.** Delivered: it was a
+   drag source only. A click now arms the link — the matching rows light,
+   the status bar says what to click — and the next click on another
+   object's row of the same property completes it; the drag still works.
 6. **Divergence strokes with the same settings merge.** Pending.
 7. **The motion button's help text.** Delivered: "Add velocity / rotational
    / scale vectors to the vector data." by track, and "Remove …" when on.

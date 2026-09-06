@@ -1039,6 +1039,8 @@ body {
   pointer-events: none;
 }
 .tl-buffering { color: #ffd678; }
+/* A link armed by a click, waiting for the row that completes it (M29). */
+.tl-follow.armed { background: #6b3a12; border-color: #b9701f; color: #ffd678; }
 .timeline[hidden] { display: none; }
 
 /* Rows share one horizontal scroll; the labels column is sticky. */

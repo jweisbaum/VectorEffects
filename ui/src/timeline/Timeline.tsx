@@ -29,7 +29,7 @@ import type { ShrinkImpact } from "../generated/ShrinkImpact";
 import type { TileAddress } from "../generated/TileAddress";
 import type { TrackSamples } from "../generated/TrackSamples";
 import NumberField from "../NumberField";
-import { reportError } from "../hint";
+import { reportError, setHint } from "../hint";
 import { api } from "../ipc";
 import { IconSvg, LOOP_ICON } from "../map/ToolIcon";
 import { MAX_STEPS } from "../project/format";
@@ -520,6 +520,18 @@ export default function Timeline({
     the first follow the second (spec.md 9.3, M13). Held here while the drag
     is in flight so the rows can say which of them would take the drop.
   */
+  /**
+   * A link armed by a *click* on the link button (M29): the next click on
+   * another object's row of the same property completes it. The drag still
+   * works; the click is for anyone who did not know to drag, which the
+   * button gave no sign of.
+   */
+  const [linkArm, setLinkArm] = useState<{ object: number; property: string } | null>(null);
+  useEffect(() => {
+    if (linkArm === null) return;
+    setHint("Click another object's row of the same property to follow it; click the link again to cancel.");
+    return () => setHint(null);
+  }, [linkArm]);
   const [linkDrag, setLinkDrag] = useState<{
     object: number;
     property: string;
@@ -1218,13 +1230,25 @@ export default function Timeline({
                         <Fragment key={track.property}>
                         <div
                           className={`tl-row tl-track${track.interpolated_here ? " interpolated" : ""}${
-                            linkDrag &&
-                            linkDrag.property === track.property &&
-                            linkDrag.object !== object.id
+                            (linkDrag ?? linkArm) &&
+                            (linkDrag ?? linkArm)?.property === track.property &&
+                            (linkDrag ?? linkArm)?.object !== object.id
                               ? " link-target"
                               : ""
                           }${track.follows !== null ? " following" : ""}`}
                           data-track={`${object.id}:${row}`}
+                          onClick={() => {
+                            // An armed link lands on the same property of
+                            // another object, as a dragged one does (M29).
+                            if (
+                              linkArm &&
+                              linkArm.property === track.property &&
+                              linkArm.object !== object.id
+                            ) {
+                              linkTo(linkArm.object, linkArm.property, object.id);
+                              setLinkArm(null);
+                            }
+                          }}
                           onPointerUp={() => {
                             // A drop on the *same* property of another object
                             // is the only one that means anything: a link is
@@ -1295,8 +1319,19 @@ export default function Timeline({
                                 </button>
                               ) : (
                                 <button
-                                  className="tl-follow"
-                                  title={`Drag onto another object's ${track.label.toLowerCase()} row to follow it`}
+                                  className={
+                                    linkArm?.object === object.id && linkArm.property === track.property
+                                      ? "tl-follow armed"
+                                      : "tl-follow"
+                                  }
+                                  title={`Click, then click another object's ${track.label.toLowerCase()} row to follow it — or drag onto that row`}
+                                  onClick={() =>
+                                    setLinkArm((current) =>
+                                      current?.object === object.id && current.property === track.property
+                                        ? null
+                                        : { object: object.id, property: track.property },
+                                    )
+                                  }
                                   onPointerDown={(event) => {
                                     event.preventDefault();
                                     setLinkDrag({

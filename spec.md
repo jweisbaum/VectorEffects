@@ -2505,7 +2505,10 @@ which is why it is not a bar.
   its value at every step, drawn under the track and sharing the ruler's
   horizontal scale, with its keys marked and the current step read out. A
   boolean or a choice has no graph: it holds rather than blends, and a line
-  through discriminants would say nothing the diamonds do not.
+  through discriminants would say nothing the diamonds do not. **The link is made by a click as well as a drag** (M29): click the
+link button, and the next click on another object's row of the same property
+completes it — the drag onto that row still works, but a button gave no sign
+that dragging was what it wanted.
 
   The samples are the **model's**, taken through the same evaluation the field
   uses (`track_samples`), never a second interpolation of the same keys in the
