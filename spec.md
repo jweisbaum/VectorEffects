@@ -938,7 +938,10 @@ anywhere in the UI.
 
 While a frame is re-rendering, previously-rendered tiles remain on screen,
 dimmed slightly, so pan and zoom never blank out. A small activity indicator
-shows rendering is in flight.
+shows rendering is in flight — the count of tiles still to come, at the head
+of the status bar's hint line (M27; it sat in the title bar among the view
+controls before, where a count that comes and goes on every edit pulled the
+eye).
 
 ### 5.5 Map chrome
 

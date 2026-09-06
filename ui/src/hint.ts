@@ -17,13 +17,26 @@ export interface HintSnapshot {
   hint: string | null;
   /** The last error, until the next hint or a clear. */
   error: string | null;
+  /**
+   * What the map is busy with — tiles still rendering — shown ahead of the
+   * hint (M27). It used to sit in the title bar among the view controls,
+   * where a count that comes and goes on every edit pulled the eye; the
+   * status bar is where the eye already goes for what is happening.
+   */
+  activity: string | null;
 }
 
-let snapshot: HintSnapshot = { hint: null, error: null };
+let snapshot: HintSnapshot = { hint: null, error: null, activity: null };
 const listeners = new Set<() => void>();
 
 function publish(next: HintSnapshot) {
-  if (next.hint === snapshot.hint && next.error === snapshot.error) return;
+  if (
+    next.hint === snapshot.hint &&
+    next.error === snapshot.error &&
+    next.activity === snapshot.activity
+  ) {
+    return;
+  }
   snapshot = next;
   for (const listener of listeners) listener();
 }
@@ -34,12 +47,17 @@ function publish(next: HintSnapshot) {
  * not changed has nothing new to say over it.
  */
 export function setHint(hint: string | null): void {
-  publish({ hint, error: hint === snapshot.hint ? snapshot.error : null });
+  publish({ ...snapshot, hint, error: hint === snapshot.hint ? snapshot.error : null });
 }
 
 /** Reports an error, which shows in place of the hint until the hint changes. */
 export function reportError(error: string | null): void {
   publish({ ...snapshot, error });
+}
+
+/** Sets what the map is busy with, or clears it. Independent of the hint and the error. */
+export function setActivity(activity: string | null): void {
+  publish({ ...snapshot, activity });
 }
 
 /** What the status bar shows: the error if there is one, else the hint. */

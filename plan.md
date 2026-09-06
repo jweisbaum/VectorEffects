@@ -2503,7 +2503,10 @@ anything not done recorded here with its reason.
     the map's chrome uses, centred along its edge; a closed panel renders
     nothing, and the timeline's own collapse button and collapsed strip are
     gone.
-11. **The rendering count moves to the status bar.** Pending.
+11. **The rendering count moves to the status bar.** Delivered: the hint
+    store gained an `activity` slot the map sets from its pending-tile
+    count, and `StatusHint` leads its line with it; the title bar's span is
+    gone.
 12. **Auto scale.** Pending.
 13. **The macro preview: frame, lockout, stamp cursor, autoplay, badge.** Pending.
 

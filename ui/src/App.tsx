@@ -747,7 +747,24 @@ function BusySpinner() {
 function StatusHint({ status }: { status: string | null }) {
   const state = useHint();
   const line = shown(state);
-  if (status !== null) return <span className="hint accent">{status}</span>;
-  if (line === null) return <span className="hint" />;
-  return <span className={line.kind === "error" ? "hint error" : "hint muted"}>{line.text}</span>;
+  // The map's activity — tiles still rendering — leads the line (M27).
+  const activity =
+    state.activity !== null ? <span className="activity">{state.activity}</span> : null;
+  if (status !== null) {
+    return (
+      <span className="hint accent">
+        {activity}
+        {activity && " · "}
+        {status}
+      </span>
+    );
+  }
+  if (line === null) return <span className="hint">{activity}</span>;
+  return (
+    <span className={line.kind === "error" ? "hint error" : "hint muted"}>
+      {activity}
+      {activity && " · "}
+      {line.text}
+    </span>
+  );
 }

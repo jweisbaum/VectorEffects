@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { currentHint, reportError, setHint, shown } from "./hint";
+import { currentHint, reportError, setActivity, setHint, shown } from "./hint";
 
 describe("the hint store", () => {
   it("shows the hint, and an error over it until the hint changes", () => {
@@ -23,5 +23,20 @@ describe("the hint store", () => {
 
     setHint(null);
     expect(shown(currentHint())).toBeNull();
+  });
+
+  it("carries the map's activity beside the hint, and neither disturbs the other", () => {
+    setHint("Click the map to place it.");
+    setActivity("rendering 12…");
+    expect(currentHint().activity).toBe("rendering 12…");
+    expect(shown(currentHint())).toEqual({ text: "Click the map to place it.", kind: "hint" });
+
+    reportError("the layer is locked");
+    expect(currentHint().activity).toBe("rendering 12…");
+
+    setActivity(null);
+    expect(currentHint().activity).toBeNull();
+    expect(shown(currentHint())?.kind).toBe("error");
+    setHint(null);
   });
 });

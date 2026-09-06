@@ -26,7 +26,7 @@ import type { ToolSchema } from "../generated/ToolSchema";
 import { actionFor, chordOf, toolChord } from "../settings/bindings";
 import { cursorFor } from "./cursor";
 import { createPortal } from "react-dom";
-import { reportError, setHint } from "../hint";
+import { reportError, setActivity, setHint } from "../hint";
 import { IconSvg, REDO_ICON, UNDO_ICON } from "./ToolIcon";
 import type { PositionPick } from "../picking";
 import type { SelectionTransform } from "../generated/SelectionTransform";
@@ -664,6 +664,13 @@ export default function MapView({
   const onViewportRef = useRef(onViewport);
   onViewportRef.current = onViewport;
   const [pending, setPending] = useState(0);
+  // Tiles still rendering, said in the status bar rather than the title bar
+  // (M27): the count comes and goes on every edit, and the status bar is
+  // where the eye already goes for what is happening.
+  useEffect(() => {
+    setActivity(pending > 0 ? `rendering ${pending}…` : null);
+    return () => setActivity(null);
+  }, [pending]);
   const [tool, setTool] = useState<ActiveTool>(HAND);
   /*
     The selected region, and how the select tool draws one (spec.md 8.2, M14).
@@ -4692,7 +4699,6 @@ export default function MapView({
           />
           Graticule
         </label>
-        {pending > 0 && <span className="activity">rendering {pending}…</span>}
           </div>,
           viewSlot,
         )}
