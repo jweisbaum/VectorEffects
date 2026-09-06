@@ -1733,3 +1733,47 @@ fn the_divergence_amount_is_a_reversed_centred_slider() {
         ("Divergence", "Convergence")
     );
 }
+
+/// A plain warp stroke pushes the field from where it began to where it
+/// ended (M29): the push target is the stroke's last point, so the drag does
+/// something as soon as it is released. A click with no travel pushes
+/// nowhere, and a named target wins over the stroke's end.
+#[test]
+fn a_warp_stroke_pushes_from_its_first_point_to_its_last() {
+    let (_root, state) = project("warp-stroke");
+    let target = |points: Vec<[f64; 2]>, options: Vec<ToolOption>| {
+        draw(&state, Tool::Warp, Gesture::Stroke { points }, options);
+        let objects = &document(&state).layers[0].objects;
+        let warp = objects.last().expect("the warp");
+        warp.props
+            .get(PropId::PushTo)
+            .expect("push to")
+            .base()
+            .as_lonlat()
+            .expect("a position")
+    };
+    let dragged = target(
+        vec![[0.0, 0.0], [3.0, 0.0], [6.0, 1.0]],
+        vec![number(PropId::SizeKm, 800.0), pick(PropId::WarpMode, 0)],
+    );
+    assert!((dragged.lon - 6.0).abs() < 1e-9 && (dragged.lat - 1.0).abs() < 1e-9);
+
+    let clicked = target(
+        vec![[20.0, 0.0]],
+        vec![number(PropId::SizeKm, 800.0), pick(PropId::WarpMode, 0)],
+    );
+    assert!(
+        (clicked.lon - 20.0).abs() < 1e-9,
+        "a click pushes nowhere: the target is the anchor"
+    );
+
+    let named = target(
+        vec![[40.0, 0.0], [46.0, 0.0]],
+        vec![
+            number(PropId::SizeKm, 800.0),
+            pick(PropId::WarpMode, 0),
+            at(PropId::PushTo, 50.0, 2.0),
+        ],
+    );
+    assert!((named.lon - 50.0).abs() < 1e-9 && (named.lat - 2.0).abs() < 1e-9);
+}

@@ -2663,7 +2663,11 @@ the field kind a property of the layer rather than of the project (§4.1).
     signed `TurnDeg`; the evaluator turns by the signed product, so no
     kernel changed. Schema 12's migration splits every saved turn, keys
     and all — a stepped sense key wherever the sign was — and is tested.
-12. **The warp does something.** Pending.
+12. **The warp does something.** Delivered: a freshly drawn push warp's
+    target was its own anchor — nowhere — until it was re-aimed with Shift,
+    so a drag did nothing at all. The target is the stroke's last point now,
+    so the field under where the drag began is dragged to where it ended;
+    a click still pushes nowhere and a named target still wins. Tested.
 13. **A start time on the timeline.** Pending.
 14. **The macro preview places into a scene of its own.** Pending.
 15. **The eraser erases what it covers.** Pending.

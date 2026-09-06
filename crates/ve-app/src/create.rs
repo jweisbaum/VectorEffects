@@ -699,13 +699,13 @@ pub fn create(state: &AppState, new: NewObject) -> Result<Created> {
         if let Some(prop) = object.props.get_mut(PropId::Position) {
             prop.set_base(PropValue::LonLat(anchor));
         }
-        // A warp starts pushing nowhere unless the caller said otherwise: its
-        // push is measured *from* the anchor, which does not exist until the
-        // gesture does, so there is nothing a push could have meant before this
-        // point. It is set afterwards by pulling the warp where it should go
-        // (spec.md 6.3), which is why the option bar does not offer it — but an
-        // option that names it explicitly is still honoured, since by then the
-        // caller knows where the gesture went.
+        // A warp's push is the stroke itself (M29): the field under where the
+        // stroke began is dragged to where it ended, so a plain drag does
+        // something the moment it is released. Before this the push was set
+        // to the anchor — nowhere — until the warp was pulled again with
+        // Shift, and a warp that had just been drawn did nothing at all. A
+        // click with no travel still pushes nowhere, and an option that names
+        // the place explicitly is honoured over the stroke's end.
         let pushed = new
             .options
             .iter()
@@ -714,7 +714,8 @@ pub fn create(state: &AppState, new: NewObject) -> Result<Created> {
             && !pushed
             && let Some(prop) = object.props.get_mut(PropId::PushTo)
         {
-            prop.set_base(PropValue::LonLat(anchor));
+            let end = positions.last().copied().unwrap_or(anchor);
+            prop.set_base(PropValue::LonLat(end));
         }
 
         let (command, held) = match merge_into(layer, &object, &positions)? {
