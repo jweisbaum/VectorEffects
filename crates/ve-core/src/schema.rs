@@ -388,6 +388,22 @@ pub struct PropSpec {
     /// A creation-only property is not animatable either: a keyframe is an edit
     /// spread over time, and the two rules would otherwise contradict.
     pub creation_only: bool,
+    /// Edited by a centred slider rather than a typed number (M29): a signed
+    /// amount whose zero is "do nothing" and whose two ends mean opposite
+    /// things. The labels name the ends; `reversed` puts the positive end on
+    /// the left, for a tool whose positive sense reads as the left-hand word.
+    pub slider: Option<Slider>,
+}
+
+/// How a centred slider is labelled (M29).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Slider {
+    /// The label at the slider's left end.
+    pub low_label: &'static str,
+    /// And at its right end.
+    pub high_label: &'static str,
+    /// Whether the stored value's positive end is the *left* one.
+    pub reversed: bool,
 }
 
 impl PropSpec {
@@ -416,6 +432,7 @@ const fn num(
         unit,
         variants: &[],
         creation_only: false,
+        slider: None,
     }
 }
 
@@ -428,6 +445,25 @@ const fn ang(id: PropId, label: &'static str, default: f64) -> PropSpec {
         unit: Unit::Degrees,
         variants: &[],
         creation_only: false,
+        slider: None,
+    }
+}
+
+/// Gives a signed amount a centred slider (M29): zero in the middle, the
+/// ends named, and the positive sense on the left when `reversed`.
+const fn slider(
+    spec: PropSpec,
+    low_label: &'static str,
+    high_label: &'static str,
+    reversed: bool,
+) -> PropSpec {
+    PropSpec {
+        slider: Some(Slider {
+            low_label,
+            high_label,
+            reversed,
+        }),
+        ..spec
     }
 }
 
@@ -459,6 +495,7 @@ const fn pos(id: PropId, label: &'static str) -> PropSpec {
         unit: Unit::None,
         variants: &[],
         creation_only: false,
+        slider: None,
     }
 }
 
@@ -471,6 +508,7 @@ const fn flag(id: PropId, label: &'static str, default: bool) -> PropSpec {
         unit: Unit::None,
         variants: &[],
         creation_only: false,
+        slider: None,
     }
 }
 
@@ -488,6 +526,7 @@ const fn choice(
         unit: Unit::None,
         variants,
         creation_only: false,
+        slider: None,
     }
 }
 
@@ -599,7 +638,14 @@ const INTENSITY: &[PropSpec] = &[
     // Signed, so one tool intensifies and reduces: +100% doubles the speed
     // beneath, -100% takes it to calm. The floor is exactly -100 because a
     // negative speed is a reversed vector, which is what the turn tool is for.
-    num(PropId::Gain, "Amount", 50.0, -100.0, 400.0, Unit::Percent),
+    // A centred slider from -100% to +200% with 0 — do nothing — in the
+    // middle, and 0 as the default so the thumb starts there (M29).
+    slider(
+        num(PropId::Gain, "Amount", 0.0, -100.0, 200.0, Unit::Percent),
+        "−100%",
+        "+200%",
+        false,
+    ),
     num(PropId::Feather, "Feather", 0.5, 0.0, 1.0, Unit::None),
 ];
 

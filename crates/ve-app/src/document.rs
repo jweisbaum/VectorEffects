@@ -234,6 +234,30 @@ pub struct PropertyView {
     /// Whether the value shown is interpolated between keys rather than keyed
     /// or held (spec.md 9.3).
     pub interpolated_here: bool,
+    /// Edited by a centred slider rather than a typed number (M29).
+    pub slider: Option<SliderView>,
+}
+
+/// A centred slider's labelling (M29), as the schema declares it.
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export, export_to = "SliderView.ts")]
+pub struct SliderView {
+    /// The label at the left end.
+    pub low_label: String,
+    /// And at the right end.
+    pub high_label: String,
+    /// Whether the stored value's positive end is the left one.
+    pub reversed: bool,
+}
+
+impl SliderView {
+    pub(crate) fn of(slider: ve_core::schema::Slider) -> Self {
+        Self {
+            low_label: slider.low_label.to_owned(),
+            high_label: slider.high_label.to_owned(),
+            reversed: slider.reversed,
+        }
+    }
 }
 
 fn tool_name(tool: ToolKind) -> &'static str {
@@ -420,6 +444,7 @@ pub fn properties(state: &AppState, object: u64, step: u32) -> Result<Vec<Proper
                             .keys()
                             .last()
                             .is_some_and(|last| last.step > step),
+                    slider: spec.slider.map(SliderView::of),
                 })
             })
             .collect())

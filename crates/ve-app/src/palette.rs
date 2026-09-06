@@ -64,6 +64,8 @@ pub struct ToolOptionSpec {
     pub creation_only: bool,
     /// What makes this option inert, if anything.
     pub depends_on: Vec<OptionDependency>,
+    /// Edited by a centred slider rather than a typed number (M29).
+    pub slider: Option<crate::document::SliderView>,
 }
 
 /// Which gesture drives a tool.
@@ -379,6 +381,7 @@ fn describe(tool: ToolKind) -> ToolSchema {
             variants: spec.variants.iter().map(|v| (*v).to_owned()).collect(),
             creation_only: spec.creation_only,
             depends_on: dependencies_of(tool, spec.id),
+            slider: spec.slider.map(crate::document::SliderView::of),
         })
         .collect();
 

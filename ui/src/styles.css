@@ -548,6 +548,18 @@ body {
   font: inherit;
 }
 .tool-options input[type="range"] { width: 4.5rem; }
+/* A centred slider (M29): named ends, a tick at the middle where the
+   amount does nothing, and the value read out with its sign. */
+.centred-slider { display: inline-flex; align-items: center; gap: 5px; }
+.centred-slider .end { font-size: 10px; color: var(--muted); white-space: nowrap; }
+.centred-slider .readout { font-variant-numeric: tabular-nums; min-width: 3.4em; text-align: right; }
+.centred-slider input[type="range"] {
+  width: 7rem;
+  background:
+    linear-gradient(to right, transparent calc(50% - 1px), var(--muted) calc(50% - 1px), var(--muted) calc(50% + 1px), transparent calc(50% + 1px))
+    no-repeat center / 100% 60%;
+}
+.property-editor.slider { flex-wrap: wrap; }
 /* The bar's are narrower than the toolbar's; everything else is inherited. */
 .tool-options select { font: inherit; padding: 2px 4px; }
 /* Two coordinates and a pick button read as one control, not three. The button

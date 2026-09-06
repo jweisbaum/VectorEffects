@@ -1421,9 +1421,11 @@ fn two_modifier_strokes_merge_when_their_settings_match() {
 
 /// ...but not a modifier whose field is measured from its own anchor. A merge
 /// re-expresses the new chain under the *target's* anchor, so absorbing one of
-/// these would move the centre its field radiates from or turns about — which
-/// changes what it paints, and a merge may never do that (spec.md 6.1). The
-/// same rule keeps two clone strokes apart.
+/// these would move the centre its field turns about — which changes what it
+/// paints, and a merge may never do that (spec.md 6.1). The same rule keeps
+/// two clone strokes apart. A divergence *left* this list in M29: it
+/// radiates from the stroke's own centreline now, so two of them with the
+/// same settings become one object, as two intensities do.
 #[test]
 fn a_modifier_measured_from_its_anchor_never_absorbs_another() {
     let (_root, state) = project("merge-anchored");
@@ -1447,8 +1449,8 @@ fn a_modifier_measured_from_its_anchor_never_absorbs_another() {
     );
     assert_eq!(
         document(&state).layers[0].objects.len(),
-        4,
-        "a divergence or a twist absorbed another"
+        3,
+        "the two divergences are one object and the two twists stay two"
     );
 
     // ...and a warp that pushes is measured from its anchor too: the
@@ -1464,8 +1466,8 @@ fn a_modifier_measured_from_its_anchor_never_absorbs_another() {
     );
     assert_eq!(
         document(&state).layers[0].objects.len(),
-        6,
-        "a divergence or a warp absorbed another"
+        5,
+        "a warp absorbed another"
     );
 }
 
@@ -1679,4 +1681,26 @@ fn aimed_strokes_at_one_target_merge_like_constant_ones() {
     let objects = &document(&state).layers[0].objects;
     assert_eq!(objects.len(), 1, "aimed strokes stayed two objects");
     assert_eq!(objects[0].geometry.stroke_chains().len(), 2);
+}
+
+/// The intensity's amount is a centred slider (M29): −100% to +200% with 0,
+/// do nothing, in the middle and as the default, so the thumb starts there.
+#[test]
+fn the_intensity_amount_is_a_centred_slider_from_minus_100_to_plus_200() {
+    let palette = ve_app::palette::palette();
+    let intensity = palette
+        .iter()
+        .find(|schema| schema.tool == Tool::Intensity)
+        .expect("intensity in the palette");
+    let amount = intensity
+        .options
+        .iter()
+        .find(|option| option.property == "Gain")
+        .expect("the amount");
+    assert_eq!((amount.min, amount.max), (Some(-100.0), Some(200.0)));
+    assert!(
+        matches!(amount.default, ve_app::document::PropertyValue::Number { value } if value == 0.0)
+    );
+    let slider = amount.slider.as_ref().expect("a slider");
+    assert!(!slider.reversed, "more is to the right");
 }

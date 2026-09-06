@@ -2647,7 +2647,13 @@ the field kind a property of the layer rather than of the project (§4.1).
    new-project dialog no longer asks. `settings.field_kind` stays as the
    default a new layer takes. Tests: the migration, the layer command and
    its undo, and a two-kind export decoded message by message.
-9. **The intensity slider.** Pending.
+9. **The intensity slider.** Delivered: `PropSpec.slider` declares a
+   centred slider — named ends, an optional reversed sense — carried on the
+   option spec and the property view, so the option bar and the inspector
+   both render `CentredSlider` for it without knowing the tool. The
+   intensity's amount runs −100% to +200% with 0 in the middle and as its
+   default; the track is piecewise linear about zero (`sliderMath`,
+   tested), and the inspector commits on release.
 10. **The divergence slider.** Pending.
 11. **The turn tool's direction and amount.** Pending.
 12. **The warp does something.** Pending.

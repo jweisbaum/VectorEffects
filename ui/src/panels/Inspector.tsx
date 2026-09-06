@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import CentredSlider, { signedPercent } from "../CentredSlider";
 import NumberField from "../NumberField";
 
 import { reportError } from "../hint";
@@ -156,7 +157,24 @@ export default function Inspector({
                 </button>
               </span>
 
-              {property.value.kind === "number" && (
+              {property.value.kind === "number" && property.slider && (
+                <span className="property-editor slider">
+                  <CentredSlider
+                    value={property.value.value}
+                    min={property.min ?? -100}
+                    max={property.max ?? 100}
+                    lowLabel={property.slider.low_label}
+                    highLabel={property.slider.high_label}
+                    reversed={property.slider.reversed}
+                    format={signedPercent}
+                    // On release, not on every tick: an inspector write is a
+                    // document edit and an undo entry (spec.md 8.4).
+                    onCommit={(next) => write(property.id, { kind: "number", value: next })}
+                  />
+                </span>
+              )}
+
+              {property.value.kind === "number" && !property.slider && (
                 <span className="property-editor">
                   <NumberField
                     step="any"

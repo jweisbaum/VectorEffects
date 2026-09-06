@@ -44,6 +44,7 @@ function option(over: Partial<ToolOptionSpec> & { property: string }): ToolOptio
     max: null,
     variants: [],
     creation_only: false,
+    slider: null,
     depends_on: [],
     ...over,
   };
@@ -71,6 +72,7 @@ const shapeFill: ToolSchema = {
       default: { kind: "choice", index: 0 },
       variants: ["polygon", "square", "rectangle", "circle"],
       creation_only: true,
+      slider: null,
     }),
     option({
       property: "VectorMode",
@@ -131,6 +133,7 @@ const brush: ToolSchema = {
       default: { kind: "choice", index: 0 },
       variants: ["circle", "square"],
       creation_only: true,
+      slider: null,
     }),
     option({
       property: "SizeKm",

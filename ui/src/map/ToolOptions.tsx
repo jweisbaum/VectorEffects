@@ -13,6 +13,7 @@
 
 import { memo } from "react";
 
+import CentredSlider, { signedPercent } from "../CentredSlider";
 import NumberField from "../NumberField";
 
 import type { PropertyValue } from "../generated/PropertyValue";
@@ -271,6 +272,27 @@ function Option({
     }
 
     case "number": {
+      // A signed amount whose zero does nothing is a centred slider (M29):
+      // the schema says so, and both ends are named.
+      if (spec.slider) {
+        return (
+          <label>
+            {spec.label}
+            <CentredSlider
+              value={value.value}
+              min={spec.min ?? -100}
+              max={spec.max ?? 100}
+              lowLabel={spec.slider.low_label}
+              highLabel={spec.slider.high_label}
+              reversed={spec.slider.reversed}
+              format={signedPercent}
+              onInput={(next) => onValue({ kind: "number", value: next })}
+              onCommit={(next) => onValue({ kind: "number", value: next })}
+            />
+          </label>
+        );
+      }
+
       // A fraction with its own natural range reads better as a slider than as
       // a number nobody can guess the scale of.
       const isFraction = spec.min === 0 && spec.max === 1;
