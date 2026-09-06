@@ -26,6 +26,7 @@ import type { Tool } from "./generated/Tool";
 import type { ToolSchema } from "./generated/ToolSchema";
 import type { DocumentTree } from "./generated/DocumentTree";
 import type { ClipboardState } from "./generated/ClipboardState";
+import type { FieldKindName } from "./kind";
 import type { Created } from "./generated/Created";
 import type { ClipboardKind } from "./generated/ClipboardKind";
 import type { AutosaveMode } from "./generated/AutosaveMode";
@@ -125,8 +126,8 @@ export const api = {
   tileBaseUrl: () => call<string>("tile_base_url"),
 
   /** Samples the field at a position, for the cursor readout. */
-  sampleField: (lon: number, lat: number, step: number) =>
-    call<FieldSample>("sample_field", { lon, lat, step }),
+  sampleField: (lon: number, lat: number, step: number, kind: FieldKindName) =>
+    call<FieldSample>("sample_field", { lon, lat, step, kind }),
 
   /**
    * Writes a rendered frame to the log directory. Development only.
@@ -289,12 +290,12 @@ export const api = {
     call<ProjectSummary>("set_start_time", { startUnixS }),
 
   /** Queues the viewport's tiles for the steps around the playhead (spec.md 9.5). */
-  renderAhead: (current: number, tiles: TileAddress[]) =>
-    call<void>("render_ahead", { current, tiles }),
+  renderAhead: (current: number, tiles: TileAddress[], kind: FieldKindName) =>
+    call<void>("render_ahead", { current, tiles, kind }),
 
   /** How ready every step is, for the viewport. */
-  frameReadiness: (tiles: TileAddress[]) =>
-    call<TimelineReadiness>("frame_readiness", { tiles }),
+  frameReadiness: (tiles: TileAddress[], kind: FieldKindName) =>
+    call<TimelineReadiness>("frame_readiness", { tiles, kind }),
 
   endGesture: () => call<void>("end_gesture"),
 
@@ -398,6 +399,9 @@ export const api = {
     gesture: string | null = null,
   ) => call<ProjectSummary>("set_layer_speed_range", { layer, minMps, maxMps, gesture }),
 
+  /** Which field a painted layer is part of (M29). */
+  setLayerParameter: (layer: number, parameter: FieldKindName) =>
+    call<ProjectSummary>("set_layer_parameter", { layer, parameter }),
   setLayerVisible: (layer: number, visible: boolean) =>
     call<ProjectSummary>("set_layer_visible", { layer, visible }),
   setLayerLocked: (layer: number, locked: boolean) =>
@@ -468,8 +472,8 @@ export const api = {
    * Evaluated on the CPU, like an export: a capture is a value the user keeps
    * rather than a frame they are looking at.
    */
-  captureRegion: (region: RegionShape, step: number) =>
-    call<CaptureState>("capture_region", { region, step }),
+  captureRegion: (region: RegionShape, step: number, kind: FieldKindName) =>
+    call<CaptureState>("capture_region", { region, step, kind }),
   /**
    * Pastes the captured field as a patch, at a position or where it came
    * from, into `layer` (null: the top of the stack). Its run of frames begins
@@ -573,16 +577,17 @@ export const api = {
   setMacroDirectory: (directory: string) =>
     call<AppSettings>("set_macro_directory", { directory }),
   /** The open project's colour scale: a document write, undoable. */
-  setColourScale: (maxKnots: number) =>
-    call<ProjectSummary>("set_colour_scale", { maxKnots }),
+  /** The top of the colour ramp for one kind of field, in knots (M29). */
+  setColourScale: (kind: FieldKindName, maxKnots: number) =>
+    call<ProjectSummary>("set_colour_scale", { kind, maxKnots }),
 
   /** The macro library (spec.md 8.7, M16). */
   macroLibrary: () => call<MacroLibrary>("macro_library", {}),
   /** Deletes one macro, or every one. Inserted macros keep working (D52). */
   deleteMacros: (id: string | null) => call<MacroLibrary>("delete_macros", { id }),
   /** Begins a capture over a region. Every document write is then refused. */
-  startCapture: (region: RegionShape, step: number, recordMovement: boolean) =>
-    call<CaptureMode>("start_capture", { region, step, recordMovement }),
+  startCapture: (region: RegionShape, step: number, recordMovement: boolean, kind: FieldKindName) =>
+    call<CaptureMode>("start_capture", { region, step, recordMovement, kind }),
   /** Moves the capture's region at one step. Each frame holds its own place. */
   placeCapture: (step: number, lon: number, lat: number) =>
     call<CaptureMode>("place_capture", { step, lon, lat }),

@@ -151,7 +151,7 @@ fn a_region_copy_carries_the_animation_from_the_copy_step() {
     );
 
     // The region spans 0°..30° about 15°, so every step's stroke is inside.
-    let held = capture::region_capture(&app, rect(15.0, 0.0, 20.0, 6.0), 1).expect("capture");
+    let held = capture::region_capture(&app, rect(15.0, 0.0, 20.0, 6.0), 1, None).expect("capture");
     assert_eq!(held.frames, 3, "steps 1, 2 and 3 differ, so three frames");
 
     // Pasted at step 0, centred at 115°: the source's 15° lands on 115°.
@@ -196,7 +196,7 @@ fn a_still_paste_of_an_animated_copy_keeps_the_copied_frame_alone() {
         let project = &session.open.as_ref().expect("open").project;
         sample_scene(&flatten(project, step), LonLat::new(lon, 0.0).unwrap()).u
     };
-    let held = capture::region_capture(&app, rect(15.0, 0.0, 20.0, 6.0), 1).expect("capture");
+    let held = capture::region_capture(&app, rect(15.0, 0.0, 20.0, 6.0), 1, None).expect("capture");
     assert_eq!(held.frames, 3, "the clipboard holds the run");
 
     capture::capture_paste(&app, Some(115.0), Some(0.0), 0, None, true).expect("still paste");
@@ -223,7 +223,7 @@ fn a_still_paste_of_an_animated_copy_keeps_the_copied_frame_alone() {
 fn a_still_region_copy_is_one_frame() {
     let (_root, app) = project("still-copy");
     stroke(&app, 0.0, 0.0, 600.0, 18.0);
-    let held = capture::region_capture(&app, rect(0.0, 0.0, 6.0, 6.0), 0).expect("capture");
+    let held = capture::region_capture(&app, rect(0.0, 0.0, 6.0, 6.0), 0, None).expect("capture");
     assert_eq!(held.frames, 1);
 }
 
@@ -241,7 +241,7 @@ fn a_pasted_patch_paints_its_source_and_leaves_the_rest_alone() {
     assert!(field(&app, 6.0, 0.0).0.abs() < 1e-4, "open water");
 
     // Capture a box spanning both.
-    let taken = capture::region_capture(&app, rect(0.0, 0.0, 10.0, 6.0), 0).expect("capture");
+    let taken = capture::region_capture(&app, rect(0.0, 0.0, 10.0, 6.0), 0, None).expect("capture");
     assert!(taken.has_capture);
 
     // Somewhere else entirely, a southward field to paste over.
@@ -291,7 +291,7 @@ fn a_pasted_patch_paints_its_source_and_leaves_the_rest_alone() {
 fn a_paste_makes_one_patch_and_undoes() {
     let (_root, app) = project("undo");
     stroke(&app, 0.0, 0.0, 800.0, 15.0);
-    capture::region_capture(&app, rect(0.0, 0.0, 6.0, 6.0), 0).expect("capture");
+    capture::region_capture(&app, rect(0.0, 0.0, 6.0, 6.0), 0, None).expect("capture");
     let before = {
         let session = app.session.lock().expect("lock");
         session.open.as_ref().expect("open").project.object_count()
@@ -322,7 +322,7 @@ fn a_paste_makes_one_patch_and_undoes() {
 fn a_patch_survives_a_save_and_load_with_its_samples() {
     let (root, app) = project("roundtrip");
     stroke(&app, 0.0, 0.0, 800.0, 18.0);
-    capture::region_capture(&app, rect(0.0, 0.0, 6.0, 6.0), 0).expect("capture");
+    capture::region_capture(&app, rect(0.0, 0.0, 6.0, 6.0), 0, None).expect("capture");
     capture::capture_paste(&app, Some(50.0), Some(0.0), 0, None, false).expect("paste");
     let before = field(&app, 50.0, 0.0);
     assert!((before.0 - 18.0).abs() < 0.6);
@@ -389,7 +389,7 @@ fn a_mask_leaves_a_hole_the_patch_does_not_fill() {
         "the mask took it away"
     );
 
-    capture::region_capture(&app, rect(0.0, 0.0, 12.0, 12.0), 0).expect("capture");
+    capture::region_capture(&app, rect(0.0, 0.0, 12.0, 12.0), 0, None).expect("capture");
 
     // Somewhere else, a westward field.
     create::create(
@@ -446,7 +446,7 @@ fn the_patch_is_not_in_the_palette() {
 fn a_patch_appears_in_the_document_tree() {
     let (_root, app) = project("tree");
     stroke(&app, 0.0, 0.0, 800.0, 11.0);
-    capture::region_capture(&app, rect(0.0, 0.0, 6.0, 6.0), 0).expect("capture");
+    capture::region_capture(&app, rect(0.0, 0.0, 6.0, 6.0), 0, None).expect("capture");
     capture::capture_paste(&app, Some(30.0), Some(0.0), 0, None, false).expect("paste");
     let tree = document::tree(&app, 0).expect("tree");
     let object = tree.layers[0].objects.last().expect("the patch");
@@ -487,7 +487,8 @@ fn whole_map_animated_copy_cost() {
         .expect("key");
     }
     let started = std::time::Instant::now();
-    let held = capture::region_capture(&app, rect(0.0, 0.0, 180.0, 90.0), 0).expect("capture");
+    let held =
+        capture::region_capture(&app, rect(0.0, 0.0, 180.0, 90.0), 0, None).expect("capture");
     let elapsed = started.elapsed();
     println!(
         "whole-map copy at 0.25° over 24 animated steps: {} frames of {}x{} in {:.2} s",
@@ -497,7 +498,8 @@ fn whole_map_animated_copy_cost() {
         elapsed.as_secs_f64()
     );
     let started = std::time::Instant::now();
-    let still = capture::region_capture(&app, rect(0.0, 0.0, 180.0, 90.0), 23).expect("capture");
+    let still =
+        capture::region_capture(&app, rect(0.0, 0.0, 180.0, 90.0), 23, None).expect("capture");
     println!(
         "the same region at the last step (one frame): {} frame in {:.2} s",
         still.frames,

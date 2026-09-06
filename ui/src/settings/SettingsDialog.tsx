@@ -179,16 +179,32 @@ export default function SettingsDialog({
           */}
           {project !== null && (
             <label className="settings-field">
-              This project&rsquo;s colour scale, in knots
+              This project&rsquo;s colour scale for wind, in knots
               <NumberField
-                value={project.colour_scale_knots}
+                value={project.wind_scale_knots}
                 min={1}
                 max={400}
                 step={1}
                 commitWhileTyping={false}
                 onCommit={(value) => {
                   setError(null);
-                  void api.setColourScale(value).then(onProject).catch(report);
+                  void api.setColourScale("wind", value).then(onProject).catch(report);
+                }}
+              />
+            </label>
+          )}
+          {project !== null && (
+            <label className="settings-field">
+              This project&rsquo;s colour scale for currents, in knots
+              <NumberField
+                value={project.current_scale_knots}
+                min={1}
+                max={400}
+                step={1}
+                commitWhileTyping={false}
+                onCommit={(value) => {
+                  setError(null);
+                  void api.setColourScale("current", value).then(onProject).catch(report);
                 }}
               />
             </label>

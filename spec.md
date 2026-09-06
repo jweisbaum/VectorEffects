@@ -271,14 +271,22 @@ they still come from geographic bearings, never from a frame angle (§7.2).
 
 ### 4.1 Project settings
 
-Set at creation. Grid resolution, field kind, and time-step size are
-**immutable after creation** — changing them would invalidate every object's
-relationship to the grid and every rendered frame. `step_count` may be
-increased or decreased after creation.
+Set at creation. Grid resolution and time-step size are **immutable after
+creation** — changing them would invalidate every object's relationship to
+the grid and every rendered frame. `step_count` may be increased or decreased
+after creation.
+
+**The kind of field is the layer's, not the project's** (M29). A project may
+hold 10 m wind layers and surface current layers together; each painted layer
+says which field its objects are part of (§4.3), a GRIB layer's kind is its
+file's, and the export writes one message pair of each kind per step (§12.1).
+`field_kind` stays in the settings as the kind a new layer starts as and as
+what a project saved before layers carried one gave to all of them; the
+new-project dialog no longer asks for it.
 
 | Setting | Values | Immutable? |
 |---|---|---|
-| `field_kind` | `Wind` \| `Current` | Yes |
+| `field_kind` | `Wind` \| `Current` | Legacy: the default a new layer takes |
 | `resolution` | `Deg1` \| `Deg0_5` \| `Deg0_25` \| `Deg0_1` | Yes |
 | `step_hours` | `1` \| `3` \| `6` \| `24` | Yes |
 | `step_count` | `1..=240` | No |
@@ -907,7 +915,8 @@ anywhere in the UI.
 
 - **Speed** as a colour ramp raster, sampled from the render tiles (§7.7), with
   a legend and an auto/manual scale control. Manual, the ramp runs from calm
-  to the project's colour scale (§4.1). **Auto scale** (M27) runs it from the
+  to the project's colour scale for the kind on show (§4.1, §8.6) — one for
+  wind and one for currents, an order of magnitude apart. **Auto scale** (M27) runs it from the
   slowest to the fastest speed among the tiles on screen, across every layer
   and object — each tile's range is read once from its bytes as it is
   uploaded, the frame reports the range it drew, and the next frame paints
@@ -945,6 +954,13 @@ anywhere in the UI.
     quantisation, so barbs never become the only speed reference.
 - Cursor readout: lon/lat, speed in the display unit, direction in the display
   convention, and the grid cell index under the cursor.
+
+**The map shows one kind of field at a time** (M29): the wind layers or the
+current layers, chosen by the title bar's *Show* menu and following the layer
+made active, since that is what a stroke in it will paint. A tile address
+carries the kind, so the two are different tiles; readiness, the render pool,
+the readout, the eyedropper, a region copy and a macro capture all take the
+kind on show. Wind barbs are offered when wind is shown.
 
 ### 5.4 Stale-tile behaviour
 
@@ -1106,6 +1122,12 @@ All tools produce **objects**. Common rules:
 - **What a gesture makes is the selection** (M29): the new object, or the
   one the gesture merged into, is selected the moment it lands, so the panel
   and the inspector turn to it as they do to a clicked object.
+- **A layer has a kind of field** — its *parameter* (M29): `10 m wind` or
+  `surface currents`. Not keyable: it says what the layer is. A painted
+  layer's is chosen in the panel, undoably; a GRIB layer's is its file's and
+  is shown, not chosen; an image layer has none. The map shows one kind at a
+  time (§5.3), the export bakes each kind's layers together (§12.1), and a
+  region copy or a macro capture is of the kind on show.
 - A layer holds an unlimited number of objects.
 - All objects support: rename, delete, duplicate, copy/paste, select and
   multi-select, enable/disable, move, rotate, scale.
@@ -2305,10 +2327,11 @@ panning: three chords, one table, no ambiguity (D67). A stored binding that
 equals a *previous* build's default is that default and not a choice, so it
 gives way when the default moves; one the user set stands.
 
-**Display.** The colour scale is a **project** setting (§4.1, §5.3) — two
-people opening one file should see the same map — so the dialog edits the open
-project's scale in place, as an undoable document write, and separately holds
-the default a *new* project of each kind gets. The **auto scale** (§5.3) and
+**Display.** The colour scales are **project** settings (§4.1, §5.3) — two
+people opening one file should see the same map — one for wind and one for
+currents (M29), so the dialog edits the open project's two scales in place, as
+undoable document writes, and separately holds the defaults a *new* project
+gets for each. The **auto scale** (§5.3) and
 the projection are *application* settings set from the title bar: how this
 person looks at a map, not what the map is. Currents run an order of
 magnitude slower than wind, so the two defaults are separate; a project made
@@ -2728,7 +2751,11 @@ gain. There is no §11.
 ### 12.1 Output
 
 A single `.grib2` file containing concatenated messages: **one message per
-component per time step**, ordered by time step then u, v.
+component per kind of field per time step**, ordered by time step, then wind
+before current, then u, v (M29). All the visible wind layers are baked
+together into the wind pair and all the visible current layers into the
+current pair; a kind no visible layer holds writes nothing, so a wind-only
+project is the two-message-per-step file it always was.
 
 Parameters by field kind:
 

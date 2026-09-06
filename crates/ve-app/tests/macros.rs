@@ -154,7 +154,7 @@ fn a_static_capture_of_a_followed_stroke_stands_still() {
     assert!((field(&app, 0, 0.0, 0.0).0 - 18.0).abs() < 0.6);
     assert!((field(&app, 2, 20.0, 0.0).0 - 18.0).abs() < 0.6);
 
-    macros::capture_start(&app, region(0.0, 0.0), 0, false).expect("start");
+    macros::capture_start(&app, region(0.0, 0.0), 0, false, None).expect("start");
     // Drag the region to follow the stroke at each step.
     macros::capture_place(&app, 1, 10.0, 0.0).expect("place");
     macros::capture_place(&app, 2, 20.0, 0.0).expect("place");
@@ -187,7 +187,7 @@ fn a_macro_placed_at_a_later_step_begins_there() {
     let root = TempRoot::new("later-step");
     let app = app(&root);
     travelling_stroke(&app, 18.0);
-    macros::capture_start(&app, region(0.0, 0.0), 0, false).expect("start");
+    macros::capture_start(&app, region(0.0, 0.0), 0, false, None).expect("start");
     macros::capture_place(&app, 1, 10.0, 0.0).expect("place");
     macros::capture_place(&app, 2, 20.0, 0.0).expect("place");
     let library = macros::capture_finish(&app, "Later".to_owned(), 2).expect("finish");
@@ -226,7 +226,7 @@ fn a_recorded_capture_moves_the_way_the_original_did() {
     let app = app(&root);
     travelling_stroke(&app, 18.0);
 
-    macros::capture_start(&app, region(0.0, 0.0), 0, true).expect("start");
+    macros::capture_start(&app, region(0.0, 0.0), 0, true, None).expect("start");
     macros::capture_place(&app, 1, 10.0, 0.0).expect("place");
     macros::capture_place(&app, 2, 20.0, 0.0).expect("place");
     let library = macros::capture_finish(&app, "Moving".to_owned(), 2).expect("finish");
@@ -258,7 +258,7 @@ fn capture_mode_refuses_every_write_and_cancel_restores() {
         session.open.as_ref().expect("open").project.object_count()
     };
 
-    macros::capture_start(&app, region(0.0, 0.0), 0, false).expect("start");
+    macros::capture_start(&app, region(0.0, 0.0), 0, false, None).expect("start");
     assert!(macros::mode(&app, None).expect("mode").active);
     // Each frame holds its own position, and the map draws the region while
     // the capture runs — so asking about a step has to give *that* step's
@@ -332,7 +332,7 @@ fn finishing_makes_one_file_and_no_object() {
         session.open.as_ref().expect("open").project.object_count()
     };
 
-    macros::capture_start(&app, region(0.0, 0.0), 0, false).expect("start");
+    macros::capture_start(&app, region(0.0, 0.0), 0, false, None).expect("start");
     let library = macros::capture_finish(&app, "One".to_owned(), 1).expect("finish");
     assert_eq!(library.entries.len(), 1);
     assert!(library.total_bytes > 0);
@@ -352,7 +352,7 @@ fn deleting_the_library_leaves_inserted_macros_working() {
     let root = TempRoot::new("library");
     let app = app(&root);
     travelling_stroke(&app, 15.0);
-    macros::capture_start(&app, region(0.0, 0.0), 0, false).expect("start");
+    macros::capture_start(&app, region(0.0, 0.0), 0, false, None).expect("start");
     let library = macros::capture_finish(&app, "Kept".to_owned(), 1).expect("finish");
     macros::macro_insert(&app, &library.entries[0].id, 60.0, 0.0, 0, None).expect("insert");
     let before = field(&app, 0, 60.0, 0.0);
@@ -384,7 +384,7 @@ fn two_inserts_share_one_entry() {
     let root = TempRoot::new("share");
     let app = app(&root);
     travelling_stroke(&app, 15.0);
-    macros::capture_start(&app, region(0.0, 0.0), 0, false).expect("start");
+    macros::capture_start(&app, region(0.0, 0.0), 0, false, None).expect("start");
     let library = macros::capture_finish(&app, "Twice".to_owned(), 1).expect("finish");
     let id = &library.entries[0].id;
     macros::macro_insert(&app, id, 60.0, 0.0, 0, None).expect("insert");
@@ -406,7 +406,7 @@ fn positions_are_keys_and_the_gaps_interpolate() {
     let app = app(&root);
     travelling_stroke(&app, 18.0);
 
-    macros::capture_start(&app, region(0.0, 0.0), 0, true).expect("start");
+    macros::capture_start(&app, region(0.0, 0.0), 0, true, None).expect("start");
     // Visit 1 and 2 without dragging: keys where the region stands.
     macros::capture_visit(&app, 1).expect("visit");
     macros::capture_visit(&app, 2).expect("visit");
@@ -460,7 +460,7 @@ fn a_preview_writes_nothing_and_is_served_apart_from_the_document() {
         (open.revision, open.history.entries().len())
     };
 
-    macros::capture_start(&app, region(0.0, 0.0), 0, false).expect("start");
+    macros::capture_start(&app, region(0.0, 0.0), 0, false, None).expect("start");
     macros::capture_place(&app, 2, 20.0, 0.0).expect("place");
     let mode = macros::capture_preview(&app, 2).expect("preview");
     assert_eq!(mode.phase, macros::CapturePhase::Previewing);
@@ -548,7 +548,7 @@ fn a_click_in_the_preview_places_the_macro_and_keeps_the_lock() {
     let root = TempRoot::new("preview-place");
     let app = app(&root);
     travelling_stroke(&app, 18.0);
-    macros::capture_start(&app, region(0.0, 0.0), 0, false).expect("start");
+    macros::capture_start(&app, region(0.0, 0.0), 0, false, None).expect("start");
     macros::capture_place(&app, 2, 20.0, 0.0).expect("place");
     let mode = macros::capture_preview(&app, 2).expect("preview");
     let entries_before = {
@@ -614,7 +614,7 @@ fn cancel_from_the_preview_clears_the_preview() {
     let root = TempRoot::new("preview-cancel");
     let app = app(&root);
     travelling_stroke(&app, 18.0);
-    macros::capture_start(&app, region(0.0, 0.0), 0, false).expect("start");
+    macros::capture_start(&app, region(0.0, 0.0), 0, false, None).expect("start");
     macros::capture_preview(&app, 1).expect("preview");
     assert!(app.session.lock().expect("lock").preview.is_some());
     macros::capture_cancel(&app).expect("cancel");

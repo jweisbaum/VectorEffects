@@ -71,6 +71,36 @@ fn first_object(state: &AppState) -> u64 {
     document::tree(state, 0).expect("tree").layers[0].objects[0].id
 }
 
+// --- The layer's field (M29) ------------------------------------------------
+
+/// A painted layer says which field it is part of, undoably, and the tree
+/// reports it.
+#[test]
+fn a_layer_takes_a_parameter_and_undo_gives_it_back() {
+    let (_root, state) = painted("layer-parameter");
+    let layer = document::tree(&state, 0).expect("tree").layers[0].id;
+    assert_eq!(
+        document::tree(&state, 0).expect("tree").layers[0].parameter,
+        "wind"
+    );
+    assert_eq!(
+        document::tree(&state, 0).expect("tree").layers[0].source,
+        "painted"
+    );
+    let after = document::layer_parameter(&state, layer, "current").expect("set");
+    assert_eq!(after.kinds_present, vec!["current".to_owned()]);
+    assert_eq!(
+        document::tree(&state, 0).expect("tree").layers[0].parameter,
+        "current"
+    );
+    edit::undo_for_test(&state).expect("undo");
+    assert_eq!(
+        document::tree(&state, 0).expect("tree").layers[0].parameter,
+        "wind"
+    );
+    assert!(document::layer_parameter(&state, layer, "temperature").is_err());
+}
+
 // --- The eraser (spec.md 8.1, M28) -----------------------------------------
 
 /// Erased from one frame, the object is gone there and present on the frames
@@ -780,6 +810,7 @@ fn a_capture_and_an_object_copy_share_one_clipboard() {
             half_height_deg: 4.0,
         },
         0,
+        None,
     )
     .expect("capture");
     assert_eq!(

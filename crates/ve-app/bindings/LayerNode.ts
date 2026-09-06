@@ -34,4 +34,14 @@ grib: GribLayerInfo | null,
 /**
  * The picture beneath everything, for an image layer (spec.md 4.9, M18).
  */
-image: ImageLayerView | null, };
+image: ImageLayerView | null, 
+/**
+ * What the layer is (M29): `"painted"`, `"raster"` for an imported GRIB,
+ * `"image"` for a picture. Says which controls the panel offers.
+ */
+source: string, 
+/**
+ * Which field the layer is part of — `"wind"` or `"current"`: its
+ * file's for a raster layer, none that matters for an image (M29).
+ */
+parameter: string, };

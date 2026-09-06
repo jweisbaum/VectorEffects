@@ -53,12 +53,18 @@ start_unix_s: number | null,
  */
 direction_convention: string, 
 /**
- * Knots at the top of the speed colour ramp (spec.md 5.3, M15).
+ * Knots at the top of the speed colour ramp when the map shows wind
+ * (spec.md 5.3, M15), and when it shows current (M29).
  *
  * The project's, so two people opening one file see the same map. Tiles
- * carry speed and not colour, so changing it costs no render.
+ * carry speed and not colour, so changing either costs no render.
  */
-colour_scale_knots: number, 
+wind_scale_knots: number, current_scale_knots: number, 
+/**
+ * The kinds of field the visible layers hold — `"wind"`, `"current"` —
+ * wind first: what an export writes, and what the map can show (M29).
+ */
+kinds_present: Array<string>, 
 /**
  * Number of layers.
  */

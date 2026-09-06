@@ -30,7 +30,7 @@ use ve_core::project::FieldKind;
 use ve_core::schema::{PropId, ToolKind};
 use ve_core::{Command, LonLat, PropValue};
 use ve_render::cpu::sample_scene_covered;
-use ve_render::scene::flatten;
+use ve_render::scene::flatten_kind;
 
 use crate::capture::RegionShape;
 use crate::commands::AppState;
@@ -326,6 +326,9 @@ pub struct ActiveCapture {
     /// Where the preview's stamp sits, `[lon, lat]`; the origin until the
     /// user clicks somewhere.
     pub stamp: [f64; 2],
+    /// The kind of field being recorded: the one the map showed when the
+    /// capture began (M29).
+    pub kind: ve_core::project::FieldKind,
 }
 
 impl ActiveCapture {
@@ -487,19 +490,27 @@ pub fn start_capture(
     region: RegionShape,
     step: u32,
     record_movement: bool,
+    kind: Option<String>,
 ) -> Result<CaptureMode> {
-    capture_start(&state, region, step, record_movement)
+    let kind = kind
+        .as_deref()
+        .map(crate::projects::parse_field_kind)
+        .transpose()?;
+    capture_start(&state, region, step, record_movement, kind)
 }
 
-/// Implementation of [`start_capture`].
+/// Implementation of [`start_capture`]. `kind` is the field the map is
+/// showing, which is the one recorded (M29); the project's own when absent.
 pub fn capture_start(
     state: &AppState,
     region: RegionShape,
     step: u32,
     record_movement: bool,
+    kind: Option<ve_core::project::FieldKind>,
 ) -> Result<CaptureMode> {
     with_session(state, |session| {
         let origin = region_centre(&region)?;
+        let kind = kind.unwrap_or(session.require_open()?.project.settings.field_kind);
         // The lockout: one flag on the history, which every write path in the
         // application already goes through (spec.md 8.7).
         session.require_open()?.history.lock();
@@ -514,6 +525,7 @@ pub fn capture_start(
                 baked: None,
                 last_step: step,
                 stamp: origin,
+                kind,
             }),
         };
         session.preview = None;
@@ -776,7 +788,14 @@ fn preview_scene(
     baked: &Arc<Capture>,
     settings: ve_core::project::ProjectSettings,
 ) -> Result<PreviewScene> {
+    // The preview's own project is of the capture's kind, so its one layer
+    // flattens whichever kind the map is showing (M29).
+    let mut settings = settings;
+    settings.field_kind = baked.kind;
     let mut project = ve_core::project::Project::new("Macro preview", settings);
+    if let Some(layer) = project.layers.first_mut() {
+        layer.parameter = baked.kind;
+    }
     let step_count = settings.step_count;
     let mut object = Object::new(ToolKind::Macro, "Preview", step_count);
     object.geometry = baked.shape.clone();
@@ -942,7 +961,7 @@ fn bake(
     for step in active.first_step..=last_step {
         // The key at this step, or the great circle between keys (D72).
         let held = active.position_at(step);
-        let scene = flatten(project, step);
+        let scene = flatten_kind(project, step, active.kind);
         let mut uv = Vec::with_capacity(ni as usize * nj as usize);
         for j in 0..nj {
             let lat = held[1] + y0 - f64::from(j) * spacing;
@@ -977,7 +996,7 @@ fn bake(
     }
 
     Capture::new(
-        settings.field_kind,
+        active.kind,
         CaptureLattice {
             ni,
             nj,

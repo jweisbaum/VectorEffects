@@ -480,27 +480,32 @@ pub fn default_scales_set(
 #[tauri::command]
 pub fn set_colour_scale(
     state: tauri::State<'_, AppState>,
+    kind: String,
     max_knots: f64,
 ) -> Result<crate::projects::ProjectSummary> {
-    colour_scale_set(&state, max_knots)
+    colour_scale_set(&state, &kind, max_knots)
 }
 
-/// Implementation of [`set_colour_scale`].
-///
-/// The scale is what the project is *drawn with*, so it is the project's and
-/// not the application's: two people opening one file should see the same map.
-/// The application's preference is the default for new projects, and lives in
-/// [`AppSettings`].
+/// Implementation of [`set_colour_scale`]: the top of the ramp for one kind
+/// of field (M29), an undoable document write.
 pub fn colour_scale_set(
     state: &AppState,
+    kind: &str,
     max_knots: f64,
 ) -> Result<crate::projects::ProjectSummary> {
+    let kind = crate::projects::parse_field_kind(kind)?;
     with_session(state, |session| {
         let open = session.require_open()?;
         let before = open.project.settings.colour_scale;
-        let after = Some(ve_core::project::ColourScale { max_knots }.clamped());
-        if after == before {
-            return Ok(crate::projects::ProjectSummary::of(open));
+        let after = Some(
+            open.project
+                .settings
+                .scale()
+                .with_knots(kind, max_knots)
+                .clamped(),
+        );
+        if before == after {
+            return Ok(crate::projects::ProjectSummary::of(session.require_open()?));
         }
         let command = ve_core::Command::SetColourScale { before, after };
         let (project, history) = (&mut open.project, &mut open.history);

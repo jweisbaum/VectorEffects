@@ -11,6 +11,7 @@
 use std::sync::atomic::AtomicBool;
 
 use ve_app::commands::AppState;
+use ve_app::document;
 use ve_app::edit::{self, BrushStroke};
 use ve_app::error::AppError;
 use ve_app::export::{self, ExportRequest};
@@ -154,6 +155,84 @@ fn a_painted_stroke_reaches_the_exported_file() {
 
 /// A due-east flow must land in `u`, not `v`. This is the check that catches
 /// the single most likely silent bug in the codebase.
+/// A project with a wind layer and a current layer exports both (M29): per
+/// step, one u/v pair of each, the wind pair meteorological and the current
+/// pair oceanographic, each baked from its own layers alone.
+#[test]
+fn wind_and_current_layers_export_as_two_message_pairs_per_step() {
+    let root = TempRoot::new("two-kinds");
+    let state = app(&root);
+    projects::create(&state, new_project("wind"), false).expect("create");
+    edit::paint(
+        &state,
+        BrushStroke {
+            points: vec![[-20.0, 0.0], [20.0, 0.0]],
+            size_km: 1000.0,
+            speed_mps: 20.0,
+            direction_toward_deg: 90.0,
+            feather: 0.0,
+            layer: None,
+            ..Default::default()
+        },
+    )
+    .expect("wind stroke");
+    let currents = {
+        document::layer_add(&state, "Currents".to_owned()).expect("add layer");
+        let tree = document::tree(&state, 0).expect("tree");
+        tree.layers.last().expect("the new layer").id
+    };
+    document::layer_parameter(&state, currents, "current").expect("current layer");
+    edit::paint(
+        &state,
+        BrushStroke {
+            points: vec![[-20.0, 0.0], [20.0, 0.0]],
+            size_km: 1000.0,
+            speed_mps: 1.0,
+            direction_toward_deg: 180.0,
+            feather: 0.0,
+            layer: Some(currents),
+            ..Default::default()
+        },
+    )
+    .expect("current stroke");
+
+    let path = root.0.join("both.grib2");
+    let project = {
+        let mut session = state.session.lock().expect("lock");
+        session.require_open().expect("open").project.clone()
+    };
+    let result =
+        export::run(&project, &request(&path), &AtomicBool::new(false), |_| {}).expect("export");
+    assert_eq!(
+        result.messages, 8,
+        "u and v of each kind, for each of two steps"
+    );
+
+    let decoded = messages(&std::fs::read(&path).expect("read"));
+    let disciplines: Vec<u8> = decoded.iter().map(|m| m.discipline).collect();
+    assert_eq!(disciplines, vec![0, 0, 10, 10, 0, 0, 10, 10]);
+    // The wind messages hold the wind alone — 20 m/s east at most, and no
+    // southward component anywhere — and the current messages the current
+    // alone: nothing eastward, 1 m/s south at most.
+    let strongest = |message: &ve_grib::reader::Decoded| {
+        message
+            .values
+            .iter()
+            .copied()
+            .fold(0.0f32, |a, b| if b.abs() > a.abs() { b } else { a })
+    };
+    assert!((strongest(&decoded[0]) - 20.0).abs() < 0.5, "wind u");
+    assert!(
+        strongest(&decoded[1]).abs() < 0.5,
+        "wind v holds no current"
+    );
+    assert!(
+        strongest(&decoded[2]).abs() < 0.1,
+        "current u holds no wind"
+    );
+    assert!((strongest(&decoded[3]) + 1.0).abs() < 0.1, "current v");
+}
+
 #[test]
 fn components_are_not_transposed() {
     let root = TempRoot::new("uv");

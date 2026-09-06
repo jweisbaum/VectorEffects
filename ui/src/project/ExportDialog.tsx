@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 
+import { KIND_LABELS, kindOf } from "../kind";
 import NumberField from "../NumberField";
 import { api, IpcError } from "../ipc";
 import type { ExportEstimate } from "../generated/ExportEstimate";
@@ -95,7 +96,9 @@ export default function ExportDialog({
         <h2>Export GRIB2</h2>
 
         <p className="muted modal-summary">
-          {project.field_kind} · {project.grid_ni} × {project.grid_nj} ·{" "}
+          {project.kinds_present.map((kind) => KIND_LABELS[kindOf(kind)]).join(" + ") ||
+            "no field"}{" "}
+          · {project.grid_ni} × {project.grid_nj} ·{" "}
           {project.step_count} steps every {project.step_hours} h
           {estimate && <> · about {formatBytes(estimate.bytes)}</>}
         </p>

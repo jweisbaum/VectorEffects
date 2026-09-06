@@ -9,7 +9,9 @@ export type NewProjectRequest = {
  */
 name: string, 
 /**
- * `"wind"` or `"current"`.
+ * The kind every layer starts as (M29): `"wind"` unless said otherwise.
+ * The dialog no longer asks — a layer says which field it is part of —
+ * so this is only the default a new layer takes.
  */
 field_kind: string, 
 /**

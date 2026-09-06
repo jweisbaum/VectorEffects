@@ -21,7 +21,7 @@ use ve_core::vector::Uv;
 use ve_grib::writer::{GridSpec, MessageSpec, Parameter, ReferenceTime, write_message};
 use ve_render::cpu::CpuEvaluator;
 use ve_render::evaluator::FieldEvaluator;
-use ve_render::scene::flatten;
+use ve_render::scene::flatten_kind;
 
 use crate::commands::AppState;
 use crate::error::{AppError, Result};
@@ -231,7 +231,10 @@ pub fn run(
     // Write to a temporary and rename on success, so an interrupted export
     // cannot leave a plausible-looking truncated file behind (spec.md 12.4).
     let temporary = path.with_extension("grib2.partial");
-    let (u_parameter, v_parameter) = parameters(settings.field_kind);
+    // One message pair per step for each kind of field the visible layers
+    // hold (M29): all the wind layers baked together, then all the current
+    // layers, so a file carries at most one u/v pair of each per step.
+    let kinds = project.kinds_present();
 
     let mut bytes = 0u64;
     let mut messages = 0u32;
@@ -248,25 +251,27 @@ pub fn run(
                 return Err(AppError::ExportCancelled);
             }
 
-            let scene = flatten(project, step);
-            let samples: Vec<Uv> = CpuEvaluator.evaluate(&scene, &points)?;
-            for (index, sample) in samples.iter().enumerate() {
-                u[index] = sample.u;
-                v[index] = sample.v;
-            }
-
             let hour = settings.forecast_hour(step);
-            for (parameter, values) in [(u_parameter, &u), (v_parameter, &v)] {
-                let spec = MessageSpec {
-                    parameter,
-                    grid,
-                    reference_time,
-                    forecast_hour: hour,
-                    centre: request.centre,
-                    bits: request.bits,
-                };
-                bytes += write_message(&mut out, &spec, values)? as u64;
-                messages += 1;
+            for &kind in &kinds {
+                let scene = flatten_kind(project, step, kind);
+                let samples: Vec<Uv> = CpuEvaluator.evaluate(&scene, &points)?;
+                for (index, sample) in samples.iter().enumerate() {
+                    u[index] = sample.u;
+                    v[index] = sample.v;
+                }
+                let (u_parameter, v_parameter) = parameters(kind);
+                for (parameter, values) in [(u_parameter, &u), (v_parameter, &v)] {
+                    let spec = MessageSpec {
+                        parameter,
+                        grid,
+                        reference_time,
+                        forecast_hour: hour,
+                        centre: request.centre,
+                        bits: request.bits,
+                    };
+                    bytes += write_message(&mut out, &spec, values)? as u64;
+                    messages += 1;
+                }
             }
 
             on_progress(ExportProgress {

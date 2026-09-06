@@ -39,7 +39,46 @@ const MIGRATIONS: &[(u32, Migration)] = &[
     (7, the_eraser_is_the_mask),
     (8, modifiers_are_painted_rather_than_stamped),
     (9, a_warp_pushes_to_a_place),
+    (10, layers_carry_the_parameter),
 ];
+
+/// Version 10 kept the kind of field on the project and one colour scale.
+///
+/// Version 11 puts the kind on each layer (M29) — a project may hold wind
+/// and current layers together, exported as two message sets — so every
+/// layer takes the project's kind as its own, and the one scale becomes the
+/// pair, the project's kind keeping the number it had and the other kind
+/// taking the default it always would have.
+fn layers_carry_the_parameter(value: &mut Value) -> Result<()> {
+    let kind = value
+        .get("settings")
+        .and_then(|settings| settings.get("field_kind"))
+        .and_then(Value::as_str)
+        .map(str::to_ascii_lowercase)
+        .unwrap_or_else(|| "wind".to_owned());
+    let is_current = kind == "current";
+    if let Some(Value::Array(layers)) = value.get_mut("layers") {
+        for layer in layers {
+            if let Value::Object(map) = layer {
+                map.entry("parameter")
+                    .or_insert_with(|| Value::String(kind.clone()));
+            }
+        }
+    }
+    if let Some(Value::Object(settings)) = value.get_mut("settings")
+        && let Some(Value::Object(scale)) = settings.get_mut("colour_scale")
+        && let Some(max) = scale.remove("max_knots")
+    {
+        let (wind, current) = if is_current {
+            (Value::from(60.0), max)
+        } else {
+            (max, Value::from(6.0))
+        };
+        scale.insert("wind_knots".to_owned(), wind);
+        scale.insert("current_knots".to_owned(), current);
+    }
+    Ok(())
+}
 
 /// Version 1 stored a stroke as one polyline: `{"stroke": {"points": [...]}}`.
 ///
@@ -975,6 +1014,36 @@ mod tests {
 
     /// A version 1 document stored one polyline per stroke. Opening one must
     /// produce a single chain, not a stroke with no geometry at all.
+    /// A version-10 current project opens with every layer a current layer
+    /// and its one scale become the pair's current end (M29).
+    #[test]
+    fn a_version_10_project_gives_its_kind_to_its_layers() {
+        let mut value: Value = serde_json::to_value(sample()).unwrap();
+        value["schema_version"] = Value::from(10);
+        value["settings"]["field_kind"] = Value::String("current".to_owned());
+        value["settings"]["colour_scale"] = serde_json::json!({ "max_knots": 8.0 });
+        if let Value::Array(layers) = &mut value["layers"] {
+            for layer in layers {
+                layer.as_object_mut().unwrap().remove("parameter");
+            }
+        }
+
+        let project = from_json(&serde_json::to_string(&value).unwrap()).expect("migrates");
+        assert!(
+            project
+                .layers
+                .iter()
+                .all(|layer| layer.parameter() == crate::project::FieldKind::Current),
+            "every layer took the project's kind"
+        );
+        let scale = project.settings.scale();
+        assert_eq!(
+            scale.current_knots, 8.0,
+            "the one scale was the current one"
+        );
+        assert_eq!(scale.wind_knots, 60.0, "and wind takes the default");
+    }
+
     #[test]
     fn a_version_1_stroke_opens_as_one_chain() {
         let mut value: Value = serde_json::to_value(sample()).unwrap();

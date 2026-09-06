@@ -21,11 +21,12 @@ use std::sync::{Arc, Mutex};
 
 use tauri::Manager;
 use tauri::http::{Request, Response};
+use ve_core::project::FieldKind;
 use ve_render::cache::{SceneHash, TileKey, scene_hash};
 use ve_render::cpu::CpuEvaluator;
 use ve_render::evaluator::FieldEvaluator;
 use ve_render::preview::{Quality, render_tile};
-use ve_render::scene::{Scene, flatten};
+use ve_render::scene::{Scene, flatten, flatten_kind};
 use ve_render::tile;
 
 use crate::commands::AppState;
@@ -47,38 +48,59 @@ pub struct Frame {
 /// A viewport is over a hundred tiles and flattening and hashing are per
 /// *frame*, not per tile, so without this every tile would redo the same work.
 #[derive(Debug, Default)]
-pub struct SceneCache(Mutex<Option<(u64, u32, Arc<Frame>)>>);
+pub struct SceneCache(Mutex<Option<CachedFrame>>);
+
+/// The one frame the cache holds, and what it was flattened for.
+#[derive(Debug)]
+struct CachedFrame {
+    revision: u64,
+    step: u32,
+    kind: FieldKind,
+    frame: Arc<Frame>,
+}
 
 impl SceneCache {
-    /// Returns the frame for `(revision, step)`, flattening it if needed.
-    fn frame_for(&self, state: &AppState, revision: u64, step: u32) -> Option<Arc<Frame>> {
+    /// Returns the frame for `(revision, step, kind)`, flattening it if needed.
+    fn frame_for(
+        &self,
+        state: &AppState,
+        revision: u64,
+        step: u32,
+        kind: FieldKind,
+    ) -> Option<Arc<Frame>> {
         if let Ok(cached) = self.0.lock()
-            && let Some((cached_revision, cached_step, frame)) = cached.as_ref()
-            && *cached_revision == revision
-            && *cached_step == step
+            && let Some(held) = cached.as_ref()
+            && held.revision == revision
+            && held.step == step
+            && held.kind == kind
         {
-            return Some(Arc::clone(frame));
+            return Some(Arc::clone(&held.frame));
         }
 
         let session = state.session.lock().ok()?;
-        // The document at its revision — or the macro preview at its own
-        // (D71): a one-object project the session holds while a capture is
-        // being looked at before it is kept, flattened by the same function
-        // and served by the same path as everything else.
-        let project = match session.open.as_ref() {
-            Some(open) if open.revision == revision => &open.project,
+        // The document at its revision, of the kind the address names (M29)
+        // — or the macro preview at its own revision (D71): a one-object
+        // project the session holds while a capture is being looked at
+        // before it is kept, of one kind, served whatever kind the address
+        // names, since it is what the map is looking at.
+        let scene = match session.open.as_ref() {
+            Some(open) if open.revision == revision => flatten_kind(&open.project, step, kind),
             _ => match session.preview.as_ref() {
-                Some(preview) if preview.revision == revision => &preview.project,
+                Some(preview) if preview.revision == revision => flatten(&preview.project, step),
                 _ => return None,
             },
         };
-        let scene = flatten(project, step);
         drop(session);
 
         let hash = scene_hash(&scene);
         let frame = Arc::new(Frame { scene, hash });
         if let Ok(mut cached) = self.0.lock() {
-            *cached = Some((revision, step, Arc::clone(&frame)));
+            *cached = Some(CachedFrame {
+                revision,
+                step,
+                kind,
+                frame: Arc::clone(&frame),
+            });
         }
         Some(frame)
     }
@@ -103,6 +125,8 @@ enum Served {
     Tile {
         revision: u64,
         step: u32,
+        /// Which field the tile is of (M29): `w` or `c` in the address.
+        kind: FieldKind,
         id: tile::TileId,
     },
     /// An image layer's picture (spec.md 4.9, M18).
@@ -113,7 +137,9 @@ enum Served {
     },
 }
 
-/// Extracts `<revision>/<step>/<z>/<x>/<y>`, or an image address, from a path.
+/// Extracts `<revision>/<step>/<kind>/<z>/<x>/<y>`, or an image address, from
+/// a path. `kind` is `w` for wind or `c` for current (M29): the map shows one
+/// kind of field at a time, and a tile of each is a different tile.
 fn parse(path: &str) -> Option<Served> {
     let mut parts = path.trim_start_matches('/').split('/');
     let first = parts.next()?;
@@ -133,6 +159,11 @@ fn parse(path: &str) -> Option<Served> {
     }
     let revision: u64 = first.parse().ok()?;
     let step: u32 = parts.next()?.parse().ok()?;
+    let kind = match parts.next()? {
+        "w" => FieldKind::Wind,
+        "c" => FieldKind::Current,
+        _ => return None,
+    };
     let z: u32 = parts.next()?.parse().ok()?;
     let x: u32 = parts.next()?.parse().ok()?;
     let y: u32 = parts.next()?.split('.').next()?.parse().ok()?;
@@ -142,6 +173,7 @@ fn parse(path: &str) -> Option<Served> {
     Some(Served::Tile {
         revision,
         step,
+        kind,
         id: tile::TileId::new(z, x, y).ok()?,
     })
 }
@@ -176,13 +208,23 @@ pub fn handle(app: &tauri::AppHandle, request: &Request<Vec<u8>>) -> Response<Ve
             layer,
             max_edge,
         } => return serve_image(app, revision, layer, max_edge),
-        Served::Tile { revision, step, id } => TileRequest { revision, step, id },
+        Served::Tile {
+            revision,
+            step,
+            kind,
+            id,
+        } => TileRequest {
+            revision,
+            step,
+            kind,
+            id,
+        },
     };
 
     let state = app.state::<AppState>();
-    let Some(frame) = app
-        .state::<SceneCache>()
-        .frame_for(&state, parsed.revision, parsed.step)
+    let Some(frame) =
+        app.state::<SceneCache>()
+            .frame_for(&state, parsed.revision, parsed.step, parsed.kind)
     else {
         // The document moved on, or nothing is open. Refusing beats answering
         // with current data under a URL that names an older revision.
@@ -208,6 +250,7 @@ pub fn handle(app: &tauri::AppHandle, request: &Request<Vec<u8>>) -> Response<Ve
 struct TileRequest {
     revision: u64,
     step: u32,
+    kind: FieldKind,
     id: tile::TileId,
 }
 
@@ -352,20 +395,22 @@ mod tests {
     /// A tile address, unpacked.
     fn tile_of(path: &str) -> (u64, u32, tile::TileId) {
         match parse(path).expect("should parse") {
-            Served::Tile { revision, step, id } => (revision, step, id),
+            Served::Tile {
+                revision, step, id, ..
+            } => (revision, step, id),
             other => panic!("{path:?} parsed as {other:?}"),
         }
     }
 
     #[test]
     fn well_formed_paths_parse() {
-        let (revision, step, id) = tile_of("/7/3/2/5/1");
+        let (revision, step, id) = tile_of("/7/3/w/2/5/1");
         assert_eq!(revision, 7);
         assert_eq!(step, 3);
         assert_eq!((id.z, id.x, id.y), (2, 5, 1));
 
         // A trailing extension is tolerated so the frontend may use one.
-        let (_, _, id) = tile_of("/1/0/0/1/0.bin");
+        let (_, _, id) = tile_of("/1/0/c/0/1/0.bin");
         assert_eq!((id.z, id.x, id.y), (0, 1, 0));
     }
 
@@ -405,12 +450,13 @@ mod tests {
         for path in [
             "",
             "/",
-            "/1/0/0/0",     // too few segments
-            "/1/0/0/0/0/0", // too many
-            "/x/0/0/0/0",   // unparseable revision
-            "/1/x/0/0/0",   // unparseable step
-            "/1/0/0/9/0",   // column past the end of level 0
-            "/1/0/99/0/0",  // level past the pyramid
+            "/1/0/0/0",      // too few segments
+            "/1/0/0/0/0/0",  // too many
+            "/x/0/w/0/0/0",  // unparseable revision
+            "/1/x/w/0/0/0",  // unparseable step
+            "/1/0/w/0/9/0",  // column past the end of level 0
+            "/1/0/w/99/0/0", // level past the pyramid
+            "/1/0/0/0/0",    // no kind: the address before M29
         ] {
             assert!(parse(path).is_none(), "{path:?} should not parse");
         }
@@ -419,9 +465,14 @@ mod tests {
     /// The revision is what keeps a cached tile from outliving its document.
     #[test]
     fn the_revision_is_part_of_the_address() {
-        let a = parse("/1/0/0/0/0").expect("parses");
-        let b = parse("/2/0/0/0/0").expect("parses");
+        let a = parse("/1/0/w/0/0/0").expect("parses");
+        let b = parse("/2/0/w/0/0/0").expect("parses");
         assert_ne!(a, b, "different revisions must be different tiles");
+        // And the kind (M29): the wind and the current of one step are two
+        // tiles, and a letter that names neither is no address at all.
+        let c = parse("/1/0/c/0/0/0").expect("parses");
+        assert_ne!(a, c, "different kinds must be different tiles");
+        assert!(parse("/1/0/x/0/0/0").is_none());
         // And the same for an image, which is cached by the browser for a year.
         assert_ne!(parse("/image/1/9/4096"), parse("/image/2/9/4096"));
     }

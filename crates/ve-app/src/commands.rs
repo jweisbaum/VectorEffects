@@ -122,8 +122,14 @@ pub fn sample_field(
     lon: f64,
     lat: f64,
     step: u32,
+    kind: Option<String>,
 ) -> Result<FieldSample> {
     let position = ve_core::LonLat::new(lon, lat)?;
+    // The kind the map is showing (M29), or the project's own.
+    let kind = kind
+        .as_deref()
+        .map(crate::projects::parse_field_kind)
+        .transpose()?;
 
     let mut session = state
         .session
@@ -136,7 +142,11 @@ pub fn sample_field(
         });
     };
 
-    let scene = ve_render::scene::flatten(&open.project, step);
+    let scene = ve_render::scene::flatten_kind(
+        &open.project,
+        step,
+        kind.unwrap_or(open.project.settings.field_kind),
+    );
     let uv = ve_render::cpu::sample_scene(&scene, position);
     let (speed, azimuth) = ve_core::vector::speed_azimuth_from_uv(uv);
     Ok(FieldSample {

@@ -30,6 +30,7 @@ import type { TileAddress } from "../generated/TileAddress";
 import type { TrackSamples } from "../generated/TrackSamples";
 import NumberField from "../NumberField";
 import { reportError, setHint } from "../hint";
+import type { FieldKindName } from "../kind";
 import { api } from "../ipc";
 import { IconSvg, LOOP_ICON } from "../map/ToolIcon";
 import { MAX_STEPS } from "../project/format";
@@ -147,6 +148,7 @@ export default function Timeline({
   settings,
   capture,
   hidden = false,
+  shownKind,
   onCapture,
 }: {
   project: ProjectSummary;
@@ -195,6 +197,8 @@ export default function Timeline({
   capture: CaptureMode | null;
   /** Put away: not drawn, but mounted, so playback goes on (M27). */
   hidden?: boolean;
+  /** The kind of field the map shows, whose tiles readiness is about (M29). */
+  shownKind: FieldKindName;
 }) {
   const capturing = capture !== null && capture.active;
   const recordingPhase = capturing && capture.phase === "recording";
@@ -258,7 +262,7 @@ export default function Timeline({
   const refreshReadiness = useCallback(() => {
     if (viewport.length === 0) return;
     void api
-      .frameReadiness(viewport)
+      .frameReadiness(viewport, shownKind)
       .then((report) => {
         const next = classify(report, memory.current);
         setStates(next.states);
@@ -272,7 +276,7 @@ export default function Timeline({
   // A new revision, viewport or playhead re-queues the pool and re-asks.
   useEffect(() => {
     if (viewport.length === 0) return;
-    void api.renderAhead(step, viewport).catch(() => undefined);
+    void api.renderAhead(step, viewport, shownKind).catch(() => undefined);
     refreshReadiness();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project.revision, step, viewportKey, refreshReadiness]);

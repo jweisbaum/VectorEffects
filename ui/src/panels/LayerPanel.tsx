@@ -8,6 +8,7 @@ import type { ImageLayerView } from "../generated/ImageLayerView";
 import { pickGribToImport, pickImageToImport } from "../project/dialogs";
 import { EyeIcon } from "./EyeIcon";
 import { layerDropIndex } from "./reorder";
+import { KIND_LABELS, KINDS, type FieldKindName, kindOf } from "../kind";
 import SpeedFilter from "./SpeedFilter";
 
 /** Which side of a row a drop lands on: above or below a layer, or into it. */
@@ -34,6 +35,7 @@ export default function LayerPanel({
   activeLayer,
   onSelect,
   onActivateLayer,
+  onActiveKind,
   onChanged,
   viewBounds,
 }: {
@@ -43,6 +45,8 @@ export default function LayerPanel({
   activeLayer: number | null;
   onSelect: (objects: number[]) => void;
   onActivateLayer: (layer: number | null) => void;
+  /** The active layer's kind of field, so the map turns to it (M29). */
+  onActiveKind: (kind: FieldKindName) => void;
   onChanged: (project: ProjectSummary) => void;
   /**
    * The visible map as `[west, north, east, south]`, for an image that carries
@@ -101,6 +105,14 @@ export default function LayerPanel({
       stale = true;
     };
   }, [project.revision, step]);
+
+  // The map shows the active layer's kind of field (M29): making a current
+  // layer active turns the map to the currents, since that is what a stroke
+  // in it will paint.
+  useEffect(() => {
+    const active = tree?.layers.find((layer) => layer.id === activeLayer);
+    if (active && active.source !== "image") onActiveKind(kindOf(active.parameter));
+  }, [activeLayer, onActiveKind, tree]);
 
   /**
    * Runs a document write and hands the summary back to the app. Resolves to
@@ -374,6 +386,34 @@ export default function LayerPanel({
                 </button>
               </div>
 
+              {/*
+                Which field the layer is part of (M29). A painted layer
+                chooses; an imported one is its file's; an image has none.
+              */}
+              {layer.source === "painted" && (
+                <div className="layer-parameter">
+                  <label title="Which field this layer's objects are part of. Wind layers export together as the wind messages, current layers as the current messages.">
+                    Field
+                    <select
+                      value={layer.parameter}
+                      onChange={(e) =>
+                        run(api.setLayerParameter(layer.id, kindOf(e.target.value)))
+                      }
+                    >
+                      {KINDS.map((kind) => (
+                        <option key={kind} value={kind}>
+                          {KIND_LABELS[kind]}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              )}
+              {layer.source === "raster" && (
+                <div className="layer-parameter muted">
+                  Field: {KIND_LABELS[kindOf(layer.parameter)]} · from the file
+                </div>
+              )}
               {layer.grib?.loaded && (
                 <SpeedFilter
                   grib={layer.grib}

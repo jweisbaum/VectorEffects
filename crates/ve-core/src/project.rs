@@ -16,7 +16,7 @@ use crate::vector::DirectionConvention;
 /// The document schema version this build writes.
 ///
 /// Opening a newer version is refused; older versions migrate forward on open.
-pub const SCHEMA_VERSION: u32 = 10;
+pub const SCHEMA_VERSION: u32 = 11;
 
 /// The largest number of time steps a project may have.
 pub const MAX_STEPS: u32 = 240;
@@ -25,10 +25,11 @@ pub const MAX_STEPS: u32 = 240;
 ///
 /// Fixed at creation: it selects the GRIB discipline, parameter numbers and
 /// level encoding.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FieldKind {
     /// Wind at 10 m. GRIB discipline 0, UGRD/VGRD.
+    #[default]
     Wind,
     /// Ocean surface current. GRIB discipline 10, UOGRD/VOGRD.
     Current,
@@ -204,8 +205,7 @@ impl ProjectSettings {
     /// The default for the field kind until someone sets one, so a project
     /// made before the setting existed looks exactly as it did.
     pub fn scale(&self) -> ColourScale {
-        self.colour_scale
-            .unwrap_or_else(|| ColourScale::default_for(self.field_kind))
+        self.colour_scale.unwrap_or_else(ColourScale::defaults)
     }
 
     /// Sensible defaults for a new project of `field_kind`.
@@ -255,26 +255,47 @@ impl ProjectSettings {
 /// tile — which is the whole reason it can be a live edit at all.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct ColourScale {
-    /// Knots at the top of the ramp. The bottom is always calm.
+    /// Knots at the top of the ramp when the map shows the wind layers. The
+    /// bottom is always calm.
     #[serde(with = "crate::canonical::ratio_field")]
-    pub max_knots: f64,
+    pub wind_knots: f64,
+    /// And when it shows the current layers (M29): an order of magnitude
+    /// slower, so the two are separate as the settings' defaults are.
+    #[serde(with = "crate::canonical::ratio_field")]
+    pub current_knots: f64,
 }
 
 impl ColourScale {
-    /// The scale a new project of this kind gets.
-    pub fn default_for(kind: FieldKind) -> Self {
+    /// The scales a project gets when it says nothing.
+    pub fn defaults() -> Self {
         Self {
-            max_knots: match kind {
-                FieldKind::Wind => 60.0,
-                FieldKind::Current => 6.0,
-            },
+            wind_knots: 60.0,
+            current_knots: 6.0,
         }
+    }
+
+    /// The top of the ramp for one kind of field.
+    pub fn knots_for(&self, kind: FieldKind) -> f64 {
+        match kind {
+            FieldKind::Wind => self.wind_knots,
+            FieldKind::Current => self.current_knots,
+        }
+    }
+
+    /// The same scale with one kind's top replaced.
+    pub fn with_knots(mut self, kind: FieldKind, knots: f64) -> Self {
+        match kind {
+            FieldKind::Wind => self.wind_knots = knots,
+            FieldKind::Current => self.current_knots = knots,
+        }
+        self
     }
 
     /// Clamped to something a legend can draw.
     pub fn clamped(self) -> Self {
         Self {
-            max_knots: self.max_knots.clamp(1.0, 400.0),
+            wind_knots: self.wind_knots.clamp(1.0, 400.0),
+            current_knots: self.current_knots.clamp(1.0, 400.0),
         }
     }
 }
@@ -382,7 +403,7 @@ impl Project {
             id: Id::new(),
             name: name.into(),
             settings,
-            layers: vec![Layer::new("Layer 1")],
+            layers: vec![Layer::of_kind("Layer 1", settings.field_kind)],
             annotations: Annotations::default(),
             view: ViewState::default(),
             regrid: std::collections::BTreeMap::new(),
@@ -396,6 +417,19 @@ impl Project {
     }
 
     /// Finds a layer by id.
+    /// The kinds of field the visible layers hold, wind first (M29): what an
+    /// export writes a message pair per step for, and what the map can show.
+    pub fn kinds_present(&self) -> Vec<FieldKind> {
+        [FieldKind::Wind, FieldKind::Current]
+            .into_iter()
+            .filter(|kind| {
+                self.layers
+                    .iter()
+                    .any(|layer| layer.visible && layer.has_field() && layer.parameter() == *kind)
+            })
+            .collect()
+    }
+
     pub fn layer(&self, id: Id) -> Option<&Layer> {
         self.layers.iter().find(|l| l.id == id)
     }

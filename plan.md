@@ -2632,7 +2632,21 @@ the field kind a property of the layer rather than of the project (§4.1).
    north.
 7. **The motion button's help text.** Delivered: "Add velocity / rotational
    / scale vectors to the vector data." by track, and "Remove …" when on.
-8. **Field kind per layer, and a two-field export.** Pending.
+8. **Field kind per layer, and a two-field export.** Delivered, and the
+   largest change of the pass. `Layer.parameter` (a `FieldKind`, serde
+   default wind; a GRIB layer's is its file's; an image has none), schema
+   11 with a migration that gives every layer the project's kind and turns
+   the one colour scale into the wind/current pair; `flatten_kind` beside
+   `flatten`; `Project::kinds_present`. The app's tile address gained a
+   kind segment, the scene cache and the render pool prepare per kind, and
+   the readout, eyedropper, region copy and macro capture take the kind on
+   show; the export writes a u/v pair per present kind per step, wind
+   first. `set_layer_parameter` and a per-kind `set_colour_scale`. In the
+   frontend a *Show* menu in the title bar, following the active layer, the
+   layer panel's field row, two scale fields in the settings, and the
+   new-project dialog no longer asks. `settings.field_kind` stays as the
+   default a new layer takes. Tests: the migration, the layer command and
+   its undo, and a two-kind export decoded message by message.
 9. **The intensity slider.** Pending.
 10. **The divergence slider.** Pending.
 11. **The turn tool's direction and amount.** Pending.

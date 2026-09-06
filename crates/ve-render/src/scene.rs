@@ -1005,12 +1005,26 @@ fn capture_of(project: &Project, object: &Object, step: u32) -> Option<FlatCaptu
 /// the *file* holds, so nothing below this line — the cache key, the
 /// readiness probe, either kernel — needs to know the choice was made.
 pub fn flatten(project: &Project, step: u32) -> Scene {
+    flatten_kind(project, step, project.settings.field_kind)
+}
+
+/// The scene of one **kind** of field at `step` (M29): the visible layers
+/// whose parameter is `kind`, in stack order. A project may hold wind and
+/// current layers together; the map shows one kind at a time and the export
+/// bakes each kind to its own message pair, and both come through here.
+/// [`flatten`] is this for the project's own kind, which is what a project
+/// made before layers carried one has.
+pub fn flatten_kind(project: &Project, step: u32, kind: ve_core::project::FieldKind) -> Scene {
     // Links are resolved once for the whole project, in dependency order: a
     // follower needs its primary placed first, and its primary may follow
     // something in turn (spec.md 9.3).
     let links = Links::resolve(project, step);
     let mut scene = Scene::default();
-    for layer in project.layers.iter().filter(|l| l.visible) {
+    for layer in project
+        .layers
+        .iter()
+        .filter(|l| l.visible && l.has_field() && l.parameter() == kind)
+    {
         if let Some(frame) = layer.imported_frame(&project.settings, step) {
             scene.rasters.push(FlatRaster {
                 z: scene.objects.len(),

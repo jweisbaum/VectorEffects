@@ -117,6 +117,7 @@ pub fn run() -> anyhow::Result<()> {
             document::remove_layer,
             document::rename_layer,
             document::set_layer_visible,
+            document::set_layer_parameter,
             document::set_layer_speed_range,
             document::set_layer_speed_range,
             document::set_layer_locked,

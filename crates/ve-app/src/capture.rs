@@ -31,7 +31,7 @@ use ve_core::{Command, LonLat, PropValue};
 use ve_render::aeqd::M_PER_DEGREE;
 use ve_render::cache::scene_hash;
 use ve_render::cpu::sample_scene_covered;
-use ve_render::scene::flatten;
+use ve_render::scene::flatten_kind;
 
 use crate::commands::AppState;
 use crate::error::{AppError, Result};
@@ -191,15 +191,27 @@ pub fn capture_region(
     state: tauri::State<'_, AppState>,
     region: RegionShape,
     step: u32,
+    kind: Option<String>,
 ) -> Result<CaptureState> {
-    region_capture(&state, region, step)
+    let kind = kind
+        .as_deref()
+        .map(crate::projects::parse_field_kind)
+        .transpose()?;
+    region_capture(&state, region, step, kind)
 }
 
 /// Implementation of [`capture_region`].
-pub fn region_capture(state: &AppState, region: RegionShape, step: u32) -> Result<CaptureState> {
+pub fn region_capture(
+    state: &AppState,
+    region: RegionShape,
+    step: u32,
+    kind: Option<ve_core::project::FieldKind>,
+) -> Result<CaptureState> {
     with_session(state, |session| {
         let open = session.require_open()?;
         let project = &open.project;
+        // The kind the map is showing is the field that is copied (M29).
+        let kind = kind.unwrap_or(project.settings.field_kind);
         let bad = |why: &str| AppError::BadOption {
             field: "region",
             value: why.to_owned(),
@@ -233,7 +245,7 @@ pub fn region_capture(state: &AppState, region: RegionShape, step: u32) -> Resul
         let mut frames = Vec::new();
         let mut previous_hash = None;
         for at_step in step..=last_step {
-            let scene = flatten(project, at_step);
+            let scene = flatten_kind(project, at_step, kind);
             let hash = scene_hash(&scene);
             if previous_hash == Some(hash) {
                 continue;
@@ -268,7 +280,7 @@ pub fn region_capture(state: &AppState, region: RegionShape, step: u32) -> Resul
         };
 
         let capture = Capture::new(
-            project.settings.field_kind,
+            kind,
             CaptureLattice {
                 ni,
                 nj,

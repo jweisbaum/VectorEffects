@@ -417,6 +417,12 @@ pub struct Layer {
     /// open unchanged.
     #[serde(default, skip_serializing_if = "LayerSource::is_painted")]
     pub source: LayerSource,
+    /// Which field a painted layer's objects are part of (M29): 10 m wind or
+    /// surface current. Not keyable — it says what the layer *is*. A GRIB
+    /// layer's is its file's and lives on the source; an image layer has no
+    /// field. Read through [`Layer::parameter`].
+    #[serde(default)]
+    pub parameter: crate::project::FieldKind,
     /// The decoded field of a [`LayerSource::Grib`] layer.
     ///
     /// **Never serialised** (invariants 1 and 2): the file keeps the path in
@@ -704,6 +710,28 @@ impl MotionFlags {
 }
 
 impl Layer {
+    /// A painted layer of one kind of field (M29): what a project's first
+    /// layer and an added layer are, taking the project's own kind.
+    pub fn of_kind(name: impl Into<String>, kind: crate::project::FieldKind) -> Self {
+        let mut layer = Self::new(name);
+        layer.parameter = kind;
+        layer
+    }
+
+    /// The field this layer is part of: the file's for a GRIB layer, the
+    /// layer's own otherwise (M29).
+    pub fn parameter(&self) -> crate::project::FieldKind {
+        match &self.source {
+            LayerSource::Grib { field, .. } => *field,
+            _ => self.parameter,
+        }
+    }
+
+    /// Whether the layer can hold a field at all: an image layer cannot.
+    pub fn has_field(&self) -> bool {
+        !matches!(self.source, LayerSource::Image { .. })
+    }
+
     /// An empty, visible, unlocked layer.
     pub fn new(name: impl Into<String>) -> Self {
         Self {
@@ -713,6 +741,7 @@ impl Layer {
             locked: false,
             objects: Vec::new(),
             source: LayerSource::Painted,
+            parameter: crate::project::FieldKind::Wind,
             raster: None,
             speed_range: None,
             frame_overrides: Vec::new(),
@@ -736,6 +765,7 @@ impl Layer {
                 path,
                 field: raster.kind,
             },
+            parameter: raster.kind,
             raster: Some(raster),
             speed_range: None,
             frame_overrides: Vec::new(),

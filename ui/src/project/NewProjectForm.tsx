@@ -30,7 +30,6 @@ export default function NewProjectForm({
   onSubmit: (request: NewProjectRequest) => void;
 }) {
   const [name, setName] = useState("Untitled");
-  const [fieldKind, setFieldKind] = useState<"wind" | "current">("wind");
   const [resolution, setResolution] = useState<string>("0.25");
   const [stepHours, setStepHours] = useState(3);
   const [stepCount, setStepCount] = useState(24);
@@ -43,7 +42,9 @@ export default function NewProjectForm({
   const submit = () =>
     onSubmit({
       name,
-      field_kind: fieldKind,
+      // A layer says which field it is part of (M29); the project no
+      // longer does. Wind is the default a new layer takes.
+      field_kind: "wind",
       resolution,
       step_hours: stepHours,
       step_count: stepCount,
@@ -54,17 +55,6 @@ export default function NewProjectForm({
       <label>
         Name
         <input value={name} onChange={(e) => setName(e.target.value)} spellCheck={false} />
-      </label>
-
-      <label>
-        Field
-        <select
-          value={fieldKind}
-          onChange={(e) => setFieldKind(e.target.value === "current" ? "current" : "wind")}
-        >
-          <option value="wind">Wind (10 m)</option>
-          <option value="current">Ocean current (surface)</option>
-        </select>
       </label>
 
       <label>

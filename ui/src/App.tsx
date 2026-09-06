@@ -14,6 +14,7 @@ import { pickProjectToOpen, pickProjectToSave } from "./project/dialogs";
 import type { CSSProperties } from "react";
 
 import { stillPasteChord } from "./chords";
+import type { FieldKindName } from "./kind";
 import { api, IpcError } from "./ipc";
 import { reportError, shown, useHint } from "./hint";
 import { isBusy, useBusy } from "./busy";
@@ -106,6 +107,12 @@ export default function App() {
   // Which layer receives new objects, and what a plain marquee is scoped to
   // (spec.md 6.1, 8.2). Null means the top of the stack.
   const [activeLayer, setActiveLayer] = useState<number | null>(null);
+  /**
+   * Which kind of field the map shows (M29): a project may hold wind and
+   * current layers together, and the map shows one at a time. Follows the
+   * active layer's kind, and the title bar's "Show" menu overrides it.
+   */
+  const [shownKind, setShownKind] = useState<FieldKindName>("wind");
   // Armed by the inspector, answered by the map: the next map click places this
   // property of this object.
   const [picking, setPicking] = useState<PositionPick | null>(null);
@@ -439,8 +446,7 @@ export default function App() {
           </button>
         )}
         <span className="muted project-meta">
-          {project.field_kind} · {project.resolution_label} · {project.step_count} ×{" "}
-          {project.step_hours} h
+          {project.resolution_label} · {project.step_count} × {project.step_hours} h
         </span>
         <span className="spacer" />
         {/* The map's view controls and the capture tool land here (D68). */}
@@ -508,6 +514,7 @@ export default function App() {
               activeLayer={activeLayer}
               onSelect={selectObjects}
               onActivateLayer={setActiveLayer}
+              onActiveKind={setShownKind}
               onChanged={setProject}
               viewBounds={viewBounds}
             />
@@ -533,6 +540,8 @@ export default function App() {
           onViewport={setViewport}
           autoKey={autoKey}
           viewSlot={viewSlot}
+          shownKind={shownKind}
+          onShownKind={setShownKind}
         />
 
         {panels.right ? (
@@ -588,6 +597,7 @@ export default function App() {
         onKeysSelected={onKeysSelected}
         settings={settings}
         capture={recording}
+        shownKind={shownKind}
         onCapture={(mode) => mapRef.current?.setCapture(mode)}
       />
 

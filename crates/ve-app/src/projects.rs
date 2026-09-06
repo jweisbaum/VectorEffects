@@ -44,11 +44,16 @@ pub struct ProjectSummary {
     pub start_unix_s: Option<i64>,
     /// `"from"` or `"toward"`: how directions are shown (spec.md 3.3).
     pub direction_convention: String,
-    /// Knots at the top of the speed colour ramp (spec.md 5.3, M15).
+    /// Knots at the top of the speed colour ramp when the map shows wind
+    /// (spec.md 5.3, M15), and when it shows current (M29).
     ///
     /// The project's, so two people opening one file see the same map. Tiles
-    /// carry speed and not colour, so changing it costs no render.
-    pub colour_scale_knots: f64,
+    /// carry speed and not colour, so changing either costs no render.
+    pub wind_scale_knots: f64,
+    pub current_scale_knots: f64,
+    /// The kinds of field the visible layers hold — `"wind"`, `"current"` —
+    /// wind first: what an export writes, and what the map can show (M29).
+    pub kinds_present: Vec<String>,
     /// Number of layers.
     pub layer_count: u32,
     /// Number of objects across all layers.
@@ -88,7 +93,14 @@ impl ProjectSummary {
                 DirectionConvention::Toward => "toward",
             }
             .to_owned(),
-            colour_scale_knots: settings.scale().max_knots,
+            wind_scale_knots: settings.scale().wind_knots,
+            current_scale_knots: settings.scale().current_knots,
+            kinds_present: open
+                .project
+                .kinds_present()
+                .into_iter()
+                .map(|kind| kind_name(kind).to_owned())
+                .collect(),
             layer_count: open.project.layers.len() as u32,
             object_count: open.project.object_count() as u32,
             revision: open.revision,
@@ -116,7 +128,10 @@ pub struct RecentProject {
 pub struct NewProjectRequest {
     /// Display name.
     pub name: String,
-    /// `"wind"` or `"current"`.
+    /// The kind every layer starts as (M29): `"wind"` unless said otherwise.
+    /// The dialog no longer asks — a layer says which field it is part of —
+    /// so this is only the default a new layer takes.
+    #[serde(default = "default_field_kind")]
     pub field_kind: String,
     /// One of `"1.0"`, `"0.5"`, `"0.25"`, `"0.1"`.
     pub resolution: String,
@@ -126,7 +141,20 @@ pub struct NewProjectRequest {
     pub step_count: u32,
 }
 
-fn parse_field_kind(value: &str) -> Result<FieldKind> {
+fn default_field_kind() -> String {
+    "wind".to_owned()
+}
+
+/// The name a kind of field goes by across IPC.
+pub fn kind_name(kind: FieldKind) -> &'static str {
+    match kind {
+        FieldKind::Wind => "wind",
+        FieldKind::Current => "current",
+    }
+}
+
+/// A kind of field from its IPC name.
+pub fn parse_field_kind(value: &str) -> Result<FieldKind> {
     match value {
         "wind" => Ok(FieldKind::Wind),
         "current" => Ok(FieldKind::Current),
@@ -236,12 +264,8 @@ pub fn create(
         // the preference later leaves existing projects alone.
         settings.colour_scale = Some(
             ve_core::project::ColourScale {
-                max_knots: match settings.field_kind {
-                    ve_core::project::FieldKind::Wind => session.settings.default_wind_scale_knots,
-                    ve_core::project::FieldKind::Current => {
-                        session.settings.default_current_scale_knots
-                    }
-                },
+                wind_knots: session.settings.default_wind_scale_knots,
+                current_knots: session.settings.default_current_scale_knots,
             }
             .clamped(),
         );

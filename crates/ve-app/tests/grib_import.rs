@@ -318,6 +318,7 @@ fn an_imported_layer_takes_no_objects() {
             half_height_deg: 5.0,
         },
         0,
+        None,
     )
     .expect("capture");
     assert!(
@@ -331,8 +332,11 @@ fn an_imported_layer_takes_no_objects() {
     assert_eq!(tree.layers[0].objects.len(), 1);
 }
 
+/// Both layers are shown (M29): the map shows one kind of field at a time,
+/// so the current layer is one the map turns to rather than one to hide,
+/// and each layer's field is its file's.
 #[test]
-fn a_file_with_both_kinds_makes_two_layers_and_hides_the_other_kind() {
+fn a_file_with_both_kinds_makes_two_layers_each_of_its_own_kind() {
     let root = TempRoot::new("both");
     let app = state(&root, 3, 4);
     let path = write_file(
@@ -345,29 +349,37 @@ fn a_file_with_both_kinds_makes_two_layers_and_hides_the_other_kind() {
     assert_eq!(summary.layer_count, 3);
 
     let tree = document::tree(&app, 0).expect("tree");
-    let names: Vec<(String, bool, String)> = tree.layers[1..]
+    let names: Vec<(String, bool, String, String)> = tree.layers[1..]
         .iter()
         .map(|l| {
             (
                 l.name.clone(),
                 l.visible,
                 l.grib.as_ref().expect("grib").field_kind.clone(),
+                l.parameter.clone(),
             )
         })
         .collect();
     assert_eq!(
         names,
         vec![
-            ("Wind (both.grib2)".to_owned(), true, "wind".to_owned()),
+            (
+                "Wind (both.grib2)".to_owned(),
+                true,
+                "wind".to_owned(),
+                "wind".to_owned()
+            ),
             (
                 "Currents (both.grib2)".to_owned(),
-                false,
+                true,
+                "current".to_owned(),
                 "current".to_owned()
             ),
         ]
     );
 
-    // Wind is the field the map shows; the hidden currents contribute nothing.
+    // The wind scene holds the wind layer alone: the current layer, though
+    // shown, is of the other kind and contributes nothing to it.
     assert_eq!(u_at(&app, 1), 3.0);
 
     // One undo removes both layers.

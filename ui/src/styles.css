@@ -1105,6 +1105,11 @@ body {
   color: var(--muted);
 }
 .grib-filter label { display: flex; align-items: center; gap: 5px; }
+/* Which field a layer is part of (M29): a row under the header, like the
+   speed filter's. */
+.layer-parameter { padding: 2px 8px 4px 26px; font-size: 11px; color: var(--muted); }
+.layer-parameter label { display: flex; align-items: center; gap: 6px; }
+.layer-parameter select { font: inherit; background: #0f1a2c; color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 1px 4px; }
 .grib-filter-band { display: flex; flex-direction: column; gap: 2px; }
 .grib-filter-row { display: flex; align-items: center; gap: 6px; }
 .grib-filter-row input[type="range"] { flex: 1; min-width: 60px; }

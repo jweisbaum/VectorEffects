@@ -86,7 +86,6 @@ fn resample_into(project: &mut Project, path: &Path) -> Result<import::Imported>
 /// Adds one layer per imported field above the open project's top, as one
 /// history entry.
 fn add_layers(open: &mut OpenProject, path: &Path, sequences: Vec<RasterSequence>) -> Result<()> {
-    let project_kind = open.project.settings.field_kind;
     let mut commands = Vec::with_capacity(sequences.len());
     for sequence in sequences {
         let kind = sequence.kind;
@@ -101,7 +100,10 @@ fn add_layers(open: &mut OpenProject, path: &Path, sequences: Vec<RasterSequence
             layer_name(kind, path),
             path.to_path_buf(),
             Arc::new(sequence),
-            kind == project_kind,
+            // Shown whatever its kind (M29): the map shows one kind at a
+            // time, so a current file in a wind project is a layer the map
+            // turns to, not one to hide.
+            true,
         );
         // Each layer goes on top of the last: the index is where it will
         // land once the ones before it in the batch have been added.

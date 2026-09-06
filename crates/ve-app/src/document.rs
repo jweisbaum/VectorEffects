@@ -55,6 +55,12 @@ pub struct LayerNode {
     pub grib: Option<GribLayerInfo>,
     /// The picture beneath everything, for an image layer (spec.md 4.9, M18).
     pub image: Option<crate::image::ImageLayerView>,
+    /// What the layer is (M29): `"painted"`, `"raster"` for an imported GRIB,
+    /// `"image"` for a picture. Says which controls the panel offers.
+    pub source: String,
+    /// Which field the layer is part of — `"wind"` or `"current"`: its
+    /// file's for a raster layer, none that matters for an image (M29).
+    pub parameter: String,
 }
 
 /// What one step of a GRIB layer shows (spec.md 4.8, M20).
@@ -270,6 +276,13 @@ fn tree_of(project: &Project, step: u32) -> DocumentTree {
                 name: layer.name.clone(),
                 visible: layer.visible,
                 locked: layer.locked,
+                source: match &layer.source {
+                    ve_core::document::LayerSource::Painted => "painted",
+                    ve_core::document::LayerSource::Grib { .. } => "raster",
+                    ve_core::document::LayerSource::Image { .. } => "image",
+                }
+                .to_owned(),
+                parameter: crate::projects::kind_name(layer.parameter()).to_owned(),
                 image: crate::image::view(layer.id, &layer.source),
                 grib: match &layer.source {
                     // An image contributes no field, so it has no GRIB view; it
@@ -657,7 +670,7 @@ pub fn layer_add(state: &AppState, name: String) -> Result<ProjectSummary> {
         };
         Ok(Command::AddLayer {
             index: project.layers.len(),
-            layer: Box::new(Layer::new(name)),
+            layer: Box::new(Layer::of_kind(name, project.settings.field_kind)),
         })
     })
 }
@@ -785,6 +798,38 @@ pub fn layer_visibility(state: &AppState, layer: u64, visible: bool) -> Result<P
             layer: found.id,
             before: found.visible,
             after: visible,
+        })
+    })
+}
+
+/// Says which field a painted layer is part of (M29): `"wind"` or `"current"`.
+#[tauri::command]
+pub fn set_layer_parameter(
+    state: tauri::State<'_, AppState>,
+    layer: u64,
+    parameter: String,
+) -> Result<ProjectSummary> {
+    layer_parameter(&state, layer, &parameter)
+}
+
+/// Implementation of [`set_layer_parameter`]. A raster layer's kind is its
+/// file's and an image has none, so only a painted layer takes it.
+pub fn layer_parameter(state: &AppState, layer: u64, parameter: &str) -> Result<ProjectSummary> {
+    let after = crate::projects::parse_field_kind(parameter)?;
+    apply(state, |project| {
+        let found = project
+            .layer(object_id(layer))
+            .ok_or_else(|| missing_layer(layer))?;
+        if !matches!(found.source, ve_core::document::LayerSource::Painted) {
+            return Err(AppError::BadOption {
+                field: "layer",
+                value: "an imported layer's field is its file's".to_owned(),
+            });
+        }
+        Ok(Command::SetLayerParameter {
+            layer: found.id,
+            before: found.parameter,
+            after,
         })
     })
 }

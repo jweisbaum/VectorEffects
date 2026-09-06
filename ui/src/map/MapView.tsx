@@ -83,6 +83,7 @@ import type { MeasurementView } from "../generated/MeasurementView";
 import type { MeasurementKind } from "../generated/MeasurementKind";
 import type { NewMeasurement } from "../generated/NewMeasurement";
 import { showsHoverIndicator, showsMagnifier } from "./hover";
+import { KIND_LABELS, KINDS, type FieldKindName, kindLetter, kindOf } from "../kind";
 import { trackKeyframes } from "./macroTrack";
 import { RAMP_STOPS, rampCss } from "./ramp";
 import { parseBasemap } from "./format";
@@ -434,6 +435,8 @@ export default function MapView({
   onViewport,
   autoKey,
   viewSlot,
+  shownKind,
+  onShownKind,
 }: {
   ref?: Ref<MapHandle>;
   /**
@@ -443,6 +446,10 @@ export default function MapView({
    * the draw loop reads it; only the buttons move.
    */
   viewSlot: HTMLElement | null;
+  /** The kind of field the map shows (M29): wind or current layers. */
+  shownKind: FieldKindName;
+  /** The title bar's "Show" menu changed it. */
+  onShownKind: (kind: FieldKindName) => void;
   project: ProjectSummary;
   step: number;
   selection: number[];
@@ -582,6 +589,9 @@ export default function MapView({
   const showGlyphsRef = useRef(true);
   const showGraticuleRef = useRef(true);
   const stepRef = useRef(0);
+  /** The kind on show, for the paths that read refs (M29). */
+  const shownKindRef = useRef(shownKind);
+  shownKindRef.current = shownKind;
   const loggedDrawError = useRef(false);
 
   /**
@@ -934,15 +944,19 @@ export default function MapView({
    * and the next frame paints with. A frame that drew no field falls back
    * to the project's scale rather than to nothing.
    */
+  // The project's scale for the kind on show (M29): wind and current are an
+  // order of magnitude apart, and the ramp says which is meant.
+  const scaleKnots =
+    shownKind === "wind" ? project.wind_scale_knots : project.current_scale_knots;
   const autoScale = settings?.auto_scale ?? false;
   const [seenRange, setSeenRange] = useState<{ min: number; max: number } | null>(null);
   const autoRange = autoScale ? seenRange : null;
   const rampMin = autoRange ? autoRange.min : 0;
   const rampMax = autoRange
     ? Math.max(autoRange.max, autoRange.min + AUTO_SCALE_MIN_SPAN_MPS)
-    : mpsFromKnots(project.colour_scale_knots);
+    : mpsFromKnots(scaleKnots);
   const rampMinKnots = Math.round(knotsFromMps(rampMin));
-  const rampMaxKnots = autoRange ? Math.round(knotsFromMps(rampMax)) : project.colour_scale_knots;
+  const rampMaxKnots = autoRange ? Math.round(knotsFromMps(rampMax)) : scaleKnots;
   // What the last frame reported, to compare the next against without a
   // render in between: a change smaller than the eye can see is not applied,
   // or the ramp would breathe with every tile that lands.
@@ -956,7 +970,7 @@ export default function MapView({
   const rampRef = useRef({ min: rampMin, max: rampMax });
   rampRef.current = { min: rampMin, max: rampMax };
   // Barbs are a wind convention and are hidden for current projects (spec.md 5.3).
-  const barbsAvailable = project.field_kind === "wind";
+  const barbsAvailable = shownKind === "wind";
   const lastStep = Math.max(0, project.step_count - 1);
 
   /**
@@ -1106,7 +1120,7 @@ export default function MapView({
 
     // Revision then step: an edit changes the address, so a cached tile can
     // never show a field that no longer exists.
-    const frame = `${frameRevision()}/${stepRef.current}`;
+    const frame = `${frameRevision()}/${stepRef.current}/${kindLetter(shownKindRef.current)}`;
     // The last frame fully on screen stands in for this one's missing tiles —
     // but never across the preview's boundary (M28): the document's tiles
     // held under the preview kept every layer on the map until the first
@@ -1881,7 +1895,7 @@ export default function MapView({
   const warm = useCallback((target: number): boolean => {
     const tiles = tilesRef.current;
     if (!tiles) return true;
-    const frame = `${frameRevision()}/${target}`;
+    const frame = `${frameRevision()}/${target}/${kindLetter(shownKindRef.current)}`;
     return tiles.prefetch(frame, uniqueTiles(visibleTiles(cameraRef.current, viewRef.current)));
   }, []);
   const bounds = useCallback((): [number, number, number, number] | null => {
@@ -1901,7 +1915,7 @@ export default function MapView({
     // The visible composite inside the region, from this step to the end of
     // the timeline (spec.md 8.5, D65).
     void api
-      .captureRegion(regionShape(region), stepRef.current)
+      .captureRegion(regionShape(region), stepRef.current, shownKindRef.current)
       .catch((err: unknown) => setError(String(err)));
     return true;
   }, [region]);
@@ -3127,6 +3141,10 @@ export default function MapView({
   useEffect(() => {
     requestDraw();
   }, [rampMin, rampMax, requestDraw]);
+  // A change of kind is a new frame of new tiles.
+  useEffect(() => {
+    requestDraw();
+  }, [shownKind, requestDraw]);
 
   const onPointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -3362,7 +3380,7 @@ export default function MapView({
       if (schema && showsMagnifier({ eyedropper, building })) {
         setEyedropper(false);
         void api
-          .sampleField(geo.lon, geo.lat, stepRef.current)
+          .sampleField(geo.lon, geo.lat, stepRef.current, shownKindRef.current)
           .then((sample) => setToolState(sampled(toolStateRef.current, schema, sample)))
           .catch(() => undefined);
         return;
@@ -3893,7 +3911,7 @@ export default function MapView({
     void api
       // Read from the refs rather than the closure: a queued request runs from
       // an earlier pointer report's promise, after the step may have moved.
-      .sampleField(geo.lon, geo.lat, stepRef.current)
+      .sampleField(geo.lon, geo.lat, stepRef.current, shownKindRef.current)
       .then((sample) =>
         store?.set({
           sample: {
@@ -4435,7 +4453,7 @@ export default function MapView({
       requestDraw();
 
       for (const probe of scenario.probes) {
-        const sample = await api.sampleField(probe.lon, probe.lat, 0);
+        const sample = await api.sampleField(probe.lon, probe.lat, 0, "wind");
         void api.frontendLog(
           "info",
           `probe ${scenario.name} lon=${probe.lon} lat=${probe.lat} ` +
@@ -4671,7 +4689,7 @@ export default function MapView({
                   onClick={() => {
                     if (region === null) return;
                     void api
-                      .startCapture(regionShape(region), stepRef.current, recordMovement)
+                      .startCapture(regionShape(region), stepRef.current, recordMovement, shownKind)
                       .then((mode) => setRecording(mode.active ? mode : null))
                       .catch((err: unknown) => setError(String(err)));
                   }}
@@ -4990,6 +5008,16 @@ export default function MapView({
         </div>
         <span className="divider" />
 
+        <label title="Which kind of field the map shows: a project may hold 10 m wind and surface current layers together, and the map shows one at a time. Follows the layer you make active.">
+          Show
+          <select value={shownKind} onChange={(e) => onShownKind(kindOf(e.target.value))}>
+            {KINDS.map((kind) => (
+              <option key={kind} value={kind}>
+                {KIND_LABELS[kind]}
+              </option>
+            ))}
+          </select>
+        </label>
         <label>
           Glyphs
           <select

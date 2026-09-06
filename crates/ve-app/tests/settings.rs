@@ -150,7 +150,7 @@ fn a_colour_scale_edit_changes_the_project_without_a_render() {
 
     let before = projects::current(&state).expect("summary").expect("open");
     assert!(
-        (before.colour_scale_knots - 60.0).abs() < 1e-9,
+        (before.wind_scale_knots - 60.0).abs() < 1e-9,
         "wind default"
     );
 
@@ -164,8 +164,8 @@ fn a_colour_scale_edit_changes_the_project_without_a_render() {
     };
     let key_before = key_of(&state);
 
-    let after = settings::colour_scale_set(&state, 25.0).expect("set");
-    assert!((after.colour_scale_knots - 25.0).abs() < 1e-9);
+    let after = settings::colour_scale_set(&state, "wind", 25.0).expect("set");
+    assert!((after.wind_scale_knots - 25.0).abs() < 1e-9);
     assert!(after.can_undo, "a scale change is a document edit");
     assert_eq!(
         key_of(&state),
@@ -175,7 +175,7 @@ fn a_colour_scale_edit_changes_the_project_without_a_render() {
 
     ve_app::edit::undo_for_test(&state).expect("undo");
     let undone = projects::current(&state).expect("summary").expect("open");
-    assert!((undone.colour_scale_knots - 60.0).abs() < 1e-9);
+    assert!((undone.wind_scale_knots - 60.0).abs() < 1e-9);
 }
 
 /// The preference is the default for *new* projects; the project keeps its own.
@@ -187,16 +187,16 @@ fn the_preference_is_the_default_for_new_projects_only() {
 
     with_project(&state, "wind");
     let wind = projects::current(&state).expect("summary").expect("open");
-    assert!((wind.colour_scale_knots - 35.0).abs() < 1e-9);
+    assert!((wind.wind_scale_knots - 35.0).abs() < 1e-9);
 
     // A current project takes the other default, since currents run an order
     // of magnitude slower.
     with_project(&state, "current");
     let current = projects::current(&state).expect("summary").expect("open");
-    assert!((current.colour_scale_knots - 4.0).abs() < 1e-9);
+    assert!((current.wind_scale_knots - 4.0).abs() < 1e-9);
 
     // Changing the preference afterwards leaves the open project alone.
     settings::default_scales_set(&state, 90.0, 9.0).expect("defaults");
     let unchanged = projects::current(&state).expect("summary").expect("open");
-    assert!((unchanged.colour_scale_knots - 4.0).abs() < 1e-9);
+    assert!((unchanged.wind_scale_knots - 4.0).abs() < 1e-9);
 }

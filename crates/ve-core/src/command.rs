@@ -59,6 +59,15 @@ pub enum Command {
         /// New name.
         after: String,
     },
+    /// Says which field a painted layer is part of (M29).
+    SetLayerParameter {
+        /// Target layer.
+        layer: crate::id::Id,
+        /// Previous kind.
+        before: crate::project::FieldKind,
+        /// New kind.
+        after: crate::project::FieldKind,
+    },
     /// Shows or hides a layer.
     SetLayerVisible {
         /// Target layer.
@@ -320,6 +329,10 @@ impl Command {
                     "Clear the speed filter".into()
                 }
             }
+            Self::SetLayerParameter { after, .. } => match after {
+                crate::project::FieldKind::Wind => "Layer holds wind".into(),
+                crate::project::FieldKind::Current => "Layer holds current".into(),
+            },
             Self::SetLayerVisible { after, .. } => {
                 if *after {
                     "Show layer".into()
@@ -409,6 +422,10 @@ impl Command {
             }
             Self::RenameLayer { layer, after, .. } => {
                 layer_mut(project, *layer)?.name = after.clone();
+                Ok(())
+            }
+            Self::SetLayerParameter { layer, after, .. } => {
+                layer_mut(project, *layer)?.parameter = *after;
                 Ok(())
             }
             Self::SetLayerVisible { layer, after, .. } => {
@@ -576,6 +593,10 @@ impl Command {
             }
             Self::RenameLayer { layer, before, .. } => {
                 layer_mut(project, *layer)?.name = before.clone();
+                Ok(())
+            }
+            Self::SetLayerParameter { layer, before, .. } => {
+                layer_mut(project, *layer)?.parameter = *before;
                 Ok(())
             }
             Self::SetLayerVisible { layer, before, .. } => {
