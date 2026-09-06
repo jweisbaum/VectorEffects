@@ -312,7 +312,10 @@ body {
   accent-color: var(--accent);
 }
 .view-controls .divider { width: 1px; height: 26px; background: var(--border); }
-.view-controls .history { display: flex; gap: 4px; align-items: center; }
+/* Undo and redo are laid out in the same flex line as capture and measure
+   rather than in a box of their own: the box sat a little high, and four
+   items of one size in one line cannot (M28). The group stays for ARIA. */
+.view-controls .history { display: contents; }
 /* Capture, measure, undo and redo are one row of one size (M27): a fixed
    box with the icon centred, so an SVG's own height never decides the
    button's and the four line up top to bottom. */

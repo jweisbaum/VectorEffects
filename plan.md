@@ -2577,7 +2577,9 @@ M27 build, in order, one commit each.
    prefixed one is beside it now, and the rows refuse a shift-press's
    default as well.
 4. **The magnifier magnifies.** Pending.
-5. **Undo and redo sit level with capture and measure.** Pending.
+5. **Undo and redo sit level with capture and measure.** Delivered: the
+   history group is `display: contents`, so its two buttons are items of
+   the same flex line as the other two and the line centres all four alike.
 
 ---
 
