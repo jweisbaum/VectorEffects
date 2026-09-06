@@ -2487,7 +2487,12 @@ anything not done recorded here with its reason.
 6. **The magnifier hides the tool's hover glyphs.** Delivered:
    `showsHoverIndicator` takes `magnifying`, so no tool's footprint or
    glyph is drawn under the magnifier.
-7. **The map is full-window behind the panels.** Pending.
+7. **The map is full-window behind the panels.** Delivered: a positioned
+   `.stage` holds the map absolutely, edge to edge, with the workspace row
+   and the timeline floating over it (`pointer-events: none` on the row,
+   back on for the panels), and the map's chrome is inset by `--dock-left`,
+   `--dock-right` and `--dock-bottom`, which `App` sets from the panel
+   state. A fold no longer resizes the canvas, so nothing re-renders.
 8. **Smaller `Shift`-arrow nudges.** Pending.
 9. **Capture, measure, undo and redo buttons alike and aligned.** Pending.
 10. **Panel toggles on the border, still.** Pending.

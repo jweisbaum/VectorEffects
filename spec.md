@@ -945,6 +945,16 @@ shows rendering is in flight.
 Everything drawn over the map — the active tool's options, the colour legend,
 the cursor readout, selection handles, gesture previews — obeys three rules.
 
+**The map is the whole window, and the panels sit over it** (M27). The
+layer panel, the properties and history panel and the timeline are docked
+over the map's edges rather than beside it, so opening or closing one
+changes nothing about the map's size: no tile is re-rendered and no frame
+redrawn for a panel. The map's own chrome — the option bar, the legend, the
+readout, the preview badge — is inset by the docked panels' widths, so
+nothing the map draws for the user is under one. The cost is that tiles
+under a panel are rendered like any other; invariant 6 prefers that to a
+resize on every fold.
+
 **What the map is showing lives in the title bar; what is being painted lives
 over the map** (M25, D68). The title bar's centre holds the view controls —
 the capture and measure tools, the glyph and projection menus, the graticule

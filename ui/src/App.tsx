@@ -11,6 +11,8 @@ import StartScreen from "./project/StartScreen";
 import UnsavedChangesDialog from "./project/UnsavedChangesDialog";
 import { mayReplaceProject, type UnsavedChoice } from "./project/saveGuard";
 import { pickProjectToOpen, pickProjectToSave } from "./project/dialogs";
+import type { CSSProperties } from "react";
+
 import { stillPasteChord } from "./chords";
 import { api, IpcError } from "./ipc";
 import { reportError, shown, useHint } from "./hint";
@@ -471,6 +473,23 @@ export default function App() {
         </button>
       </div>
 
+      {/*
+        The stage: the map fills it, edge to edge, and the panels sit *over*
+        the map rather than beside it (M27). Opening or closing a panel then
+        changes nothing about the map's size, so no tile is re-rendered and no
+        frame is redrawn for it; the map's own chrome keeps clear of the
+        docked panels through the inset variables below.
+      */}
+      <div
+        className="stage"
+        style={
+          {
+            "--dock-left": panels.left ? "310px" : "22px",
+            "--dock-right": panels.right ? "250px" : "22px",
+            "--dock-bottom": panels.bottom ? "220px" : "28px",
+          } as CSSProperties
+        }
+      >
       <div className="workspace">
         <aside
           className={[
@@ -611,6 +630,8 @@ export default function App() {
           </span>
         </div>
       )}
+
+      </div>
 
       {showSettings && settings !== null && (
         <SettingsDialog

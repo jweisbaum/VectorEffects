@@ -24,11 +24,30 @@ body {
 
 .app { display: flex; flex-direction: column; height: 100%; }
 
-.workspace {
-  display: flex;
+/* The stage holds the map and everything docked over it (M27). The map is
+   positioned against the stage and fills it; the workspace row and the
+   timeline below it are laid out as before but float above the map, so a
+   panel opening or closing never resizes the canvas. */
+.stage {
+  position: relative;
   flex: 1;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
+  --dock-left: 0px;
+  --dock-right: 0px;
+  --dock-bottom: 0px;
 }
+.workspace {
+  display: flex;
+  justify-content: space-between;
+  flex: 1;
+  min-height: 0;
+  /* The row is a frame around the map: only its panels take the pointer. */
+  pointer-events: none;
+}
+.workspace > .sidebar { pointer-events: auto; position: relative; z-index: 2; }
+.stage > .timeline { position: relative; z-index: 2; }
 
 .sidebar {
   width: 250px;
@@ -86,8 +105,9 @@ body {
   flex-direction: row;
   align-items: center;
   gap: 12px;
-  height: auto;
+  height: 28px;
   min-height: 0;
+  box-sizing: border-box;
   padding: 0 12px 0 0;
   border-top: 1px solid var(--border);
   background: #0d1526;
@@ -103,7 +123,9 @@ body {
 }
 .layer-panel .fold.open { transform: none; }
 
-.map { position: relative; flex: 1; min-width: 0; min-height: 0; }
+/* Behind the panels, edge to edge (M27). Its chrome is inset by the docked
+   panels' widths so nothing the map draws for the user sits under one. */
+.map { position: absolute; inset: 0; z-index: 0; pointer-events: auto; }
 
 /* The cursor is set on the element by `cursorFor` (ui/src/map/cursor.ts):
    one rule for every tool, applied per pointer report. Nothing here. */
@@ -133,8 +155,8 @@ body {
 .map-toolbar {
   position: absolute;
   top: 12px;
-  left: 12px;
-  right: 12px;
+  left: calc(var(--dock-left, 0px) + 12px);
+  right: calc(var(--dock-right, 0px) + 12px);
   display: flex;
   flex-wrap: wrap;
   gap: 8px 14px;
@@ -165,8 +187,8 @@ body {
  */
 .map-legend {
   position: absolute;
-  right: 12px;
-  bottom: 12px;
+  right: calc(var(--dock-right, 0px) + 12px);
+  bottom: calc(var(--dock-bottom, 0px) + 12px);
   width: 190px;
   padding: 8px 10px;
   background: var(--panel);
@@ -184,8 +206,8 @@ body {
 
 .map-readout {
   position: absolute;
-  left: 12px;
-  bottom: 12px;
+  left: calc(var(--dock-left, 0px) + 12px);
+  bottom: calc(var(--dock-bottom, 0px) + 12px);
   display: flex;
   gap: 14px;
   padding: 6px 12px;
@@ -957,8 +979,8 @@ body {
 /* The preview badge, bottom right of the map (spec.md 8.7, M26). */
 .map-preview-badge {
   position: absolute;
-  right: 12px;
-  bottom: 48px;
+  right: calc(var(--dock-right, 0px) + 12px);
+  bottom: calc(var(--dock-bottom, 0px) + 48px);
   padding: 4px 10px;
   border: 1px solid #3fbf7f;
   border-radius: 6px;
