@@ -2654,7 +2654,10 @@ the field kind a property of the layer rather than of the project (§4.1).
    intensity's amount runs −100% to +200% with 0 in the middle and as its
    default; the track is piecewise linear about zero (`sliderMath`,
    tested), and the inspector commits on release.
-10. **The divergence slider.** Pending.
+10. **The divergence slider.** Delivered: the same declaration, reversed,
+    with *Divergence* and *Convergence* as its ends and 0 as the default;
+    the readout names the side the value is on ("50% Divergence"), tested.
+    The stored sign is untouched, so no migration and no kernel change.
 11. **The turn tool's direction and amount.** Pending.
 12. **The warp does something.** Pending.
 13. **A start time on the timeline.** Pending.

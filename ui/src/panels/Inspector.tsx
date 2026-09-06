@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import CentredSlider, { signedPercent } from "../CentredSlider";
+import CentredSlider, { readoutFor } from "../CentredSlider";
 import NumberField from "../NumberField";
 
 import { reportError } from "../hint";
@@ -166,7 +166,7 @@ export default function Inspector({
                     lowLabel={property.slider.low_label}
                     highLabel={property.slider.high_label}
                     reversed={property.slider.reversed}
-                    format={signedPercent}
+                    format={readoutFor(property.slider)}
                     // On release, not on every tick: an inspector write is a
                     // document edit and an undo entry (spec.md 8.4).
                     onCommit={(next) => write(property.id, { kind: "number", value: next })}

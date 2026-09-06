@@ -1519,7 +1519,7 @@ the same settings become one object and neither paints differently for it.
 | `size_km` | f32 | all four; the swept stamp's diameter, px or km, so `stamp_space` applies as everywhere else |
 | `feather` | f32 0–1 | all four |
 | `gain` | f32 % (−100…200) | intensify / reduce — a **centred slider** (M29): 0, do nothing, in the middle and the default, −100% at the left end, +200% at the right |
-| `radial` | f32 % (−400…400) | diverge / converge |
+| `radial` | f32 % (−400…400) | diverge / converge — a **centred slider** (M29), *Divergence* at the left end and *Convergence* at the right, 0 — neither — in the middle and the default; the stored sign is untouched, positive diverging, the slider simply reversed |
 | `turn_deg` | f32 ° (−180…180) | rotate flow. A signed *amount*, not a bearing: it is not converted into the project's direction convention (§3.3), and animating it from −170 to 170 unwinds through zero rather than taking the short way round as a bearing would. |
 | `warp_mode` | enum `Push` \| `Twist` | warp |
 | `push_to` | LonLat | warp, `Push`: where the field under the anchor is dragged to |

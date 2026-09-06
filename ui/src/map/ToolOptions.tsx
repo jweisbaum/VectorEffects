@@ -13,7 +13,7 @@
 
 import { memo } from "react";
 
-import CentredSlider, { signedPercent } from "../CentredSlider";
+import CentredSlider, { readoutFor } from "../CentredSlider";
 import NumberField from "../NumberField";
 
 import type { PropertyValue } from "../generated/PropertyValue";
@@ -285,7 +285,7 @@ function Option({
               lowLabel={spec.slider.low_label}
               highLabel={spec.slider.high_label}
               reversed={spec.slider.reversed}
-              format={signedPercent}
+              format={readoutFor(spec.slider)}
               onInput={(next) => onValue({ kind: "number", value: next })}
               onCommit={(next) => onValue({ kind: "number", value: next })}
             />

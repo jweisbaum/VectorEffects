@@ -652,8 +652,16 @@ const INTENSITY: &[PropSpec] = &[
 const DIVERGENCE: &[PropSpec] = &[
     modifier_stamp!(),
     modifier_size!(),
-    // Signed: positive diverges (outward), negative converges.
-    num(PropId::Radial, "Amount", 50.0, -400.0, 400.0, Unit::Percent),
+    // Signed: positive diverges (outward), negative converges. A centred
+    // slider with divergence to the *left* and convergence to the right,
+    // 0 — neither — in the middle and as the default (M29); the stored sign
+    // is untouched, the slider is simply reversed.
+    slider(
+        num(PropId::Radial, "Amount", 0.0, -400.0, 400.0, Unit::Percent),
+        "Divergence",
+        "Convergence",
+        true,
+    ),
     num(PropId::Feather, "Feather", 0.5, 0.0, 1.0, Unit::None),
 ];
 

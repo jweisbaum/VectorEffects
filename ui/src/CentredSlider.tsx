@@ -76,6 +76,28 @@ export default function CentredSlider({
   );
 }
 
+/**
+ * The readout a slider's declaration asks for: a signed percentage when the
+ * ends are numbers, and "50% Divergence" when the ends are words — the word
+ * for the side the value is on.
+ */
+export function readoutFor(slider: {
+  low_label: string;
+  high_label: string;
+  reversed: boolean;
+}): (value: number) => string {
+  const worded = !/%/.test(slider.low_label) && !/%/.test(slider.high_label);
+  if (!worded) return signedPercent;
+  return (value: number) => {
+    const rounded = Math.round(value);
+    if (rounded === 0) return "0%";
+    // The positive end is the left one when reversed.
+    const positiveWord = slider.reversed ? slider.low_label : slider.high_label;
+    const negativeWord = slider.reversed ? slider.high_label : slider.low_label;
+    return `${Math.abs(rounded)}% ${rounded > 0 ? positiveWord : negativeWord}`;
+  };
+}
+
 /** A signed percentage, `+50%`, `−20%`, `0%`. */
 export function signedPercent(value: number): string {
   const rounded = Math.round(value);

@@ -1704,3 +1704,29 @@ fn the_intensity_amount_is_a_centred_slider_from_minus_100_to_plus_200() {
     let slider = amount.slider.as_ref().expect("a slider");
     assert!(!slider.reversed, "more is to the right");
 }
+
+/// The divergence's amount is a centred slider too (M29), reversed: the
+/// positive, diverging sense sits at the left end under the word for it, 0
+/// — neither — in the middle and as the default.
+#[test]
+fn the_divergence_amount_is_a_reversed_centred_slider() {
+    let palette = ve_app::palette::palette();
+    let divergence = palette
+        .iter()
+        .find(|schema| schema.tool == Tool::Divergence)
+        .expect("divergence in the palette");
+    let amount = divergence
+        .options
+        .iter()
+        .find(|option| option.property == "Radial")
+        .expect("the amount");
+    assert!(
+        matches!(amount.default, ve_app::document::PropertyValue::Number { value } if value == 0.0)
+    );
+    let slider = amount.slider.as_ref().expect("a slider");
+    assert!(slider.reversed, "diverging is to the left");
+    assert_eq!(
+        (slider.low_label.as_str(), slider.high_label.as_str()),
+        ("Divergence", "Convergence")
+    );
+}

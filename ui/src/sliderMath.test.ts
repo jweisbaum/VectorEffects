@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { readoutFor, signedPercent } from "./CentredSlider";
 import { positionOf, valueOf } from "./sliderMath";
 
 describe("a centred slider", () => {
@@ -30,5 +31,22 @@ describe("a centred slider", () => {
   it("clamps a thumb pushed past an end", () => {
     expect(valueOf(3, -100, 200)).toBe(200);
     expect(valueOf(-3, -100, 200)).toBe(-100);
+  });
+});
+
+describe("a slider's readout", () => {
+  it("is a signed percentage when the ends are numbers", () => {
+    const read = readoutFor({ low_label: "−100%", high_label: "+200%", reversed: false });
+    expect(read).toBe(signedPercent);
+    expect(read(50)).toBe("+50%");
+    expect(read(-20)).toBe("−20%");
+    expect(read(0)).toBe("0%");
+  });
+
+  it("names the side the value is on when the ends are words", () => {
+    const read = readoutFor({ low_label: "Divergence", high_label: "Convergence", reversed: true });
+    expect(read(50)).toBe("50% Divergence");
+    expect(read(-30)).toBe("30% Convergence");
+    expect(read(0)).toBe("0%");
   });
 });
