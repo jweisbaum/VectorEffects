@@ -223,6 +223,18 @@ function macroRegion(outline: MacroOutline, lon: number, lat: number): Region {
 }
 
 /**
+ * The narrowest span the auto scale gives the ramp, m/s (spec.md 5.3, M27):
+ * a field of one speed would otherwise put its whole range into one colour
+ * stop, and a ramp that goes nowhere says nothing.
+ */
+const AUTO_SCALE_MIN_SPAN_MPS = 0.5;
+
+/** How far the seen range may drift before the auto scale follows it: 2%, and never under 0.1 m/s. */
+function autoScaleTolerance(range: { min: number; max: number }): number {
+  return Math.max(0.1, 0.02 * (range.max - range.min));
+}
+
+/**
  * How far one nudge moves the selection, in CSS pixels (spec.md 8.2, M23).
  *
  * Three, down from eight (M27): a nudge is for the last few pixels of a
@@ -889,9 +901,34 @@ export default function MapView({
   // The project's own scale (spec.md 5.3, M15): two people opening one file
   // see the same map, and the application's preference is only the default a
   // new project got.
-  const rampMaxKnots = project.colour_scale_knots;
-  // The renderer works in stored units; the ramp is chosen in displayed ones.
-  const rampMax = mpsFromKnots(rampMaxKnots);
+  /**
+   * The colour ramp's span. The project's own scale from calm (spec.md 5.3,
+   * M15) — or, with the auto scale on (M27), the slowest to the fastest
+   * speed among the tiles the last frame drew, which the renderer reports
+   * and the next frame paints with. A frame that drew no field falls back
+   * to the project's scale rather than to nothing.
+   */
+  const autoScale = settings?.auto_scale ?? false;
+  const [seenRange, setSeenRange] = useState<{ min: number; max: number } | null>(null);
+  const autoRange = autoScale ? seenRange : null;
+  const rampMin = autoRange ? autoRange.min : 0;
+  const rampMax = autoRange
+    ? Math.max(autoRange.max, autoRange.min + AUTO_SCALE_MIN_SPAN_MPS)
+    : mpsFromKnots(project.colour_scale_knots);
+  const rampMinKnots = Math.round(knotsFromMps(rampMin));
+  const rampMaxKnots = autoRange ? Math.round(knotsFromMps(rampMax)) : project.colour_scale_knots;
+  // What the last frame reported, to compare the next against without a
+  // render in between: a change smaller than the eye can see is not applied,
+  // or the ramp would breathe with every tile that lands.
+  const seenRef = useRef<{ min: number; max: number } | null>(null);
+  const autoScaleRef = useRef(autoScale);
+  autoScaleRef.current = autoScale;
+  // `draw` is built once and reads its inputs through refs; the ramp went in
+  // by closure and so stood still after the first frame — a colour scale
+  // changed in the settings reached the map only when something else rebuilt
+  // the callback. Through a ref, with a redraw when either end moves (M27).
+  const rampRef = useRef({ min: rampMin, max: rampMax });
+  rampRef.current = { min: rampMin, max: rampMax };
   // Barbs are a wind convention and are hidden for current projects (spec.md 5.3).
   const barbsAvailable = project.field_kind === "wind";
   const lastStep = Math.max(0, project.step_count - 1);
@@ -1052,7 +1089,8 @@ export default function MapView({
       glyphStyle: glyphStyleRef.current,
       showGlyphs: showGlyphsRef.current,
       showGraticule: showGraticuleRef.current,
-      rampMax,
+      rampMin: rampRef.current.min,
+      rampMax: rampRef.current.max,
       heldFrame: shown !== null && shown !== frame ? shown : null,
       pixelRatio: window.devicePixelRatio || 1,
       // The gesture's own operation while it is being drawn, and the one it
@@ -1080,7 +1118,23 @@ export default function MapView({
     }
 
     try {
-      renderer.render(state);
+      const seen = renderer.render(state);
+      // The auto scale follows what was drawn (spec.md 5.3, M27). Applied
+      // only when it moved by more than the eye can see, and through state,
+      // so the next frame paints with it and the legend says so.
+      if (autoScaleRef.current) {
+        const last = seenRef.current;
+        const moved =
+          seen === null
+            ? last !== null
+            : last === null ||
+              Math.abs(seen.min - last.min) > autoScaleTolerance(last) ||
+              Math.abs(seen.max - last.max) > autoScaleTolerance(last);
+        if (moved) {
+          seenRef.current = seen;
+          setSeenRange(seen);
+        }
+      }
       // Once every tile of this frame is on screen it is the one to hold.
       const tiles = tilesRef.current;
       if (tiles && tiles.residentCount(frame, unique) === unique.length) {
@@ -2541,7 +2595,7 @@ export default function MapView({
         ? null
         : footprintOf(schemaTool, toolState, drawing, camera);
     const field = previewField(schemaTool ?? "brush", toolState, inProgress);
-    const paint = rampCss(mpsFromKnots(field.knots), rampMax, PREVIEW_MIN_ALPHA);
+    const paint = rampCss(mpsFromKnots(field.knots), rampMax, PREVIEW_MIN_ALPHA, rampMin);
 
     // What the overlay draws is the tool's preview kind, decided in one place
     // (`overlayPlan`): the field for a tool that paints one, an outline for the
@@ -2676,6 +2730,7 @@ export default function MapView({
     macroId,
     near,
     rampMax,
+    rampMin,
     schema,
     showGlyphs,
     tool,
@@ -2941,6 +2996,11 @@ export default function MapView({
   useEffect(() => {
     applyCursor(false, dragging.current !== null);
   }, [applyCursor]);
+  // Either end of the ramp moving is a new frame: the tiles are the same,
+  // the colours are not.
+  useEffect(() => {
+    requestDraw();
+  }, [rampMin, rampMax, requestDraw]);
 
   const onPointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -3649,7 +3709,7 @@ export default function MapView({
       const operator = operatorRef.current;
       const settled: HeldPreview = {
         footprint,
-        paint: rampCss(mpsFromKnots(field.knots), rampMax, PREVIEW_MIN_ALPHA),
+        paint: rampCss(mpsFromKnots(field.knots), rampMax, PREVIEW_MIN_ALPHA, rampMin),
         knots: field.knots,
         azimuthAt: field.azimuthAt,
         revision: null,
@@ -3681,7 +3741,7 @@ export default function MapView({
         setBusy(false);
       }
     },
-    [activeLayer, onProjectChanged, rampMax, requestDraw],
+    [activeLayer, onProjectChanged, rampMax, rampMin, requestDraw],
   );
 
   /** Commits the gesture in progress, if it has enough placed to mean anything. */
@@ -4149,7 +4209,7 @@ export default function MapView({
           view,
           frame: `${projectRef.current.revision}/0`,
           glyphStyle: "barb", showGlyphs: true,
-          showGraticule: true, rampMax, heldFrame: null,
+          showGraticule: true, rampMin, rampMax, heldFrame: null,
           pixelRatio: window.devicePixelRatio || 1,
         });
       }
@@ -4161,7 +4221,7 @@ export default function MapView({
           view,
           frame: `${projectRef.current.revision}/0`,
           glyphStyle: "barb", showGlyphs: true,
-          showGraticule: true, rampMax, heldFrame: null,
+          showGraticule: true, rampMin, rampMax, heldFrame: null,
           pixelRatio: window.devicePixelRatio || 1,
         });
       }
@@ -4179,6 +4239,7 @@ export default function MapView({
     onProjectChanged,
     project.direction_convention,
     rampMax,
+    rampMin,
     requestDraw,
   ]);
 
@@ -4699,6 +4760,17 @@ export default function MapView({
           />
           Graticule
         </label>
+        <label title="Auto scale: run the colour ramp from the slowest to the fastest speed in view, across every layer and object. A view setting: it changes nothing stored or exported.">
+          <input
+            type="checkbox"
+            checked={autoScale}
+            disabled={settings === null}
+            onChange={(e) => {
+              void api.setAutoScale(e.target.checked).then(onSettings);
+            }}
+          />
+          Auto scale
+        </label>
           </div>,
           viewSlot,
         )}
@@ -4709,7 +4781,12 @@ export default function MapView({
           style={{ background: `linear-gradient(to right, ${RAMP_STOPS.join(", ")})` }}
         />
         <div className="legend-labels">
-          <span>0</span>
+          <span>{rampMinKnots}</span>
+          {autoRange && (
+            <span className="legend-auto" title="Auto scale: the ramp spans the speeds in view">
+              auto
+            </span>
+          )}
           <span>{rampMaxKnots} kt</span>
         </div>
       </div>

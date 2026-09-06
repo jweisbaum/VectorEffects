@@ -37,4 +37,14 @@ macro_directory: string,
  * rather than the project's for exactly that reason: it says how *this*
  * person likes to look at a map, not what the map is.
  */
-projection: string, };
+projection: string, 
+/**
+ * Whether the colour ramp follows the field in view (M27, spec.md 5.3).
+ *
+ * On, the ramp runs from the slowest to the fastest speed among the
+ * tiles on screen, across every layer and object, and the legend says
+ * so; off, it runs from calm to the project's own scale. A view
+ * preference like the projection: it changes no stored or exported
+ * value, only which colour a speed is drawn in.
+ */
+auto_scale: boolean, };

@@ -205,6 +205,7 @@ ${PROJECTION}
 uniform vec4 uTileGeo;      // west, north, spanX, spanY
 uniform sampler2D uTile;
 uniform float uSpeedScale;  // full-scale speed, m/s
+uniform float uRampMin;     // speed mapped to the bottom of the ramp (0 unless auto-scaled)
 uniform float uRampMax;     // speed mapped to the top of the ramp
 uniform float uDim;         // 1.0 normally, lower while a frame is stale
 ${MASK}
@@ -272,7 +273,7 @@ vec2 tileUV() {
 
 void main() {
   float speed = sampleSpeed(tileUV());
-  vec3 colour = ramp(speed / max(uRampMax, 0.001));
+  vec3 colour = ramp((speed - uRampMin) / max(uRampMax - uRampMin, 0.001));
   // Calm water stays transparent so the basemap shows through.
   // Capped below 1 so the basemap stays visible through the field; calm areas
   // fade out entirely so the map is readable where there is nothing to show.

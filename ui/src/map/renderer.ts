@@ -106,6 +106,11 @@ export interface RenderState {
   glyphStyle: "arrow" | "barb";
   showGlyphs: boolean;
   showGraticule: boolean;
+  /**
+   * Speed mapped to the bottom of the colour ramp, m/s: 0 unless the auto
+   * scale is on (spec.md 5.3, M27).
+   */
+  rampMin: number;
   /** Speed mapped to the top of the colour ramp, m/s. */
   rampMax: number;
   /**
@@ -231,7 +236,7 @@ export class MapRenderer {
     this.geoUniforms = uniforms(gl, this.geoProgram, [...shared, "uColor"]);
     const mask = ["uMask", "uMaskSize", "uMaskMode"];
     this.rasterUniforms = uniforms(gl, this.rasterProgram, [
-      ...shared, ...mask, "uTileGeo", "uTile", "uSpeedScale", "uRampMax", "uDim",
+      ...shared, ...mask, "uTileGeo", "uTile", "uSpeedScale", "uRampMin", "uRampMax", "uDim",
     ]);
     this.imageUniforms = uniforms(gl, this.imageProgram, [
       ...shared, "uPlaceLon", "uPlaceLat", "uImage", "uOpacity",
@@ -418,13 +423,15 @@ export class MapRenderer {
     gl.bindVertexArray(this.quadVao);
     gl.uniform1i(this.rasterUniforms.uTile ?? null, 0);
     gl.uniform1f(this.rasterUniforms.uSpeedScale ?? null, SPEED_SCALE_MPS);
+    gl.uniform1f(this.rasterUniforms.uRampMin ?? null, state.rampMin);
     gl.uniform1f(this.rasterUniforms.uRampMax ?? null, state.rampMax);
     this.setMask(this.rasterUniforms, state.view, mode);
     gl.activeTexture(gl.TEXTURE0);
 
     for (const tile of tiles) {
-      const { texture, held } = this.textureFor(state, tile);
+      const { texture, held, frame } = this.textureFor(state, tile);
       if (!texture) continue;
+      this.noteRange(frame, tile);
       const b = tileBounds(tile.z, tile.x, tile.y);
       this.setShared(this.rasterUniforms, camera, state.view, tile.lonOffset);
       gl.uniform1f(this.rasterUniforms.uDim ?? null, held ? HELD_DIM : 1.0);
@@ -444,10 +451,33 @@ export class MapRenderer {
   private textureFor(
     state: RenderState,
     tile: VisibleTile,
-  ): { texture: WebGLTexture | null; held: boolean } {
+  ): { texture: WebGLTexture | null; held: boolean; frame: string } {
     const texture = this.tiles.get(state.frame, tile.z, tile.x, tile.y);
-    if (texture || !state.heldFrame) return { texture, held: false };
-    return { texture: this.tiles.peek(state.heldFrame, tile.z, tile.x, tile.y), held: true };
+    if (texture || !state.heldFrame) return { texture, held: false, frame: state.frame };
+    return {
+      texture: this.tiles.peek(state.heldFrame, tile.z, tile.x, tile.y),
+      held: true,
+      frame: state.heldFrame,
+    };
+  }
+
+  /**
+   * The range of speeds across the tiles the last frame drew, in m/s, or null
+   * when none of them held a field (spec.md 5.3, M27). Accumulated by the
+   * raster pass from each tile's own range, which the cache read at upload.
+   */
+  private seen: { min: number; max: number } | null = null;
+
+  private noteRange(frame: string, tile: VisibleTile): void {
+    const range = this.tiles.rangeOf(frame, tile.z, tile.x, tile.y);
+    if (range === null) return;
+    const min = (range[0] / 0xffff) * SPEED_SCALE_MPS;
+    const max = (range[1] / 0xffff) * SPEED_SCALE_MPS;
+    if (this.seen === null) this.seen = { min, max };
+    else {
+      if (min < this.seen.min) this.seen.min = min;
+      if (max > this.seen.max) this.seen.max = max;
+    }
   }
 
   /** Graticule interval that keeps lines at least ~70 px apart. */
@@ -569,9 +599,15 @@ export class MapRenderer {
     }
   }
 
-  render(state: RenderState): void {
+  /**
+   * Draws a frame and returns the range of speeds across the field tiles it
+   * drew, in m/s — null when none held a field. What the auto scale
+   * (spec.md 5.3) sets the next frame's ramp from.
+   */
+  render(state: RenderState): { min: number; max: number } | null {
     const gl = this.gl;
     const offsets = this.worldOffsets(state);
+    this.seen = null;
     const lod = this.lodFor(state.camera.pxPerDeg);
 
     gl.viewport(0, 0, state.view.width, state.view.height);
@@ -680,6 +716,7 @@ export class MapRenderer {
       this.captureRequest = null;
       resolve(this.readPixels(state.view));
     }
+    return this.seen;
   }
 
   private readPixels(view: Viewport): ImageData | null {

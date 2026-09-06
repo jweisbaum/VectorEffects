@@ -205,6 +205,7 @@ body {
   border-radius: 8px;
 }
 .legend-bar { height: 9px; border-radius: 3px; }
+.legend-auto { color: var(--accent); font-variant: small-caps; letter-spacing: 0.08em; }
 .legend-labels {
   display: flex;
   justify-content: space-between;

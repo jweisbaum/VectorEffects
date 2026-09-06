@@ -2507,7 +2507,17 @@ anything not done recorded here with its reason.
     store gained an `activity` slot the map sets from its pending-tile
     count, and `StatusHint` leads its line with it; the title bar's span is
     gone.
-12. **Auto scale.** Pending.
+12. **Auto scale.** Delivered: `AppSettings.auto_scale` and
+    `set_auto_scale`; each tile's speed range is read from its bytes at
+    upload (`tileSpeedRange`, tested), the renderer accumulates the range of
+    the tiles it drew and returns it from `render`, and the map applies it
+    to the next frame's ramp — `uRampMin` joined `uRampMax` in the raster
+    shader and `rampCss` — when it has moved by more than 2% or 0.1 m/s. The
+    toggle is in the title bar beside the graticule; the legend's ends
+    follow and say *auto*. Found on the way: `draw` is built once and read
+    `rampMax` by closure, so a colour scale changed in the settings reached
+    the map only when something else rebuilt the callback; both ends go
+    through a ref now, with a redraw when either moves.
 13. **The macro preview: frame, lockout, stamp cursor, autoplay, badge.** Pending.
 
 ---

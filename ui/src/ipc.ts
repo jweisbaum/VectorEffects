@@ -540,6 +540,8 @@ export const api = {
   /** How the map lays the world out (M11). A view preference only. */
   setProjection: (projection: string) =>
     call<AppSettings>("set_projection", { projection }),
+  /** Whether the colour ramp follows the field in view (spec.md 5.3, M27). */
+  setAutoScale: (on: boolean) => call<AppSettings>("set_auto_scale", { on }),
   /** What the autosave thread does with unsaved work (D70). */
   setAutosaveMode: (mode: AutosaveMode) => call<AppSettings>("set_autosave_mode", { mode }),
   /** Where the macro library lives. */

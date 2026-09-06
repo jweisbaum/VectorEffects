@@ -15,7 +15,14 @@ export type TileStatus = "ready" | "pending" | "failed";
 interface Entry {
   texture: WebGLTexture | null;
   status: TileStatus;
+  /**
+   * The tile's speed range as 16-bit fractions of full scale, read once at
+   * upload (`tileSpeedRange`), or null for a tile with no field in it.
+   */
+  range: [number, number] | null;
 }
+
+import { tileSpeedRange } from "./tileRange";
 
 /** Tracks fetched tiles and their textures. */
 export class TileCache {
@@ -62,7 +69,7 @@ export class TileCache {
       return existing.texture;
     }
 
-    const entry: Entry = { texture: null, status: "pending" };
+    const entry: Entry = { texture: null, status: "pending", range: null };
     this.entries.set(key, entry);
     void this.fetch(key, entry);
     this.evict();
@@ -72,6 +79,14 @@ export class TileCache {
   /** The texture for a tile if it is resident, fetching nothing. */
   peek(frame: string, z: number, x: number, y: number): WebGLTexture | null {
     return this.entries.get(TileCache.key(frame, z, x, y))?.texture ?? null;
+  }
+
+  /**
+   * A resident tile's speed range as 16-bit fractions of full scale, or null
+   * when it is not resident or holds no field. Fetches nothing.
+   */
+  rangeOf(frame: string, z: number, x: number, y: number): [number, number] | null {
+    return this.entries.get(TileCache.key(frame, z, x, y))?.range ?? null;
   }
 
   /** How many of a frame's tiles are resident, fetching nothing. */
@@ -109,6 +124,7 @@ export class TileCache {
 
       entry.texture = this.upload(bytes);
       entry.status = entry.texture ? "ready" : "failed";
+      entry.range = entry.texture ? tileSpeedRange(bytes) : null;
     } catch (error) {
       entry.status = "failed";
       const message = `tile ${key} failed: ${error instanceof Error ? error.message : String(error)}`;

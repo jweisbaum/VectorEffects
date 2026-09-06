@@ -146,6 +146,7 @@ pub fn run() -> anyhow::Result<()> {
             settings::set_macro_directory,
             settings::set_autosave_mode,
             settings::set_projection,
+            settings::set_auto_scale,
             autosave::autosaves,
             autosave::recover_autosave,
             autosave::discard_autosave,

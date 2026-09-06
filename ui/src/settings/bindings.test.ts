@@ -16,6 +16,7 @@ const settings: AppSettings = {
   default_current_scale_knots: 6,
   macro_directory: "",
   projection: "equirectangular",
+  auto_scale: false,
 };
 
 describe("chordOf", () => {

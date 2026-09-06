@@ -42,6 +42,14 @@ describe("rampCss", () => {
     expect(rampCss(30 * 0.06, 30)).toMatch(/, 0\.720\)$/);
   });
 
+  /** With the auto scale on the ramp spans `rampMin` to `rampMax`, as the shader's does. */
+  it("runs from the ramp's bottom when one is given", () => {
+    const [r, g, b] = RAMP_COLOURS[0]!;
+    const bottom = `rgba(${Math.round(r * 255)}, ${Math.round(g * 255)}, ${Math.round(b * 255)}`;
+    expect(rampCss(20, 30, 0, 20)).toMatch(new RegExp(`^${bottom.replace(/[()]/g, "\\$&")}`));
+    expect(rampCss(20, 30, 0, 20)).not.toBe(rampCss(20, 30, 0, 0));
+  });
+
   /** A preview needs to be visible even when the field it previews would not be. */
   it("honours a minimum alpha", () => {
     expect(rampCss(0, 30, 0.28)).toMatch(/, 0\.280\)$/);

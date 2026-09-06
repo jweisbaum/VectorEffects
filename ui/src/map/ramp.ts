@@ -66,8 +66,10 @@ export function rampColour(t: number): Rgb {
  * need the shape visible whatever the speed -- a preview of a calm stroke still
  * has to be something the user can aim.
  */
-export function rampCss(speed: number, rampMax: number, minAlpha = 0): string {
-  const [r, g, b] = rampColour(speed / Math.max(rampMax, 0.001));
+export function rampCss(speed: number, rampMax: number, minAlpha = 0, rampMin = 0): string {
+  // The same span the shader uses: from `rampMin` — 0 unless the auto scale
+  // is on (spec.md 5.3, M27) — to `rampMax`.
+  const [r, g, b] = rampColour((speed - rampMin) / Math.max(rampMax - rampMin, 0.001));
   const alpha = Math.max(
     minAlpha,
     Math.min(1, Math.max(0, speed / (rampMax * 0.06))) * 0.72,

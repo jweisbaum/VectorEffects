@@ -906,7 +906,19 @@ The map **always** shows speed and direction. `u` and `v` are never displayed
 anywhere in the UI.
 
 - **Speed** as a colour ramp raster, sampled from the render tiles (§7.7), with
-  a legend and an auto/manual scale control.
+  a legend and an auto/manual scale control. Manual, the ramp runs from calm
+  to the project's colour scale (§4.1). **Auto scale** (M27) runs it from the
+  slowest to the fastest speed among the tiles on screen, across every layer
+  and object — each tile's range is read once from its bytes as it is
+  uploaded, the frame reports the range it drew, and the next frame paints
+  with it, with the legend's ends following and marked *auto*. It moves only
+  when the range has moved by more than the eye can see, so it does not
+  breathe with every tile that lands; a field of one speed still gets half a
+  metre per second of ramp; unpainted cells are left out of the low end,
+  since the tile encodes undefined as calm. It is an application setting
+  (§8.6), toggled from the title bar's view controls beside the graticule: a
+  way of looking, not a fact about the project, and it changes no stored or
+  exported value.
 - **Direction** as instanced glyphs on a lattice anchored to the globe — points
   sit at whole-degree multiples chosen so their on-screen spacing stays near a
   target, and the step snaps to a fixed ladder so it changes only at discrete
@@ -2270,7 +2282,9 @@ gives way when the default moves; one the user set stands.
 **Display.** The colour scale is a **project** setting (§4.1, §5.3) — two
 people opening one file should see the same map — so the dialog edits the open
 project's scale in place, as an undoable document write, and separately holds
-the default a *new* project of each kind gets. Currents run an order of
+the default a *new* project of each kind gets. The **auto scale** (§5.3) and
+the projection are *application* settings set from the title bar: how this
+person looks at a map, not what the map is. Currents run an order of
 magnitude slower than wind, so the two defaults are separate; a project made
 before the setting existed takes the default for its kind and looks exactly as
 it did. **Changing a scale costs no tile**: tiles carry speed, not colour, so

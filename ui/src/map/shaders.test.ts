@@ -189,7 +189,7 @@ describe("the renderer's uniform lookups", () => {
     const known = new Set([
       "uCamera", "uViewport", "uLonOffset", "uProjection",
       "uMask", "uMaskSize", "uMaskMode",
-      "uTileGeo", "uTile", "uSpeedScale", "uRampMax", "uDim",
+      "uTileGeo", "uTile", "uSpeedScale", "uRampMin", "uRampMax", "uDim",
       "uGlyphOrigin", "uGlyphStep", "uGrid", "uSpacing",
       "uStyle", "uSizeScale", "uColor", "uPixelRatio",
     ]);

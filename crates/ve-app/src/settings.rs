@@ -271,6 +271,14 @@ pub struct AppSettings {
     /// rather than the project's for exactly that reason: it says how *this*
     /// person likes to look at a map, not what the map is.
     pub projection: String,
+    /// Whether the colour ramp follows the field in view (M27, spec.md 5.3).
+    ///
+    /// On, the ramp runs from the slowest to the fastest speed among the
+    /// tiles on screen, across every layer and object, and the legend says
+    /// so; off, it runs from calm to the project's own scale. A view
+    /// preference like the projection: it changes no stored or exported
+    /// value, only which colour a speed is drawn in.
+    pub auto_scale: bool,
 }
 
 /// The map projections the view offers, in the order the menu lists them.
@@ -290,6 +298,7 @@ impl Default for AppSettings {
             default_current_scale_knots: 6.0,
             macro_directory: String::new(),
             projection: PROJECTIONS[0].to_owned(),
+            auto_scale: false,
         }
     }
 }
@@ -518,6 +527,22 @@ pub fn projection_set(state: &AppState, projection: String) -> Result<AppSetting
     let file = state.paths.settings_file();
     with_session(state, |session| {
         session.settings.projection = projection.clone();
+        session.save_settings(&file)?;
+        Ok(session.settings.clone())
+    })
+}
+
+/// Sets whether the colour ramp follows the field in view (M27).
+#[tauri::command]
+pub fn set_auto_scale(state: tauri::State<'_, AppState>, on: bool) -> Result<AppSettings> {
+    auto_scale_set(&state, on)
+}
+
+/// Implementation of [`set_auto_scale`].
+pub fn auto_scale_set(state: &AppState, on: bool) -> Result<AppSettings> {
+    let file = state.paths.settings_file();
+    with_session(state, |session| {
+        session.settings.auto_scale = on;
         session.save_settings(&file)?;
         Ok(session.settings.clone())
     })
