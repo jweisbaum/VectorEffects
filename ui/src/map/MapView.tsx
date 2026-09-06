@@ -82,6 +82,7 @@ import {
 import type { MeasurementView } from "../generated/MeasurementView";
 import type { MeasurementKind } from "../generated/MeasurementKind";
 import { showsHoverIndicator, showsMagnifier } from "./hover";
+import { trackKeyframes } from "./macroTrack";
 import { RAMP_STOPS, rampCss } from "./ramp";
 import { parseBasemap } from "./format";
 import { marqueeBounds } from "./marquee";
@@ -2161,10 +2162,15 @@ export default function MapView({
    * redrawing the whole map to move a cursor outline.
    */
   /**
-   * A macro's footprint at a pointer: its region outline, dashed, and — for
-   * one that recorded movement — the track its centre will follow, one dot
-   * per frame. What the insert tool's hover and the preview's stamp hover
-   * both draw (spec.md 8.7, M27).
+   * A macro's footprint at a pointer: its region outline, dashed, where a
+   * click would put it — and, for one that recorded movement, **where it
+   * goes**: the outline again at every keyframe of its track, fainter, with
+   * the path its centre follows drawn through them (spec.md 8.7, M27). The
+   * keys are read off the track (`trackKeyframes`): a saved macro holds no
+   * keys, only frames, and the frames bend only where a key was placed.
+   * Static: the hover says the whole motion at once, and nothing animates
+   * under the pointer. What the insert tool's hover and the preview's stamp
+   * hover both draw.
    */
   const drawMacroFootprint = useCallback(
     (
@@ -2176,22 +2182,39 @@ export default function MapView({
     ) => {
       const camera = cameraRef.current;
       const view = viewRef.current;
-      const outline = ring.map((p) => toScreen(camera, view, { lon: p[0], lat: p[1] }));
-      const first = outline[0];
-      if (!first) return;
+      const outlineAt = (dx: number, dy: number, stroke: string, fill: string | null) => {
+        const outline = ring.map((p) =>
+          toScreen(camera, view, { lon: p[0] + dx, lat: p[1] + dy }),
+        );
+        const first = outline[0];
+        if (!first) return;
+        context.beginPath();
+        context.moveTo(first.x, first.y);
+        for (const point of outline.slice(1)) context.lineTo(point.x, point.y);
+        context.closePath();
+        if (fill !== null) {
+          context.fillStyle = fill;
+          context.fill();
+        }
+        context.strokeStyle = stroke;
+        context.stroke();
+      };
       context.save();
-      context.beginPath();
-      context.moveTo(first.x, first.y);
-      for (const point of outline.slice(1)) context.lineTo(point.x, point.y);
-      context.closePath();
-      context.fillStyle = "rgba(140, 255, 190, 0.08)";
-      context.fill();
-      context.strokeStyle = "rgba(150, 255, 200, 0.95)";
       context.lineWidth = Math.max(1, dpr);
       context.setLineDash([6 * dpr, 4 * dpr]);
-      context.stroke();
+      if (track && track.length > 1) {
+        // The later keys first, so the box at the pointer is drawn on top.
+        const keys = trackKeyframes(track);
+        for (const index of keys.slice(1).reverse()) {
+          const [dx, dy] = track[index] as [number, number];
+          outlineAt(dx, dy, "rgba(150, 255, 200, 0.55)", null);
+        }
+      }
+      outlineAt(0, 0, "rgba(150, 255, 200, 0.95)", "rgba(140, 255, 190, 0.08)");
       context.setLineDash([]);
-      if (track) {
+      if (track && track.length > 1) {
+        // The path the centre follows, through every frame, so a curve reads
+        // as a curve and not as a chord between its keys.
         const path = track.map(([dx, dy]) =>
           toScreen(camera, view, { lon: at.lon + dx, lat: at.lat + dy }),
         );
@@ -2201,14 +2224,7 @@ export default function MapView({
           context.moveTo(start.x, start.y);
           for (const point of path.slice(1)) context.lineTo(point.x, point.y);
           context.strokeStyle = "rgba(150, 255, 200, 0.75)";
-          context.lineWidth = Math.max(1, dpr);
           context.stroke();
-          context.fillStyle = "rgba(150, 255, 200, 0.95)";
-          for (const point of path) {
-            context.beginPath();
-            context.arc(point.x, point.y, 2.5 * dpr, 0, Math.PI * 2);
-            context.fill();
-          }
         }
       }
       context.restore();

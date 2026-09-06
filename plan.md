@@ -2465,6 +2465,14 @@ title bar, the map or a chord. **Not clicked through in the running app**:
 item 5 in particular is a fix for the one cause the code shows, and item 12
 was measured by its tests and not by eye.
 
+**Follow-up, 2026-09-06.** The stamp hover's track was a dot per frame; the
+user asked for the motion shown as a box at each keyframe with the path
+between. A saved macro holds no keys, so `trackKeyframes`
+(`ui/src/map/macroTrack.ts`, tested) reads them off the track — the frames
+where the step changes, which under great-circle interpolation is exactly
+where a key was placed, a pause included — and `drawMacroFootprint` draws
+the outline at each, fainter, behind the one at the pointer.
+
 1. **Hover indicator stands down inside a selected region.** Delivered: the
    footprint was drawn under the paint bucket, so a click that would fill
    the region looked as though it would paint a spot. `showsHoverIndicator`

@@ -2376,7 +2376,13 @@ and restores everything.
 
 **Insert.** Pick a macro, and before the click the pointer carries the macro's
 **region outline**, in the region's colour, and for a macro that recorded
-movement the **track** its centre will follow, one dot per frame. Click the
+movement **where it goes**: the outline again, fainter, at every **keyframe**
+of its track, with the path its centre follows drawn through them. Static —
+the hover says the whole motion at once and nothing animates under the
+pointer. A saved macro holds frames and not keys, and between keys the
+position interpolates, so the keys are read off the track as the frames where
+it bends, speeds up, slows down or stops (`trackKeyframes`); the preview's
+stamp hover (above) draws the same thing from the same function. Click the
 map, and a macro object lands with its
 region centred on the click, **in the active layer, beginning at the current
 step**: its active range starts there, which is where its frames are measured
