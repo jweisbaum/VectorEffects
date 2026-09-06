@@ -142,6 +142,15 @@ export default function LayerPanel({
     run(isLayer ? api.renameLayer(id, name) : api.renameObject(id, name));
   };
 
+  /**
+   * A shift-press on a row extends the selection and must not also start a
+   * text selection across the rows, which is the browser's default for a
+   * shift-click (M28). Belt to the stylesheet's `user-select` braces.
+   */
+  const noTextSelect = (event: React.MouseEvent) => {
+    if (event.shiftKey) event.preventDefault();
+  };
+
   /** Click semantics: plain replaces the selection, accel adds or removes. */
   const clickObject = (id: number, layer: number, event: React.MouseEvent) => {
     onActivateLayer(layer);
@@ -227,6 +236,7 @@ export default function LayerPanel({
                   .filter(Boolean)
                   .join(" ")}
                 onClick={() => onActivateLayer(layer.id)}
+                onMouseDown={noTextSelect}
                 title="Click to make this the active layer"
                 draggable
                 onDragStart={(e) => {
@@ -388,6 +398,7 @@ export default function LayerPanel({
                         .filter(Boolean)
                         .join(" ")}
                       draggable
+                      onMouseDown={noTextSelect}
                       onDragStart={(e) => {
                         e.stopPropagation();
                         e.dataTransfer.effectAllowed = "move";

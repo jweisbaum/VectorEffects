@@ -2572,7 +2572,10 @@ M27 build, in order, one commit each.
    document's last frame was *held*, dimmed, under the preview until the
    preview's own first frame had landed and been replaced. Test in
    `macros.rs`.
-3. **Shift-click in the layer panel still selected text.** Pending.
+3. **Shift-click in the layer panel still selected text.** Delivered: M27's
+   rule was the unprefixed `user-select`, which WebKit does not read; the
+   prefixed one is beside it now, and the rows refuse a shift-press's
+   default as well.
 4. **The magnifier magnifies.** Pending.
 5. **Undo and redo sit level with capture and measure.** Pending.
 

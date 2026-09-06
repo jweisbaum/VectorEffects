@@ -685,9 +685,11 @@ body {
 
 /* A shift-click across rows extends the selection; without this the browser
    also swept the rows' text into a text selection (M27). The rename field is
-   the one place text is meant to be selected. */
-.layer-panel .layers { user-select: none; }
-.layer-panel .layers input { user-select: text; }
+   the one place text is meant to be selected. WebKit reads only the prefixed
+   property, which is why the unprefixed one alone did nothing (M28); the
+   rows also refuse the shift-press itself, in `LayerPanel`. */
+.layer-panel .layers { -webkit-user-select: none; user-select: none; }
+.layer-panel .layers input { -webkit-user-select: text; user-select: text; }
 
 .layer-panel button,
 .inspector button {
