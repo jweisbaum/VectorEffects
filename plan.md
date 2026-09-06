@@ -2547,10 +2547,15 @@ the outline at each, fainter, behind the one at the pointer.
 
 ---
 
-### M28 — Polish from the third pass · **in progress**
+### M28 — Polish from the third pass · **complete**
 
 **Goal:** the five findings the user handed over on 2026-09-06 after the
 M27 build, in order, one commit each.
+
+**Delivered 2026-09-06**, five commits `M28.1`–`M28.5`. The reachability
+sweep finds the same four uncalled methods as M27's and nothing new; the
+stamp-only preview command is gone with its caller. Not clicked through:
+the eraser's sweep and the loupe in particular want a look in the app.
 
 1. **A real eraser.** Delivered: `ERASE`, a frontend-only tool with the
    others of its kind, a palette button, `X`, an icon and a crosshair. It
@@ -2576,7 +2581,11 @@ M27 build, in order, one commit each.
    rule was the unprefixed `user-select`, which WebKit does not read; the
    prefixed one is beside it now, and the rows refuse a shift-press's
    default as well.
-4. **The magnifier magnifies.** Pending.
+4. **The magnifier magnifies.** Delivered: the ring holds the GL canvas
+   under the pointer at 2.5×, clipped to the circle, copied in the same
+   frame as the GL pass; a pointer move with the eyedropper armed requests
+   a whole frame, since the drawing buffer is not preserved between frames
+   and an overlay-only redraw would copy a cleared one.
 5. **Undo and redo sit level with capture and measure.** Delivered: the
    history group is `display: contents`, so its two buttons are items of
    the same flex line as the other two and the line centres all four alike.

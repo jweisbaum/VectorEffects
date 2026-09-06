@@ -224,6 +224,10 @@ function macroRegion(outline: MacroOutline, lon: number, lat: number): Region {
   }
 }
 
+/** The eyedropper's loupe: how much larger the map is inside the ring, and the ring's radius. */
+const MAGNIFIER_ZOOM = 2.5;
+const MAGNIFIER_RADIUS_CSS = 44;
+
 /**
  * Whether a frame token names the macro preview's scene: its revision has
  * bit 62 set (D71), which no document revision reaches.
@@ -2752,8 +2756,34 @@ export default function MapView({
     // position waiting — so arming the eyedropper costs no second stream.
     if (cursor && magnifying) {
       const sample = readoutStore.current?.get().sample ?? null;
-      const radius = 22 * dpr;
+      const radius = MAGNIFIER_RADIUS_CSS * dpr;
       context.save();
+      // The map under the pointer, enlarged into the ring (M28). Copied from
+      // the GL canvas, which still holds this frame because the overlay is
+      // drawn in the same frame as the GL pass — the drawing buffer is not
+      // preserved between frames, which is why a pointer move with the
+      // magnifier up asks for a whole frame and not the overlay alone.
+      const source = canvasRef.current;
+      if (source) {
+        const span = (radius * 2) / MAGNIFIER_ZOOM;
+        context.save();
+        context.beginPath();
+        context.arc(cursor.x, cursor.y, radius, 0, Math.PI * 2);
+        context.clip();
+        context.imageSmoothingEnabled = false;
+        context.drawImage(
+          source,
+          cursor.x - span / 2,
+          cursor.y - span / 2,
+          span,
+          span,
+          cursor.x - radius,
+          cursor.y - radius,
+          radius * 2,
+          radius * 2,
+        );
+        context.restore();
+      }
       context.strokeStyle = "rgba(255, 255, 255, 0.95)";
       context.lineWidth = Math.max(1, 1.5 * dpr);
       context.beginPath();
@@ -3762,7 +3792,10 @@ export default function MapView({
 
     // A tool's hover indicator follows the cursor, and so does a pick's
     // crosshair — and so does the rubber line of a gesture being built up.
-    if (tool !== HAND || picking !== null) requestOverlay();
+    // The magnifier copies the GL canvas, so it needs the whole frame drawn
+    // again under it, not the overlay alone (M28).
+    if (eyedropperRef.current) requestDraw();
+    else if (tool !== HAND || picking !== null) requestOverlay();
 
     if (dragging.current) {
       const dx = point.x - dragging.current.x;

@@ -2000,7 +2000,10 @@ indicator is not drawn there** — the click makes the object from the region,
 and a footprint under the bucket said it would paint a spot instead
 (`showsHoverIndicator`, one rule beside the cursor's); while the eyedropper is armed
 the cursor hides and the overlay draws a **magnifier** at the pointer — a ring
-with a plus, the field there as the project's glyph, and the speed and
+holding **the map under the pointer at two and a half times** (M28; copied
+from the GL canvas in the same frame, which is why a pointer move with the
+magnifier up redraws the frame and not the overlay alone), a plus at its
+centre, the field there as the project's glyph, and the speed and
 direction the click will take, from the readout's own sample, **and no
 hover indicator under it** on any tool: the click samples rather than
 paints, and a footprint and glyph under the magnifier were two arrows
