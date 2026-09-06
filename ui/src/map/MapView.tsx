@@ -2557,6 +2557,10 @@ export default function MapView({
     // point, so a single click produces nothing to show (spec.md 6.2) — and
     // only where the click *would* produce it: inside a selected region the
     // click fills the region and the cursor is the bucket (`showsHoverIndicator`).
+    const magnifying = showsMagnifier({
+      eyedropper,
+      building: drawing?.kind === "ring" || drawing?.kind === "path",
+    });
     const hoverGeo = cursor ? unproject(camera, view, cursor) : null;
     const hoverShown =
       hoverGeo !== null &&
@@ -2564,6 +2568,7 @@ export default function MapView({
         hasIndicator: schema.hover,
         nib: plan.nib,
         picking: toolPick !== null,
+        magnifying,
         insideRegion:
           region !== null &&
           drawsObjects(tool) &&
@@ -2598,13 +2603,7 @@ export default function MapView({
     // the field there as the project's glyph, and the numbers the click will
     // take. The numbers are the readout's — one sample in flight, the newest
     // position waiting — so arming the eyedropper costs no second stream.
-    if (
-      cursor &&
-      showsMagnifier({
-        eyedropper,
-        building: drawing?.kind === "ring" || drawing?.kind === "path",
-      })
-    ) {
+    if (cursor && magnifying) {
       const sample = readoutStore.current?.get().sample ?? null;
       const radius = 22 * dpr;
       context.save();

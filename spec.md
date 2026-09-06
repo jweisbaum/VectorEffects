@@ -1972,7 +1972,10 @@ and a footprint under the bucket said it would paint a spot instead
 (`showsHoverIndicator`, one rule beside the cursor's); while the eyedropper is armed
 the cursor hides and the overlay draws a **magnifier** at the pointer — a ring
 with a plus, the field there as the project's glyph, and the speed and
-direction the click will take, from the readout's own sample — **except
+direction the click will take, from the readout's own sample, **and no
+hover indicator under it** on any tool: the click samples rather than
+paints, and a footprint and glyph under the magnifier were two arrows
+pointing two ways (M27) — **except
 while a polygon or a curve is being built point by point**: those clicks
 are vertices, so nothing is magnified and nothing sampled until the gesture
 is closed (`showsMagnifier`, M27). Every custom

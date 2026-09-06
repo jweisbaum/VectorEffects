@@ -23,6 +23,13 @@ export interface HoverContext {
    * paint bucket: a footprint drawn as well said the click would paint a spot.
    */
   insideRegion: boolean;
+  /**
+   * The magnifier is up (`showsMagnifier`). The click samples the field
+   * rather than painting, and the magnifier shows the field's own glyph at
+   * the pointer; the tool's footprint and glyph under it were two arrows
+   * pointing two ways (M27).
+   */
+  magnifying: boolean;
 }
 
 /** Whether the overlay draws the hover indicator. */
@@ -30,6 +37,7 @@ export function showsHoverIndicator(context: HoverContext): boolean {
   if (!context.hasIndicator || !context.nib) return false;
   if (context.picking) return false;
   if (context.insideRegion) return false;
+  if (context.magnifying) return false;
   return true;
 }
 

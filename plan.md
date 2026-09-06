@@ -2484,7 +2484,9 @@ anything not done recorded here with its reason.
    is being built. **Not reproduced from the code**: no other path in the
    polygon's click magnifies anything; if the symptom survives, it is
    something else and needs the exact gesture.
-6. **The magnifier hides the tool's hover glyphs.** Pending.
+6. **The magnifier hides the tool's hover glyphs.** Delivered:
+   `showsHoverIndicator` takes `magnifying`, so no tool's footprint or
+   glyph is drawn under the magnifier.
 7. **The map is full-window behind the panels.** Pending.
 8. **Smaller `Shift`-arrow nudges.** Pending.
 9. **Capture, measure, undo and redo buttons alike and aligned.** Pending.

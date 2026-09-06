@@ -7,6 +7,7 @@ const brush: HoverContext = {
   nib: true,
   picking: false,
   insideRegion: false,
+  magnifying: false,
 };
 
 describe("the hover indicator", () => {
@@ -25,6 +26,10 @@ describe("the hover indicator", () => {
 
   it("stands down inside a selected region the tool would fill: the bucket is the indication", () => {
     expect(showsHoverIndicator({ ...brush, insideRegion: true })).toBe(false);
+  });
+
+  it("stands down while the magnifier is up: the click samples, it does not paint", () => {
+    expect(showsHoverIndicator({ ...brush, magnifying: true })).toBe(false);
   });
 });
 
