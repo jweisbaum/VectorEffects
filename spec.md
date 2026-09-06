@@ -2405,17 +2405,16 @@ stamped region, and the badge sat over the legend). Nothing of the document
 is drawn over it: no object edges, handles, measurements, image corners or
 selected region. **The pointer is the stamp**: it carries the macro's region
 outline and, for a recording with movement, its track, exactly as the insert
-tool's does, and **a click places the macro there** (M28) — an object in the
-active layer beginning at the current step, exactly the object the insert
-tool would make, and the preview's own stamp moves with it so the loop shows
-it where it now is. It is the one write the preview makes, and it goes
-*through* the lock rather than around it: unlocked for the single push and
-locked again whatever the push did, so every other write stays refused. The
-placed object is an ordinary edit, undoable, and Cancel leaves it — Cancel
-drops the capture, not the document. The document's tiles are never held
-under the preview's: the map holds a frame's tiles only from a frame of the
-same scene, so the layers go the moment the preview is entered rather than at
-the first click. The panels stay grey and the
+tool's does, and **a click places a copy of the macro there — in the
+preview's own scene** (M29): the original loops where it was recorded and a
+copy loops at every place clicked, all in the preview's one layer, none of
+them in any layer of the document, the panel or the file. They are for
+looking at, and they go with the preview whatever ends it; *Edit macro*
+clears them, so the next preview reflects the edit alone. Nothing is
+written and the history lock stands throughout, as D71 says. The document's
+tiles are never held under the preview's: the map holds a frame's tiles
+only from a frame of the same scene, so the layers go the moment the
+preview is entered rather than at the first click. The panels stay grey and the
 palette dead. The preview is a one-object project the
 session holds, served by the tile pipeline under a revision of its own:
 nothing is written to the document to show it, and the history lock stands

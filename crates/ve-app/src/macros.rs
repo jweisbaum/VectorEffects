@@ -329,6 +329,10 @@ pub struct ActiveCapture {
     /// The kind of field being recorded: the one the map showed when the
     /// capture began (M29).
     pub kind: ve_core::project::FieldKind,
+    /// Where the preview has been clicked (M29): a copy of the macro is shown
+    /// looping at each, in the preview's own scene and nowhere else — they
+    /// are for looking at, and go with the preview. Edit clears them.
+    pub stamps: Vec<[f64; 2]>,
 }
 
 impl ActiveCapture {
@@ -526,6 +530,7 @@ pub fn capture_start(
                 last_step: step,
                 stamp: origin,
                 kind,
+                stamps: Vec::new(),
             }),
         };
         session.preview = None;
@@ -661,82 +666,36 @@ pub fn capture_preview(state: &AppState, last_step: u32) -> Result<CaptureMode> 
     })
 }
 
-/// What a click in the preview returns: the capture mode, stamped where the
-/// click was, and the document, with the macro placed there (M28).
-#[derive(Debug, Clone, Serialize, TS)]
-#[ts(export, export_to = "PlacedPreview.ts")]
-pub struct PlacedPreview {
-    /// The preview, moved to the click.
-    pub mode: CaptureMode,
-    /// The document, one macro object richer.
-    pub project: ProjectSummary,
-}
-
-/// A click in the preview (spec.md 8.7, M28): the macro is **placed** in the
-/// document there — in `layer` under the creation rule, beginning at
-/// `step`, exactly as the insert tool places one from the library — and the
-/// preview's stamp moves there too, so the loop shows it where it now is.
+/// A click in the preview (spec.md 8.7, M29): a copy of the macro is placed
+/// there — **in the preview's own scene**, looping with the original, and in
+/// no layer of the document. The placements are for looking at: they go
+/// when the preview does, whatever ends it, and are never in the panel or
+/// the file. Nothing is written and the history lock stands.
 #[tauri::command]
-pub fn place_preview(
-    state: tauri::State<'_, AppState>,
-    lon: f64,
-    lat: f64,
-    step: u32,
-    layer: Option<u64>,
-) -> Result<PlacedPreview> {
-    preview_place(&state, lon, lat, step, layer)
+pub fn place_preview(state: tauri::State<'_, AppState>, lon: f64, lat: f64) -> Result<CaptureMode> {
+    preview_place(&state, lon, lat)
 }
 
-/// Implementation of [`place_preview`].
-///
-/// The one write the preview makes, and it goes **through** the lock rather
-/// than around it: the history is unlocked for the single push and locked
-/// again whatever the push did, so every other write path stays refused and
-/// the preview is otherwise what D71 says it is. The placed object is an
-/// ordinary edit — undoable, and left standing by Cancel, which drops the
-/// capture and not the document.
-pub fn preview_place(
-    state: &AppState,
-    lon: f64,
-    lat: f64,
-    step: u32,
-    layer: Option<u64>,
-) -> Result<PlacedPreview> {
-    let mode = preview_stamp(state, lon, lat)?;
+/// Implementation of [`place_preview`]. A new revision, so the scene with
+/// one more copy in it is a new set of tiles.
+pub fn preview_place(state: &AppState, lon: f64, lat: f64) -> Result<CaptureMode> {
     with_session(state, |session| {
-        let baked = session
+        let settings = session.require_open()?.project.settings;
+        let active = session
             .capturing
             .active
-            .as_ref()
-            .and_then(|active| active.baked.clone())
+            .as_mut()
             .ok_or(AppError::BadOption {
                 field: "capture",
-                value: "nothing is being previewed".to_owned(),
+                value: "no capture is running".to_owned(),
             })?;
-        let anchor = LonLat::new(wrap180(lon), lat.clamp(-90.0, 90.0))?;
-        let open = session.require_open()?;
-        let step_count = open.project.settings.step_count;
-        let object = macro_object(&baked, anchor, step, step_count);
-        let target = crate::document::creation_layer(&open.project, layer)?;
-        let (layer, index) = (target.id, target.objects.len());
-        open.project
-            .captures
-            .entry(baked.hash.clone())
-            .or_insert_with(|| Arc::clone(&baked));
-        let command = Command::AddObject {
-            layer,
-            index,
-            object: Box::new(object),
-        };
-        open.history.unlock();
-        let pushed = open.history.push(&mut open.project, command);
-        open.history.lock();
-        pushed?;
-        open.touch();
-        Ok(PlacedPreview {
-            mode,
-            project: ProjectSummary::of(session.require_open()?),
-        })
+        if let Some(baked) = active.baked.clone()
+            && active.phase == CapturePhase::Previewing
+        {
+            active.stamps.push([wrap180(lon), lat.clamp(-90.0, 90.0)]);
+            session.preview = Some(preview_scene(active, &baked, settings)?);
+        }
+        Ok(mode_of(&session.capturing, session.preview.as_ref(), None))
     })
 }
 
@@ -776,6 +735,8 @@ pub fn capture_edit(state: &AppState) -> Result<CaptureMode> {
         if let Some(active) = session.capturing.active.as_mut() {
             active.phase = CapturePhase::Recording;
             active.baked = None;
+            // The copies were of this bake; the next preview starts clean.
+            active.stamps.clear();
         }
         session.preview = None;
         Ok(mode_of(&session.capturing, session.preview.as_ref(), None))
@@ -804,18 +765,26 @@ fn preview_scene(
         active.first_step.min(step_count.saturating_sub(1)),
         active.last_step.min(step_count.saturating_sub(1)),
     );
-    let anchor = LonLat::new(wrap180(active.stamp[0]), active.stamp[1].clamp(-90.0, 90.0))?;
-    if let Some(anim) = object.props.get_mut(PropId::Position) {
-        anim.set_base(PropValue::LonLat(anchor));
-    }
     if let Some(anim) = object.props.get_mut(PropId::StampSpace) {
         anim.set_base(PropValue::Enum(1));
     }
     project
         .captures
         .insert(baked.hash.clone(), Arc::clone(baked));
+    // The original where it was recorded, and a copy at every place the
+    // preview has been clicked (M29) — all in the preview's one layer, all
+    // looping together, none of them the document's.
+    let places = std::iter::once(active.stamp).chain(active.stamps.iter().copied());
     if let Some(layer) = project.layers.first_mut() {
-        layer.objects.push(object);
+        for place in places {
+            let mut copy = object.clone();
+            copy.id = ve_core::id::Id::new();
+            let anchor = LonLat::new(wrap180(place[0]), place[1].clamp(-90.0, 90.0))?;
+            if let Some(anim) = copy.props.get_mut(PropId::Position) {
+                anim.set_base(PropValue::LonLat(anchor));
+            }
+            layer.objects.push(copy);
+        }
     }
     Ok(PreviewScene {
         project,

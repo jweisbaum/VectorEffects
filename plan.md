@@ -2675,7 +2675,16 @@ the field kind a property of the layer rather than of the project (§4.1).
     forecast hour; × removes it. The export dialog pre-sets its start to the
     project's, else to the current UTC hour rounded to the nearest. The
     draft and rounding helpers are tested.
-14. **The macro preview places into a scene of its own.** Pending.
+14. **The macro preview places into a scene of its own.** Delivered,
+    replacing M28.2's document write, which put the copy in a layer the
+    preview hid and left it behind afterwards. A click now adds a stamp to
+    the active capture and the preview scene is rebuilt with a copy of the
+    macro at each, looping with the original; nothing is written, the lock
+    stands, Edit clears the copies and Cancel leaves no trace. Tested. The
+    animation not showing at all is **not reproduced**: the backend's
+    preview scene samples the macro at the stamp (the tests say so), so the
+    remaining cause is in the running app and needs a look there — most
+    likely playback waiting on tiles that take seconds a step on the CPU.
 15. **The eraser erases what it covers.** Pending.
 
 ---

@@ -539,74 +539,76 @@ fn a_preview_writes_nothing_and_is_served_apart_from_the_document() {
 }
 
 /// Cancelling from the preview clears it too.
-/// A click in the preview places the macro in the document (M28): one
-/// object, through the lock and not around it — every other write is still
-/// refused — and the preview follows the click. Cancel drops the capture and
-/// leaves what was placed.
+/// A click in the preview places a copy of the macro in the preview's own
+/// scene (M29): the document gains nothing, the lock stands, the scene
+/// shows the macro at the original and at the click, and Cancel leaves no
+/// trace of either.
 #[test]
-fn a_click_in_the_preview_places_the_macro_and_keeps_the_lock() {
+fn a_click_in_the_preview_places_a_copy_in_the_preview_scene_alone() {
     let root = TempRoot::new("preview-place");
     let app = app(&root);
     travelling_stroke(&app, 18.0);
     macros::capture_start(&app, region(0.0, 0.0), 0, false, None).expect("start");
     macros::capture_place(&app, 2, 20.0, 0.0).expect("place");
     let mode = macros::capture_preview(&app, 2).expect("preview");
-    let entries_before = {
+    let (entries_before, objects_before) = {
         let session = app.session.lock().expect("lock");
-        session.open.as_ref().expect("open").history.entries().len()
+        let open = session.open.as_ref().expect("open");
+        (open.history.entries().len(), open.project.object_count())
     };
 
-    let placed = macros::preview_place(&app, 90.0, 0.0, 1, None).expect("place in preview");
+    let placed = macros::preview_place(&app, 90.0, 0.0).expect("place in preview");
     assert_eq!(
-        placed.mode.phase,
+        placed.phase,
         macros::CapturePhase::Previewing,
         "still previewing"
     );
-    assert_eq!(
-        placed.mode.stamp,
-        Some([90.0, 0.0]),
-        "the preview followed the click"
+    assert_ne!(
+        placed.preview_revision, mode.preview_revision,
+        "a new scene"
     );
-    assert_ne!(placed.mode.preview_revision, mode.preview_revision);
     {
         let session = app.session.lock().expect("lock");
         let open = session.open.as_ref().expect("open");
-        assert_eq!(open.history.entries().len(), entries_before + 1, "one edit");
-        assert!(open.history.is_locked(), "and the lock stands");
-        let object = open.project.layers[0].objects.last().expect("the macro");
-        assert_eq!(object.tool, ToolKind::Macro);
         assert_eq!(
-            object.active_range.start, 1,
-            "begins at the step it was placed at"
+            open.history.entries().len(),
+            entries_before,
+            "nothing written"
         );
-        // The document shows it: at its step 1 the macro's first frame.
-        let u = sample_scene(&flatten(&open.project, 1), LonLat::new(90.0, 0.0).unwrap()).u;
-        assert!((u - 18.0).abs() < 0.6, "placed at 90°, reads {u}");
+        assert_eq!(
+            open.project.object_count(),
+            objects_before,
+            "no object in any layer"
+        );
+        assert!(open.history.is_locked(), "the lock stands");
+        let scene = &session.preview.as_ref().expect("preview").project;
+        assert_eq!(
+            scene.layers[0].objects.len(),
+            2,
+            "the original and the copy"
+        );
+        let at = |lon: f64| sample_scene(&flatten(scene, 0), LonLat::new(lon, 0.0).unwrap()).u;
+        assert!((at(0.0) - 18.0).abs() < 0.6, "the original at the origin");
+        assert!((at(90.0) - 18.0).abs() < 0.6, "and the copy at the click");
     }
-    assert!(
-        edit::paint(
-            &app,
-            BrushStroke {
-                points: vec![[50.0, 0.0]],
-                size_km: 400.0,
-                speed_mps: 5.0,
-                direction_toward_deg: 0.0,
-                feather: 0.0,
-                ..Default::default()
-            },
-        )
-        .is_err(),
-        "every other write is still refused"
-    );
+    // Back to recording drops the copies; the next preview starts clean.
+    macros::capture_edit(&app).expect("edit");
+    let again = macros::capture_preview(&app, 2).expect("preview again");
+    assert!(again.preview_revision.is_some());
+    {
+        let session = app.session.lock().expect("lock");
+        let scene = &session.preview.as_ref().expect("preview").project;
+        assert_eq!(
+            scene.layers[0].objects.len(),
+            1,
+            "the copies went with the edit"
+        );
+    }
     macros::capture_cancel(&app).expect("cancel");
     let session = app.session.lock().expect("lock");
     let open = session.open.as_ref().expect("open");
-    assert_eq!(
-        open.history.entries().len(),
-        entries_before + 1,
-        "cancel leaves what was placed"
-    );
-    assert!(!open.history.is_locked());
+    assert_eq!(open.project.object_count(), objects_before);
+    assert!(session.preview.is_none());
 }
 
 #[test]

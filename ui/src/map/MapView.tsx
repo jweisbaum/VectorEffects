@@ -1548,7 +1548,7 @@ export default function MapView({
       setHint("Draw a region first — it is what gets recorded.");
     } else if (recording !== null && recording.phase === "previewing") {
       setHint(
-        "Click the map to place the macro there. Save keeps it in the library too; Edit goes back to recording; Cancel leaves what was placed.",
+        "Click the map to see a copy of the macro there. Save keeps the macro in the library; Edit goes back to recording; the copies go with the preview.",
       );
     } else if (recording !== null) {
       setHint(
@@ -3199,16 +3199,14 @@ export default function MapView({
     // never the document, which is why it is not an edit and not undoable.
     if (recording !== null) {
       const geo = unproject(cameraRef.current, viewRef.current, point);
-      // In the preview a click *places* the macro there (spec.md 8.7, M28):
-      // an object in the active layer from this step, and the preview's
-      // stamp moves with it so the loop shows it where it now is.
+      // In the preview a click places a *copy* of the macro there (spec.md
+      // 8.7, M29): in the preview's own scene, looping with the original,
+      // and in no layer of the document — the placements go with the
+      // preview, whatever ends it.
       if (recording.phase === "previewing") {
         void api
-          .placePreview(geo.lon, geo.lat, stepRef.current, activeLayer)
-          .then((placed) => {
-            setCapture(placed.mode);
-            onProjectChanged(placed.project);
-          })
+          .placePreview(geo.lon, geo.lat)
+          .then(setCapture)
           .catch((err: unknown) => setError(String(err)));
         return;
       }

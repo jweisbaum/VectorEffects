@@ -104,7 +104,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ve_app::macros::CapturePhase::export_all(&cfg)?;
     ve_app::macros::MacroLibrary::export_all(&cfg)?;
     ve_app::macros::CaptureMode::export_all(&cfg)?;
-    ve_app::macros::PlacedPreview::export_all(&cfg)?;
     ve_app::capture::RegionShape::export_all(&cfg)?;
     ObjectNode::export_all(&cfg)?;
     PropertyView::export_all(&cfg)?;
