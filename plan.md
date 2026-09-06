@@ -2472,7 +2472,10 @@ anything not done recorded here with its reason.
 3. **Shift-click in the layer panel selects no text.** Delivered: the
    layer and object lists are `user-select: none`, the rename field alone
    keeps text selection.
-4. **The macro stamp's hover outline.** Pending.
+4. **The macro stamp's hover outline.** Delivered: the outline and the
+   track were drawn (M24) but *behind* the overlay's `!schema` return, and
+   the insert tool has no schema, so the code was never reached. The block
+   now runs before that return. The preview's own stamp hover is item 13.
 5. **The shape fill's click neither magnifies nor samples.** Pending.
 6. **The magnifier hides the tool's hover glyphs.** Pending.
 7. **The map is full-window behind the panels.** Pending.

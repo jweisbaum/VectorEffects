@@ -2428,6 +2428,55 @@ export default function MapView({
     // must not blink the paint out either.
     for (const settled of settling.current) drawFieldPreview(context, settled, dpr);
 
+    // The insert tool's hover (M24): the macro's region outline at the
+    // pointer, in the region's own colour, and for a macro that recorded
+    // movement the track its centre will follow — one dot per frame.
+    // Drawn *before* the schema check below: the insert tool has no schema,
+    // and behind that return this was never reached (M27).
+    const macro = library?.entries.find((entry) => entry.id === macroId) ?? null;
+    if (cursor && tool === INSERT && recording === null && macro !== null) {
+      const at = unproject(camera, view, cursor);
+      const ring = regionRing(macroRegion(macro.outline, at.lon, at.lat)).map((p) =>
+        toScreen(camera, view, { lon: p[0], lat: p[1] }),
+      );
+      const first = ring[0];
+      if (first) {
+        context.save();
+        context.beginPath();
+        context.moveTo(first.x, first.y);
+        for (const point of ring.slice(1)) context.lineTo(point.x, point.y);
+        context.closePath();
+        context.fillStyle = "rgba(140, 255, 190, 0.08)";
+        context.fill();
+        context.strokeStyle = "rgba(150, 255, 200, 0.95)";
+        context.lineWidth = Math.max(1, dpr);
+        context.setLineDash([6 * dpr, 4 * dpr]);
+        context.stroke();
+        context.setLineDash([]);
+        if (macro.moves) {
+          const track = macro.track.map(([dx, dy]) =>
+            toScreen(camera, view, { lon: at.lon + dx, lat: at.lat + dy }),
+          );
+          const start = track[0];
+          if (start) {
+            context.beginPath();
+            context.moveTo(start.x, start.y);
+            for (const point of track.slice(1)) context.lineTo(point.x, point.y);
+            context.strokeStyle = "rgba(150, 255, 200, 0.75)";
+            context.lineWidth = Math.max(1, dpr);
+            context.stroke();
+            context.fillStyle = "rgba(150, 255, 200, 0.95)";
+            for (const point of track) {
+              context.beginPath();
+              context.arc(point.x, point.y, 2.5 * dpr, 0, Math.PI * 2);
+              context.fill();
+            }
+          }
+        }
+        context.restore();
+      }
+    }
+
     if (tool === HAND || !schema) return;
 
     // Every `LonLat` option is placeable by pointing, on every tool that has
@@ -2542,53 +2591,6 @@ export default function MapView({
         context.strokeStyle = "rgba(160, 232, 255, 0.95)";
         context.lineWidth = Math.max(1, dpr);
         context.stroke(tip);
-      }
-    }
-
-    // The insert tool's hover (M24): the macro's region outline at the
-    // pointer, in the region's own colour, and for a macro that recorded
-    // movement the track its centre will follow — one dot per frame.
-    const macro = library?.entries.find((entry) => entry.id === macroId) ?? null;
-    if (cursor && tool === INSERT && recording === null && macro !== null) {
-      const at = unproject(camera, view, cursor);
-      const ring = regionRing(macroRegion(macro.outline, at.lon, at.lat)).map((p) =>
-        toScreen(camera, view, { lon: p[0], lat: p[1] }),
-      );
-      const first = ring[0];
-      if (first) {
-        context.save();
-        context.beginPath();
-        context.moveTo(first.x, first.y);
-        for (const point of ring.slice(1)) context.lineTo(point.x, point.y);
-        context.closePath();
-        context.fillStyle = "rgba(140, 255, 190, 0.08)";
-        context.fill();
-        context.strokeStyle = "rgba(150, 255, 200, 0.95)";
-        context.lineWidth = Math.max(1, dpr);
-        context.setLineDash([6 * dpr, 4 * dpr]);
-        context.stroke();
-        context.setLineDash([]);
-        if (macro.moves) {
-          const track = macro.track.map(([dx, dy]) =>
-            toScreen(camera, view, { lon: at.lon + dx, lat: at.lat + dy }),
-          );
-          const start = track[0];
-          if (start) {
-            context.beginPath();
-            context.moveTo(start.x, start.y);
-            for (const point of track.slice(1)) context.lineTo(point.x, point.y);
-            context.strokeStyle = "rgba(150, 255, 200, 0.75)";
-            context.lineWidth = Math.max(1, dpr);
-            context.stroke();
-            context.fillStyle = "rgba(150, 255, 200, 0.95)";
-            for (const point of track) {
-              context.beginPath();
-              context.arc(point.x, point.y, 2.5 * dpr, 0, Math.PI * 2);
-              context.fill();
-            }
-          }
-        }
-        context.restore();
       }
     }
 
