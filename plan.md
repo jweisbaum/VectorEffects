@@ -2617,7 +2617,8 @@ the field kind a property of the layer rather than of the project (§4.1).
 4. **A new object is the selection.** Pending.
 5. **The follow button does something on a click.** Pending.
 6. **Divergence strokes with the same settings merge.** Pending.
-7. **The motion button's help text.** Pending.
+7. **The motion button's help text.** Delivered: "Add velocity / rotational
+   / scale vectors to the vector data." by track, and "Remove …" when on.
 8. **Field kind per layer, and a two-field export.** Pending.
 9. **The intensity slider.** Pending.
 10. **The divergence slider.** Pending.

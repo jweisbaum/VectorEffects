@@ -120,6 +120,17 @@ function easingName(interp: InterpolationView): string {
   }
 }
 
+/**
+ * What the motion switch adds, named for the track (M29): the object's
+ * travel is a velocity, its turn a rotational vector, its growth a scale one.
+ */
+function motionWord(label: string): string {
+  const lower = label.toLowerCase();
+  if (lower.startsWith("pos")) return "velocity";
+  if (lower.startsWith("rot")) return "rotational";
+  return "scale";
+}
+
 export default function Timeline({
   project,
   step,
@@ -1257,8 +1268,8 @@ export default function Timeline({
                                 className={`tl-motion${track.motion ? " on" : ""}`}
                                 title={
                                   track.motion
-                                    ? `Take this object's ${track.label.toLowerCase()} out of the field it paints`
-                                    : `Add this object's ${track.label.toLowerCase()} to the field it paints`
+                                    ? `Remove ${motionWord(track.label)} vectors from the vector data.`
+                                    : `Add ${motionWord(track.label)} vectors to the vector data.`
                                 }
                                 onClick={() =>
                                   run(api.setMotion(object.id, track.property, !track.motion))
