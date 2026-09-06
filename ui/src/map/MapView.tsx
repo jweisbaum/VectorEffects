@@ -81,7 +81,7 @@ import {
 } from "./measure";
 import type { MeasurementView } from "../generated/MeasurementView";
 import type { MeasurementKind } from "../generated/MeasurementKind";
-import { showsHoverIndicator } from "./hover";
+import { showsHoverIndicator, showsMagnifier } from "./hover";
 import { RAMP_STOPS, rampCss } from "./ramp";
 import { parseBasemap } from "./format";
 import { marqueeBounds } from "./marquee";
@@ -2598,7 +2598,13 @@ export default function MapView({
     // the field there as the project's glyph, and the numbers the click will
     // take. The numbers are the readout's — one sample in flight, the newest
     // position waiting — so arming the eyedropper costs no second stream.
-    if (cursor && eyedropper) {
+    if (
+      cursor &&
+      showsMagnifier({
+        eyedropper,
+        building: drawing?.kind === "ring" || drawing?.kind === "path",
+      })
+    ) {
       const sample = readoutStore.current?.get().sample ?? null;
       const radius = 22 * dpr;
       context.save();
@@ -3136,7 +3142,9 @@ export default function MapView({
       // object will hold. Only visible layers contribute, because that is what
       // the evaluator composites (spec.md 7.1) — pointing at what you can see
       // is the whole of the gesture.
-      if (eyedropper && schema) {
+      const building =
+        gestureRef.current?.kind === "ring" || gestureRef.current?.kind === "path";
+      if (schema && showsMagnifier({ eyedropper, building })) {
         setEyedropper(false);
         void api
           .sampleField(geo.lon, geo.lat, stepRef.current)

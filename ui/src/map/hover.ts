@@ -32,3 +32,20 @@ export function showsHoverIndicator(context: HoverContext): boolean {
   if (context.insideRegion) return false;
   return true;
 }
+
+/** What decides whether the eyedropper's magnifier is drawn. */
+export interface MagnifierContext {
+  /** The eyedropper is armed. */
+  eyedropper: boolean;
+  /**
+   * A polygon or a curve is being built point by point. Its clicks are
+   * vertices, so nothing is sampled and nothing is magnified until the
+   * gesture is closed (M27).
+   */
+  building: boolean;
+}
+
+/** Whether the overlay draws the magnifier — and whether a click samples. */
+export function showsMagnifier(context: MagnifierContext): boolean {
+  return context.eyedropper && !context.building;
+}

@@ -1972,7 +1972,10 @@ and a footprint under the bucket said it would paint a spot instead
 (`showsHoverIndicator`, one rule beside the cursor's); while the eyedropper is armed
 the cursor hides and the overlay draws a **magnifier** at the pointer — a ring
 with a plus, the field there as the project's glyph, and the speed and
-direction the click will take, from the readout's own sample. Every custom
+direction the click will take, from the readout's own sample — **except
+while a polygon or a curve is being built point by point**: those clicks
+are vertices, so nothing is magnified and nothing sampled until the gesture
+is closed (`showsMagnifier`, M27). Every custom
 cursor is an inline SVG data URI (invariant 5). The option bar's sample
 button is an eyedropper icon.
 

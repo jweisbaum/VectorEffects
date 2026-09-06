@@ -2476,7 +2476,14 @@ anything not done recorded here with its reason.
    track were drawn (M24) but *behind* the overlay's `!schema` return, and
    the insert tool has no schema, so the code was never reached. The block
    now runs before that return. The preview's own stamp hover is item 13.
-5. **The shape fill's click neither magnifies nor samples.** Pending.
+5. **The shape fill's click neither magnifies nor samples.** Delivered as
+   far as the code shows a cause: the one thing on the map that magnifies
+   and shows the wind at a click is the eyedropper's magnifier, and it
+   stayed armed through a polygon's vertices. `showsMagnifier` now stands it
+   down — no magnifier drawn, no click sampled — while a polygon or a curve
+   is being built. **Not reproduced from the code**: no other path in the
+   polygon's click magnifies anything; if the symptom survives, it is
+   something else and needs the exact gesture.
 6. **The magnifier hides the tool's hover glyphs.** Pending.
 7. **The map is full-window behind the panels.** Pending.
 8. **Smaller `Shift`-arrow nudges.** Pending.

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { type HoverContext, showsHoverIndicator } from "./hover";
+import { type HoverContext, showsHoverIndicator, showsMagnifier } from "./hover";
 
 const brush: HoverContext = {
   hasIndicator: true,
@@ -25,5 +25,16 @@ describe("the hover indicator", () => {
 
   it("stands down inside a selected region the tool would fill: the bucket is the indication", () => {
     expect(showsHoverIndicator({ ...brush, insideRegion: true })).toBe(false);
+  });
+});
+
+describe("the magnifier", () => {
+  it("is drawn while the eyedropper is armed", () => {
+    expect(showsMagnifier({ eyedropper: true, building: false })).toBe(true);
+    expect(showsMagnifier({ eyedropper: false, building: false })).toBe(false);
+  });
+
+  it("stands down while a polygon or curve is being built: those clicks are vertices", () => {
+    expect(showsMagnifier({ eyedropper: true, building: true })).toBe(false);
   });
 });
