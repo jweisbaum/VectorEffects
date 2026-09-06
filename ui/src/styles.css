@@ -1077,7 +1077,13 @@ body {
 .tl-grid { position: relative; flex: 0 0 auto; height: 100%; }
 
 .tl-ruler { height: 30px; position: sticky; top: 0; z-index: 3; background: #0d1526; }
-.tl-ruler-label { color: var(--muted); }
+.tl-ruler-label { color: var(--muted); display: flex; align-items: center; gap: 6px; }
+/* The start-time control on the Time row and its inline editor (M29). */
+.tl-start { font-size: 10px; padding: 0 5px; line-height: 1.4; }
+.tl-start-editor { display: inline-flex; align-items: center; gap: 6px; margin-left: 8px; font-size: 11px; }
+.tl-start-editor label { display: flex; align-items: center; gap: 3px; }
+.tl-start-editor input[type="number"] { width: 3.6rem; }
+.tl-when { color: var(--muted); }
 .tl-ruler .tl-grid { cursor: ew-resize; }
 .tl-tick {
   position: absolute;

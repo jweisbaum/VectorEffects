@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 
 import { KIND_LABELS, kindOf } from "../kind";
 import NumberField from "../NumberField";
+import { startDraftFrom } from "../timeline/Timeline";
 import { api, IpcError } from "../ipc";
 import type { ExportEstimate } from "../generated/ExportEstimate";
 import type { ExportProgress } from "../generated/ExportProgress";
@@ -11,11 +12,6 @@ import { formatBytes } from "./format";
 import { pickGribDestination } from "./dialogs";
 
 /** Today's date, as the form's default reference time. */
-function today(): { year: number; month: number; day: number } {
-  const now = new Date();
-  return { year: now.getUTCFullYear(), month: now.getUTCMonth() + 1, day: now.getUTCDate() };
-}
-
 /**
  * The export dialog.
  *
@@ -30,11 +26,13 @@ export default function ExportDialog({
   project: ProjectSummary;
   onClose: () => void;
 }) {
-  const start = today();
+  // The project's start time when it has one, else now rounded to the
+  // nearest hour, UTC (M29): the dialog still asks, it just starts right.
+  const start = startDraftFrom(project.start_unix_s);
   const [year, setYear] = useState(start.year);
   const [month, setMonth] = useState(start.month);
   const [day, setDay] = useState(start.day);
-  const [hour, setHour] = useState(0);
+  const [hour, setHour] = useState(start.hour);
   const [centre, setCentre] = useState(255);
   /**
    * Bits per packed value (spec.md 12.3, M19). Sixteen is what every export

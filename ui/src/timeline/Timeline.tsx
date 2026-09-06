@@ -121,6 +121,42 @@ function easingName(interp: InterpolationView): string {
   }
 }
 
+/** A start time as it is typed: a UTC date and hour (M29). */
+interface StartDraft {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+}
+
+/** A draft from a start time, or from now rounded to the nearest hour. */
+export function startDraftFrom(startUnixS: number | null): StartDraft {
+  const at =
+    startUnixS !== null ? new Date(startUnixS * 1000) : nearestHour(new Date());
+  return {
+    year: at.getUTCFullYear(),
+    month: at.getUTCMonth() + 1,
+    day: at.getUTCDate(),
+    hour: at.getUTCHours(),
+  };
+}
+
+/** The clock rounded to the nearest whole hour, UTC. */
+export function nearestHour(now: Date): Date {
+  const rounded = new Date(now.getTime());
+  rounded.setUTCMinutes(0, 0, 0);
+  if (now.getUTCMinutes() >= 30) rounded.setUTCHours(rounded.getUTCHours() + 1);
+  return rounded;
+}
+
+/** Seconds since the epoch for a draft, or null for a date that does not exist. */
+export function unixOf(draft: StartDraft): number | null {
+  const ms = Date.UTC(draft.year, draft.month - 1, draft.day, draft.hour);
+  const back = new Date(ms);
+  if (back.getUTCMonth() + 1 !== draft.month || back.getUTCDate() !== draft.day) return null;
+  return Math.round(ms / 1000);
+}
+
 /**
  * What the motion switch adds, named for the track (M29): the object's
  * travel is a velocity, its turn a rotational vector, its growth a scale one.
@@ -303,6 +339,8 @@ export default function Timeline({
   const [loop, setLoop] = useState(false);
   const [rate, setRate] = useState(DEFAULT_RATE);
   const [buffering, setBuffering] = useState(false);
+  /** The start time being typed, until Set or Cancel (M29). */
+  const [startDraft, setStartDraft] = useState<StartDraft | null>(null);
   const stepRef = useRef(step);
   stepRef.current = step;
   const loopRef = useRef(loop);
@@ -936,9 +974,64 @@ export default function Timeline({
           ◆ Auto-key
         </button>
         <span className="tl-position">
-          Step {step} / {last} · {tickLabel(step)}
+          Step {step} / {last} · {forecastLabel(step, project.step_hours)}
+          {/* The frame's UTC time, when step 0 has one (M29). */}
+          {utcLabel(step, project.step_hours, project.start_unix_s) !== null && (
+            <span className="tl-when"> · {utcLabel(step, project.step_hours, project.start_unix_s)}</span>
+          )}
           {buffering && <span className="tl-buffering"> · buffering…</span>}
         </span>
+        {startDraft !== null && (
+          <span className="tl-start-editor" role="group" aria-label="Start time (UTC)">
+            <label>
+              Y
+              <NumberField
+                min={1900}
+                max={2999}
+                value={startDraft.year}
+                onCommit={(year) => setStartDraft({ ...startDraft, year })}
+              />
+            </label>
+            <label>
+              M
+              <NumberField
+                min={1}
+                max={12}
+                value={startDraft.month}
+                onCommit={(month) => setStartDraft({ ...startDraft, month })}
+              />
+            </label>
+            <label>
+              D
+              <NumberField
+                min={1}
+                max={31}
+                value={startDraft.day}
+                onCommit={(day) => setStartDraft({ ...startDraft, day })}
+              />
+            </label>
+            <label>
+              h
+              <NumberField
+                min={0}
+                max={23}
+                value={startDraft.hour}
+                onCommit={(hour) => setStartDraft({ ...startDraft, hour })}
+              />
+            </label>
+            <span className="muted">UTC</span>
+            <button
+              onClick={() => {
+                const unix = unixOf(startDraft);
+                setStartDraft(null);
+                if (unix !== null) run(api.setStartTime(unix));
+              }}
+            >
+              Set
+            </button>
+            <button onClick={() => setStartDraft(null)}>Cancel</button>
+          </span>
+        )}
         <span className="spacer" />
         {/*
           No start-time field (D69): a project has no clock of its own until a
@@ -976,7 +1069,33 @@ export default function Timeline({
             ) : previewing ? (
               <span className="tl-preview-label">Macro preview</span>
             ) : (
-              "Time"
+              <>
+                Time
+                {/*
+                  A start time, by choice (M29): step 0 as a UTC date and
+                  hour, so the ruler and the step readout can say when a
+                  frame is. Optional, removable, and read by nothing but the
+                  labels and the export dialog's default (spec.md 9.1).
+                */}
+                {project.start_unix_s === null ? (
+                  <button
+                    className="tl-start"
+                    onClick={() => setStartDraft(startDraftFrom(null))}
+                    title="Give step 0 a UTC date and time. Labels then show when each frame is, and the export starts there by default."
+                  >
+                    Add start time
+                  </button>
+                ) : (
+                  <button
+                    className="tl-start"
+                    onClick={() => run(api.setStartTime(null))}
+                    title="Remove the start time. Nothing else changes."
+                    aria-label="Remove the start time"
+                  >
+                    ×
+                  </button>
+                )}
+              </>
             )}
           </div>
           <div

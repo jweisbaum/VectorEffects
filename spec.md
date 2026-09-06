@@ -2484,8 +2484,13 @@ the reverse of the document's bottom-first order, reversed in both places.
 
 - **Ruler:** one tick per time step, labelled with the forecast hour and, once a
   GRIB file has given the project a start time (§4.8), the absolute UTC time.
-  There is no field for the start time: a project has no clock of its own,
-  and the export asks for the one the GRIB needs (D69). Click or scrub to
+  **A start time is optional and set from the Time row** (M29, superseding
+  D69 on the user's instruction): *Add start time* takes a UTC date and
+  hour for step 0, the step readout then shows each frame's UTC time beside
+  its forecast hour, and × removes it again. Nothing else reads it: the
+  export dialog still asks for its own start, pre-set to the project's when
+  there is one and to the current UTC hour, rounded to the nearest, when
+  there is not. Click or scrub to
   change the current step.
 - **Tracks:** a collapsible tree — layers, then objects, then one row per
   animatable property, with keyframe diamonds on each.
