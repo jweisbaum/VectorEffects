@@ -400,11 +400,17 @@ export const api = {
    * (spec 4.10). The only command that reaches the network, and only because
    * the user asked for it.
    */
-  importHistory: (archives: string[], startUnixS: number, endUnixS: number) =>
+  importHistory: (
+    archives: string[],
+    startUnixS: number,
+    endUnixS: number,
+    setStartTime: boolean,
+  ) =>
     call<ProjectSummary>("import_history", {
       archives,
       startUnixS,
       endUnixS,
+      setStartTime,
     }),
   removeLayer: (layer: number) => call<ProjectSummary>("remove_layer", { layer }),
   /** Renames the project: a document write, undoable (M25). */

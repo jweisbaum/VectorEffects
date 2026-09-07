@@ -806,6 +806,10 @@ body {
   padding: 3px 0;
   color: var(--text);
 }
+/* The start-time option stands on its own between the dates and the archives,
+   so it needs the spacing a `.field` would have given it. */
+.history-import > .check { margin: 12px 0; align-items: flex-start; }
+.history-import > .check input { margin-top: 2px; }
 .history-import .check input[type="checkbox"] {
   width: auto;
   flex: none;

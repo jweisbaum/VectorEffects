@@ -12,6 +12,12 @@
  * is. On a three-hourly project a day of range is nine downloads, not
  * twenty-five, and the wait is a third of what it was.
  *
+ * **It opens on the project's own timeline.** A history import exists to fill
+ * the steps a project has, so the range worth asking for is the span those
+ * steps cover: the timeline's start to the timeline's end. A project with no
+ * start time has no date to anchor that to and takes this day a year ago,
+ * which is the one offset certainly inside both archives.
+ *
  * **Rendered through a portal.** The layer panel sits in a stacking context
  * of its own, so a dialog rendered inside it is painted under the timeline
  * whatever its `z-index` says. A modal belongs to the window, not to the
@@ -21,7 +27,13 @@ import { useState } from "react";
 import { createPortal } from "react-dom";
 
 import type { ProjectSummary } from "../generated/ProjectSummary";
-import { ARCHIVES, MAX_FETCHED_STEPS, defaultRange, rangeState } from "./historyRange";
+import {
+  ARCHIVES,
+  MAX_FETCHED_STEPS,
+  defaultRange,
+  formatUtcHour,
+  rangeState,
+} from "./historyRange";
 
 /** What the dialog hands back when the user commits. */
 export interface HistoryChoice {
@@ -31,6 +43,8 @@ export interface HistoryChoice {
   startUnixS: number;
   /** Last hour, in UTC seconds. */
   endUnixS: number;
+  /** Whether to stamp the project's step 0 with the first hour fetched. */
+  setStartTime: boolean;
 }
 
 export default function HistoryImportDialog({
@@ -46,10 +60,19 @@ export default function HistoryImportDialog({
   onImport: (choice: HistoryChoice) => void;
   onClose: () => void;
 }) {
-  const initial = defaultRange(now);
+  const dated = project.start_unix_s !== null;
+  const initial = defaultRange(now, {
+    startUnixS: project.start_unix_s,
+    stepHours: project.step_hours,
+    stepCount: project.step_count,
+  });
   const [start, setStart] = useState(initial.start);
   const [end, setEnd] = useState(initial.end);
   const [chosen, setChosen] = useState<string[]>(ARCHIVES.map((a) => a.id));
+  // A project with no date almost always wants one, and the fetched hours are
+  // the only fact available about when its step 0 is. A project that has one
+  // has it for a reason, so overriding it is offered and not assumed.
+  const [setStartTime, setSetStartTime] = useState(!dated);
 
   const state = rangeState(start, end, chosen, project.step_hours, project.step_count);
   const ready = state.problem === null && state.start !== null && state.end !== null;
@@ -89,6 +112,24 @@ export default function HistoryImportDialog({
             value={end}
             onChange={(event) => setEnd(event.target.value)}
           />
+        </label>
+
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={setStartTime}
+            onChange={(event) => setSetStartTime(event.target.checked)}
+          />
+          <span>
+            {dated ? "Move the timeline\u2019s start" : "Set the timeline\u2019s start"} to{" "}
+            {start.replace("T", " ")} UTC
+            {dated && (
+              <span className="muted">
+                {" "}
+                — it is {formatUtcHour(project.start_unix_s ?? 0).replace("T", " ")} now
+              </span>
+            )}
+          </span>
         </label>
 
         <fieldset className="field">
@@ -134,6 +175,7 @@ export default function HistoryImportDialog({
                 archives: ARCHIVES.map((a) => a.id).filter((id) => chosen.includes(id)),
                 startUnixS: state.start,
                 endUnixS: state.end,
+                setStartTime,
               });
             }}
           >

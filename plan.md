@@ -3115,10 +3115,11 @@ through 2026-09-01T23:00Z while the last written chunk was
 2026-08-30T23:00Z. `Era5Store` takes the attributes at their word, so a
 range inside that gap fails on the first missing hour — quickly, and
 with a message naming the chunk, but it fails. The dialog's default was
-a week back, which landed in it; the default is a fortnight now, which
-clears both the lag and the overstatement. Clamping the *coverage* to
-what is written would need a probe per range and is not done: the
-refusal is already fast and says which chunk is missing.
+a week back, which landed in it; it is the project's own timeline now,
+and this day a year ago when the project has no date, which clears the
+lag and the overstatement together. Clamping the *coverage* to what is
+written would need a probe per range and is not done: the refusal is
+already fast and says which chunk is missing.
 
 ---
 

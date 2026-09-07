@@ -153,24 +153,54 @@ export function rangeState(
   return { start, end, steps, problem: null };
 }
 
-/** How far back the dialog opens, in days. */
-const DEFAULT_LAG_DAYS = 14;
+/** What the default range needs to know about the open project. */
+export interface TimelineShape {
+  /** When step 0 is, in UTC seconds, or null if the timeline has no date. */
+  startUnixS: number | null;
+  /** Hours between steps. */
+  stepHours: number;
+  /** Number of steps. */
+  stepCount: number;
+}
 
 /**
- * The range the dialog opens on: a day, ending a fortnight back.
+ * The instant a year before `nowUnixS`, at midnight UTC on the same date.
  *
- * Both archives trail real time. ERA5's final stream runs months behind, with
- * the preliminary ERA5T filling in behind it, and GlobCurrent's near-real-time
- * stream runs days behind. A range ending *now* is one neither archive has.
+ * A year rather than a smaller lag because it is the one offset that is
+ * certainly inside both archives. Both trail real time — ERA5's final stream
+ * by months with the preliminary ERA5T behind it, GlobCurrent's near-real-time
+ * stream by days — and ERA5's own attributes overstate what it holds by about
+ * two days on top of that, so anything measured in days is a guess that
+ * sometimes lands in a gap.
  *
- * A fortnight rather than a week, because ERA5's own attributes overstate what
- * it holds: measured on 2026-09-07 they advertised hours through 2026-09-01
- * while the last written chunk was 2026-08-30, so a week back landed in the
- * gap and the import failed on its first hour. The default has to be a range
- * that works, and the margin costs nothing — any range the user prefers is two
- * fields away.
+ * Midnight rather than the current hour, because a start on the hour is what
+ * an hourly archive has and what a timeline reads cleanly. 29 February rolls
+ * into 1 March, which is the only sane answer and needs no special case.
  */
-export function defaultRange(nowUnixS: number): { start: string; end: string } {
-  const end = Math.floor(nowUnixS / HOUR) * HOUR - DEFAULT_LAG_DAYS * 24 * HOUR;
-  return { start: formatUtcHour(end - 23 * HOUR), end: formatUtcHour(end) };
+export function aYearBefore(nowUnixS: number): number {
+  const at = new Date(nowUnixS * 1000);
+  return Date.UTC(at.getUTCFullYear() - 1, at.getUTCMonth(), at.getUTCDate()) / 1000;
+}
+
+/**
+ * The range the dialog opens on: the project's own timeline.
+ *
+ * A history import exists to fill a project's steps, so the range that wants
+ * asking for is exactly the span those steps cover. It starts where the
+ * timeline starts and ends where the timeline ends, which makes the number of
+ * downloads equal to the number of steps — nothing fetched that no step can
+ * show, and no step left without an hour to show.
+ *
+ * A project with no start time has no date to anchor that span to, so it
+ * takes this day a year ago and runs the timeline's own length forward from
+ * there. Ticking the start-time box then stamps the timeline with it, which
+ * is how a painted project acquires a date at all.
+ */
+export function defaultRange(
+  nowUnixS: number,
+  timeline: TimelineShape,
+): { start: string; end: string } {
+  const start = timeline.startUnixS ?? aYearBefore(nowUnixS);
+  const span = Math.max(0, timeline.stepCount - 1) * Math.max(1, timeline.stepHours) * HOUR;
+  return { start: formatUtcHour(start), end: formatUtcHour(start + span) };
 }

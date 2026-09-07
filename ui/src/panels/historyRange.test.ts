@@ -11,6 +11,7 @@ import { describe, expect, it } from "vitest";
 import {
   ARCHIVES,
   MAX_FETCHED_STEPS,
+  aYearBefore,
   defaultRange,
   formatUtcHour,
   parseUtcHour,
@@ -184,35 +185,60 @@ describe("judging a range", () => {
 });
 
 describe("the range the dialog opens on", () => {
+  const now = parseUtcHour("2026-09-07T13:00") as number;
+  const both = ARCHIVES.map((a) => a.id);
+
   /**
-   * Both archives trail real time, and ERA5's own attributes overstate what
-   * it holds by about two days: measured on 2026-09-07 it advertised hours
-   * through 2026-09-01 and had written only to 2026-08-30. A week back landed
-   * in that gap and failed on the first hour, so the default sits a fortnight
-   * back, clear of both the lag and the overstatement.
+   * A history import exists to fill the steps a project has, so the range
+   * worth opening on is the span those steps cover. Any other default either
+   * leaves steps empty or fetches hours no step can show.
    */
-  it("ends far enough back to clear the archives' lag", () => {
-    const now = parseUtcHour("2026-09-07T13:00") as number;
-    // Half past, to prove the default lands on the hour rather than carrying
-    // whatever minute the dialog happened to open at.
-    const { end } = defaultRange(now + 30 * 60);
-    const endAt = parseUtcHour(end) as number;
-    expect(now - endAt, "at least ten days back").toBeGreaterThanOrEqual(10 * DAY);
-    expect(endAt % HOUR, "on the hour").toBe(0);
+  it("is the project's own timeline, when the timeline has a date", () => {
+    const startUnixS = parseUtcHour("2024-03-01T06:00") as number;
+    const { start, end } = defaultRange(now, { startUnixS, stepHours: 3, stepCount: 24 });
+    expect(start).toBe("2024-03-01T06:00");
+    // Twenty-four steps three hours apart span twenty-three gaps, not
+    // twenty-four: the last step is the end, it does not start another.
+    expect(end).toBe(formatUtcHour(startUnixS + 23 * 3 * HOUR));
+    expect(rangeState(start, end, both, 3, 24).steps).toBe(24);
   });
 
-  it("is a whole day, and is itself a range the dialog accepts", () => {
-    const now = parseUtcHour("2026-09-07T13:00") as number;
-    const { start, end } = defaultRange(now);
-    expect((parseUtcHour(end) as number) - (parseUtcHour(start) as number)).toBe(23 * HOUR);
-    const judged = rangeState(start, end, ARCHIVES.map((a) => a.id), 1, 240);
-    expect(judged.problem).toBeNull();
-    expect(judged.steps).toBe(24);
+  /** An hourly timeline of one step is a single hour, not a negative span. */
+  it("handles a one-step timeline", () => {
+    const startUnixS = parseUtcHour("2024-03-01T06:00") as number;
+    const { start, end } = defaultRange(now, { startUnixS, stepHours: 1, stepCount: 1 });
+    expect(start).toBe(end);
+    expect(rangeState(start, end, both, 1, 1).steps).toBe(1);
   });
 
-  /** On a coarser project the same default is proportionally fewer reads. */
-  it("costs a three-hourly project eight steps", () => {
-    const { start, end } = defaultRange(parseUtcHour("2026-09-07T13:00") as number);
-    expect(rangeState(start, end, ARCHIVES.map((a) => a.id), 3, 240).steps).toBe(8);
+  /**
+   * A painted project has no date to anchor its span to. A year back rather
+   * than a smaller lag: both archives trail real time, and ERA5's own
+   * attributes overstate what it holds by about two days on top of that, so
+   * anything measured in days is a guess that sometimes lands in a gap.
+   */
+  it("falls back to this day a year ago when the timeline has no date", () => {
+    const { start, end } = defaultRange(now, {
+      startUnixS: null,
+      stepHours: 6,
+      stepCount: 5,
+    });
+    expect(start, "the same date, a year back, at midnight").toBe("2025-09-07T00:00");
+    expect(end).toBe("2025-09-08T00:00");
+    expect(rangeState(start, end, both, 6, 5).steps).toBe(5);
+  });
+
+  /** 29 February has no counterpart a year later; 1 March is the answer. */
+  it("rolls a leap day forward rather than failing", () => {
+    const leap = parseUtcHour("2025-02-28T09:00") as number;
+    expect(formatUtcHour(aYearBefore(leap))).toBe("2024-02-28T00:00");
+    const after = parseUtcHour("2025-03-01T09:00") as number;
+    expect(formatUtcHour(aYearBefore(after))).toBe("2024-03-01T00:00");
+  });
+
+  /** Whatever the hour it is opened at, the range starts on the hour. */
+  it("always lands on the hour", () => {
+    const { start } = defaultRange(now + 37 * 60, { startUnixS: null, stepHours: 1, stepCount: 2 });
+    expect((parseUtcHour(start) as number) % HOUR).toBe(0);
   });
 });

@@ -903,10 +903,27 @@ sometimes is not there.
 count from its own first hour, so the first hour of the range lands on the
 project's first step and the rest follow at their own spacing — §4.8's rule,
 unchanged, because a history layer is to behave exactly as an imported one
-does. A project with no start time takes the first fetched hour as its own,
-the way a project made from a GRIB takes the file's, and both the layers and
-that start time arrive as one history entry, so one undo takes the whole
-import back.
+does.
+
+**The dialog opens on the project's own timeline**, from its start to its
+end, because that span is exactly the set of times the project can show: the
+number of downloads then equals the number of steps, with no hour fetched
+that no step can draw and no step left without an hour. A project that has no
+start time has no date to anchor that span to, and takes this day a year ago
+— a year, rather than a smaller lag, because both archives trail real time by
+an amount that is not stated reliably (§4.10 note), and a year is certainly
+inside both.
+
+**The timeline's start time can be set or moved by the import**, as an option
+on the dialog. It is the number every step's absolute label is read from
+(§9.1), and an import is usually the moment it becomes knowable: the hours
+just fetched are a fact about *when* a project is, where a painted project
+has none. It is offered rather than assumed, since a project that already has
+a date has one for a reason and moving it relabels every step. Offered
+ticked when there is no date and unticked when there is. The layers and the
+start time arrive as one history entry, so one undo takes the whole import
+back rather than leaving the timeline stamped with hours that are no longer
+there.
 
 **Bounded, and refused rather than abandoned.** Two hundred and forty steps
 per archive is the most one import fetches, which is the most steps a project

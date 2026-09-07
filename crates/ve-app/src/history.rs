@@ -105,6 +105,15 @@ pub struct HistoryRequest {
     pub start_unix_s: i64,
     /// Last hour wanted, in Unix seconds.
     pub end_unix_s: i64,
+    /// Whether to stamp the project's step 0 with the first hour fetched.
+    ///
+    /// The timeline's absolute labels come from that one number, and an
+    /// import is usually the moment it becomes knowable: the hours just
+    /// fetched are a fact about *when* the project is, where a painted
+    /// project has none. It is asked for rather than assumed because a
+    /// project that already has a start time has one for a reason, and
+    /// moving it relabels every step (spec.md 9.1).
+    pub set_start_time: bool,
 }
 
 /// Imports the hours of a range that the project has steps for.
@@ -115,6 +124,7 @@ pub fn import_history(
     archives: Vec<String>,
     start_unix_s: i64,
     end_unix_s: i64,
+    set_start_time: bool,
 ) -> Result<ProjectSummary> {
     use tauri::Emitter;
     history_import(
@@ -123,6 +133,7 @@ pub fn import_history(
             archives,
             start_unix_s,
             end_unix_s,
+            set_start_time,
         },
         |progress| {
             let _ = app.emit("history://progress", progress);
@@ -190,24 +201,26 @@ pub fn history_import(
             layers.push(history_layer(*archive, path, request)?);
         }
 
-        // The first hour any of them holds. A project with no start time
-        // takes it, exactly as a project made from a GRIB takes its file's
-        // (spec.md 4.8) — and through the same command the timeline's own
-        // control uses, so one undo takes the whole import back, start time
-        // included, rather than leaving the timeline stamped with hours that
-        // are no longer there.
+        // The first hour any of them holds, which is what step 0 will show:
+        // the importer aligns a file's first message with the project's
+        // first step (spec.md 4.8). That is the hour to stamp the timeline
+        // with, and it is the range's start in every case but an archive
+        // missing the hours it opens on.
         let earliest = layers
             .iter()
             .filter_map(|layer| layer.raster.as_ref()?.frames.first())
             .map(|frame| frame.valid_unix_s)
             .min();
         let mut commands = Vec::with_capacity(layers.len() + 1);
-        if let (None, Some(start)) = (open.project.settings.start_unix_s, earliest) {
-            commands.push(Command::SetStartTime {
-                before: None,
-                after: Some(start),
-            });
-        }
+        // Through the same command the timeline's own control uses, and in
+        // the same history entry as the layers, so one undo takes the whole
+        // import back — start time included, rather than leaving the
+        // timeline stamped with hours that are no longer there.
+        commands.extend(start_time_command(
+            request.set_start_time,
+            open.project.settings.start_unix_s,
+            earliest,
+        ));
         // Each layer lands on top of the last: the index is where it will be
         // once the layers before it in the batch have been added.
         let base = open.project.layers.len();
@@ -250,6 +263,26 @@ fn archives_of(request: &HistoryRequest) -> Result<Vec<Archive>> {
             })
         })
         .collect()
+}
+
+/// The command that stamps the timeline with the first hour fetched, if the
+/// import should stamp it at all.
+///
+/// Three ways to answer nothing, and each is a decision rather than a guard.
+/// The box was not ticked, so a project's own start time is left alone —
+/// moving it relabels every step (spec.md 9.1) and is the user's call.
+/// Nothing was fetched, so there is no hour to stamp with. Or the timeline
+/// already says exactly that, and a command whose inverse restores the value
+/// it just wrote is an undo entry that does nothing.
+fn start_time_command(asked: bool, before: Option<i64>, earliest: Option<i64>) -> Option<Command> {
+    let after = earliest?;
+    if !asked || before == Some(after) {
+        return None;
+    }
+    Some(Command::SetStartTime {
+        before,
+        after: Some(after),
+    })
 }
 
 /// The hours of a request that land on one of the project's steps.
@@ -485,7 +518,50 @@ mod tests {
             archives: vec!["era5-wind".to_owned()],
             start_unix_s: start,
             end_unix_s: end,
+            set_start_time: false,
         }
+    }
+
+    /// The timeline's date is the user's, and an import moves it only when
+    /// asked to. It is the one number every step's absolute label is read
+    /// from (spec.md 9.1), so an import that quietly re-dated a project
+    /// would relabel work that was already placed against real times.
+    #[test]
+    fn the_timeline_is_only_re_dated_when_the_import_is_asked_to() {
+        let hour = 1_600_000_000;
+        // Not asked: a project with a date keeps it, and so does one without.
+        assert!(start_time_command(false, Some(1), Some(hour)).is_none());
+        assert!(start_time_command(false, None, Some(hour)).is_none());
+
+        // Asked, with nothing fetched: there is no hour to stamp with.
+        assert!(start_time_command(true, None, None).is_none());
+
+        // Asked, and the timeline already says exactly that: a command whose
+        // inverse restores what it just wrote is an undo entry that does
+        // nothing.
+        assert!(start_time_command(true, Some(hour), Some(hour)).is_none());
+    }
+
+    /// And when it is asked, it carries the old value so the undo is right.
+    #[test]
+    fn re_dating_the_timeline_remembers_what_it_replaced() {
+        let (was, now) = (1_500_000_000, 1_600_000_000);
+        assert_eq!(
+            start_time_command(true, None, Some(now)),
+            Some(Command::SetStartTime {
+                before: None,
+                after: Some(now),
+            }),
+            "a project with no date takes the hours it just fetched"
+        );
+        assert_eq!(
+            start_time_command(true, Some(was), Some(now)),
+            Some(Command::SetStartTime {
+                before: Some(was),
+                after: Some(now),
+            }),
+            "and an override keeps the old date for the undo"
+        );
     }
 
     /// The point of M38's follow-up: a project that shows every third hour

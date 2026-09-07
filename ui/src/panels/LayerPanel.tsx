@@ -207,7 +207,14 @@ export default function LayerPanel({
   const importHistory = (choice: HistoryChoice) => {
     setHistoryOpen(false);
     setError(null);
-    run(api.importHistory(choice.archives, choice.startUnixS, choice.endUnixS));
+    run(
+      api.importHistory(
+        choice.archives,
+        choice.startUnixS,
+        choice.endUnixS,
+        choice.setStartTime,
+      ),
+    );
   };
 
   /** Picks an image and lays it under the field (spec.md 4.9, M18). */
