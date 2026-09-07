@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { layerDropIndex } from "./reorder";
+import { dropSide, layerDropIndex } from "./reorder";
 
 /** The order the panel shows, top-first, after `MoveLayer { from, to }` on `["A", "B", "C"]`. */
 function shown(from: number, to: number): string[] {
@@ -31,5 +31,19 @@ describe("layerDropIndex", () => {
   it("leaves a layer dropped on itself where it is", () => {
     expect(layerDropIndex(1, 1, true)).toBe(1);
     expect(layerDropIndex(1, 1, false)).toBe(1);
+  });
+});
+
+describe("dropSide", () => {
+  /**
+   * The halves of the row, and the whole row between them: a drop anywhere
+   * on it lands on one side or the other, so there is nowhere on a row that
+   * a layer cannot be dropped beside (M33).
+   */
+  it("splits a row down the middle, with the midpoint below", () => {
+    expect(dropSide(100, 100, 20)).toBe("above");
+    expect(dropSide(109, 100, 20)).toBe("above");
+    expect(dropSide(110, 100, 20)).toBe("below");
+    expect(dropSide(119, 100, 20)).toBe("below");
   });
 });

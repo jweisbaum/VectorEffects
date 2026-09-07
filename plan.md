@@ -2841,6 +2841,16 @@ here with its reason.
    through the same frame its outline is; the band is cut where a piece is
    gone and the piece's own rim drawn inside the object in its place. Tests
    in `editing.rs`.
+6. **Layer and object reordering is a pointer drag** (finding 8). The rows
+   were `draggable` with HTML5 drop handlers, and WebKit will not start a
+   native drag from an element it considers unselectable — which the rows
+   are, so that a shift-click extends the selection rather than selecting
+   text across them (M28). `-webkit-user-drag: element` did not lift it.
+   The panel now presses, moves and releases with pointer events, resolving
+   the row under the pointer with `elementFromPoint`; the index arithmetic
+   and the choice of side are `reorder.ts`, tested. The DOM hit test itself
+   is not unit-tested — a fake `elementFromPoint` asserts nothing about
+   WebKit — so this one wants a click-through.
 
 ### M32 — Edit tools show their effect as the pointer moves · **complete**
 

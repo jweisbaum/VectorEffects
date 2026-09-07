@@ -1148,7 +1148,11 @@ All tools produce **objects**. Common rules:
   taken only if every object in it is an edit. **A layer is
   dragged above or below any other** (M29): the drop lands on whichever
   half of the target row the pointer let go on, a line on that edge says so
-  beforehand, and each row carries a grip to pick it up by.
+  beforehand, and each row carries a grip to pick it up by. **The reorder is
+  a pointer drag, not the browser's own** (M33): WebKit will not begin a
+  native drag from an element it holds to be unselectable, and the panel's
+  rows are unselectable so that a shift-click extends the selection instead
+  of selecting text across them — so the rows never picked up at all.
 - **What a gesture makes is the selection** (M29): the new object, or the
   one the gesture merged into, is selected the moment it lands, so the panel
   and the inspector turn to it as they do to a clicked object.

@@ -8,6 +8,17 @@
  * source has already moved down by one when the layer is put back.
  */
 
+/**
+ * Which side of a row a drop at `pointerY` lands on (M33).
+ *
+ * The halves of the row: above it in the panel is above it in the stack,
+ * since the panel shows the top of the stack first. Exactly on the midpoint
+ * counts as below, so the two halves are the whole row between them.
+ */
+export function dropSide(pointerY: number, top: number, height: number): "above" | "below" {
+  return pointerY < top + height / 2 ? "above" : "below";
+}
+
 /** The document index a layer at `from` moves to when dropped above or below the layer at `target`. */
 export function layerDropIndex(from: number, target: number, above: boolean): number {
   if (from === target) return from;

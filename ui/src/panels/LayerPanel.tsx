@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { reportError } from "../hint";
 import { api } from "../ipc";
@@ -7,12 +7,63 @@ import type { ProjectSummary } from "../generated/ProjectSummary";
 import type { ImageLayerView } from "../generated/ImageLayerView";
 import { pickGribToImport, pickImageToImport } from "../project/dialogs";
 import { EyeIcon } from "./EyeIcon";
-import { layerDropIndex } from "./reorder";
+import { dropSide, layerDropIndex } from "./reorder";
 import { KIND_LABELS, KINDS, type FieldKindName, kindOf } from "../kind";
 import SpeedFilter from "./SpeedFilter";
 
 /** Which side of a row a drop lands on: above or below a layer, or into it. */
 type DropWhere = "above" | "below" | "into";
+
+/** A row a drop would land on, read off the DOM under the pointer. */
+type DropAt =
+  | { row: "layer"; id: number; index: number; where: DropWhere }
+  | { row: "object"; id: number; layer: number; index: number };
+
+/** How far the pointer must travel before a press becomes a drag, in px. */
+const DRAG_SLACK_PX = 4;
+
+/**
+ * The row under the pointer, and which side of it a layer would land on.
+ *
+ * Read from the DOM rather than from React's own hit testing, because the
+ * pointer is captured by the row the press began on: every move after that
+ * is delivered there whatever it is over. `elementFromPoint` is what says
+ * where it actually is.
+ *
+ * **Reordering is pointer-driven and not HTML5 drag-and-drop** (M33). WebKit
+ * will not begin a native drag from an element it considers unselectable,
+ * and the panel's rows are `user-select: none` so that a shift-click extends
+ * the selection instead of selecting text across them — so `draggable` rows
+ * simply never started a drag in the app, however correct the drop handlers
+ * were. Pointer events have no such rule and are the same events the map
+ * already reorders and transforms with.
+ */
+function dropAt(x: number, y: number, dragging: Dragging["kind"]): DropAt | null {
+  const at = document.elementFromPoint(x, y);
+  if (!(at instanceof Element)) return null;
+  const objectRow = dragging === "object" ? at.closest<HTMLElement>("[data-object-id]") : null;
+  if (objectRow) {
+    return {
+      row: "object",
+      id: Number(objectRow.dataset.objectId),
+      layer: Number(objectRow.dataset.objectLayer),
+      index: Number(objectRow.dataset.objectIndex),
+    };
+  }
+  const block = at.closest<HTMLElement>("[data-layer-id]");
+  if (!block) return null;
+  // Above or below is which half of the row the pointer is over — of the
+  // header where it is over one, and of the whole layer otherwise, so the
+  // space beside a layer's objects is still a place to drop beside it.
+  const header = at.closest<HTMLElement>(".layer-header") ?? block;
+  const rect = header.getBoundingClientRect();
+  return {
+    row: "layer",
+    id: Number(block.dataset.layerId),
+    index: Number(block.dataset.layerIndex),
+    where: dropSide(y, rect.top, rect.height),
+  };
+}
 
 /** What is being dragged, while a reorder is in progress. */
 type Dragging =
@@ -187,6 +238,77 @@ export default function LayerPanel({
     setDropTarget(null);
   };
 
+  /**
+   * The press in progress, and whether it has become a drag.
+   *
+   * A press that never travels is a click — activating a layer, selecting an
+   * object — so the click handlers stand down only once one actually has.
+   */
+  const press = useRef<{ drag: Dragging; x: number; y: number; moved: boolean } | null>(null);
+  const dragged = useRef(false);
+  /**
+   * What a release does, kept in a ref because it needs the layer tree and
+   * the hooks here run before the tree is known to exist.
+   */
+  const dropRef = useRef<(drag: Dragging, at: DropAt | null) => void>(() => {});
+
+  const startPress = (event: React.PointerEvent, drag: Dragging) => {
+    if (event.button !== 0) return;
+    press.current = { drag, x: event.clientX, y: event.clientY, moved: false };
+    dragged.current = false;
+  };
+
+  useEffect(() => {
+    const move = (event: PointerEvent) => {
+      const held = press.current;
+      if (!held) return;
+      if (
+        !held.moved &&
+        Math.hypot(event.clientX - held.x, event.clientY - held.y) < DRAG_SLACK_PX
+      ) {
+        return;
+      }
+      if (!held.moved) {
+        held.moved = true;
+        dragged.current = true;
+        setDragging(held.drag);
+      }
+      const at = dropAt(event.clientX, event.clientY, held.drag.kind);
+      const shown =
+        at === null
+          ? null
+          : at.row === "object"
+            ? { id: at.id, where: "into" as DropWhere }
+            : { id: at.id, where: held.drag.kind === "object" ? ("into" as DropWhere) : at.where };
+      setDropTarget((current) =>
+        current?.id === shown?.id && current?.where === shown?.where ? current : shown,
+      );
+    };
+    const up = (event: PointerEvent) => {
+      const held = press.current;
+      press.current = null;
+      if (!held) return;
+      if (held.moved) {
+        dropRef.current(held.drag, dropAt(event.clientX, event.clientY, held.drag.kind));
+      }
+      setDragging(null);
+      setDropTarget(null);
+      // The click that follows a drag is not a click on the row it ended on;
+      // cleared afterwards so the next press is one again.
+      window.setTimeout(() => {
+        dragged.current = false;
+      }, 0);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+    };
+  }, []);
+
   if (!tree) {
     return <div className="panel-empty muted">Loading…</div>;
   }
@@ -195,23 +317,29 @@ export default function LayerPanel({
   const layers = [...tree.layers].reverse();
 
   /**
-   * Drops the dragged layer above or below the layer at `targetIndex`, or
-   * the dragged object into it (M29). Above and below are the halves of the
-   * row the pointer let go on, so a layer can be put on either side of any
-   * other in one drag.
+   * What a release does, with the tree it needs (M33). Reassigned every
+   * render, so the drop that runs is the one for the panel as it stands.
+   *
+   * A layer lands above or below the row it was let go on — the halves of
+   * that row, so a layer can be put on either side of any other in one drag
+   * (M29). An object lands in the layer of whatever it was let go on: at that
+   * object's place among its siblings, or at the top of a layer dropped on
+   * directly.
    */
-  const dropOnLayer = (targetIndex: number, targetId: number, where: DropWhere) => {
-    const drag = dragging;
-    endDrag();
-    if (!drag) return;
+  dropRef.current = (drag, at) => {
+    if (at === null) return;
     if (drag.kind === "layer") {
-      const to = layerDropIndex(drag.index, targetIndex, where !== "below");
+      if (at.row !== "layer") return;
+      const to = layerDropIndex(drag.index, at.index, at.where !== "below");
       if (drag.index !== to) run(api.moveLayer(drag.index, to));
       return;
     }
-    // An object dropped on a layer header joins the top of that layer.
-    const layer = tree.layers.find((l) => l.id === targetId);
-    if (layer) run(api.moveObject(drag.id, targetId, layer.objects.length));
+    if (at.row === "object") {
+      dropOnObject(at.layer, at.index);
+      return;
+    }
+    const layer = tree.layers.find((l) => l.id === at.id);
+    if (layer) run(api.moveObject(drag.id, at.id, layer.objects.length));
   };
 
   /** Moves the dragged object to a position in the object list. */
@@ -249,7 +377,7 @@ export default function LayerPanel({
         {layers.map((layer, reversed) => {
           const index = tree.layers.length - 1 - reversed;
           return (
-            <li key={layer.id} className="layer">
+            <li key={layer.id} className="layer" data-layer-id={layer.id} data-layer-index={index}>
               <div
                 className={[
                   "layer-header",
@@ -258,45 +386,13 @@ export default function LayerPanel({
                 ]
                   .filter(Boolean)
                   .join(" ")}
-                onClick={() => onActivateLayer(layer.id)}
+                onClick={() => {
+                  if (dragged.current) return;
+                  onActivateLayer(layer.id);
+                }}
                 onMouseDown={noTextSelect}
-                title="Click to make this the active layer"
-                draggable
-                onDragStart={(e) => {
-                  e.dataTransfer.effectAllowed = "move";
-                  // Some payload is required for a drag to start at all.
-                  e.dataTransfer.setData("text/plain", String(layer.id));
-                  setDragging({ kind: "layer", id: layer.id, index });
-                }}
-                onDragEnd={endDrag}
-                onDragOver={(e) => {
-                  if (!dragging) return;
-                  // An imported layer takes no objects (D66): a layer can be
-                  // dropped beside it, but an object dropped onto it would be
-                  // refused, so the target is not offered.
-                  if (dragging.kind === "object" && layer.grib !== null) return;
-                  e.preventDefault();
-                  e.dataTransfer.dropEffect = "move";
-                  // A layer lands on the side of the row the pointer is over;
-                  // an object lands in the layer.
-                  const where: DropWhere =
-                    dragging.kind === "object"
-                      ? "into"
-                      : e.clientY < e.currentTarget.getBoundingClientRect().top +
-                          e.currentTarget.getBoundingClientRect().height / 2
-                        ? "above"
-                        : "below";
-                  setDropTarget((current) =>
-                    current?.id === layer.id && current.where === where
-                      ? current
-                      : { id: layer.id, where },
-                  );
-                }}
-                onDragLeave={() => setDropTarget((t) => (t?.id === layer.id ? null : t))}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  dropOnLayer(index, layer.id, dropTarget?.id === layer.id ? dropTarget.where : "into");
-                }}
+                onPointerDown={(e) => startPress(e, { kind: "layer", id: layer.id, index })}
+                title="Click to make this the active layer; drag to reorder"
               >
                 <span className="grip" aria-hidden="true" title="Drag to reorder">
                   ⋮⋮
@@ -435,21 +531,7 @@ export default function LayerPanel({
               )}
 
               {!folded.has(layer.id) && (
-              <ul
-                className="objects"
-                onDragOver={(e) => {
-                  if (dragging?.kind !== "object" || layer.grib !== null) return;
-                  e.preventDefault();
-                  e.dataTransfer.dropEffect = "move";
-                }}
-                onDrop={(e) => {
-                  // Dropping on the list's empty space, rather than on a row,
-                  // means "the bottom of this layer".
-                  if (e.currentTarget !== e.target) return;
-                  e.preventDefault();
-                  dropOnObject(layer.id, 0);
-                }}
-              >
+              <ul className="objects">
                 {/* Objects are also shown top-first. */}
                 {[...layer.objects].reverse().map((object, reversedObject) => {
                   const documentIndex = layer.objects.length - 1 - reversedObject;
@@ -464,31 +546,15 @@ export default function LayerPanel({
                       ]
                         .filter(Boolean)
                         .join(" ")}
-                      draggable
+                      data-object-id={object.id}
+                      data-object-layer={layer.id}
+                      data-object-index={documentIndex}
                       onMouseDown={noTextSelect}
-                      onDragStart={(e) => {
-                        e.stopPropagation();
-                        e.dataTransfer.effectAllowed = "move";
-                        e.dataTransfer.setData("text/plain", String(object.id));
-                        setDragging({ kind: "object", id: object.id });
+                      onPointerDown={(e) => startPress(e, { kind: "object", id: object.id })}
+                      onClick={(e) => {
+                        if (dragged.current) return;
+                        clickObject(object.id, layer.id, e);
                       }}
-                      onDragEnd={endDrag}
-                      onDragOver={(e) => {
-                        if (dragging?.kind !== "object") return;
-                        e.preventDefault();
-                        e.stopPropagation();
-                        e.dataTransfer.dropEffect = "move";
-                        setDropTarget({ id: object.id, where: "into" });
-                      }}
-                      onDragLeave={() =>
-                        setDropTarget((t) => (t?.id === object.id ? null : t))
-                      }
-                      onDrop={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        dropOnObject(layer.id, documentIndex);
-                      }}
-                      onClick={(e) => clickObject(object.id, layer.id, e)}
                     >
                       {renaming === object.id ? (
                         <input
