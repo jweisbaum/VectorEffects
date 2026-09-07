@@ -373,6 +373,15 @@ pub struct OperatorOutline {
     pub anchor: [f64; 2],
     /// Where its edge is.
     pub outline: ObjectOutline,
+    /// What the eraser has taken out of it at this step (M33), in the same
+    /// geographic terms.
+    ///
+    /// The outline is the shape the object was drawn with; the eraser takes
+    /// pieces out of it without changing that shape (spec.md 8.1, M29), so an
+    /// edge drawn from the shape alone traced a footprint that is no longer
+    /// all there. The map knocks these out of the edge it draws and follows
+    /// their own rims inside it.
+    pub erased: Vec<ObjectOutline>,
 }
 
 /// The footprints the map may need to draw at `step`.
@@ -449,6 +458,13 @@ pub fn outlines_at(
                     inverted: flat.invert,
                     anchor: [flat.frame.anchor.lon, flat.frame.anchor.lat],
                     outline: outline_of(&BaselineOutline::of(&flat.shape), &flat.frame),
+                    erased: flat
+                        .erased
+                        .iter()
+                        .map(|erasure| {
+                            outline_of(&BaselineOutline::of(&erasure.shape), &flat.frame)
+                        })
+                        .collect(),
                 });
             }
         }

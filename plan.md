@@ -2836,6 +2836,11 @@ here with its reason.
    turning `loop` on afterwards is what the range handle is for. A still
    capture is one frame at hour zero and so covers one step, which is what
    it already drew.
+5. **An edge follows what the eraser took** (finding 7). `OperatorOutline`
+   carries the object's erasures at the step, lifted into geographic terms
+   through the same frame its outline is; the band is cut where a piece is
+   gone and the piece's own rim drawn inside the object in its place. Tests
+   in `editing.rs`.
 
 ### M32 — Edit tools show their effect as the pointer moves · **complete**
 

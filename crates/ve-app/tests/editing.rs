@@ -128,6 +128,54 @@ fn erase(state: &AppState, points: Vec<[f64; 2]>, radius_km: f64, step: Option<u
     .expect("erase");
 }
 
+/// An object's outline says what the eraser has taken out of it (M33).
+///
+/// The eraser takes pieces out without changing the shape the object was
+/// drawn with, so the selection highlight and the pink edge under the
+/// pointer were still tracing a footprint that is no longer all there.
+#[test]
+fn an_outline_carries_what_the_eraser_took() {
+    let (_root, state) = painted("erase-outline");
+    let object = document::tree(&state, 0).expect("tree").layers[0].objects[0].id;
+    let outline_of = |state: &AppState| {
+        ve_app::transform::outlines_at(state, 0, None, &[object], None, false)
+            .expect("outlines")
+            .into_iter()
+            .next()
+            .expect("the object has an outline")
+    };
+    assert!(
+        outline_of(&state).erased.is_empty(),
+        "nothing has been taken yet"
+    );
+
+    erase(&state, vec![[8.0, 4.0]], 250.0, None);
+    let outlined = outline_of(&state);
+    assert_eq!(outlined.erased.len(), 1, "the stamp the eraser left");
+    // Where it was erased, in the object's own frame lifted back to the map.
+    let ve_app::transform::ObjectOutline::Swept {
+        chains, radius_km, ..
+    } = &outlined.erased[0]
+    else {
+        panic!("an eraser's stamp is swept");
+    };
+    let at = chains[0][0];
+    assert!(
+        (at[0] - 8.0).abs() < 0.2 && (at[1] - 4.0).abs() < 0.2,
+        "the stamp is where the eraser was: {at:?}"
+    );
+    assert!(
+        (radius_km - 250.0).abs() < 1.0,
+        "and the size it was: {radius_km}"
+    );
+
+    edit::undo_for_test(&state).expect("undo");
+    assert!(
+        outline_of(&state).erased.is_empty(),
+        "undo puts the outline back too"
+    );
+}
+
 /// The eraser takes the part of an object it covers and nothing else: no
 /// object is made, the object stays, and undo puts the part back.
 #[test]

@@ -1450,6 +1450,12 @@ covered, or that a click landed on it.
   a ring alike — and centred on it, where a stroke of that width would be.
 - An **inverted** mask is drawn with a wide, faint band on top of its edge, since
   an outline alone cannot say which side is covered.
+- **An edge follows what the eraser has taken** (M33). The eraser takes
+  pieces out of an object without changing the shape it was drawn with
+  (§8.1), so an edge drawn from the shape alone traced a footprint that is no
+  longer all there. Each outline carries the erasures standing against it at
+  that step: the band is cut where a piece is gone and the piece's own rim is
+  drawn inside the object in its place.
 - **The eraser's stroke in progress is filled, not outlined** (M33). It is the
   same union, and the same rings would trail the pointer; it is being drawn
   rather than sitting on the map, so a tint over the sweep and a dashed nib at

@@ -2250,6 +2250,7 @@ export default function MapView({
       colour: string,
       widthCss: number,
       dpr: number,
+      erased: readonly ObjectOutline[] = [],
     ) => {
       const width = Math.max(1, widthCss * dpr);
       context.save();
@@ -2257,6 +2258,9 @@ export default function MapView({
         context.strokeStyle = colour;
         context.lineWidth = width;
         context.stroke(maskPath(outline));
+        // What the eraser took is no longer there to outline (M33).
+        context.globalCompositeOperation = "destination-out";
+        for (const hole of erased) context.fill(maskPath(hole, width / 2));
         context.restore();
         return;
       }
@@ -2267,6 +2271,22 @@ export default function MapView({
       context.fill(maskPath(outline, -width / 2));
       context.globalCompositeOperation = "destination-out";
       context.fill(maskPath(outline, width / 2));
+      // The eraser takes pieces out of an object without changing the shape
+      // it was drawn with (spec.md 8.1), so the edge has to be told: the band
+      // is cut where a piece is gone, and the piece's own rim is drawn inside
+      // the object in its place (M33).
+      for (const hole of erased) context.fill(maskPath(hole, width / 2));
+      context.restore();
+      if (erased.length === 0) return;
+      context.save();
+      context.clip(maskPath(outline, width / 2));
+      for (const hole of erased) {
+        context.fillStyle = colour;
+        context.globalCompositeOperation = "source-over";
+        context.fill(maskPath(hole, -width / 2));
+        context.globalCompositeOperation = "destination-out";
+        context.fill(maskPath(hole, width / 2));
+      }
       context.restore();
     },
     [maskPath],
@@ -2452,11 +2472,19 @@ export default function MapView({
         hovered ? "rgba(255, 110, 190, 0.95)" : "rgba(255, 214, 102, 0.85)",
         hovered ? 2.5 : 1.5,
         dpr,
+        outlined.erased,
       );
       // An inverted mask covers everything *but* this, so a wide faint band
       // goes with it: an edge alone cannot say which side is covered.
       if (outlined.inverted) {
-        drawEdgeBand(context, outlined.outline, "rgba(255, 110, 190, 0.16)", 9, dpr);
+        drawEdgeBand(
+          context,
+          outlined.outline,
+          "rgba(255, 110, 190, 0.16)",
+          9,
+          dpr,
+          outlined.erased,
+        );
       }
     }
 
