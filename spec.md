@@ -2487,10 +2487,17 @@ project that knows nothing about where it came from.
 
 **Nothing in the library is project data.** A project that uses a macro carries
 its own copy of the frames, as its own `captures/` entry (D52), so clearing the
-library breaks nothing already inserted — which is what makes *Delete all
-macros* a safe button rather than a destructive one. The library's directory is
+library breaks nothing already inserted. The library's directory is
 a setting (§8.6); a file in it that will not decode is skipped rather than
 emptying the list.
+
+**Deleting the library is asked for** (M35). It reaches outside the project,
+takes files off the disk and is not undoable, so *Delete all macros* opens a
+confirmation naming how many macros and how much disk go — and saying the
+one thing that makes it safe, that placed macros keep their own copy. **And
+the insert tool re-reads the library when it changes**: the tool reads it
+when it is picked up and keeps what it read, so a library emptied from the
+settings left the stamp offering macros that were no longer there.
 
 **Capture.** Draw a region, press **Start capture**, and the application
 enters capture mode: the layer panel and the properties panel grey out and

@@ -60,18 +60,29 @@ export default function SettingsDialog({
   project,
   onSettings,
   onProject,
+  onLibrary,
   onClose,
 }: {
   settings: AppSettings;
   project: ProjectSummary | null;
   onSettings: (settings: AppSettings) => void;
   onProject: (project: ProjectSummary) => void;
+  /**
+   * The macro library changed (M35).
+   *
+   * The insert tool reads the library when it is picked up and keeps what it
+   * read, so a library emptied from here left the stamp tool offering macros
+   * that are no longer on disk.
+   */
+  onLibrary: () => void;
   onClose: () => void;
 }) {
   const [error, setError] = useState<string | null>(null);
   /** The row waiting for a key press, if any. */
   const [capturing, setCapturing] = useState<string | null>(null);
   const [library, setLibrary] = useState<MacroLibrary | null>(null);
+  /** Whether the "delete every macro" confirmation is up (M35). */
+  const [confirmClear, setConfirmClear] = useState(false);
   useEffect(() => {
     void api.macroLibrary().then(setLibrary).catch(() => undefined);
   }, []);
@@ -271,10 +282,7 @@ export default function SettingsDialog({
             <button
               disabled={library === null || library.entries.length === 0}
               title="Projects that already use a macro keep their own copy of its frames, so this breaks nothing"
-              onClick={() => {
-                setError(null);
-                void api.deleteMacros(null).then(setLibrary).catch(report);
-              }}
+              onClick={() => setConfirmClear(true)}
             >
               Delete all macros
             </button>
@@ -285,6 +293,56 @@ export default function SettingsDialog({
           <button onClick={onClose}>Close</button>
         </div>
       </div>
+
+      {/*
+        Deleting the library is not undoable and reaches outside the project,
+        so it is asked for (M35) — with the number and the size, and with the
+        one thing that makes it safe: a project that used a macro carries its
+        own copy of the frames (D52).
+      */}
+      {confirmClear && library !== null && (
+        <div className="modal-backdrop" onClick={() => setConfirmClear(false)}>
+          <div
+            className="modal modal-narrow"
+            role="dialog"
+            aria-label="Delete all macros"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2>
+              Delete {library.entries.length} macro
+              {library.entries.length === 1 ? "" : "s"}?
+            </h2>
+            <p>
+              This removes {formatBytes(library.total_bytes)} from the macro library on disk.
+              It cannot be undone.
+            </p>
+            <p className="muted">
+              Projects that already use a macro keep their own copy of its frames, so nothing
+              you have placed will change.
+            </p>
+            <div className="modal-actions">
+              <button onClick={() => setConfirmClear(false)}>Cancel</button>
+              <button
+                className="danger"
+                onClick={() => {
+                  setConfirmClear(false);
+                  setError(null);
+                  void api
+                    .deleteMacros(null)
+                    .then((held) => {
+                      setLibrary(held);
+                      onLibrary();
+                    })
+                    .catch(report);
+                }}
+              >
+                Delete {library.entries.length} macro
+                {library.entries.length === 1 ? "" : "s"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

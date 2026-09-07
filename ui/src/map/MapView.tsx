@@ -489,6 +489,7 @@ export default function MapView({
   autoKey,
   viewSlot,
   activeKind,
+  libraryRevision,
 }: {
   ref?: Ref<MapHandle>;
   /**
@@ -505,6 +506,11 @@ export default function MapView({
    * every kind the project holds.
    */
   activeKind: FieldKindName;
+  /**
+   * Bumped when the macro library has changed elsewhere (M35): the insert
+   * tool re-reads it rather than going on offering what is no longer there.
+   */
+  libraryRevision: number;
   project: ProjectSummary;
   step: number;
   selection: number[];
@@ -1673,7 +1679,7 @@ export default function MapView({
   }, []);
   useEffect(() => {
     if (tool === INSERT) readLibrary();
-  }, [readLibrary, tool]);
+  }, [readLibrary, tool, libraryRevision]);
 
   /**
    * The image layers, re-read whenever the document changes.

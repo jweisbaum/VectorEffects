@@ -112,6 +112,16 @@ export default function App() {
    * samples and a capture takes. The map shows every kind the project holds.
    */
   const [activeKind, setActiveKind] = useState<FieldKindName>("wind");
+  /**
+   * Bumped whenever the macro library changes from outside the map (M35).
+   *
+   * The insert tool reads the library when it is picked up and keeps what it
+   * read; emptying the library from the settings left it offering macros
+   * that are no longer there. A counter rather than the library itself: the
+   * map is the one that knows how to read it, and only needs telling that
+   * what it has is stale.
+   */
+  const [libraryRevision, setLibraryRevision] = useState(0);
   // Armed by the inspector, answered by the map: the next map click places this
   // property of this object.
   const [picking, setPicking] = useState<PositionPick | null>(null);
@@ -540,6 +550,7 @@ export default function App() {
           autoKey={autoKey}
           viewSlot={viewSlot}
           activeKind={activeKind}
+          libraryRevision={libraryRevision}
         />
 
         {panels.right ? (
@@ -631,6 +642,7 @@ export default function App() {
           project={project}
           onSettings={setSettings}
           onProject={setProject}
+          onLibrary={() => setLibraryRevision((at) => at + 1)}
           onClose={() => setShowSettings(false)}
         />
       )}

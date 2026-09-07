@@ -2956,6 +2956,26 @@ correction: it takes every kind under it. Not clicked through in the app.
    there. `preview_stamp` no longer rebuilds the scene under a new
    revision — there is no object at the stamp to move, and doing so threw
    away every tile on screen whenever the pointer moved.
+### M35 — The macro library says what it holds · **complete**
+
+**Goal:** the two findings the user handed over on 2026-09-07 after the M34
+build: deleted macros still offered by the stamp tool, and no confirmation
+before deleting them all.
+
+**Delivered 2026-09-07**, one commit.
+
+1. **The stamp tool re-reads the library.** It read the library when the
+   tool was picked up and kept what it read, so emptying the library from
+   the settings left it offering macros that were no longer on disk — and
+   the click that placed one refused. The settings dialog reports a library
+   change, the shell counts them, and the map re-reads on the count as well
+   as on the tool.
+2. **Deleting every macro is confirmed.** The button opens a confirmation
+   naming how many macros and how much disk go, and saying what makes it
+   safe: a project that used a macro keeps its own copy of the frames
+   (D52). Nothing is deleted until it is answered — which is what
+   `SettingsDialog.test.tsx` holds.
+
 ---
 
 ## 3. Testing strategy
