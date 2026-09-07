@@ -2,7 +2,15 @@ import { describe, expect, it } from "vitest";
 
 import type { ImageLayerView } from "../generated/ImageLayerView";
 import { project, type Camera, type Viewport } from "./camera";
-import { cornerUnder, cornersOf, draggedCorners, hasArea } from "./place";
+import {
+  cornerUnder,
+  cornersOf,
+  draggedCorners,
+  hasArea,
+  imageUnder,
+  insideImage,
+  movedCorners,
+} from "./place";
 
 const view: Viewport = { width: 800, height: 600 };
 const camera: Camera = { centerLon: 0, centerLat: 0, pxPerDeg: 8 };
@@ -127,5 +135,80 @@ describe("hasArea", () => {
     expect(
       hasArea({ topLeft: [170, 10], topRight: [-170, 10], bottomLeft: [170, 0] }),
     ).toBe(true);
+  });
+});
+
+describe("insideImage", () => {
+  /** The pointer has to be over the picture the outline draws, not its bounding box. */
+  it("is the quad the outline draws", () => {
+    const at = (lon: number, lat: number) => project(camera, view, { lon, lat });
+    expect(insideImage(image(), camera, view, at(0, 0))).toBe(true);
+    expect(insideImage(image(), camera, view, at(-9.5, 4.5))).toBe(true);
+    expect(insideImage(image(), camera, view, at(11, 0))).toBe(false);
+    expect(insideImage(image(), camera, view, at(0, 6))).toBe(false);
+  });
+
+  /** A sheared image is a quad, so its corner triangles are outside it. */
+  it("follows a shear rather than a bounding box", () => {
+    const sheared = image({
+      corners: [
+        [-10, 5],
+        [10, 15],
+        [10, 5],
+        [-10, -5],
+      ],
+    });
+    const at = (lon: number, lat: number) => project(camera, view, { lon, lat });
+    expect(insideImage(sheared, camera, view, at(0, 5))).toBe(true);
+    // Inside the bounding box, above the sheared top edge.
+    expect(insideImage(sheared, camera, view, at(-8, 12))).toBe(false);
+  });
+});
+
+describe("imageUnder", () => {
+  /**
+   * Only the active layer's picture moves (M36), for the reason only its
+   * control points are drawn: several charts stacked would otherwise move
+   * whichever was on top, with no way to say which was meant.
+   */
+  it("offers the active layer's picture and no other", () => {
+    const at = project(camera, view, { lon: 0, lat: 0 });
+    const other = image({ layer: 9 });
+    expect(imageUnder([image(), other], 7, camera, view, at)?.layer).toBe(7);
+    expect(imageUnder([image(), other], 9, camera, view, at)?.layer).toBe(9);
+    expect(imageUnder([image(), other], null, camera, view, at)).toBeNull();
+  });
+
+  it("offers nothing for an image that has not loaded", () => {
+    const at = project(camera, view, { lon: 0, lat: 0 });
+    expect(imageUnder([image({ loaded: false })], 7, camera, view, at)).toBeNull();
+  });
+});
+
+describe("movedCorners", () => {
+  /** A move keeps the shape: every point takes the same delta. */
+  it("carries all three points by the same delta", () => {
+    const moved = movedCorners(cornersOf(image()), 5, -2);
+    expect(moved.topLeft).toEqual([-5, 3]);
+    expect(moved.topRight).toEqual([15, 3]);
+    expect(moved.bottomLeft).toEqual([-5, -7]);
+  });
+
+  /**
+   * The picture stops at the pole rather than folding over it — and the
+   * whole delta is held back, not each corner, so the shape stays rigid.
+   */
+  it("holds the whole move back at the pole", () => {
+    const moved = movedCorners(cornersOf(image()), 0, 100);
+    expect(moved.topLeft[1]).toBe(90);
+    // The image is 10 degrees deep, so its bottom follows to 80.
+    expect(moved.bottomLeft[1]).toBe(80);
+    expect(moved.topRight[1]).toBe(90);
+  });
+
+  /** Longitude wraps: a chart dragged past the dateline stays one chart. */
+  it("normalises longitude", () => {
+    const moved = movedCorners(cornersOf(image()), 175, 0);
+    expect(moved.topRight[0]).toBeCloseTo(-175, 9);
   });
 });

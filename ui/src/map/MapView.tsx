@@ -155,6 +155,8 @@ import {
   type CornerPick,
   cornerUnder,
   cornersOf,
+  imageUnder,
+  movedCorners,
   draggedCorners,
   hasArea,
 } from "./place";
@@ -727,6 +729,19 @@ export default function MapView({
     inFlight: boolean;
     queued: ReturnType<typeof draggedCorners> | null;
   }>({ inFlight: false, queued: null });
+  /**
+   * The image being dragged bodily, and what it was when the drag began
+   * (M36).
+   *
+   * From the corners at the press rather than from wherever the last round
+   * trip left them: a move made of accumulated deltas drifts, and the picture
+   * has to end up where the hand does.
+   */
+  const imageDrag = useRef<{
+    layer: number;
+    from: { lon: number; lat: number };
+    corners: ReturnType<typeof cornersOf>;
+  } | null>(null);
   /** The measurement handle being dragged. */
   const measureDrag = useRef<HandlePick | null>(null);
   /**
@@ -3338,7 +3353,7 @@ export default function MapView({
    * `createReadoutStore` exists to prevent.
    */
   const applyCursor = useCallback(
-    (insideRegion: boolean, panning: boolean) => {
+    (insideRegion: boolean, panning: boolean, onImage = false) => {
       const canvas = canvasRef.current;
       if (!canvas) return;
       const wanted = cursorFor({
@@ -3348,6 +3363,7 @@ export default function MapView({
         insideRegion,
         panning,
         recording: recording !== null,
+        onImage,
       });
       if (canvas.style.cursor !== wanted) canvas.style.cursor = wanted;
     },
@@ -3405,6 +3421,30 @@ export default function MapView({
         cornerDrag.current = grabbed;
         requestOverlay();
         return;
+      }
+      // Inside the picture, the hand moves the whole thing (M36) — the same
+      // tool that moves a selected object, and the same rule: what is
+      // selected is what a drag moves, and a drag anywhere else pans. The
+      // active image layer is the selection, which is what puts the outline
+      // and the control points on the map.
+      if (tool === HAND) {
+        const image = imageUnder(
+          imageLayersRef.current,
+          activeLayer,
+          cameraRef.current,
+          viewRef.current,
+          point,
+        );
+        if (image !== null) {
+          const geo = unproject(cameraRef.current, viewRef.current, point);
+          imageDrag.current = {
+            layer: image.layer,
+            from: geo,
+            corners: cornersOf(image),
+          };
+          requestOverlay();
+          return;
+        }
       }
     }
 
@@ -3799,6 +3839,14 @@ export default function MapView({
           editsRegion(tool) &&
           regionContains(region, geo.lon, geo.lat),
         dragging.current !== null,
+        imageDrag.current !== null ||
+          imageUnder(
+            imageLayersRef.current,
+            activeLayer,
+            cameraRef.current,
+            viewRef.current,
+            point,
+          ) !== null,
       );
     }
 
@@ -3975,6 +4023,45 @@ export default function MapView({
           void api
             .placeCapture(stepRef.current, next[0], next[1])
             .then((mode) => setRecording(mode.active ? mode : null))
+            .catch(() => undefined)
+            .finally(send);
+        };
+        send();
+      }
+      return;
+    }
+
+    // The whole picture being dragged (M36). The same one-in-flight rule and
+    // the same coalescing key as a control point, so a move and a placement
+    // are one undo entry each and the picture follows the hand either way.
+    if (imageDrag.current) {
+      const held = imageDrag.current;
+      const geo = unproject(cameraRef.current, viewRef.current, point);
+      const next = movedCorners(
+        held.corners,
+        normalizeLon(geo.lon - held.from.lon),
+        geo.lat - held.from.lat,
+      );
+      const flight = cornerMove.current;
+      flight.queued = next;
+      if (!flight.inFlight) {
+        const send = () => {
+          const wanted = flight.queued;
+          flight.queued = null;
+          if (wanted === null) {
+            flight.inFlight = false;
+            return;
+          }
+          flight.inFlight = true;
+          void api
+            .setImageCorners(
+              held.layer,
+              wanted.topLeft,
+              wanted.topRight,
+              wanted.bottomLeft,
+              `image:${held.layer}:place`,
+            )
+            .then(onProjectChanged)
             .catch(() => undefined)
             .finally(send);
         };
@@ -4408,10 +4495,11 @@ export default function MapView({
       return;
     }
 
-    // An image control point lets go: the coalescing group ends, so the next
-    // drag of the same corner is its own undo entry (spec.md 4.9, M18).
-    if (cornerDrag.current) {
+    // An image control point or the picture itself lets go: the coalescing
+    // group ends, so the next drag is its own undo entry (spec.md 4.9, M18).
+    if (cornerDrag.current || imageDrag.current) {
       cornerDrag.current = null;
+      imageDrag.current = null;
       void api.endGesture().catch(() => undefined);
       requestOverlay();
       return;

@@ -2976,6 +2976,23 @@ before deleting them all.
    (D52). Nothing is deleted until it is answered — which is what
    `SettingsDialog.test.tsx` holds.
 
+### M36 — An image is dragged by its picture · **complete**
+
+**Goal:** the user's instruction of 2026-09-07: an imported image must be
+draggable once selected.
+
+**Delivered 2026-09-07**, one commit. The three control points placed an
+image but nothing moved it, so a chart could only be walked across the map
+corner by corner. With the hand in hand, a drag inside the active image
+layer's outline now carries every control point by the same delta —
+`insideImage` is the crossing test over the quad the outline draws, and
+`movedCorners` holds the latitude back at the poles so the shape stays
+rigid. It goes through the same `set_image_corners` command, the same
+one-in-flight rule and the same coalescing key as a corner drag, so a move
+is one undo entry and the picture follows the hand. The cursor over the
+picture is `move` rather than the hand's usual `grab`, since a drag there
+does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
+
 ---
 
 ## 3. Testing strategy

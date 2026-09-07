@@ -817,7 +817,16 @@ point and shears the image; **shift** keeps it north-up and its aspect true,
 which is the translate-and-scale case a chart scan almost always wants. Three
 points on a line have no area and are refused.
 
-The control points belong to the **active layer** only. A project with several
+**The picture itself is dragged to move it** (M36). With the hand in hand, a
+drag inside the active image's outline carries the whole thing — every control
+point by the same delta, so the size, the aspect and any shear are kept, since
+a move is not a placement. The cursor says so over the picture, the move stops
+at the poles rather than folding over one, and the whole drag is one undo entry
+like a corner's. It is the rule the hand already follows for a selected object:
+what is selected is what a drag moves, and a drag anywhere else pans.
+
+The control points, and the picture's own drag, belong to the **active layer**
+only. A project with several
 charts under it would otherwise stack handles from all of them on one corner of
 the map, with no way to say which a drag meant.
 

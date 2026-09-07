@@ -26,6 +26,8 @@ export interface CursorContext {
   panning: boolean;
   /** A macro capture is running: the region is dragged with the selection cursor. */
   recording: boolean;
+  /** The pointer is over the active image layer's picture, which a drag moves (M36). */
+  onImage: boolean;
 }
 
 /**
@@ -54,7 +56,11 @@ export function cursorFor(context: CursorContext): string {
   if (context.insideRegion) return BUCKET_CURSOR;
   switch (context.tool) {
     case HAND:
-      return context.panning ? "grabbing" : "grab";
+      if (context.panning) return "grabbing";
+      // Over the picture the hand moves it rather than the map (M36), and
+      // says so: a grab hand here would promise a pan that is not what a
+      // drag does.
+      return context.onImage ? "move" : "grab";
     case SELECT:
     case CAPTURE:
     case INSERT:

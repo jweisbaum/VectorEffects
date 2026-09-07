@@ -10,12 +10,24 @@ const base: CursorContext = {
   insideRegion: false,
   panning: false,
   recording: false,
+  onImage: false,
 };
 
 describe("cursorFor", () => {
   it("gives the hand a hand, closed while panning", () => {
     expect(cursorFor(base)).toBe("grab");
     expect(cursorFor({ ...base, panning: true })).toBe("grabbing");
+  });
+
+  /**
+   * Over the active image the hand moves the picture rather than the map
+   * (M36), so it must not promise a pan — and once the drag is under way it
+   * is the closed hand like any other drag.
+   */
+  it("says the hand moves the picture it is over", () => {
+    expect(cursorFor({ ...base, onImage: true })).toBe("move");
+    expect(cursorFor({ ...base, onImage: true, panning: true })).toBe("grabbing");
+    expect(cursorFor({ ...base, tool: "brush", onImage: true })).toBe("crosshair");
   });
 
   it("gives the select, capture and insert tools the arrow", () => {

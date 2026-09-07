@@ -161,6 +161,80 @@ export function draggedCorners(
 }
 
 /**
+ * Whether a screen point is inside an image's quad.
+ *
+ * The crossing test over the four projected corners, which is the shape the
+ * outline draws — so what can be grabbed is exactly what can be seen. The
+ * projection takes each corner to the copy of the world nearest the camera,
+ * so an image across the antimeridian is one quad here rather than two.
+ */
+export function insideImage(
+  image: ImageLayerView,
+  camera: Camera,
+  viewport: Viewport,
+  at: ScreenPoint,
+): boolean {
+  const quad = image.corners.map((corner) =>
+    project(camera, viewport, { lon: corner[0], lat: corner[1] }),
+  );
+  if (quad.length < 3) return false;
+  let inside = false;
+  for (let i = 0, j = quad.length - 1; i < quad.length; j = i++) {
+    const a = quad[i] as ScreenPoint;
+    const b = quad[j] as ScreenPoint;
+    if (a.y > at.y !== b.y > at.y) {
+      const t = (at.y - a.y) / (b.y - a.y);
+      if (at.x < a.x + t * (b.x - a.x)) inside = !inside;
+    }
+  }
+  return inside;
+}
+
+/**
+ * The image a drag would move: the active layer's, loaded, under the pointer.
+ *
+ * Only the active one, for the reason its handles are only the active one's
+ * (M36): a project with several charts stacked would otherwise move whichever
+ * happened to be on top, and there would be no way to say which was meant.
+ */
+export function imageUnder(
+  views: readonly ImageLayerView[],
+  activeLayer: number | null,
+  camera: Camera,
+  viewport: Viewport,
+  at: ScreenPoint,
+): ImageLayerView | null {
+  const image = views.find((candidate) => candidate.layer === activeLayer);
+  if (!image || !image.loaded) return null;
+  return insideImage(image, camera, viewport, at) ? image : null;
+}
+
+/**
+ * The three control points moved bodily by a delta in degrees (M36).
+ *
+ * Every point takes the same delta, so the image keeps its size, its aspect
+ * and whatever shear it had: a move is not a placement. The latitude delta is
+ * held back where it would carry a corner off the map — the picture stops at
+ * the pole rather than folding over it — and holding the *whole* delta rather
+ * than each corner is what keeps the shape rigid on the way.
+ */
+export function movedCorners(corners: Corners, dLon: number, dLat: number): Corners {
+  const lats = [corners.topLeft[1], corners.topRight[1], corners.bottomLeft[1]];
+  const room = Math.min(...lats.map((lat) => 90 - lat));
+  const below = Math.min(...lats.map((lat) => lat + 90));
+  const held = Math.max(-below, Math.min(dLat, room));
+  const moved = (point: [number, number]): [number, number] => [
+    normalizeLon(point[0] + dLon),
+    point[1] + held,
+  ];
+  return {
+    topLeft: moved(corners.topLeft),
+    topRight: moved(corners.topRight),
+    bottomLeft: moved(corners.bottomLeft),
+  };
+}
+
+/**
  * Whether three control points describe an image with any area.
  *
  * Collinear points have none, and the backend refuses them; asking first means
