@@ -736,6 +736,44 @@ body {
   white-space: nowrap;
 }
 
+/* The history import is a calendar and no words: it sits beside two buttons
+   that already say "Import", and what distinguishes it is that it asks for
+   dates rather than a file (M38). */
+.layer-panel header .icon-button {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 7px;
+}
+
+/* The history range dialog's fields. */
+.modal .field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 10px 0;
+  font-size: 12px;
+}
+.modal fieldset.field {
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 8px 10px;
+}
+.modal fieldset.field legend { padding: 0 4px; color: var(--muted); }
+.modal .field input[type="datetime-local"] {
+  background: #0d1526;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 7px;
+  font: inherit;
+}
+.modal .check {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 2px 0;
+}
+
 /* The visibility toggle is an eye, shown rather than said. */
 .layer-panel .eye {
   display: inline-flex;

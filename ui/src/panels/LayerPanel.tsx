@@ -6,7 +6,9 @@ import type { DocumentTree } from "../generated/DocumentTree";
 import type { ProjectSummary } from "../generated/ProjectSummary";
 import type { ImageLayerView } from "../generated/ImageLayerView";
 import { pickGribToImport, pickImageToImport } from "../project/dialogs";
+import { CalendarIcon } from "./CalendarIcon";
 import { EyeIcon } from "./EyeIcon";
+import HistoryImportDialog, { type HistoryChoice } from "./HistoryImportDialog";
 import { dropSide, layerDropIndex } from "./reorder";
 import { KIND_LABELS, KINDS, type FieldKindName, kindOf } from "../kind";
 import SpeedFilter from "./SpeedFilter";
@@ -126,6 +128,8 @@ export default function LayerPanel({
    * about it.
    */
   const [folded, setFolded] = useState<Set<number>>(new Set());
+  /** Whether the history range dialog is up (M38). */
+  const [historyOpen, setHistoryOpen] = useState(false);
   const toggleFold = (id: number) =>
     setFolded((current) => {
       const next = new Set(current);
@@ -193,6 +197,17 @@ export default function LayerPanel({
     const path = await pickGribToImport();
     if (path === null) return;
     run(api.importGrib(path));
+  };
+
+  /**
+   * Fetches a range of past hours and lands one layer per archive
+   * (spec.md 4.10, M38). The one action in the application that reaches the
+   * network, and only from this button.
+   */
+  const importHistory = (choice: HistoryChoice) => {
+    setHistoryOpen(false);
+    setError(null);
+    run(api.importHistory(choice.archives, choice.startUnixS, choice.endUnixS));
   };
 
   /** Picks an image and lays it under the field (spec.md 4.9, M18). */
@@ -371,7 +386,23 @@ export default function LayerPanel({
         >
           Import image
         </button>
+        <button
+          className="import-grib icon-button"
+          title="Import past hours from the ERA5 and GlobCurrent archives as layers. This is the only action that reaches the network."
+          aria-label="Import history"
+          onClick={() => setHistoryOpen(true)}
+        >
+          <CalendarIcon />
+        </button>
       </header>
+
+      {historyOpen && (
+        <HistoryImportDialog
+          now={Date.now() / 1000}
+          onImport={importHistory}
+          onClose={() => setHistoryOpen(false)}
+        />
+      )}
 
       <ul className="layers">
         {layers.map((layer, reversed) => {
@@ -505,9 +536,10 @@ export default function LayerPanel({
                   </label>
                 </div>
               )}
-              {layer.source === "raster" && (
+              {(layer.source === "raster" || layer.source === "zarr") && (
                 <div className="layer-parameter muted">
-                  Field: {KIND_LABELS[kindOf(layer.parameter)]} · from the file
+                  Field: {KIND_LABELS[kindOf(layer.parameter)]} ·{" "}
+                  {layer.source === "zarr" ? "from the archive" : "from the file"}
                 </div>
               )}
               {layer.grib?.loaded && (

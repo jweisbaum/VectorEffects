@@ -81,6 +81,7 @@ export function isErrorPayload(value: unknown): value is AppErrorPayload {
  */
 const LONG_RUNNING: Readonly<Record<string, string>> = {
   import_grib: "Importing GRIB",
+  import_history: "Fetching history",
   new_project_from_grib: "Opening GRIB",
   import_image: "Importing image",
   open_project: "Opening project",
@@ -386,6 +387,17 @@ export const api = {
   addLayer: (name: string) => call<ProjectSummary>("add_layer", { name }),
   /** Imports a GRIB2 file as one layer per field kind it holds (spec 4.8). */
   importGrib: (path: string) => call<ProjectSummary>("import_grib", { path }),
+  /**
+   * Fetches a range of hours from the history archives, one layer each
+   * (spec 4.10). The only command that reaches the network, and only because
+   * the user asked for it.
+   */
+  importHistory: (archives: string[], startUnixS: number, endUnixS: number) =>
+    call<ProjectSummary>("import_history", {
+      archives,
+      startUnixS,
+      endUnixS,
+    }),
   removeLayer: (layer: number) => call<ProjectSummary>("remove_layer", { layer }),
   /** Renames the project: a document write, undoable (M25). */
   renameProject: (name: string) => call<ProjectSummary>("rename_project", { name }),

@@ -3008,7 +3008,7 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
-### M38 — Importing from the record · **in progress**
+### M38 — Importing from the record · **done**
 
 **Goal:** the user's instruction of 2026-09-07: import history from the ERA5
 and GlobCurrent archives over a date range, ERA5 wind in one layer and
@@ -3069,6 +3069,16 @@ still a finding, and in `ve-zarr` only the two archives are allowed.
    every fetched hour by the reader's own offset. The default range is a
    day ending a week back, because both archives trail real time and a
    range ending now is one neither has yet.
+
+**Not done, and why.** The fetch shows the status bar's spinner and
+nothing finer: there is no per-hour progress and no way to cancel it
+part-way. Both want the fetch to report from a worker rather than run
+inside the command, which is a larger change than the import needed, and
+the cap keeps the wait bounded in the meantime. Nothing tests the two
+archives end to end either — a test that reaches the network would put
+the one exception to invariant 5 into CI, where no user asked for it —
+so the seam is tested instead: `ve-zarr` against its own store fixtures,
+and the encode-and-read-back join against hand-made fields.
 
 ---
 
