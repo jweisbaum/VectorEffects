@@ -2031,7 +2031,15 @@ What still has to hold, and is tested:
   is digested once per frame; a tile's key combines the digests of the objects
   whose spherical cap touches its rectangle — an inverted mask reaches every
   tile, and a clone stamp, a warp or a liquify brings its whole layer beneath
-  it — with every raster at its remapped place. The tile is rendered from
+  it — with the imported fields the tile can read, each culled to what
+  reaches it (M33): a lattice the tile lies outside of is dropped outright, an
+  erased stroke is kept only by the tiles it passes over, and the speed
+  filter's upper end is clamped to the fastest node the tile holds, so a band
+  wider than the tile's own field keys it exactly as no band does. Erasing in
+  one place, or filtering a regional import, therefore re-renders the tiles it
+  changes and no others; a band dragged across the speeds a global field
+  actually holds there still changes those tiles, because it changes what they
+  show. The tile is rendered from
   that same sub-scene, which evaluates identically at its pixels, and the
   backend is chosen for it too, so a tile the eraser never reaches stays on
   the GPU. Any edit that changes what a tile looks like changes its key; any

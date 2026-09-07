@@ -15,31 +15,113 @@
 //! stamp, a warp, a liquify — which keep everything beneath them in their
 //! layer, wherever it is; and an inverted mask, which covers everything
 //! outside its footprint and so reaches every tile.
+//!
+//! An imported field is culled the same way (M33), which is what keeps an
+//! edit to one local to it: a tile the lattice cannot be read at drops the
+//! raster outright, a stroke of the eraser is kept only by the tiles it
+//! passes over, and the speed filter's upper end is clamped to the greatest
+//! speed the tile holds — so a band wider than the tile's own field keys
+//! the tile exactly as no band at all does.
+
+use std::collections::HashMap;
+use std::sync::Mutex;
 
 use ve_core::LonLat;
+use ve_core::document::SpeedRange;
 
 use crate::cache::{EVALUATOR_VERSION, SceneHash, object_digest, raster_digest};
-use crate::scene::{FlatObject, Modifier, Scene};
-use crate::tile::TileId;
+use crate::scene::{FlatObject, FlatRaster, Modifier, Scene};
+use crate::tile::{TileBounds, TileId};
 
-/// The content hash of every object and every raster of a scene, computed
-/// once per frame and combined per tile.
+/// The content hash of every object of a scene, computed once per frame and
+/// combined per tile.
 ///
 /// Hashing an object is the expensive part of keying a tile; a viewport is a
 /// hundred tiles and each sees a fraction of the objects, so the objects are
-/// hashed once and each tile's key is a hash of the digests it keeps.
+/// hashed once and each tile's key is a hash of the digests it keeps. A
+/// raster is hashed per tile instead (M33): what the tile keeps of it — its
+/// erasures, its band — is not the same from one tile to the next.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Digests {
     pub objects: Vec<[u8; 32]>,
-    pub rasters: Vec<[u8; 32]>,
 }
 
-/// Digests every object and raster of a scene, in order.
+/// Digests every object of a scene, in order.
 pub fn digests_of(scene: &Scene) -> Digests {
     Digests {
         objects: scene.objects.iter().map(object_digest).collect(),
-        rasters: scene.rasters.iter().map(raster_digest).collect(),
     }
+}
+
+/// The greatest speed a lattice holds inside a tile, memoised.
+///
+/// A tile's key needs it on every frame the map draws, and it depends only
+/// on the lattice's content and the tile — neither of which changes — so it
+/// is computed once. The lattice is identified by its own content hash, so
+/// a re-imported or edited file is a different entry rather than a stale one.
+static TILE_MAXIMA: Mutex<Option<HashMap<([u8; 32], TileId), Option<f32>>>> = Mutex::new(None);
+
+/// How many entries the memo keeps: a few viewports of a few lattices.
+const MAXIMA_KEPT: usize = 8192;
+
+fn tile_maximum(raster: &FlatRaster, tile: TileId, bounds: &TileBounds) -> Option<f32> {
+    let key = (raster.grid.hash, tile);
+    if let Ok(mut held) = TILE_MAXIMA.lock() {
+        let memo = held.get_or_insert_with(HashMap::new);
+        if let Some(found) = memo.get(&key) {
+            return *found;
+        }
+    }
+    let found = raster
+        .grid
+        .max_speed_in(bounds.west, bounds.east, bounds.north, bounds.south);
+    if let Ok(mut held) = TILE_MAXIMA.lock() {
+        let memo = held.get_or_insert_with(HashMap::new);
+        // Dropped wholesale rather than by age: the memo is a saving, not a
+        // correctness requirement, and an LRU clock would cost more than the
+        // lookups it protects.
+        if memo.len() >= MAXIMA_KEPT {
+            memo.clear();
+        }
+        memo.insert(key, found);
+    }
+    found
+}
+
+/// What a tile keeps of an imported field (M33), or `None` where the tile
+/// can read no node of it at all.
+///
+/// The band is clamped to the field the tile actually holds: a band that
+/// admits everything here is no band at all, and one whose top is above
+/// everything here keeps the same nodes as any wider band. A blended sample
+/// can be slower than either node it came from but never faster, so the top
+/// is the only end that can be bounded this way.
+fn tile_raster(
+    raster: &FlatRaster,
+    tile: TileId,
+    bounds: &TileBounds,
+    centre: LonLat,
+    radius_m: f64,
+) -> Option<FlatRaster> {
+    let most = tile_maximum(raster, tile, bounds)?;
+    let mut kept = raster.clone();
+    kept.speed_range = raster.speed_range.and_then(|band| {
+        if band.min_mps <= 0.0 && band.max_mps >= most {
+            return None;
+        }
+        Some(SpeedRange {
+            min_mps: band.min_mps,
+            max_mps: band.max_mps.min(most),
+        })
+    });
+    kept.erased.retain(|erasure| {
+        erasure
+            .chains
+            .iter()
+            .flatten()
+            .any(|point| centre.distance_m(*point) <= erasure.radius_m + radius_m)
+    });
+    Some(kept)
 }
 
 /// A tile's sub-scene and the key it is cached under.
@@ -100,6 +182,7 @@ fn tile_cap(tile: TileId) -> (LonLat, f64) {
 ///
 /// `digests` must be [`digests_of`] the same scene.
 pub fn tile_scene(scene: &Scene, digests: &Digests, tile: TileId) -> TileScene {
+    let bounds = tile.bounds();
     let (centre, radius_m) = tile_cap(tile);
     let mut keep: Vec<bool> = scene
         .objects
@@ -141,22 +224,22 @@ pub fn tile_scene(scene: &Scene, digests: &Digests, tile: TileId) -> TileScene {
             objects.push(object.clone());
         }
     }
-    // Every raster is kept: a lattice costs one extent check a pixel where
-    // the tile lies outside it, and most are global.
-    hasher.update(&(scene.rasters.len() as u64).to_le_bytes());
-    let rasters = scene
+    // Each raster as this tile sees it: dropped where the lattice cannot be
+    // read, and carrying only the erasures and the band that reach it (M33).
+    let rasters: Vec<FlatRaster> = scene
         .rasters
         .iter()
-        .zip(&digests.rasters)
-        .map(|(raster, digest)| {
-            let z = kept_before[raster.z.min(scene.objects.len())];
-            hasher.update(&(z as u64).to_le_bytes());
-            hasher.update(digest);
-            let mut remapped = raster.clone();
-            remapped.z = z;
-            remapped
+        .filter_map(|raster| {
+            let mut kept = tile_raster(raster, tile, &bounds, centre, radius_m)?;
+            kept.z = kept_before[raster.z.min(scene.objects.len())];
+            Some(kept)
         })
         .collect();
+    hasher.update(&(rasters.len() as u64).to_le_bytes());
+    for raster in &rasters {
+        hasher.update(&(raster.z as u64).to_le_bytes());
+        hasher.update(&raster_digest(raster));
+    }
 
     TileScene {
         scene: Scene { objects, rasters },
@@ -271,8 +354,10 @@ mod tests {
         let mut inverted = disc(150.0, -30.0, 100_000.0, 0.0, 0);
         inverted.invert = true;
         inverted.erases = true;
+        // Over the tile, or it would be culled with everything else that is
+        // not (M33).
         let grid =
-            ve_core::raster::RasterGrid::new(4, 3, 0.0, 10.0, 1.0, 1.0, vec![[1.0, 0.0]; 12])
+            ve_core::raster::RasterGrid::new(4, 3, -11.0, 56.0, 1.0, 1.0, vec![[1.0, 0.0]; 12])
                 .expect("valid grid");
         let scene = Scene {
             objects: vec![
@@ -300,5 +385,121 @@ mod tests {
             "one object kept beneath the raster"
         );
         assert_eq!(sub.hash, scene_hash(&sub.scene));
+    }
+
+    fn raster_of(lon0: f64, lat0: f64, speeds: &[f32], band: Option<(f32, f32)>) -> FlatRaster {
+        let uv: Vec<[f32; 2]> = speeds.iter().map(|s| [*s, 0.0]).collect();
+        let grid =
+            ve_core::raster::RasterGrid::new(speeds.len() as u32, 1, lon0, lat0, 1.0, 1.0, uv)
+                .expect("valid grid");
+        FlatRaster {
+            z: 0,
+            layer: 0,
+            kind: FieldKind::Wind,
+            grid: std::sync::Arc::new(grid),
+            speed_range: band.map(|(min_mps, max_mps)| SpeedRange { min_mps, max_mps }),
+            erased: Vec::new(),
+        }
+    }
+
+    /// Spec 7.10 (M33): an imported field reaches only the tiles its lattice
+    /// covers, so a tile somewhere else keeps nothing of it and is not
+    /// re-keyed when its filter or its erasures change.
+    #[test]
+    fn a_tile_outside_a_lattice_keeps_nothing_of_it() {
+        let here = raster_of(-11.0, 50.0, &[5.0, 9.0], None);
+        let elsewhere = raster_of(150.0, -30.0, &[5.0, 9.0], None);
+        let scene = Scene {
+            objects: Vec::new(),
+            rasters: vec![here, elsewhere],
+        };
+        let sub = tile_scene(&scene, &digests_of(&scene), tile());
+        assert_eq!(sub.scene.rasters.len(), 1, "only the one over the tile");
+        assert_eq!(sub.hash, scene_hash(&sub.scene));
+
+        // And filtering the distant one leaves this tile's key alone.
+        let mut filtered = scene.clone();
+        filtered.rasters[1].speed_range = Some(SpeedRange {
+            min_mps: 1.0,
+            max_mps: 2.0,
+        });
+        assert_eq!(
+            tile_scene(&filtered, &digests_of(&filtered), tile()).hash,
+            sub.hash
+        );
+    }
+
+    /// A band that admits everything the tile holds keys it as no band does,
+    /// and one whose top is above everything here keys it as any wider band
+    /// does — so dragging the filter over speeds a tile has none of leaves
+    /// that tile alone (M33).
+    #[test]
+    fn a_band_is_clamped_to_the_speeds_the_tile_holds() {
+        let key = |band: Option<(f32, f32)>| {
+            let scene = Scene {
+                objects: Vec::new(),
+                rasters: vec![raster_of(-11.0, 50.0, &[5.0, 9.0], band)],
+            };
+            tile_scene(&scene, &digests_of(&scene), tile()).hash
+        };
+        let unfiltered = key(None);
+        assert_eq!(
+            key(Some((0.0, 20.0))),
+            unfiltered,
+            "a band over everything is no band"
+        );
+        assert_eq!(
+            key(Some((2.0, 20.0))),
+            key(Some((2.0, 50.0))),
+            "two bands above the tile's fastest are one band"
+        );
+        assert_ne!(
+            key(Some((2.0, 20.0))),
+            unfiltered,
+            "a band that drops something is not no band"
+        );
+        assert_ne!(
+            key(Some((2.0, 7.0))),
+            key(Some((2.0, 20.0))),
+            "a band that cuts into the field re-keys the tile"
+        );
+    }
+
+    /// An erased stroke is kept by the tiles it passes over and no others,
+    /// so erasing in one place does not re-render the map (M33).
+    #[test]
+    fn an_erasure_is_kept_only_where_it_reaches() {
+        let erasure = |lon: f64, lat: f64| crate::scene::FlatRasterErasure {
+            chains: vec![vec![LonLat::new(lon, lat).expect("valid")]],
+            radius_m: 100_000.0,
+            square: false,
+            feather: 0.5,
+        };
+        let mut raster = raster_of(-11.0, 50.0, &[5.0, 9.0], None);
+        let keyed = |raster: &FlatRaster| {
+            let scene = Scene {
+                objects: Vec::new(),
+                rasters: vec![raster.clone()],
+            };
+            tile_scene(&scene, &digests_of(&scene), tile())
+        };
+        let before = keyed(&raster).hash;
+
+        raster.erased.push(erasure(150.0, -30.0));
+        let sub = keyed(&raster);
+        assert!(
+            sub.scene.rasters[0].erased.is_empty(),
+            "a distant erasure is not this tile's"
+        );
+        assert_eq!(sub.hash, before, "and does not re-key it");
+
+        raster.erased.push(erasure(-6.0, 50.0));
+        let sub = keyed(&raster);
+        assert_eq!(
+            sub.scene.rasters[0].erased.len(),
+            1,
+            "the one over the tile is kept"
+        );
+        assert_ne!(sub.hash, before, "and re-keys it");
     }
 }

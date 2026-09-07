@@ -24,6 +24,19 @@ use crate::vector::Uv;
 /// to optimise away.
 pub const MISSING: f32 = -1.0e30;
 
+/// A block of nodes, inclusive at both ends (M33).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Window {
+    /// First column.
+    pub i0: u32,
+    /// Last column.
+    pub i1: u32,
+    /// First row.
+    pub j0: u32,
+    /// Last row.
+    pub j1: u32,
+}
+
 /// Whether a stored component marks a missing node.
 pub fn is_missing(value: f32) -> bool {
     value <= -1.0e29
@@ -177,6 +190,83 @@ impl RasterGrid {
         } else {
             Some(*sample)
         }
+    }
+
+    /// The block of nodes a lat/lon box can read, one cell wider each way
+    /// so the bilinear blend's corners are inside it (M33).
+    ///
+    /// `None` when the box reads no node at all: a regional grid and a box
+    /// somewhere else entirely. Conservative wherever the arithmetic is
+    /// awkward — a box that straddles the gap behind a regional grid takes
+    /// the whole row — because saying "maybe" costs a little work and saying
+    /// "no" wrongly would drop a field the map should be drawing.
+    pub fn window(&self, west: f64, east: f64, north: f64, south: f64) -> Option<Window> {
+        let last_i = f64::from(self.ni - 1);
+        let last_j = f64::from(self.nj - 1);
+
+        // Rows run north to south from `lat0`.
+        let top = (self.lat0 - north) / self.dlat;
+        let bottom = (self.lat0 - south) / self.dlat;
+        if bottom < -1.0 || top > last_j + 1.0 {
+            return None;
+        }
+        let j0 = (top - 1.0).max(0.0) as u32;
+        let j1 = (bottom + 1.0).clamp(0.0, last_j) as u32;
+
+        let span = (east - west).max(0.0);
+        if self.wraps || span >= 360.0 - 1e-9 {
+            return Some(Window {
+                i0: 0,
+                i1: self.ni - 1,
+                j0,
+                j1,
+            });
+        }
+        // Columns are measured eastward from column 0 around the full turn,
+        // the same way `sample` measures them.
+        let full = 360.0 / self.dlon;
+        let west_at = (west - self.lon0).rem_euclid(360.0) / self.dlon;
+        let east_at = west_at + span / self.dlon;
+        if west_at > last_i + 1.0 {
+            // The box begins in the gap behind the grid. Either it reaches
+            // round to column 0 — take the row, which is conservative — or it
+            // never reaches the grid at all.
+            return (east_at >= full).then_some(Window {
+                i0: 0,
+                i1: self.ni - 1,
+                j0,
+                j1,
+            });
+        }
+        Some(Window {
+            i0: (west_at - 1.0).max(0.0) as u32,
+            i1: (east_at + 1.0).clamp(0.0, last_i) as u32,
+            j0,
+            j1,
+        })
+    }
+
+    /// The greatest speed among the nodes a lat/lon box can read, in m/s.
+    ///
+    /// `None` where the box reads no node, or none that has a value. What a
+    /// speed filter's upper end is compared against per tile (spec.md 7.10,
+    /// M33): a band whose top is above everything the tile holds keeps the
+    /// same nodes as any wider band, so the tile's key does not move when the
+    /// slider does. The lower end has no such bound — a blend of two vectors
+    /// can be slower than either — so only the top is answered here.
+    pub fn max_speed_in(&self, west: f64, east: f64, north: f64, south: f64) -> Option<f32> {
+        let window = self.window(west, east, north, south)?;
+        let mut most: Option<f32> = None;
+        for j in window.j0..=window.j1 {
+            for i in window.i0..=window.i1 {
+                let Some([u, v]) = self.node(i, j) else {
+                    continue;
+                };
+                let speed = u.hypot(v);
+                most = Some(most.map_or(speed, |best: f32| best.max(speed)));
+            }
+        }
+        most
     }
 
     /// Bilinear sample at a position, or `None` where the grid has no value.

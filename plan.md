@@ -2788,7 +2788,27 @@ wind and a defined current together.
    whole map does re-render on release, as it must; what changed since it
    was cheap is that M30 rendered two kinds' tiles and M31 renders one
    again, and the GRIB's tiles go to the CPU only where an eraser or a
-   clone reaches them. Not clicked through in the app.
+   clone reaches them. Not clicked through in the app. **Superseded in part
+   by M33.1**, which culls the imported field per tile too.
+
+### M33 — The fifth pass · **in progress**
+
+**Goal:** the eight findings the user handed over on 2026-09-06 after the
+M32 build, in order, one commit each, with anything scoped down recorded
+here with its reason.
+
+1. **An imported field is culled per tile** (findings 1 and 4). An erase
+   and a change to a speed filter re-rendered the whole map because every
+   tile kept every raster whole, erasures and band included, so any edit to
+   one re-keyed every tile. `RasterGrid::window` and `max_speed_in` answer
+   what a tile can read of a lattice; `cull::tile_raster` drops a raster the
+   tile lies outside, keeps only the erasures whose stroke reaches it, and
+   clamps the band's top to the fastest node the tile holds — a band over
+   everything the tile has keys it as no band at all. The per-tile maximum
+   is memoised by lattice hash and tile. What is *not* fixed: dragging the
+   low end of a band across the speeds a global forecast holds under a tile
+   does re-render that tile, because it changes what the tile shows. Tests
+   in `cull.rs`.
 
 ### M32 — Edit tools show their effect as the pointer moves · **complete**
 
