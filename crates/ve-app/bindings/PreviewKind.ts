@@ -11,10 +11,11 @@
  * already there, and a preview that drew a flat colour would be showing
  * something the tool does not do.
  *
- * The two operators are previewed by operating on the map itself rather than
- * by drawing over it, which is the only way to show a removal at all: the
- * overlay is a canvas stacked above the field and can add pixels, never take
- * them away. A modifier is placed by a click rather than dragged, so its
- * preview is only the footprint a click would produce.
+ * Every tool that operates on the field is previewed by operating on the
+ * map itself rather than by drawing over it (M32): the only way to show a
+ * removal at all — the overlay is a canvas stacked above the field and can
+ * add pixels, never take them away — and the only honest preview of a
+ * modifier, whose result is whatever was beneath it, changed. The map
+ * applies the operation per pixel, live, as the pointer moves.
  */
-export type PreviewKind = "field" | "mask" | "clone" | "outline";
+export type PreviewKind = "field" | "mask" | "clone" | "gain" | "turn" | "radial" | "warp" | "smear";

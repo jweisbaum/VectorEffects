@@ -2790,6 +2790,30 @@ wind and a defined current together.
    again, and the GRIB's tiles go to the CPU only where an eraser or a
    clone reaches them. Not clicked through in the app.
 
+### M32 — Edit tools show their effect as the pointer moves · **complete**
+
+**Goal:** the user's instruction of 2026-09-06: the mask, the intensity,
+the divergence, the turn, the warp, the liquify and the eraser must show
+their effect live as the brush paints, not at the release.
+
+**Delivered 2026-09-06**, one commit. The live-gesture mask of D37 became
+an *operator*: the mask texture plus the tool's kind and settings, uploaded
+per pointer report, and the raster and glyph programs apply it per pixel —
+`remove` for the mask and the eraser, `keep` for a clone's and a push's
+shifted source, and a modifier's own change for the gain, the turn and the
+divergence, the last radiating from the nearest point of the stroke's
+centreline carried in a uniform array of up to 64 points. A liquify is the
+one displacement that varies from pixel to pixel: the field is drawn alone
+into a viewport-sized texture and read back displaced through the stamps'
+deltas, seam-free, with glyphs reading the tile texel at the source. The
+palette's `Outline` preview kind is gone; each edit tool names its own, and
+`operatorOf` in the frontend turns the tool's state into the operator with
+a unit test per tool. The eraser rasterises its own stroke into the mask,
+and every operator's held preview is silent on the overlay. A twist has no
+live preview. Spec §6.3. Not clicked through in the app: the direction of a
+divergence and the sign of a turn on screen are the two things most worth
+a look.
+
 ---
 
 ## 3. Testing strategy

@@ -72,7 +72,7 @@ describe("overlayPlan", () => {
    * because it is the only thing either operator draws.
    */
   it("gives an operator its nib and nothing else, drag or no drag", () => {
-    for (const kind of ["mask", "clone"] as const) {
+    for (const kind of ["mask", "clone", "gain", "turn", "radial", "warp", "smear"] as const) {
       expect(overlayPlan(kind, true)).toEqual({ sweep: "none", nib: true });
       expect(overlayPlan(kind, false)).toEqual({ sweep: "none", nib: true });
     }

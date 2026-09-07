@@ -20,6 +20,8 @@ import {
   GLYPH_VERT,
   RASTER_FRAG,
   RASTER_VERT,
+  SMEAR_FRAG,
+  SMEAR_VERT,
 } from "./shaders";
 import { PROJECTIONS, projectionOf } from "./projection";
 
@@ -28,6 +30,7 @@ const PROGRAMS = {
   geo: [GEO_VERT, GEO_FRAG],
   raster: [RASTER_VERT, RASTER_FRAG],
   glyph: [GLYPH_VERT, GLYPH_FRAG],
+  smear: [SMEAR_VERT, SMEAR_FRAG],
 } as const;
 
 /** Matches a uniform declaration, capturing its precision, type and name. */
@@ -91,21 +94,22 @@ describe("every shader source", () => {
   });
 });
 
-describe("the live-gesture mask", () => {
+describe("the live-gesture operator", () => {
   /**
-   * The screen mask is what makes a mask cover and a clone clone while the pointer
-   * is down (spec.md 6.1). It is applied in the two programs that draw the
-   * field — the raster and the glyphs — and a program that calls `maskFactor`
-   * without including the block would not compile.
+   * The screen mask is what makes a mask cover, a clone clone and a modifier
+   * modify while the pointer is down (spec.md 6.1, M32). It is applied in the
+   * programs that draw the field — the raster, the glyphs and the liquify's
+   * read-back — and a program that calls into the block without including it
+   * would not compile.
    */
   it("is included by every program that applies it", () => {
     for (const [name, sources] of Object.entries(PROGRAMS)) {
       for (const source of sources) {
-        if (!source.includes("maskFactor()")) continue;
-        expect(defines(source), `${name} calls maskFactor without defining it`).toContain(
-          "maskFactor",
+        if (!source.includes("maskFactor") && !source.includes("opCoverage")) continue;
+        expect(defines(source), `${name} applies the operator without defining it`).toContain(
+          "opApply",
         );
-        for (const uniform of ["uMask", "uMaskSize", "uMaskMode"]) {
+        for (const uniform of ["uMask", "uMaskSize", "uOpKind", "uOpAmount", "uOpCount"]) {
           expect(declared(source), `${name} is missing ${uniform}`).toContain(uniform);
         }
       }
@@ -115,11 +119,14 @@ describe("the live-gesture mask", () => {
   /**
    * Both halves of the field respect it. A glyph left standing over a masked
    * patch would point at a wind that is no longer there, which reads as the
-   * erasure having half worked.
+   * erasure having half worked; a glyph over an intensified patch that kept
+   * its old length would say the intensity had not taken.
    */
   it("is applied to the speed raster and to the glyphs", () => {
     expect(RASTER_FRAG).toContain("maskFactor()");
-    expect(GLYPH_FRAG).toContain("maskFactor()");
+    expect(RASTER_FRAG).toContain("opApply(");
+    expect(GLYPH_VERT).toContain("maskFactorAt(");
+    expect(GLYPH_VERT).toContain("opApply(");
   });
 
   /**
@@ -132,10 +139,11 @@ describe("the live-gesture mask", () => {
     expect(GEO_VERT).not.toContain("maskFactor");
   });
 
-  /** Mode 0 must leave the field exactly as it was, or every ordinary frame
+  /** Kind 0 must leave the field exactly as it was, or every ordinary frame
    * would be altered by a preview that is not happening. */
-  it("has an off mode that changes nothing", () => {
-    expect(RASTER_FRAG).toMatch(/uMaskMode\s*==\s*0.*return 1\.0/s);
+  it("has an off kind that changes nothing", () => {
+    expect(RASTER_FRAG).toMatch(/uOpKind\s*==\s*0\) return 1\.0/s);
+    expect(RASTER_FRAG).toMatch(/void opApply[^}]*if \(coverage <= 0\.0\) return;/s);
   });
 });
 
@@ -188,7 +196,8 @@ describe("the renderer's uniform lookups", () => {
     // shader gaining a uniform has to be noticed here too.
     const known = new Set([
       "uCamera", "uViewport", "uLonOffset", "uProjection",
-      "uMask", "uMaskSize", "uMaskMode",
+      "uMask", "uMaskSize", "uOpKind", "uOpAmount", "uOpCount", "uOpRadius", "uOpFeather",
+      "uField",
       "uTileGeo", "uTile", "uSpeedScale", "uRampWind", "uRampCurrent", "uDim",
       "uGlyphOrigin", "uGlyphStep", "uGrid", "uSpacing",
       "uSizeScaleArrow", "uSizeScaleBarb", "uColor", "uPixelRatio",

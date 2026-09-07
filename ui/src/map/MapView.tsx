@@ -118,7 +118,7 @@ import {
   ERASE,
   INSERT,
   MEASURE,
-  cloneSourceCamera,
+  operatorOf,
   defaultState,
   drawsObjects,
   liveOptions,
@@ -2723,7 +2723,9 @@ export default function MapView({
     // Strokes already committed, still waiting for their field. Drawn whatever
     // the tool is: they are finished strokes, and switching tools at pointer-up
     // must not blink the paint out either.
-    for (const settled of settling.current) drawFieldPreview(context, settled, dpr);
+    for (const settled of settling.current) {
+      if (!settled.silent) drawFieldPreview(context, settled, dpr);
+    }
 
     // The insert tool's hover (M24): the macro's region outline at the
     // pointer, in the region's own colour, and for a macro that recorded
@@ -3020,13 +3022,19 @@ export default function MapView({
     (drawing: InProgress | null): boolean => {
       const had = operatorRef.current !== null;
       const kind = schema?.preview;
-      const operates = kind === "mask" || kind === "clone";
+      // Every tool that does not paint a field of its own operates on the
+      // one that is there, and is previewed by the map applying it (M32).
+      const operates = kind !== undefined && kind !== "field";
       const footprint =
         drawing && operates && schemaTool !== null
           ? footprintOf(schemaTool, toolState, finished(drawing), cameraRef.current)
           : null;
+      const spec =
+        footprint && drawing && operates && schemaTool !== null
+          ? operatorOf(schemaTool, toolState, finished(drawing), cameraRef.current, viewRef.current)
+          : null;
 
-      if (!footprint || !drawing || !operates) {
+      if (!footprint || !drawing || !spec) {
         operatorRef.current = null;
         return had;
       }
@@ -3057,18 +3065,52 @@ export default function MapView({
       context.fillStyle = "#fff";
       context.fill(region);
 
-      const gesture = finished(drawing);
-      const source =
-        kind === "clone" ? cloneSourceCamera(toolState, gesture, cameraRef.current) : null;
-      operatorRef.current = {
-        mask: canvas,
-        kind,
-        ...(source ? { source } : {}),
-      };
+      operatorRef.current = { mask: canvas, ...spec };
       return true;
     },
     [schema, tool, toolState],
   );
+
+  /**
+   * The eraser's live preview (M32): the field goes from under the stroke as
+   * it is drawn, exactly as a mask's does. The eraser has no schema and no
+   * gesture of the palette's kind, so it rasterises its own path.
+   */
+  const refreshEraser = useCallback((): boolean => {
+    const had = operatorRef.current !== null;
+    const drag = eraseDrag.current;
+    if (!drag || drag.points.length === 0) {
+      if (had) operatorRef.current = null;
+      return had;
+    }
+    const view = viewRef.current;
+    const width = Math.max(1, Math.round(view.width * MASK_SCALE));
+    const height = Math.max(1, Math.round(view.height * MASK_SCALE));
+    const canvas = (maskCanvas.current ??= document.createElement("canvas"));
+    if (canvas.width !== width || canvas.height !== height) {
+      canvas.width = width;
+      canvas.height = height;
+    }
+    const context = canvas.getContext("2d");
+    if (!context) return had;
+    context.setTransform(1, 0, 0, 1, 0, 0);
+    context.clearRect(0, 0, width, height);
+    context.scale(MASK_SCALE, MASK_SCALE);
+    const path = new Path2D();
+    buildStrokePath(
+      path,
+      cameraRef.current,
+      view,
+      drag.points,
+      drag.radiusKm,
+      eraserRef.current.shape,
+      "geodesic",
+    );
+    context.fillStyle = "#fff";
+    context.fill(path);
+    operatorRef.current = { mask: canvas, kind: "remove" };
+    return true;
+  }, []);
 
   /** Screen positions of the handles, or null when nothing is selected. */
   const handlePositions = useCallback(() => {
@@ -3342,6 +3384,7 @@ export default function MapView({
         step: event.shiftKey ? stepRef.current : null,
         radiusKm: diameterKm / 2,
       };
+      if (refreshEraser()) requestDraw();
       requestOverlay();
       return;
     }
@@ -3737,6 +3780,8 @@ export default function MapView({
           ) > spacing;
         if (moved) drag.points.push([geo.lon, geo.lat]);
       }
+      // The map is the preview: the field leaves the stroke as it is drawn.
+      if (refreshEraser()) requestDraw();
       requestOverlay();
       return;
     }
@@ -4091,8 +4136,9 @@ export default function MapView({
         revision: null,
         at: performance.now(),
         // A tool that operates on the field keeps operating until its own field
-        // arrives; one that adds a field keeps showing the field it added.
-        ...(operator ? { operator } : {}),
+        // arrives, and the overlay draws nothing for it; one that adds a field
+        // keeps showing the field it added.
+        ...(operator ? { operator, silent: true } : {}),
       };
       settling.current = [...settling.current, settled];
 
@@ -4214,8 +4260,32 @@ export default function MapView({
     // The eraser's stroke lands as one write — one undo for the whole pass.
     if (eraseDrag.current) {
       const drag = eraseDrag.current;
-      eraseDrag.current = null;
       const brush = eraserRef.current;
+      // The live removal is held until the erased tiles land, as a mask's is
+      // (M32): dropping it at the release would let the field fill back in
+      // for the round trip and then empty again.
+      const operator = operatorRef.current;
+      const held: HeldPreview | null = operator
+        ? {
+            footprint: {
+              kind: "swept",
+              points: drag.points,
+              radiusKm: drag.radiusKm,
+              shape: brush.shape,
+              space: "geodesic",
+            },
+            paint: "transparent",
+            knots: 0,
+            azimuthAt: () => 0,
+            revision: null,
+            at: performance.now(),
+            operator,
+            silent: true,
+          }
+        : null;
+      if (held) settling.current = [...settling.current, held];
+      eraseDrag.current = null;
+      operatorRef.current = null;
       void api
         .eraseStroke({
           points: drag.points,
@@ -4226,9 +4296,18 @@ export default function MapView({
           at_step: stepRef.current,
           layer: activeLayer,
         })
-        .then(onProjectChanged)
-        .catch((err: unknown) => setError(String(err)));
+        .then((summary) => {
+          if (held) held.revision = summary.revision;
+          onProjectChanged(summary);
+          requestDraw();
+          window.setTimeout(requestDraw, SETTLE_TIMEOUT_MS + 100);
+        })
+        .catch((err: unknown) => {
+          if (held) settling.current = settling.current.filter((entry) => entry !== held);
+          setError(String(err));
+        });
       hoveredOperator.current = null;
+      requestDraw();
       requestOverlay();
       return;
     }

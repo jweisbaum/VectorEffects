@@ -102,11 +102,12 @@ pub enum GestureSelector {
 /// already there, and a preview that drew a flat colour would be showing
 /// something the tool does not do.
 ///
-/// The two operators are previewed by operating on the map itself rather than
-/// by drawing over it, which is the only way to show a removal at all: the
-/// overlay is a canvas stacked above the field and can add pixels, never take
-/// them away. A modifier is placed by a click rather than dragged, so its
-/// preview is only the footprint a click would produce.
+/// Every tool that operates on the field is previewed by operating on the
+/// map itself rather than by drawing over it (M32): the only way to show a
+/// removal at all — the overlay is a canvas stacked above the field and can
+/// add pixels, never take them away — and the only honest preview of a
+/// modifier, whose result is whatever was beneath it, changed. The map
+/// applies the operation per pixel, live, as the pointer moves.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export, export_to = "PreviewKind.ts")]
@@ -117,14 +118,16 @@ pub enum PreviewKind {
     Mask,
     /// Show the field from the source, where the gesture covers.
     Clone,
-    /// Draw the footprint and nothing inside it.
-    ///
-    /// The modifiers (spec.md 6.3). What one of them produces is whatever was
-    /// beneath it, changed — there is no colour that stands for "the same wind,
-    /// half as fast", and the honest preview of a modifier is where it will
-    /// land. They are placed by a click rather than dragged, so what the map
-    /// shows a moment later is the answer itself.
-    Outline,
+    /// Scale the speed of what is there by the gain.
+    Gain,
+    /// Turn what is there by the amount.
+    Turn,
+    /// Radiate what is there outward from the stroke.
+    Radial,
+    /// Move the field under the start of the drag to its end.
+    Warp,
+    /// Drag the field along the stroke.
+    Smear,
 }
 
 /// The km/px control a tool offers, and when it is live.
@@ -253,12 +256,13 @@ fn preview_for(tool: ToolKind) -> PreviewKind {
     match tool {
         ToolKind::Mask => PreviewKind::Mask,
         ToolKind::CloneStamp => PreviewKind::Clone,
-        // A modifier has no field of its own to show (spec.md 6.3).
-        ToolKind::Intensity
-        | ToolKind::Divergence
-        | ToolKind::Turn
-        | ToolKind::Warp
-        | ToolKind::Liquify => PreviewKind::Outline,
+        // A modifier has no field of its own to show; the map shows its
+        // effect on what is there (spec.md 6.3, M32).
+        ToolKind::Intensity => PreviewKind::Gain,
+        ToolKind::Divergence => PreviewKind::Radial,
+        ToolKind::Turn => PreviewKind::Turn,
+        ToolKind::Warp => PreviewKind::Warp,
+        ToolKind::Liquify => PreviewKind::Smear,
         // Everything else paints a field of its own, which is what its gesture
         // shows. The patch's is a captured one and it has no gesture at all,
         // but it is a field, and `operator_outlines` keys off this: anything

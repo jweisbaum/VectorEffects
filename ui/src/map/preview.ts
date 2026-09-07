@@ -59,6 +59,12 @@ export interface HeldPreview extends FieldPreview, Settling {
    * in reverse.
    */
   operator?: OperatorPreview;
+  /**
+   * Whether the overlay draws nothing for it. An operator's held preview is
+   * the map's own doing — the operation kept applied until its tiles land —
+   * and a field drawn over it would be a colour for a wind that is not there.
+   */
+  silent?: boolean;
 }
 
 /**

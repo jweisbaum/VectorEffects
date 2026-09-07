@@ -159,27 +159,111 @@ void main() {
  * the same path builder the overlay uses — so it needs no knowledge of what
  * shape the gesture is, and a new tool inherits it by supplying a footprint.
  */
-const MASK = `
+/**
+ * The gesture in progress, applied to the field live (spec.md 6.2, M32).
+ *
+ * A mask of the gesture's coverage, and what the tool does inside it. The
+ * mask and the clone take the field away or keep only it; a modifier changes
+ * the speed and the direction of what is there, per fragment, from the
+ * gesture's own settings; a liquify moves it. Every one of these is a proxy
+ * in screen space — the true field lands with the commit — but it is the
+ * tool's effect, seen while the pointer is still down.
+ *
+ * Positions are framebuffer pixels with y up, which is what gl_FragCoord
+ * gives; the glyph program converts its station to match.
+ */
+const OP_POINTS = 64;
+const OPERATOR = `
 uniform sampler2D uMask;    // screen-space coverage of the gesture, in alpha
 uniform vec2 uMaskSize;     // the framebuffer's size, to read gl_FragCoord
-uniform int uMaskMode;      // 0 none, 1 cut the covered part, 2 keep only it
+uniform int uOpKind;        // 0 none, 1 remove, 2 keep only, 3 gain, 4 turn,
+                            // 5 radial, 6 smear
+uniform float uOpAmount;    // gain: fraction; turn: degrees; radial: fraction
+uniform int uOpCount;       // points of the stroke's centreline in use
+uniform vec2 uOpPoints[${OP_POINTS}];  // the centreline, framebuffer px, y up
+uniform vec2 uOpDeltas[${OP_POINTS}];  // a liquify's movement per stamp, px
+uniform float uOpRadius;    // a liquify's stamp radius, px
+uniform float uOpFeather;   // and its feather, 0 to 1
 
-// How much of this fragment the gesture covers, 0 to 1.
-float maskCoverage() {
-  if (uMaskMode == 0) return 0.0;
-  return texture(uMask, gl_FragCoord.xy / uMaskSize).a;
+// How much of a point the gesture covers, 0 to 1.
+float opCoverageAt(vec2 p) {
+  if (uOpKind == 0) return 0.0;
+  return texture(uMask, p / uMaskSize).a;
 }
 
-// The factor the fragment's alpha is multiplied by.
-float maskFactor() {
-  if (uMaskMode == 0) return 1.0;
-  float covered = maskCoverage();
-  // Mode 1 takes the field away where the gesture covers, which is what an
-  // mask does and what a clone does before it puts the source in its place.
-  // Mode 2 keeps only what the gesture covers, which is how the source is
-  // drawn into it.
-  return uMaskMode == 1 ? 1.0 - covered : covered;
+// The factor a fragment's alpha is multiplied by: the mask and the eraser
+// take the field away where the gesture covers, and a clone or a warp keeps
+// only what it covers when its source is drawn in. A modifier leaves it.
+float maskFactorAt(vec2 p) {
+  if (uOpKind == 0) return 1.0;
+  float covered = opCoverageAt(p);
+  if (uOpKind == 1) return 1.0 - covered;
+  if (uOpKind == 2) return covered;
+  return 1.0;
 }
+
+// The direction away from the nearest point of the stroke's centreline: what
+// a divergence radiates along, a stroke diverging from itself (spec.md 6.3).
+vec2 opOutward(vec2 p) {
+  float best = 1.0e30;
+  vec2 nearest = p;
+  for (int i = 0; i < ${OP_POINTS}; i++) {
+    if (i >= uOpCount) break;
+    vec2 a = uOpPoints[i];
+    vec2 b = (i + 1 < uOpCount) ? uOpPoints[i + 1] : a;
+    vec2 ab = b - a;
+    float len2 = dot(ab, ab);
+    float t = len2 > 0.0 ? clamp(dot(p - a, ab) / len2, 0.0, 1.0) : 0.0;
+    vec2 q = a + ab * t;
+    float d = dot(p - q, p - q);
+    if (d < best) { best = d; nearest = q; }
+  }
+  vec2 away = p - nearest;
+  float len = length(away);
+  // On the line itself there is no outward, and just beside it the bearing
+  // is ill-conditioned: fade in over a couple of pixels.
+  return len > 0.001 ? away / len * min(len / 2.0, 1.0) : vec2(0.0);
+}
+
+// Where a liquify moved the field from: the feathered sum of the deltas of
+// the stamps that cover the point, the port of smear_source_position.
+vec2 opDisplacement(vec2 p) {
+  vec2 moved = vec2(0.0);
+  float band = uOpFeather * uOpRadius;
+  for (int i = 0; i < ${OP_POINTS}; i++) {
+    if (i >= uOpCount) break;
+    float signed = distance(p, uOpPoints[i]) - uOpRadius;
+    if (signed > 0.0) continue;
+    float w = band > 0.0 ? smoothstep(0.0, band, -signed) : 1.0;
+    moved += uOpDeltas[i] * w;
+  }
+  return moved;
+}
+
+// A modifier's effect on the field at a point covered by \`coverage\`: the
+// same fade from what was there to what the tool makes of it that the
+// kernels apply. Speed in m/s, azimuth-toward in degrees.
+void opApply(vec2 p, float coverage, inout float speed, inout float azimuth) {
+  if (coverage <= 0.0) return;
+  if (uOpKind == 3) {
+    speed *= 1.0 + uOpAmount * coverage;
+  } else if (uOpKind == 4) {
+    azimuth += uOpAmount * coverage;
+  } else if (uOpKind == 5) {
+    float az = azimuth * 0.017453292519943295;
+    // East is +x and north is +y here, as the point is.
+    vec2 v = speed * vec2(sin(az), cos(az));
+    v += speed * uOpAmount * coverage * opOutward(p);
+    speed = length(v);
+    if (speed > 1.0e-6) azimuth = atan(v.x, v.y) / 0.017453292519943295;
+  }
+}
+`;
+
+/** The operator at this fragment. Fragment programs only: gl_FragCoord is theirs. */
+const OPERATOR_FRAG = `
+float opCoverage() { return opCoverageAt(gl_FragCoord.xy); }
+float maskFactor() { return maskFactorAt(gl_FragCoord.xy); }
 `;
 
 export const RASTER_VERT = `#version 300 es
@@ -236,13 +320,15 @@ uniform float uSpeedScale;  // full-scale speed, m/s
 uniform vec2 uRampWind;     // speeds mapped to the ends of the wind ramp, m/s
 uniform vec2 uRampCurrent;  // and of the current ramp (M31)
 uniform float uDim;         // 1.0 normally, lower while a frame is stale
-${MASK}
+${OPERATOR}
+${OPERATOR_FRAG}
 ${TEXEL}
 out vec4 fragColor;
 
 // The decoded speed, coverage and kind at the four texels about a point,
-// blended: the speed and the coverage bilinearly, the kind from the nearest.
-struct Field { float speed; float coverage; bool wind; };
+// blended: the speed and the coverage bilinearly, the kind from the nearest,
+// and the azimuth from the nearest too, for an operator that turns it.
+struct Field { float speed; float coverage; bool wind; float azimuth; };
 
 Field sampleField(vec2 uv) {
   vec2 size = vec2(textureSize(uTile, 0));
@@ -263,6 +349,7 @@ Field sampleField(vec2 uv) {
                       mix(wordCoverage(w01), wordCoverage(w11), f.x), f.y);
   uint nearest = f.x < 0.5 ? (f.y < 0.5 ? w00 : w01) : (f.y < 0.5 ? w10 : w11);
   out_.wind = wordIsWind(nearest);
+  out_.azimuth = wordAzimuth(nearest);
   return out_;
 }
 
@@ -307,6 +394,8 @@ vec2 tileUV() {
 
 void main() {
   Field field = sampleField(tileUV());
+  // A modifier in progress changes the speed here, live (M32).
+  if (uOpKind >= 3) opApply(gl_FragCoord.xy, opCoverage(), field.speed, field.azimuth);
   // Each kind on its own scale: wind and current are an order of magnitude
   // apart, and the cell says which it is (M31).
   vec2 rampEnds = field.wind ? uRampWind : uRampCurrent;
@@ -346,7 +435,9 @@ uniform float uSizeScaleArrow; // glyph length as a fraction of spacing, by styl
 uniform float uSizeScaleBarb;
 uniform float uPixelRatio;  // device pixels per CSS pixel; keeps strokes even
 ${TEXEL}
+${OPERATOR}
 out float vShade;
+out float vFade;
 
 const float DEG = 0.017453292519943295;
 
@@ -373,6 +464,27 @@ void main() {
   }
 
   vec2 station = geoToScreen(vec2(lon, lat));
+  // The station with y up, as the operator measures things.
+  vec2 stationUp = vec2(station.x, uViewport.y - station.y);
+  float covered = opCoverageAt(stationUp);
+  // What the operator leaves of this glyph: none of it where a mask or an
+  // eraser covers, all of it where a clone's source is drawn in.
+  vFade = maskFactorAt(stationUp);
+
+  // A liquify reads the field from where it moved it from (M32). Outside
+  // this tile the texel is another tile's, which this instance cannot read:
+  // the glyph goes, and the tile the source is in draws its own.
+  if (uOpKind == 6 && covered > 0.0) {
+    vec2 sourceUp = stationUp - opDisplacement(stationUp);
+    vec2 source = vec2(sourceUp.x, uViewport.y - sourceUp.y);
+    float sourceLon = (source.x - uViewport.x * 0.5) / uCamera.z + uCamera.x - uLonOffset;
+    float sourceLat = yToLat(uCamera.y - (source.y - uViewport.y * 0.5) / uCamera.z);
+    uv = vec2((sourceLon - uTileGeo.x) / uTileGeo.z, (uTileGeo.y - sourceLat) / uTileGeo.w);
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
+      gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+      return;
+    }
+  }
 
   ivec2 size = textureSize(uTile, 0);
   ivec2 texel = clamp(ivec2(uv * vec2(size)), ivec2(0), size - 1);
@@ -384,6 +496,8 @@ void main() {
   }
   float speed = wordSpeed(word);
   float azimuth = wordAzimuth(word);
+  // A modifier in progress changes the vector here, live (M32).
+  if (uOpKind >= 3) opApply(stationUp, covered, speed, azimuth);
   // The cell's kind chooses the glyph (M31): wind is a barb, a current an
   // arrow, always.
   bool barb = wordIsWind(word);
@@ -501,10 +615,42 @@ void main() {
 export const GLYPH_FRAG = `#version 300 es
 precision highp float;
 in float vShade;
+in float vFade;
 uniform vec4 uColor;
-${MASK}
 out vec4 fragColor;
 // The glyphs follow the field they describe: a glyph left standing over an
 // masked patch would be pointing at a wind that is no longer there.
-void main() { fragColor = vec4(uColor.rgb, uColor.a * vShade * maskFactor()); }
+void main() { fragColor = vec4(uColor.rgb, uColor.a * vShade * vFade); }
+`;
+
+/**
+ * A liquify in progress, composited over the map (M32).
+ *
+ * The field is first drawn alone into a texture the size of the viewport.
+ * This pass then reads it back at each covered fragment from where the
+ * stroke moved the field from, so the field slides under the pointer in
+ * screen space with no seam at a tile's edge — the one displacement that
+ * varies from pixel to pixel, which a camera shift cannot show.
+ */
+export const SMEAR_VERT = `#version 300 es
+precision highp float;
+in vec2 aCorner;            // 0..1 across the viewport
+void main() {
+  gl_Position = vec4(aCorner * 2.0 - 1.0, 0.0, 1.0);
+}
+`;
+
+export const SMEAR_FRAG = `#version 300 es
+precision highp float;
+uniform sampler2D uField;   // the field alone, at the framebuffer's size
+${OPERATOR}
+${OPERATOR_FRAG}
+out vec4 fragColor;
+void main() {
+  float covered = opCoverage();
+  if (covered <= 0.0) discard;
+  vec2 source = gl_FragCoord.xy - opDisplacement(gl_FragCoord.xy);
+  vec4 moved = texture(uField, source / uMaskSize);
+  fragColor = vec4(moved.rgb, moved.a * covered);
+}
 `;

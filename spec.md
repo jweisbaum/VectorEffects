@@ -1520,7 +1520,17 @@ modifier cannot invent a wind, only change one.
 
 All five are **painted**, like the brush and the mask: a stamp swept along a
 polyline, sized in px or km (§3.5), with the common `position`, `scale_pct`,
-`rotation_deg` and `enabled` (§4.4). A swathe of field is therefore intensified
+`rotation_deg` and `enabled` (§4.4). **Every one of them, the mask and the
+eraser show their effect while the pointer is down** (M32): the map applies
+the gesture to the field it is drawing, per pixel and per glyph, from the
+tool's own settings — the intensity scales the speed under the stroke, the
+turn turns it, the divergence radiates it from the stroke's centreline, the
+push moves the field under the start of the drag to its end, the liquify
+drags it along the stroke, and the mask and the eraser take it away — and
+keeps applying it after the release until the committed tiles land. It is a
+screen-space proxy of the kernels' answer, the way every preview is (§7.9):
+a twist has none, and a push is previewed as a clone of the field under the
+start. A swathe of field is therefore intensified
 or turned in one gesture, and **two strokes of one modifier with identical
 settings and overlapping footprints merge into a single object**, exactly as two
 brush strokes do (§6.1) — with the exception below. All four animate like

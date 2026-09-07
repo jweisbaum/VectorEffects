@@ -12,6 +12,7 @@ import type { ToolOptionSpec } from "../generated/ToolOptionSpec";
 import type { ToolSchema } from "../generated/ToolSchema";
 import type { Camera } from "./camera";
 import { KM_PER_DEGREE } from "./footprint";
+import { OP_POINTS } from "./renderer";
 import {
   choiceOf,
   cloneSourceCamera,
@@ -26,6 +27,7 @@ import {
   liveOptions,
   offersEyedropper,
   offersUnit,
+  operatorOf,
   sampled,
   shownAngle,
   sizeKm,
@@ -579,6 +581,118 @@ describe("choiceOf", () => {
     expect(choiceOf({ Mode: { kind: "choice", index: 2 } }, "Mode")).toBe(2);
     expect(choiceOf({}, "Mode")).toBe(0);
     expect(choiceOf({ Mode: { kind: "number", value: 3 } }, "Mode")).toBe(0);
+  });
+});
+
+describe("operatorOf", () => {
+  const view = { width: 1000, height: 500 };
+  const at = (lon: number, lat: number): [number, number] => [lon, lat];
+  const stroke = (...points: [number, number][]) => ({ kind: "stroke" as const, points });
+  const state = (values: ToolState["values"]): ToolState => ({ values, unit: "km" });
+
+  /** Spec 6.3: the intensity's amount is a percentage; the kernel takes a fraction. */
+  it("carries an intensity's gain as a fraction", () => {
+    const spec = operatorOf(
+      "intensity",
+      state({ Gain: { kind: "number", value: 50 } }),
+      stroke(at(0, 0)),
+      camera,
+      view,
+    );
+    expect(spec).toEqual({ kind: "gain", amount: 0.5 });
+  });
+
+  /** M29: sense 0 is clockwise, the positive turn; sense 1 is the other way. */
+  it("signs a turn by its sense", () => {
+    const turn = (sense: number) =>
+      operatorOf(
+        "turn",
+        state({
+          TurnAmountDeg: { kind: "number", value: 30 },
+          TurnSense: { kind: "choice", index: sense },
+        }),
+        stroke(at(0, 0)),
+        camera,
+        view,
+      );
+    expect(turn(0)).toEqual({ kind: "turn", amount: 30 });
+    expect(turn(1)).toEqual({ kind: "turn", amount: -30 });
+  });
+
+  /**
+   * The stroke's points reach the shader in framebuffer pixels with y up,
+   * as gl_FragCoord measures them: a point north of the centre is above it.
+   */
+  it("gives a divergence its centreline in framebuffer pixels, y up", () => {
+    const spec = operatorOf(
+      "divergence",
+      state({ Radial: { kind: "number", value: 100 } }),
+      stroke(at(camera.centerLon, camera.centerLat), at(camera.centerLon, camera.centerLat + 1)),
+      camera,
+      view,
+    );
+    expect(spec?.kind).toBe("radial");
+    expect(spec?.amount).toBe(1);
+    expect(spec?.points?.[0]).toEqual([500, 250]);
+    expect(spec?.points?.[1]?.[1]).toBeGreaterThan(250);
+  });
+
+  /**
+   * A liquify's stamps carry the pointer's movement, scaled by the strength
+   * (spec.md 6.3); thinning a long stroke keeps the whole movement, so the
+   * field is dragged as far by the preview as by the commit.
+   */
+  it("gives a liquify each stamp's movement and keeps it through thinning", () => {
+    const points: [number, number][] = [];
+    for (let i = 0; i <= 200; i++) points.push(at(camera.centerLon + i * 0.01, camera.centerLat));
+    const spec = operatorOf(
+      "liquify",
+      state({
+        Strength: { kind: "number", value: 50 },
+        SizeKm: { kind: "number", value: 100 },
+        Feather: { kind: "number", value: 0.5 },
+      }),
+      stroke(...points),
+      camera,
+      view,
+    );
+    expect(spec?.kind).toBe("smear");
+    expect(spec?.points?.length).toBe(OP_POINTS);
+    expect(spec?.deltas?.[0]).toEqual([0, 0]);
+    const whole = (spec?.deltas ?? []).reduce((sum, [dx]) => sum + dx, 0);
+    // 2 degrees of travel at the camera's scale, halved by the strength.
+    expect(whole).toBeCloseTo(2 * camera.pxPerDeg * 0.5, 6);
+    expect(spec?.radiusPx).toBeGreaterThan(0);
+    expect(spec?.feather).toBe(0.5);
+  });
+
+  /**
+   * A warp's push is a clone of the field under the start, read through a
+   * camera shifted so it lands at the end (M29: the push is the stroke); a
+   * twist has no screen-space preview, and neither has a click that went
+   * nowhere.
+   */
+  it("previews a push as a shifted read and a twist not at all", () => {
+    const push = operatorOf(
+      "warp",
+      state({ WarpMode: { kind: "choice", index: 0 } }),
+      stroke(at(10, 20), at(15, 20)),
+      camera,
+      view,
+    );
+    expect(push?.kind).toBe("clone");
+    expect(push?.source?.centerLon).toBeCloseTo(camera.centerLon - 5, 9);
+    expect(
+      operatorOf("warp", state({ WarpMode: { kind: "choice", index: 1 } }), stroke(at(10, 20), at(15, 20)), camera, view),
+    ).toBeNull();
+    expect(
+      operatorOf("warp", state({ WarpMode: { kind: "choice", index: 0 } }), stroke(at(10, 20)), camera, view),
+    ).toBeNull();
+  });
+
+  /** A tool that paints a field of its own is the overlay's to preview. */
+  it("is nothing for a tool that paints", () => {
+    expect(operatorOf("brush", state({}), stroke(at(0, 0)), camera, view)).toBeNull();
   });
 });
 

@@ -20,7 +20,8 @@ import type { ToolOptionSpec } from "../generated/ToolOptionSpec";
 import type { ToolSchema } from "../generated/ToolSchema";
 import type { StampSpace } from "../generated/StampSpace";
 import { displayDirection } from "../project/format";
-import { type Camera, normalizeLon, projectionFor } from "./camera";
+import { type Camera, type Viewport, normalizeLon, project, projectionFor } from "./camera";
+import { OP_POINTS, type OperatorPreview } from "./renderer";
 import {
   cosLat,
   type Footprint,
@@ -774,4 +775,127 @@ export function cloneSourceCamera(
     centerLon: camera.centerLon - normalizeLon(from[0] - sourceLon),
     centerLat: projection.latOf(projection.yOf(camera.centerLat) - shiftY),
   };
+}
+
+/** What a gesture does to the field it covers, for the map to draw live (M32). */
+export type OperatorSpec = Omit<OperatorPreview, "mask">;
+
+/**
+ * A stroke's points in framebuffer pixels with y up, as the operator shaders
+ * read them, thinned to at most `OP_POINTS` — every k-th point and the last,
+ * so a long stroke keeps its ends and its shape.
+ */
+function screenPoints(
+  points: readonly (readonly [number, number])[],
+  camera: Camera,
+  view: Viewport,
+): { at: [number, number][]; kept: number[] } {
+  const n = points.length;
+  const count = Math.min(n, OP_POINTS);
+  const kept: number[] = [];
+  for (let i = 0; i < count; i++) {
+    kept.push(count === 1 ? 0 : Math.round((i * (n - 1)) / (count - 1)));
+  }
+  const at = kept.map((index) => {
+    const [lon, lat] = points[index] as readonly [number, number];
+    const screen = project(camera, view, { lon, lat });
+    return [screen.x, view.height - screen.y] as [number, number];
+  });
+  return { at, kept };
+}
+
+/** The camera through which `source` is read so that it lands at `at`. */
+function shiftedCamera(
+  camera: Camera,
+  source: readonly [number, number],
+  at: readonly [number, number],
+): Camera {
+  const projection = projectionFor(camera);
+  const shiftY = projection.yOf(at[1]) - projection.yOf(source[1]);
+  return {
+    ...camera,
+    centerLon: camera.centerLon - normalizeLon(at[0] - source[0]),
+    centerLat: projection.latOf(projection.yOf(camera.centerLat) - shiftY),
+  };
+}
+
+/**
+ * What the map applies to the field under a gesture in progress, from the
+ * tool's own settings (spec.md 6.2, M32) — or null for a tool that paints a
+ * field of its own, whose preview is the overlay's, and for a twist, whose
+ * turn about its anchor no screen-space pass can show.
+ *
+ * The mask and the eraser remove; the clone stamp and a warp's push bring
+ * the field in from elsewhere through a shifted camera; the intensity, the
+ * turn and the divergence carry their amount; the liquify carries each
+ * stamp's movement, in pixels, scaled by its strength.
+ */
+export function operatorOf(
+  tool: Tool,
+  state: ToolState,
+  gesture: Gesture,
+  camera: Camera,
+  view: Viewport,
+): OperatorSpec | null {
+  const values = state.values;
+  switch (tool) {
+    case "mask":
+      return { kind: "remove" };
+    case "clone_stamp": {
+      const source = cloneSourceCamera(state, gesture, camera);
+      return source ? { kind: "clone", source } : null;
+    }
+    case "intensity":
+      return { kind: "gain", amount: numberOf(values, "Gain") / 100 };
+    case "turn": {
+      const amount = numberOf(values, "TurnAmountDeg");
+      // Sense 0 is clockwise, the positive turn (M29).
+      return { kind: "turn", amount: choiceOf(values, "TurnSense") === 0 ? amount : -amount };
+    }
+    case "divergence": {
+      if (gesture.kind !== "stroke") return null;
+      return {
+        kind: "radial",
+        amount: numberOf(values, "Radial") / 100,
+        points: screenPoints(gesture.points, camera, view).at,
+      };
+    }
+    case "warp": {
+      // Mode 1 twists; 0 pushes the field under the start to the end.
+      if (gesture.kind !== "stroke" || choiceOf(values, "WarpMode") === 1) return null;
+      const start = gesture.points[0];
+      const end = gesture.points[gesture.points.length - 1];
+      if (!start || !end || (start[0] === end[0] && start[1] === end[1])) return null;
+      return { kind: "clone", source: shiftedCamera(camera, start, end) };
+    }
+    case "liquify": {
+      if (gesture.kind !== "stroke") return null;
+      const first = gesture.points[0];
+      if (!first) return null;
+      const strength = numberOf(values, "Strength") / 100;
+      const { at, kept } = screenPoints(gesture.points, camera, view);
+      // Each kept stamp carries the movement since the one before it, so a
+      // thinned stroke moves the field as far as the whole one does.
+      const raw = gesture.points.map(([lon, lat]) => {
+        const screen = project(camera, view, { lon, lat });
+        return [screen.x, view.height - screen.y] as const;
+      });
+      const deltas = kept.map((index, k) => {
+        const previous = k === 0 ? index : (kept[k - 1] as number);
+        const from = raw[previous] as readonly [number, number];
+        const to = raw[index] as readonly [number, number];
+        return [(to[0] - from[0]) * strength, (to[1] - from[1]) * strength] as [number, number];
+      });
+      const radiusKm = sizeKm(state, "SizeKm", camera, first[1]) / 2;
+      return {
+        kind: "smear",
+        points: at,
+        deltas,
+        radiusPx: pixelsFromKm(camera, first[1], radiusKm, spaceFor(state.unit)),
+        feather: Math.min(1, Math.max(0, numberOf(values, "Feather"))),
+      };
+    }
+    default:
+      return null;
+  }
 }

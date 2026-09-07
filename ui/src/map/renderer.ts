@@ -25,6 +25,8 @@ import {
   GEO_FRAG,
   GEO_VERT,
   GLYPH_FRAG,
+  SMEAR_FRAG,
+  SMEAR_VERT,
   GLYPH_VERT,
   IMAGE_FRAG,
   IMAGE_VERT,
@@ -79,6 +81,21 @@ export interface ImageDraw {
  * is how the two get a live preview at all, and it is why they are the only two
  * that need one.
  */
+/**
+ * What a gesture in progress does to the field, drawn live (spec.md 6.2, M32).
+ *
+ * - `remove`: the field goes where the gesture covers — the mask, the eraser.
+ * - `clone`: the field from elsewhere comes in where it covers — the clone
+ *   stamp, and a warp's push, which moves the field under the start to the
+ *   end. Read through `source`.
+ * - `gain`, `turn`, `radial`: a modifier changes what is there by `amount` —
+ *   a fraction of the speed, degrees clockwise, a fraction radiated outward
+ *   from the stroke's centreline.
+ * - `smear`: a liquify moves the field along the stroke, each stamp by its
+ *   own `deltas`.
+ */
+export type OperatorKind = "remove" | "clone" | "gain" | "turn" | "radial" | "smear";
+
 export interface OperatorPreview {
   /**
    * The gesture's coverage, in screen space and at the framebuffer's size.
@@ -88,8 +105,7 @@ export interface OperatorPreview {
    * the live preview by supplying a footprint.
    */
   mask: TexImageSource;
-  /** Whether the covered field is taken away, or replaced from elsewhere. */
-  kind: "mask" | "clone";
+  kind: OperatorKind;
   /**
    * For a clone, the camera the source is read through.
    *
@@ -97,7 +113,35 @@ export interface OperatorPreview {
    * `cloneSourceCamera`, which builds it.
    */
   source?: Camera;
+  /** A modifier's setting: gain as a fraction, turn in degrees, radial as a fraction. */
+  amount?: number;
+  /**
+   * The stroke's centreline in framebuffer pixels, y up, for a divergence
+   * and a liquify. At most `OP_POINTS`; a longer stroke is thinned.
+   */
+  points?: readonly (readonly [number, number])[];
+  /** A liquify's movement per stamp, framebuffer pixels, parallel to `points`. */
+  deltas?: readonly (readonly [number, number])[];
+  /** A liquify's stamp radius in framebuffer pixels, and its feather. */
+  radiusPx?: number;
+  feather?: number;
 }
+
+/** Most centreline points the shaders take; `OPERATOR` declares the arrays. */
+export const OP_POINTS = 64;
+
+/** Which part of an operation a pass draws. */
+type OpStage = "none" | "remove" | "keep" | "apply";
+
+/** The kind's code in the shaders, for the `apply` stage. */
+const OP_CODE: Record<OperatorKind, number> = {
+  remove: 1,
+  clone: 1,
+  gain: 3,
+  turn: 4,
+  radial: 5,
+  smear: 6,
+};
 
 /** What to draw. */
 /** The range of speeds of each kind the last frame drew, m/s, or null for none. */
@@ -224,6 +268,15 @@ export class MapRenderer {
   private graticuleKey = "";
   /** Screen-space coverage of the gesture in progress, uploaded per frame. */
   private maskTexture: WebGLTexture | null = null;
+  /** The field alone at the framebuffer's size, for a liquify's preview. */
+  private fieldTarget: {
+    framebuffer: WebGLFramebuffer;
+    texture: WebGLTexture;
+    width: number;
+    height: number;
+  } | null = null;
+  private readonly smearProgram: WebGLProgram;
+  private readonly smearUniforms: Uniforms;
 
   /** Set to have the next render read its pixels back. */
   private captureRequest: ((data: ImageData | null) => void) | null = null;
@@ -236,10 +289,15 @@ export class MapRenderer {
     this.geoProgram = link(gl, GEO_VERT, GEO_FRAG);
     this.rasterProgram = link(gl, RASTER_VERT, RASTER_FRAG);
     this.glyphProgram = link(gl, GLYPH_VERT, GLYPH_FRAG);
+    this.smearProgram = link(gl, SMEAR_VERT, SMEAR_FRAG);
 
     const shared = ["uCamera", "uViewport", "uLonOffset", "uProjection"];
     this.geoUniforms = uniforms(gl, this.geoProgram, [...shared, "uColor"]);
-    const mask = ["uMask", "uMaskSize", "uMaskMode"];
+    const mask = [
+      "uMask", "uMaskSize", "uOpKind", "uOpAmount", "uOpCount", "uOpPoints", "uOpDeltas",
+      "uOpRadius", "uOpFeather",
+    ];
+    this.smearUniforms = uniforms(gl, this.smearProgram, [...mask, "uField"]);
     this.rasterUniforms = uniforms(gl, this.rasterProgram, [
       ...shared, ...mask, "uTileGeo", "uTile", "uSpeedScale", "uRampWind", "uRampCurrent", "uDim",
     ]);
@@ -371,18 +429,91 @@ export class MapRenderer {
     gl.uniform1i(u.uProjection ?? null, projection.mode);
   }
 
+  /** The centreline arrays, padded to what the shaders declare. */
+  private opArrays = {
+    points: new Float32Array(OP_POINTS * 2),
+    deltas: new Float32Array(OP_POINTS * 2),
+  };
+
   /**
-   * Points a program's mask uniforms at the gesture in progress.
+   * Points a program's operator uniforms at the gesture in progress.
    *
-   * Mode 0 leaves the field alone. Mode 1 takes it away where the gesture
-   * covers — a mask, and a clone before its source is drawn in. Mode 2 keeps
-   * only what the gesture covers, which is how that source arrives.
+   * `none` leaves the field alone. `remove` takes it away where the gesture
+   * covers — a mask, an eraser, and a clone before its source is drawn in.
+   * `keep` keeps only what the gesture covers, which is how that source
+   * arrives. `apply` is a modifier's own effect, by the operator's kind.
    */
-  private setMask(u: Uniforms, view: Viewport, mode: 0 | 1 | 2): void {
+  private setOperator(
+    u: Uniforms,
+    view: Viewport,
+    operator: OperatorPreview | null,
+    stage: OpStage,
+  ): void {
     const gl = this.gl;
-    gl.uniform1i(u.uMaskMode ?? null, mode);
+    const kind =
+      operator === null || stage === "none"
+        ? 0
+        : stage === "remove"
+          ? 1
+          : stage === "keep"
+            ? 2
+            : OP_CODE[operator.kind];
+    gl.uniform1i(u.uOpKind ?? null, kind);
     gl.uniform2f(u.uMaskSize ?? null, view.width, view.height);
     gl.uniform1i(u.uMask ?? null, MASK_UNIT);
+    gl.uniform1f(u.uOpAmount ?? null, operator?.amount ?? 0);
+    const points = operator?.points ?? [];
+    const count = Math.min(points.length, OP_POINTS);
+    const { points: flatPoints, deltas: flatDeltas } = this.opArrays;
+    flatPoints.fill(0);
+    flatDeltas.fill(0);
+    for (let i = 0; i < count; i++) {
+      const point = points[i];
+      const delta = operator?.deltas?.[i];
+      if (point) {
+        flatPoints[i * 2] = point[0];
+        flatPoints[i * 2 + 1] = point[1];
+      }
+      if (delta) {
+        flatDeltas[i * 2] = delta[0];
+        flatDeltas[i * 2 + 1] = delta[1];
+      }
+    }
+    gl.uniform1i(u.uOpCount ?? null, count);
+    gl.uniform2fv(u.uOpPoints ?? null, flatPoints);
+    gl.uniform2fv(u.uOpDeltas ?? null, flatDeltas);
+    gl.uniform1f(u.uOpRadius ?? null, operator?.radiusPx ?? 0);
+    gl.uniform1f(u.uOpFeather ?? null, operator?.feather ?? 0);
+  }
+
+  /** The offscreen target the field alone is drawn into, at the viewport's size. */
+  private ensureFieldTarget(view: Viewport): WebGLFramebuffer | null {
+    const gl = this.gl;
+    const width = Math.max(1, Math.floor(view.width));
+    const height = Math.max(1, Math.floor(view.height));
+    const current = this.fieldTarget;
+    if (current && current.width === width && current.height === height) {
+      return current.framebuffer;
+    }
+    if (current) {
+      gl.deleteFramebuffer(current.framebuffer);
+      gl.deleteTexture(current.texture);
+      this.fieldTarget = null;
+    }
+    const texture = gl.createTexture();
+    const framebuffer = gl.createFramebuffer();
+    if (!texture || !framebuffer) return null;
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    this.fieldTarget = { framebuffer, texture, width, height };
+    return framebuffer;
   }
 
   /**
@@ -421,7 +552,7 @@ export class MapRenderer {
     state: RenderState,
     camera: Camera,
     tiles: readonly VisibleTile[],
-    mode: 0 | 1 | 2,
+    stage: OpStage,
   ): void {
     const gl = this.gl;
     gl.useProgram(this.rasterProgram);
@@ -434,7 +565,7 @@ export class MapRenderer {
       state.ramps.current.min,
       state.ramps.current.max,
     );
-    this.setMask(this.rasterUniforms, state.view, mode);
+    this.setOperator(this.rasterUniforms, state.view, state.operator ?? null, stage);
     gl.activeTexture(gl.TEXTURE0);
 
     for (const tile of tiles) {
@@ -545,7 +676,7 @@ export class MapRenderer {
     state: RenderState,
     camera: Camera,
     tiles: readonly VisibleTile[],
-    mode: 0 | 1 | 2,
+    stage: OpStage,
   ): void {
     const gl = this.gl;
     // Spacing is resolved to a whole-degree lattice step so the grid is
@@ -564,7 +695,7 @@ export class MapRenderer {
     gl.uniform1f(this.glyphUniforms.uSizeScaleBarb ?? null, GLYPH_SIZE_SCALE.barb);
     gl.uniform1f(this.glyphUniforms.uPixelRatio ?? null, state.pixelRatio);
     gl.uniform4f(this.glyphUniforms.uColor ?? null, ...GLYPH);
-    this.setMask(this.glyphUniforms, state.view, mode);
+    this.setOperator(this.glyphUniforms, state.view, state.operator ?? null, stage);
     gl.activeTexture(gl.TEXTURE0);
 
     const projection = projectionFor(camera);
@@ -633,12 +764,25 @@ export class MapRenderer {
     // and a clone clone *while the pointer is down*, rather than at the commit
     // a round trip later.
     const operating = this.uploadMask(state.operator?.mask ?? null);
-    const mode: 0 | 1 | 2 = operating ? 1 : 0;
+    const operator = operating ? (state.operator ?? null) : null;
+    // What the passes over the field do inside the gesture (M32): take it
+    // away for a mask, an eraser, a clone or a liquify, whose replacement
+    // is drawn afterwards; change it in place for a modifier.
+    const stage: OpStage =
+      operator === null
+        ? "none"
+        : operator.kind === "gain" || operator.kind === "turn" || operator.kind === "radial"
+          ? "apply"
+          : "remove";
     // A clone draws the field a second time, read through a camera shifted so
     // the source lands where the brush is, and kept only where the gesture
-    // covers (spec.md 5.1).
-    const source =
-      operating && state.operator?.kind === "clone" ? (state.operator.source ?? null) : null;
+    // covers (spec.md 5.1). A warp's push is the same shift, from the start
+    // of the drag to its end.
+    const source = operator?.kind === "clone" ? (operator.source ?? null) : null;
+    // A liquify reads the field from where it moved it from, which varies
+    // from pixel to pixel: the field is drawn alone into a texture first and
+    // read back displaced.
+    const smearing = operator?.kind === "smear";
 
     // Which tiles each camera sees, once per frame rather than once per pass:
     // the raster and the glyphs walk the same set.
@@ -682,11 +826,33 @@ export class MapRenderer {
       }
     }
 
+    // --- The field alone, for a liquify to read back ---
+    if (smearing) {
+      const target = this.ensureFieldTarget(state.view);
+      if (target) {
+        gl.bindFramebuffer(gl.FRAMEBUFFER, target);
+        gl.clearColor(0, 0, 0, 0);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+        this.drawRaster(state, state.camera, tiles, "none");
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.viewport(0, 0, state.view.width, state.view.height);
+      }
+    }
+
     // --- Speed raster ---
     // The basemap is never masked: a mask takes away the field, not the
     // coastline underneath it.
-    this.drawRaster(state, state.camera, tiles, mode);
-    if (source) this.drawRaster(state, source, sourceTiles, 2);
+    this.drawRaster(state, state.camera, tiles, stage);
+    if (source) this.drawRaster(state, source, sourceTiles, "keep");
+    if (smearing && this.fieldTarget) {
+      gl.useProgram(this.smearProgram);
+      gl.bindVertexArray(this.quadVao);
+      this.setOperator(this.smearUniforms, state.view, operator, "apply");
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, this.fieldTarget.texture);
+      gl.uniform1i(this.smearUniforms.uField ?? null, 0);
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+    }
 
     // --- Coastlines, above the raster ---
     // The field covers land as well as sea, so a coastline drawn underneath it
@@ -716,9 +882,11 @@ export class MapRenderer {
     }
 
     // --- Glyphs ---
+    // A liquify's glyphs read the field from where it was moved from, so
+    // they are the apply stage rather than the remove one.
     if (state.showGlyphs) {
-      this.drawGlyphs(state, state.camera, tiles, mode);
-      if (source) this.drawGlyphs(state, source, sourceTiles, 2);
+      this.drawGlyphs(state, state.camera, tiles, smearing ? "apply" : stage);
+      if (source) this.drawGlyphs(state, source, sourceTiles, "keep");
     }
 
     gl.bindVertexArray(null);
@@ -761,6 +929,12 @@ export class MapRenderer {
 
   dispose(): void {
     const gl = this.gl;
+    gl.deleteProgram(this.smearProgram);
+    if (this.fieldTarget) {
+      gl.deleteFramebuffer(this.fieldTarget.framebuffer);
+      gl.deleteTexture(this.fieldTarget.texture);
+      this.fieldTarget = null;
+    }
     for (const buffers of [...this.landByLod.values(), ...this.coastByLod.values()]) {
       gl.deleteVertexArray(buffers.vao);
     }
