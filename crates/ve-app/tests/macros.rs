@@ -176,6 +176,51 @@ fn a_static_capture_of_a_followed_stroke_stands_still() {
     }
 }
 
+/// A macro reaches as far as the frames it holds and no further (M33).
+///
+/// Past its last frame a macro draws nothing — spec.md 8.7's rule, and why a
+/// patch is the one that holds (D65) — so a range running to the end of the
+/// timeline claimed steps it paints nothing at, and the timeline drew the
+/// macro across all of them.
+#[test]
+fn a_macro_reaches_only_as_far_as_its_frames() {
+    let root = TempRoot::new("frames-long");
+    let app = app(&root);
+    travelling_stroke(&app, 18.0);
+    macros::capture_start(&app, region(0.0, 0.0), 0, false, None).expect("start");
+    macros::capture_place(&app, 1, 10.0, 0.0).expect("place");
+    macros::capture_place(&app, 2, 20.0, 0.0).expect("place");
+    let library = macros::capture_finish(&app, "Three".to_owned(), 2).expect("finish");
+    let entry = &library.entries[0];
+    assert_eq!(entry.frames, 3);
+
+    // Three frames of a three-hourly project placed at step 1: steps 1, 2
+    // and 3, in a timeline of six.
+    macros::macro_insert(&app, &entry.id, 100.0, 0.0, 1, None).expect("insert");
+    let project = {
+        let mut session = app.session.lock().expect("lock");
+        session.require_open().expect("open").project.clone()
+    };
+    let placed = project.layers[0]
+        .objects
+        .last()
+        .expect("the macro is the newest object");
+    assert_eq!(
+        (placed.active_range.start, placed.active_range.end),
+        (1, 3),
+        "a three-frame macro covers three steps"
+    );
+    // And what it draws agrees with what it claims.
+    assert!(
+        field(&app, 3, 100.0, 0.0).0.abs() > 0.6,
+        "the last frame is drawn"
+    );
+    assert!(
+        field(&app, 4, 100.0, 0.0).0.abs() < 0.6,
+        "and nothing past it"
+    );
+}
+
 /// A macro begins at the step it was placed (M23).
 ///
 /// Its frames run from the object's first active step, and a new object's

@@ -2554,7 +2554,11 @@ map, and a macro object lands with its
 region centred on the click, **in the active layer, beginning at the current
 step**: its active range starts there, which is where its frames are measured
 from, so a macro placed at step 12 plays from step 12 rather than having ended
-at step 4. It is an object like any other — keyable position,
+at step 4. **It ends where its frames do** (M33): the range is as many steps
+long as the macro's own span, since past its last frame it draws nothing
+unless it loops, and a range running to the end of the timeline claimed steps
+it painted none of. Turning `loop` on afterwards is what the range handle is
+for. It is an object like any other — keyable position,
 rotation and scale, feather, edge mode, §9.3's motion — whose field is the
 capture's frames, sampled through §8.5's patch sampler in the object's own
 frame. A macro that recorded movement moves the **whole object**, anchor and

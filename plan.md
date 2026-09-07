@@ -2829,6 +2829,13 @@ here with its reason.
    half-step rungs and `glyphSizeScale` holds a glyph to the size its style
    asked for wherever the lattice is wider than that, on the map and in a
    gesture's preview alike.
+4. **A macro reaches as far as its frames** (finding 5). An inserted macro
+   took a range to the end of the timeline while drawing nothing past its
+   last frame (§8.7, D65), so the timeline showed it spanning steps it
+   painted none of. The range now ends at the frame span in project steps;
+   turning `loop` on afterwards is what the range handle is for. A still
+   capture is one frame at hour zero and so covers one step, which is what
+   it already drew.
 
 ### M32 — Edit tools show their effect as the pointer moves · **complete**
 

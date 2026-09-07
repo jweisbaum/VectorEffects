@@ -1024,7 +1024,13 @@ pub fn macro_insert(
     with_session(state, |session| {
         let open = session.require_open()?;
         let step_count = open.project.settings.step_count;
-        let object = macro_object(&capture, anchor, step, step_count);
+        let object = macro_object(
+            &capture,
+            anchor,
+            step,
+            step_count,
+            open.project.settings.step_hours.hours(),
+        );
         let target =
             crate::document::creation_layer(&open.project, layer, crate::document::Placing::Field)?;
         let (layer, index) = (target.id, target.objects.len());
@@ -1047,12 +1053,35 @@ pub fn macro_insert(
 /// The macro object a capture becomes when it is placed, at `anchor` and
 /// beginning at `step` (spec.md 8.7). One builder for the library's insert
 /// and the preview's click, so the two place the same object.
-fn macro_object(capture: &Arc<Capture>, anchor: LonLat, step: u32, step_count: u32) -> Object {
+fn macro_object(
+    capture: &Arc<Capture>,
+    anchor: LonLat,
+    step: u32,
+    step_count: u32,
+    step_hours: u32,
+) -> Object {
     let last = step_count.saturating_sub(1);
     let mut object = Object::new(ToolKind::Macro, "Macro", step_count);
     object.geometry = capture.shape.clone();
     object.capture = Some(capture.hash.clone());
-    object.active_range = ve_core::document::StepRange::new(step.min(last), last);
+    // A macro reaches as far as the frames it holds and no further (M33).
+    // Past its last frame it draws nothing — that is spec.md 8.7's rule, and
+    // the reason a patch is the one that holds (D65) — so a range running to
+    // the end of the timeline claimed steps the macro paints nothing at, and
+    // the timeline drew it across all of them. Turning `loop` on afterwards
+    // is what the range handle is for.
+    let span_hours = capture
+        .frames
+        .last()
+        .map_or(0.0, |frame| frame.offset_hours);
+    let frames = if step_hours == 0 {
+        0
+    } else {
+        (span_hours / f64::from(step_hours)).ceil().max(0.0) as u32
+    };
+    let start = step.min(last);
+    object.active_range =
+        ve_core::document::StepRange::new(start, start.saturating_add(frames).min(last));
     if let Some(anim) = object.props.get_mut(PropId::Position) {
         anim.set_base(PropValue::LonLat(anchor));
     }
