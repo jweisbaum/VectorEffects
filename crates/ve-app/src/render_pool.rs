@@ -19,19 +19,19 @@
 //! per step into a `Vec` indexed by step, and the queue is a `Vec` in priority
 //! order.
 
+use std::collections::HashMap;
 use std::sync::{Arc, Condvar, Mutex};
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use ve_core::project::Project;
-use ve_render::cache::{SceneHash, TileKey, scene_hash};
-use ve_render::preview::Quality;
+use ve_render::cache::TileKey;
 use ve_render::scene::{Scene, flatten};
 use ve_render::tile::TileId;
 
 use crate::commands::AppState;
 use crate::error::{AppError, Result};
-use crate::protocol;
+use crate::protocol::{self, Frame};
 
 /// A tile address on the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -81,18 +81,35 @@ pub struct RenderProgress {
 /// One step, flattened, hashed and planned — everything a tile of it needs
 /// that does not depend on which tile.
 struct Prepared {
-    scene: Scene,
-    hash: SceneHash,
-    quality: Quality,
+    frame: Frame,
+    /// Each tile's key, once asked for: a key is the hash of the objects
+    /// that reach the tile (M31), and the readiness probe asks after the
+    /// same viewport several times a second.
+    keys: Mutex<HashMap<TileId, TileKey>>,
 }
 
 impl Prepared {
-    fn key(&self, tile: TileId) -> TileKey {
-        TileKey {
-            scene: self.hash,
-            tile,
-            quality: self.quality,
+    /// The tile's key, computed the first time.
+    fn key(&self, state: &AppState, tile: TileId) -> TileKey {
+        if let Ok(keys) = self.keys.lock()
+            && let Some(key) = keys.get(&tile)
+        {
+            return *key;
         }
+        let key = self.frame.tile(state, tile).1;
+        if let Ok(mut keys) = self.keys.lock() {
+            keys.insert(tile, key);
+        }
+        key
+    }
+
+    /// The tile's sub-scene and its key, for rendering it.
+    fn tile(&self, state: &AppState, tile: TileId) -> (Scene, TileKey) {
+        let (scene, key) = self.frame.tile(state, tile);
+        if let Ok(mut keys) = self.keys.lock() {
+            keys.insert(tile, key);
+        }
+        (scene, key)
     }
 }
 
@@ -123,19 +140,15 @@ impl Snapshot {
 
     /// The step's scene — every layer of every kind, as the map draws it
     /// (M31) — prepared the first time it is asked for.
-    fn prepared(&self, state: &AppState, step: u32) -> Arc<Prepared> {
+    fn prepared(&self, step: u32) -> Arc<Prepared> {
         if let Ok(steps) = self.steps.lock()
             && let Some(Some(prepared)) = steps.get(step as usize)
         {
             return Arc::clone(prepared);
         }
-        let scene = flatten(&self.project, step);
-        let hash = scene_hash(&scene);
-        let (_, quality) = protocol::plan_for(state, &scene);
         let prepared = Arc::new(Prepared {
-            scene,
-            hash,
-            quality,
+            frame: Frame::of(flatten(&self.project, step)),
+            keys: Mutex::new(HashMap::new()),
         });
         if let Ok(mut steps) = self.steps.lock()
             && let Some(slot) = steps.get_mut(step as usize)
@@ -297,12 +310,12 @@ impl RenderPool {
             (unit, snapshot)
         };
 
-        let prepared = snapshot.prepared(state, unit.step);
-        let key = prepared.key(unit.tile);
-        if state.tiles.contains(&key) {
+        let prepared = snapshot.prepared(unit.step);
+        if state.tiles.contains(&prepared.key(state, unit.tile)) {
             return true;
         }
-        if let Err(err) = protocol::serve_keyed(state, &prepared.scene, key) {
+        let (scene, key) = prepared.tile(state, unit.tile);
+        if let Err(err) = protocol::serve_keyed(state, &scene, key) {
             tracing::warn!(%err, step = unit.step, "render ahead failed");
             return true;
         }
@@ -395,10 +408,10 @@ impl RenderPool {
         let total = ids.len() as u32;
         let steps = (0..snapshot.project.settings.step_count)
             .map(|step| {
-                let prepared = snapshot.prepared(state, step);
+                let prepared = snapshot.prepared(step);
                 let ready = ids
                     .iter()
-                    .filter(|tile| state.tiles.contains(&prepared.key(**tile)))
+                    .filter(|tile| state.tiles.contains(&prepared.key(state, **tile)))
                     .count() as u32;
                 StepReadiness { step, ready, total }
             })

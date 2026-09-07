@@ -2013,11 +2013,25 @@ What still has to hold, and is tested:
 
 ### 7.10 Render cache
 
-- **Key:** BLAKE3 of the canonicalised `FlatScene` for a time step, plus grid
-  parameters, plus tile coordinates. Any edit that changes what a frame looks
-  like changes the hash; any edit that does not (renaming a layer, moving the
-  camera) does not. Invalidation is therefore automatic and exact — there is no
-  hand-maintained dirty-tracking to get wrong.
+- **Key:** BLAKE3 of the canonicalised part of the `FlatScene` **that can
+  reach the tile** (M31), plus the quality, plus tile coordinates. Each object
+  is digested once per frame; a tile's key combines the digests of the objects
+  whose spherical cap touches its rectangle — an inverted mask reaches every
+  tile, and a clone stamp, a warp or a liquify brings its whole layer beneath
+  it — with every raster at its remapped place. The tile is rendered from
+  that same sub-scene, which evaluates identically at its pixels, and the
+  backend is chosen for it too, so a tile the eraser never reaches stays on
+  the GPU. Any edit that changes what a tile looks like changes its key; any
+  edit that does not — renaming a layer, moving the camera, a stroke on the
+  far side of the world — does not. Invalidation is therefore automatic and
+  exact, and local: a stroke re-renders the tiles it reaches and no others.
+- **The map keeps textures by key, not by address.** A tile address still
+  names a revision, but on each frame the map asks the backend for the keys
+  of the tiles in view (`tile_keys`) and fetches only those whose key it does
+  not hold; the rest stay on screen, untouched and undimmed. A step change on
+  a still scene, or a scrub back to a step already seen, fetches nothing.
+- **Readiness** probes the cache by the same per-tile keys, cached per step
+  of a snapshot, so a viewport of a still scene is one key set for every step.
 - **Location:** OS cache directory, never inside the project file.
 - **Eviction:** LRU with a configurable disk cap, default 4 GB.
 - **Safety:** deleting the cache directory while the app is closed is always

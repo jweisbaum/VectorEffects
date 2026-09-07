@@ -1390,6 +1390,12 @@ export default function MapView({
         const basemap = parseBasemap(buffer);
         trace(`basemap parsed, ${basemap.lods.length} lods`);
         tiles = new TileCache(gl, baseUrl);
+        // A frame's tiles are kept by key, and the keys come from the
+        // backend (spec.md 7.10, M31): the token is `<revision>/<step>`.
+        tiles.resolver = (frame, wanted) => {
+          const [revision, step] = frame.split("/");
+          return api.tileKeys(Number(revision), Number(step), [...wanted]);
+        };
         pictures = new ImageCache(gl, baseUrl);
         pictures.onChange = () => requestDraw();
         pictures.onError = (message) => void api.frontendLog("error", message);

@@ -18,7 +18,7 @@ use crate::aeqd::Space;
 use crate::error::{RenderError, Result};
 use crate::preview::Quality;
 use crate::scene::{
-    DirectionMode, EdgeMode, FlatObject, Modifier, OffsetMode, Scene, SpeedMode, Warp,
+    DirectionMode, EdgeMode, FlatObject, FlatRaster, Modifier, OffsetMode, Scene, SpeedMode, Warp,
 };
 use crate::sdf::Shape;
 use crate::tile::TileId;
@@ -47,7 +47,7 @@ pub fn scene_hash(scene: &Scene) -> SceneHash {
     hasher.update(&EVALUATOR_VERSION.to_le_bytes());
     hasher.update(&(scene.objects.len() as u64).to_le_bytes());
     for object in &scene.objects {
-        hash_object(&mut hasher, object);
+        hasher.update(&object_digest(object));
     }
     // An imported field is identified by its own content hash — the lattice
     // and every sample — and by where it sits in the stack. A different time
@@ -56,36 +56,54 @@ pub fn scene_hash(scene: &Scene) -> SceneHash {
     hasher.update(&(scene.rasters.len() as u64).to_le_bytes());
     for raster in &scene.rasters {
         hasher.update(&(raster.z as u64).to_le_bytes());
-        hasher.update(&raster.layer.to_le_bytes());
-        hasher.update(&[kind_byte(raster.kind)]);
-        hasher.update(&raster.grid.hash);
-        // The speed band decides which of the lattice's samples are drawn at
-        // all, so a tile keyed without it would be served from before the
-        // filter was set (spec.md 7.10).
-        // And what the eraser has taken from the lattice (M29).
-        hasher.update(&(raster.erased.len() as u64).to_le_bytes());
-        for erasure in &raster.erased {
-            hash_f64(&mut hasher, erasure.radius_m);
-            hash_f64(&mut hasher, erasure.feather);
-            hasher.update(&[u8::from(erasure.square)]);
-            hasher.update(&(erasure.chains.len() as u64).to_le_bytes());
-            for chain in &erasure.chains {
-                hasher.update(&(chain.len() as u64).to_le_bytes());
-                for point in chain {
-                    hash_f64(&mut hasher, point.lon);
-                    hash_f64(&mut hasher, point.lat);
-                }
+        hasher.update(&raster_digest(raster));
+    }
+    *hasher.finalize().as_bytes()
+}
+
+/// The content hash of one object: everything about it that reaches a
+/// pixel. A scene's hash is a hash of these (M31), so a tile keyed by the
+/// objects that reach it (`cull`) hashes each object once for the frame.
+pub fn object_digest(object: &FlatObject) -> [u8; 32] {
+    let mut hasher = blake3::Hasher::new();
+    hash_object(&mut hasher, object);
+    *hasher.finalize().as_bytes()
+}
+
+/// The content hash of one imported field as placed: the lattice, its
+/// layer, the band it keeps and what the eraser took — everything but its
+/// `z`, which is where it sits among the objects and is hashed beside it.
+pub fn raster_digest(raster: &FlatRaster) -> [u8; 32] {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(&raster.layer.to_le_bytes());
+    hasher.update(&[kind_byte(raster.kind)]);
+    hasher.update(&raster.grid.hash);
+    // The speed band decides which of the lattice's samples are drawn at
+    // all, so a tile keyed without it would be served from before the
+    // filter was set (spec.md 7.10).
+    // And what the eraser has taken from the lattice (M29).
+    hasher.update(&(raster.erased.len() as u64).to_le_bytes());
+    for erasure in &raster.erased {
+        hash_f64(&mut hasher, erasure.radius_m);
+        hash_f64(&mut hasher, erasure.feather);
+        hasher.update(&[u8::from(erasure.square)]);
+        hasher.update(&(erasure.chains.len() as u64).to_le_bytes());
+        for chain in &erasure.chains {
+            hasher.update(&(chain.len() as u64).to_le_bytes());
+            for point in chain {
+                hash_f64(&mut hasher, point.lon);
+                hash_f64(&mut hasher, point.lat);
             }
         }
-        match raster.speed_range {
-            None => hasher.update(&[0]),
-            Some(band) => {
-                hasher.update(&[1]);
-                hasher.update(&band.min_mps.to_le_bytes());
-                hasher.update(&band.max_mps.to_le_bytes())
-            }
-        };
     }
+    match raster.speed_range {
+        None => hasher.update(&[0]),
+        Some(band) => {
+            hasher.update(&[1]);
+            hasher.update(&band.min_mps.to_le_bytes());
+            hasher.update(&band.max_mps.to_le_bytes())
+        }
+    };
     *hasher.finalize().as_bytes()
 }
 

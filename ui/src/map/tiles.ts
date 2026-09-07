@@ -5,9 +5,18 @@
  * browser's own cache and request pipelining apply and a quarter-megabyte of
  * pixels never crosses the IPC channel.
  *
- * A tile URL names a specific field, so it never changes meaning: entries can
- * be cached indefinitely and evicted purely on pressure.
+ * **A texture is kept by the tile's key, not by its address** (spec.md 7.10,
+ * M31). An address is `<revision>/<step>/<z>/<x>/<y>` and an edit changes the
+ * revision of every tile on the map; the key is the content hash of the
+ * objects that reach the tile, and an edit changes it for the tiles the
+ * edited object reaches and no others. So a frame is first *resolved* — the
+ * backend is asked for the keys of the tiles in view — and a tile whose key
+ * the cache already holds is on screen at once, untouched and undimmed,
+ * while only the tiles whose key is new are fetched. A step change on a
+ * still scene, likewise, fetches nothing.
  */
+
+import { type TileRanges, hasField, tileSpeedRange } from "./tileRange";
 
 /** How a tile is doing. */
 export type TileStatus = "ready" | "pending" | "failed";
@@ -23,19 +32,45 @@ interface Entry {
   range: TileRanges | null;
 }
 
-import { type TileRanges, hasField, tileSpeedRange } from "./tileRange";
+/** A tile's place in the pyramid. */
+export interface TileAddress {
+  z: number;
+  x: number;
+  y: number;
+}
+
+/**
+ * Asks the backend for the keys of a frame's tiles, in the tiles' order.
+ * The frame token is `<revision>/<step>`.
+ */
+export type KeyResolver = (frame: string, tiles: readonly TileAddress[]) => Promise<string[]>;
+
+/** How many frames' key maps are remembered. Playback loops over a few dozen. */
+const FRAMES_KEPT = 96;
 
 /** Tracks fetched tiles and their textures. */
 export class TileCache {
   private readonly gl: WebGL2RenderingContext;
   private readonly baseUrl: string;
   private readonly limit: number;
-  /** Insertion-ordered, which makes it an LRU when re-inserted on access. */
+  /** Textures by key. Insertion-ordered, which makes it an LRU when re-inserted on access. */
   private readonly entries = new Map<string, Entry>();
-  /** Called when a fetch completes, so the caller can redraw. */
+  /** Each frame's tiles' keys, as far as they have been resolved. */
+  private readonly frames = new Map<string, Map<string, string>>();
+  /** Tiles asked about since the last resolution, by frame. */
+  private readonly pending = new Map<string, Map<string, TileAddress>>();
+  /** Frames whose resolution is in flight, with the tiles it covers. */
+  private readonly resolving = new Map<string, Set<string>>();
+  private flushScheduled = false;
+  /** Called when a fetch or a resolution completes, so the caller can redraw. */
   onChange: (() => void) | null = null;
   /** Called when a fetch fails, so the failure reaches the application log. */
   onError: ((message: string) => void) | null = null;
+  /**
+   * How a frame's keys are found. Until one is set, no tile of any frame is
+   * resident and none is fetched.
+   */
+  resolver: KeyResolver | null = null;
 
   /**
    * `limit` is in tiles of a quarter megabyte each. Playback shows a viewport
@@ -50,18 +85,28 @@ export class TileCache {
     this.limit = limit;
   }
 
-  private static key(frame: string, z: number, x: number, y: number): string {
-    return `${frame}/${z}/${x}/${y}`;
+  private static tileKey(z: number, x: number, y: number): string {
+    return `${z}/${x}/${y}`;
+  }
+
+  /** The key of a frame's tile, if the frame has been resolved for it. */
+  private keyOf(frame: string, z: number, x: number, y: number): string | undefined {
+    return this.frames.get(frame)?.get(TileCache.tileKey(z, x, y));
   }
 
   /**
    * The texture for a tile, fetching it if absent.
    *
-   * Returns null while a fetch is in flight; the caller draws whatever it has
-   * and redraws when `onChange` fires, so panning never blanks the map.
+   * Returns null while the frame's keys or the tile itself are on their way;
+   * the caller draws whatever it has and redraws when `onChange` fires, so
+   * panning never blanks the map.
    */
   get(frame: string, z: number, x: number, y: number): WebGLTexture | null {
-    const key = TileCache.key(frame, z, x, y);
+    const key = this.keyOf(frame, z, x, y);
+    if (key === undefined) {
+      this.ask(frame, { z, x, y });
+      return null;
+    }
     const existing = this.entries.get(key);
     if (existing) {
       // Re-insert to mark as recently used.
@@ -72,14 +117,15 @@ export class TileCache {
 
     const entry: Entry = { texture: null, status: "pending", range: null };
     this.entries.set(key, entry);
-    void this.fetch(key, entry);
+    void this.fetch(`${frame}/${TileCache.tileKey(z, x, y)}`, key, entry);
     this.evict();
     return null;
   }
 
   /** The texture for a tile if it is resident, fetching nothing. */
   peek(frame: string, z: number, x: number, y: number): WebGLTexture | null {
-    return this.entries.get(TileCache.key(frame, z, x, y))?.texture ?? null;
+    const key = this.keyOf(frame, z, x, y);
+    return key === undefined ? null : (this.entries.get(key)?.texture ?? null);
   }
 
   /**
@@ -87,11 +133,12 @@ export class TileCache {
    * null when it is not resident or holds no field. Fetches nothing.
    */
   rangeOf(frame: string, z: number, x: number, y: number): TileRanges | null {
-    return this.entries.get(TileCache.key(frame, z, x, y))?.range ?? null;
+    const key = this.keyOf(frame, z, x, y);
+    return key === undefined ? null : (this.entries.get(key)?.range ?? null);
   }
 
   /** How many of a frame's tiles are resident, fetching nothing. */
-  residentCount(frame: string, tiles: ReadonlyArray<{ z: number; x: number; y: number }>): number {
+  residentCount(frame: string, tiles: ReadonlyArray<TileAddress>): number {
     let count = 0;
     for (const tile of tiles) {
       if (this.peek(frame, tile.z, tile.x, tile.y)) count++;
@@ -100,13 +147,14 @@ export class TileCache {
   }
 
   /**
-   * Starts fetching a frame's tiles, and says whether they are all resident.
+   * Starts resolving and fetching a frame's tiles, and says whether they are
+   * all resident.
    *
    * Playback asks this of the step it is about to show: the backend can hold a
    * rendered tile the GPU does not yet, and advancing on the backend's word
    * alone shows the previous step under the new one for a frame (spec.md 9.4).
    */
-  prefetch(frame: string, tiles: ReadonlyArray<{ z: number; x: number; y: number }>): boolean {
+  prefetch(frame: string, tiles: ReadonlyArray<TileAddress>): boolean {
     let resident = 0;
     for (const tile of tiles) {
       if (this.get(frame, tile.z, tile.x, tile.y)) resident++;
@@ -114,14 +162,84 @@ export class TileCache {
     return resident === tiles.length;
   }
 
-  private async fetch(key: string, entry: Entry): Promise<void> {
+  /**
+   * Notes a tile whose key the frame has not been resolved for, and arranges
+   * for one resolution of everything asked this frame. A draw asks for a
+   * viewport's tiles one after another; one request answers them all.
+   */
+  private ask(frame: string, tile: TileAddress): void {
+    const tileKey = TileCache.tileKey(tile.z, tile.x, tile.y);
+    if (this.resolving.get(frame)?.has(tileKey)) return;
+    let tiles = this.pending.get(frame);
+    if (!tiles) {
+      tiles = new Map();
+      this.pending.set(frame, tiles);
+    }
+    tiles.set(tileKey, tile);
+    if (!this.flushScheduled) {
+      this.flushScheduled = true;
+      queueMicrotask(() => this.flush());
+    }
+  }
+
+  private flush(): void {
+    this.flushScheduled = false;
+    const resolver = this.resolver;
+    if (!resolver) return;
+    for (const [frame, tiles] of this.pending) {
+      const list = [...tiles.values()];
+      const covered = this.resolving.get(frame) ?? new Set<string>();
+      for (const tile of list) covered.add(TileCache.tileKey(tile.z, tile.x, tile.y));
+      this.resolving.set(frame, covered);
+      void this.resolve(resolver, frame, list);
+    }
+    this.pending.clear();
+  }
+
+  private async resolve(
+    resolver: KeyResolver,
+    frame: string,
+    tiles: TileAddress[],
+  ): Promise<void> {
     try {
-      const response = await fetch(`${this.baseUrl}${key}`);
+      const keys = await resolver(frame, tiles);
+      let map = this.frames.get(frame);
+      if (!map) {
+        map = new Map();
+        this.frames.set(frame, map);
+        // The oldest frames' maps go; their textures stay by key.
+        while (this.frames.size > FRAMES_KEPT) {
+          const oldest = this.frames.keys().next();
+          if (oldest.done) break;
+          this.frames.delete(oldest.value);
+        }
+      }
+      tiles.forEach((tile, index) => {
+        const key = keys[index];
+        if (key) map.set(TileCache.tileKey(tile.z, tile.x, tile.y), key);
+      });
+    } catch (error) {
+      // The revision moved on before it was asked about — an edit landed
+      // between the draw and the request. The next draw asks with the new one.
+      console.debug(`tile keys for ${frame} unavailable: ${String(error)}`);
+    } finally {
+      const covered = this.resolving.get(frame);
+      if (covered) {
+        for (const tile of tiles) covered.delete(TileCache.tileKey(tile.z, tile.x, tile.y));
+        if (covered.size === 0) this.resolving.delete(frame);
+      }
+    }
+    this.onChange?.();
+  }
+
+  private async fetch(address: string, key: string, entry: Entry): Promise<void> {
+    try {
+      const response = await fetch(`${this.baseUrl}${address}`);
       if (!response.ok) throw new Error(`status ${response.status}`);
       const bytes = new Uint8Array(await response.arrayBuffer());
 
       // The entry may have been evicted while the fetch was in flight.
-      if (!this.entries.has(key)) return;
+      if (this.entries.get(key) !== entry) return;
 
       entry.texture = this.upload(bytes);
       entry.status = entry.texture ? "ready" : "failed";
@@ -133,7 +251,7 @@ export class TileCache {
       }
     } catch (error) {
       entry.status = "failed";
-      const message = `tile ${key} failed: ${error instanceof Error ? error.message : String(error)}`;
+      const message = `tile ${address} failed: ${error instanceof Error ? error.message : String(error)}`;
       console.warn(message);
       this.onError?.(message);
     }
@@ -191,5 +309,8 @@ export class TileCache {
       if (entry.texture) this.gl.deleteTexture(entry.texture);
     }
     this.entries.clear();
+    this.frames.clear();
+    this.pending.clear();
+    this.resolving.clear();
   }
 }

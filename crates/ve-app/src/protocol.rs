@@ -21,8 +21,9 @@ use std::sync::{Arc, Mutex};
 
 use tauri::Manager;
 use tauri::http::{Request, Response};
-use ve_render::cache::{SceneHash, TileKey, scene_hash};
+use ve_render::cache::TileKey;
 use ve_render::cpu::CpuEvaluator;
+use ve_render::cull::{Digests, TileScene, digests_of, tile_scene};
 use ve_render::evaluator::FieldEvaluator;
 use ve_render::preview::{Quality, render_tile};
 use ve_render::scene::{Scene, flatten};
@@ -38,8 +39,37 @@ pub const SCHEME: &str = "ve-tile";
 pub struct Frame {
     /// The scene at this step.
     pub scene: Scene,
-    /// Its content hash, computed once for the frame rather than per tile.
-    pub hash: SceneHash,
+    /// The content hash of each of its objects and rasters, computed once
+    /// for the frame: what each tile's key is combined from (M31).
+    pub digests: Digests,
+}
+
+impl Frame {
+    /// A frame of `scene`, its objects digested.
+    pub fn of(scene: Scene) -> Self {
+        let digests = digests_of(&scene);
+        Self { scene, digests }
+    }
+
+    /// The part of the frame a tile sees, and the key it is cached under.
+    ///
+    /// The key names the sub-scene — the objects whose reach touches the
+    /// tile — so an edit re-keys the tiles the edited object reaches and no
+    /// others (spec.md 7.10, M31). The backend and the quality are decided
+    /// for the sub-scene too: a tile the eraser or a clone stamp never
+    /// reaches stays on the GPU whatever the rest of the scene holds.
+    pub fn tile(&self, state: &AppState, id: tile::TileId) -> (Scene, TileKey) {
+        let TileScene { scene, hash } = tile_scene(&self.scene, &self.digests, id);
+        let (_, quality) = plan_for(state, &scene);
+        (
+            scene,
+            TileKey {
+                scene: hash,
+                tile: id,
+                quality,
+            },
+        )
+    }
 }
 
 /// The most recently flattened frame, reused across the tiles of it.
@@ -82,8 +112,7 @@ impl SceneCache {
         };
         drop(session);
 
-        let hash = scene_hash(&scene);
-        let frame = Arc::new(Frame { scene, hash });
+        let frame = Arc::new(Frame::of(scene));
         if let Ok(mut cached) = self.0.lock() {
             *cached = Some(CachedFrame {
                 revision,
@@ -205,8 +234,8 @@ pub fn handle(app: &tauri::AppHandle, request: &Request<Vec<u8>>) -> Response<Ve
         return respond(409, Vec::new());
     };
 
-    let key = key_with(&state, &frame.scene, frame.hash, parsed.id);
-    match serve_keyed(&state, &frame.scene, key) {
+    let (scene, key) = frame.tile(&state, parsed.id);
+    match serve_keyed(&state, &scene, key) {
         Ok(encoded) => respond(200, encoded),
         Err(err) => {
             tracing::error!(%err, "tile evaluation failed");
@@ -301,36 +330,54 @@ pub fn plan_for<'a>(
     (gpu, quality)
 }
 
-/// The cache key a tile of `scene` is served under, hashing the scene.
-pub fn key_for(state: &AppState, scene: &Scene, id: tile::TileId) -> TileKey {
-    key_with(state, scene, scene_hash(scene), id)
-}
-
-/// The cache key a tile of `scene` is served under, given the scene's hash.
-///
-/// Hashing is per frame and a frame is a hundred tiles, so a caller that
-/// serves many tiles of one scene hashes once and comes through here.
-pub fn key_with(state: &AppState, scene: &Scene, hash: SceneHash, id: tile::TileId) -> TileKey {
-    let (_, quality) = plan_for(state, scene);
-    TileKey {
-        scene: hash,
-        tile: id,
-        quality,
-    }
-}
-
 /// A tile of `scene`, from the cache or freshly rendered into it.
 ///
 /// **The one path a tile takes**, whether the map asked for it now or the
 /// render pool is working ahead of the playhead: the key, the backend, the
 /// quality and the encoding are decided once here, so a tile rendered ahead
-/// is exactly the tile that will later be served.
+/// is exactly the tile that will later be served. Digests the whole scene
+/// for one tile; a caller with many tiles of one frame builds a [`Frame`]
+/// and asks it.
 pub fn serve(
     state: &AppState,
     scene: &Scene,
     id: tile::TileId,
 ) -> ve_render::error::Result<Vec<u8>> {
-    serve_keyed(state, scene, key_for(state, scene, id))
+    let (scene, key) = Frame::of(scene.clone()).tile(state, id);
+    serve_keyed(state, &scene, key)
+}
+
+/// The keys the viewport's tiles of a frame are cached under (M31).
+///
+/// The map keeps its textures by key rather than by address: after an edit
+/// it asks for the new revision's keys and fetches only the tiles whose key
+/// it does not already hold, so a stroke redraws the tiles it reaches and
+/// leaves the rest on screen, undimmed. The revision is the document's or
+/// the macro preview's, exactly as a tile address is; a revision that is
+/// neither is refused, and the map asks again with the one it has by then.
+#[tauri::command]
+pub fn tile_keys(
+    app: tauri::AppHandle,
+    revision: u64,
+    step: u32,
+    tiles: Vec<crate::render_pool::TileAddress>,
+) -> crate::error::Result<Vec<String>> {
+    let state = app.state::<AppState>();
+    let frame = app
+        .state::<SceneCache>()
+        .frame_for(&state, revision, step)
+        .ok_or_else(|| {
+            crate::error::AppError::Internal(format!("revision {revision} is not the one open"))
+        })?;
+    Ok(tiles
+        .iter()
+        .map(
+            |address| match tile::TileId::new(address.z, address.x, address.y) {
+                Ok(id) => frame.tile(&state, id).1.digest(),
+                Err(_) => String::new(),
+            },
+        )
+        .collect())
 }
 
 /// [`serve`], with the key already made — see [`key_with`].

@@ -304,6 +304,13 @@ export const api = {
   /** How ready every step is, for the viewport, across every kind on the map. */
   frameReadiness: (tiles: TileAddress[]) => call<TimelineReadiness>("frame_readiness", { tiles }),
 
+  /**
+   * The keys a frame's tiles are cached under (spec.md 7.10, M31): what the
+   * map keeps its textures by, so an edit refetches only the tiles it reaches.
+   */
+  tileKeys: (revision: number, step: number, tiles: TileAddress[]) =>
+    call<string[]>("tile_keys", { revision, step, tiles }),
+
   endGesture: () => call<void>("end_gesture"),
 
   /** The selected object's transform, for the on-map handles. */

@@ -200,7 +200,8 @@ pub fn run() -> anyhow::Result<()> {
             animation::set_step_count,
             animation::set_start_time,
             render_pool::render_ahead,
-            render_pool::frame_readiness
+            render_pool::frame_readiness,
+            protocol::tile_keys
         ])
         .run(tauri::generate_context!())?;
 

@@ -2771,6 +2771,24 @@ wind and a defined current together.
    user's instruction. Test: an intensity stroke on an imported layer
    doubles its field where it lands and leaves it alone elsewhere, while a
    brush there is still refused.
+3. **A tile is keyed by what reaches it.** `ve_render::cull` digests every
+   object once per frame and gives each tile the sub-scene whose caps touch
+   it — inverted masks always, a clone, a warp or a liquify with its whole
+   layer beneath — hashed from the digests and rendered from the sub-scene,
+   which the tests hold to render identically to the whole. The protocol's
+   `Frame` and the pool's `Prepared` key per tile, the readiness probe caches
+   keys per step, and the backend is chosen per sub-scene, so the eraser or
+   a clone stamp sends only the tiles it reaches to the CPU. The map's
+   `TileCache` keeps textures by key: a draw asks `tile_keys` for the tiles
+   in view once, reuses every texture whose key it holds and fetches the
+   rest. An edit therefore redraws the tiles it reaches and leaves the rest
+   undimmed; a step change on a still scene fetches nothing. Spec §7.10.
+   **On the speed filter (finding 3):** a filter change re-keys every tile
+   the imported field reaches — a global forecast is every tile — so the
+   whole map does re-render on release, as it must; what changed since it
+   was cheap is that M30 rendered two kinds' tiles and M31 renders one
+   again, and the GRIB's tiles go to the CPU only where an eraser or a
+   clone reaches them. Not clicked through in the app.
 
 ---
 
