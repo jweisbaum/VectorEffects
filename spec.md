@@ -2524,7 +2524,11 @@ is drawn over it: no object edges, handles, measurements, image corners or
 selected region. **The pointer is the stamp**: it carries the macro's region
 outline and, for a recording with movement, its track, exactly as the insert
 tool's does, and **a click places a copy of the macro there — in the
-preview's own scene** (M29): the original loops where it was recorded and a
+preview's own scene** (M29). **A drag pans**, as it does everywhere else on
+the map (M33): a press places only if it barely moved, so the preview can be
+looked around before it is stamped on. The legend shows the preview's one
+kind and not the document's, there being nothing of any other kind to scale.
+Of the copies: the original loops where it was recorded and a
 copy loops at every place clicked, all in the preview's one layer, none of
 them in any layer of the document, the panel or the file. They are for
 looking at, and they go with the preview whatever ends it; *Edit macro*

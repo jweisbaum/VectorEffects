@@ -2851,6 +2851,17 @@ here with its reason.
    and the choice of side are `reorder.ts`, tested. The DOM hit test itself
    is not unit-tested — a fake `elementFromPoint` asserts nothing about
    WebKit — so this one wants a click-through.
+7. **The macro preview shows the macro** (finding 9). A preview's revision
+   was the clock with bit 62 set, and a revision crosses IPC as a number:
+   above 2^53 JavaScript keeps only a double, so the address the map built
+   was not the revision, every tile of the preview was refused as stale, and
+   the preview had never shown anything at all — the "not reproduced" note
+   under M29's item 15 and again under M31. The bit is 2^52 now, which a
+   millisecond clock reaches in a hundred and forty thousand years, and a
+   test holds the revision under 2^53 and exact through a double. Beside it:
+   the legend shows the preview's one kind, `CaptureMode.kind` being back for
+   it, and a press in the preview pans, placing a copy only if it barely
+   moved.
 
 ### M32 — Edit tools show their effect as the pointer moves · **complete**
 

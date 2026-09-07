@@ -573,6 +573,8 @@ export default function MapView({
   const dragging = useRef<{ x: number; y: number } | null>(null);
   /** Where the pointer went down, to tell a click from a pan. */
   const pressOrigin = useRef<{ x: number; y: number } | null>(null);
+  /** Whether the press in progress began in a macro preview (M33). */
+  const previewPress = useRef(false);
   const overlayRef = useRef<HTMLCanvasElement | null>(null);
   const loggedFirstDraw = useRef(false);
   /**
@@ -1012,7 +1014,12 @@ export default function MapView({
   // One ramp per kind (M29, M31): wind and current are an order of magnitude
   // apart, and the map shows both, each on its own scale, with a legend
   // entry for each kind the project holds.
-  const kindsShown: FieldKindName[] = project.kinds_present.map(kindOf);
+  // A macro preview is a scene of one kind (M33): a legend offering a scale
+  // for a kind the preview has nothing of is a scale for nothing.
+  const kindsShown: FieldKindName[] =
+    previewing && recording?.kind
+      ? [kindOf(recording.kind)]
+      : project.kinds_present.map(kindOf);
   const autoScale = settings?.auto_scale ?? false;
   const [seenRanges, setSeenRanges] = useState<Record<FieldKindName, SeenRange>>({
     wind: null,
@@ -1626,7 +1633,7 @@ export default function MapView({
       setHint("Draw a region first — it is what gets recorded.");
     } else if (recording !== null && recording.phase === "previewing") {
       setHint(
-        "Click the map to see a copy of the macro there. Save keeps the macro in the library; Edit goes back to recording; the copies go with the preview.",
+        "Click the map to see a copy of the macro there, or drag to pan. Save keeps the macro in the library; Edit goes back to recording; the copies go with the preview.",
       );
     } else if (recording !== null) {
       setHint(
@@ -3406,10 +3413,13 @@ export default function MapView({
       // and in no layer of the document — the placements go with the
       // preview, whatever ends it.
       if (recording.phase === "previewing") {
-        void api
-          .placePreview(geo.lon, geo.lat)
-          .then(setCapture)
-          .catch((err: unknown) => setError(String(err)));
+        // A press pans and a click places (M33). Placing on the way down
+        // meant a drag could never pan: the preview is a map to look around
+        // before it is a surface to stamp on.
+        previewPress.current = true;
+        dragging.current = point;
+        pressOrigin.current = point;
+        applyCursor(false, true);
         return;
       }
       const anchor = region === null ? null : regionAnchor(region);
@@ -4307,6 +4317,26 @@ export default function MapView({
   const endDrag = (event: React.PointerEvent<HTMLCanvasElement>) => {
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+
+    // In a macro preview a press that barely moved is a click, which places a
+    // copy; one that travelled was a pan and places nothing (M33).
+    if (previewPress.current) {
+      previewPress.current = false;
+      const origin = pressOrigin.current;
+      pressOrigin.current = null;
+      dragging.current = null;
+      applyCursor(false, false);
+      const point = toDevice(event);
+      const slack = 4 * (window.devicePixelRatio || 1);
+      if (origin && Math.hypot(point.x - origin.x, point.y - origin.y) <= slack) {
+        const geo = unproject(cameraRef.current, viewRef.current, point);
+        void api
+          .placePreview(geo.lon, geo.lat)
+          .then(setCapture)
+          .catch((err: unknown) => setError(String(err)));
+      }
+      return;
     }
     // The eraser's stroke lands as one write — one undo for the whole pass.
     if (eraseDrag.current) {

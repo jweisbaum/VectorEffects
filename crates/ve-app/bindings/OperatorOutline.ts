@@ -28,4 +28,15 @@ anchor: [number, number],
 /**
  * Where its edge is.
  */
-outline: ObjectOutline, };
+outline: ObjectOutline, 
+/**
+ * What the eraser has taken out of it at this step (M33), in the same
+ * geographic terms.
+ *
+ * The outline is the shape the object was drawn with; the eraser takes
+ * pieces out of it without changing that shape (spec.md 8.1, M29), so an
+ * edge drawn from the shape alone traced a footprint that is no longer
+ * all there. The map knocks these out of the edge it draws and follows
+ * their own rims inside it.
+ */
+erased: Array<ObjectOutline>, };

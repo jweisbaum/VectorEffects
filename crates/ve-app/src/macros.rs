@@ -439,6 +439,13 @@ pub struct CaptureMode {
     /// entry per frame, for the stamp hover to draw (M27). Empty otherwise,
     /// and one entry for a macro that recorded no movement.
     pub track: Vec<[f64; 2]>,
+    /// The kind of field being recorded, `wind` or `current`, or null when
+    /// no capture is running.
+    ///
+    /// The map shows every kind the project holds (M31), but a preview is a
+    /// scene of one: the legend would otherwise offer a scale for a kind the
+    /// preview has nothing of (M33).
+    pub kind: Option<String>,
 }
 
 fn mode_of(
@@ -461,6 +468,7 @@ fn mode_of(
             last_step: active.last_step,
             preview_revision: preview.map(|scene| scene.revision),
             stamp: (active.phase == CapturePhase::Previewing).then_some(active.stamp),
+            kind: Some(crate::projects::kind_name(active.kind).to_owned()),
             track: match (&active.baked, active.phase) {
                 (Some(baked), CapturePhase::Previewing) => baked
                     .frames
@@ -483,6 +491,7 @@ fn mode_of(
             preview_revision: None,
             stamp: None,
             track: Vec::new(),
+            kind: None,
         },
     }
 }
@@ -793,9 +802,23 @@ fn preview_scene(
         // millisecond *was* the document's — and the webview caches tiles by
         // revision, immutably. A bit no document revision will reach keeps
         // the two address spaces apart for good.
-        revision: crate::session::fresh_revision() | (1 << 62),
+        //
+        // **Bit 52 and not a higher one** (M33). A revision crosses IPC as a
+        // number and JavaScript has only the double: above 2^53 the low bits
+        // are lost, so the address the map built from the preview's revision
+        // was not the revision, every tile of it was refused as stale, and
+        // the preview showed nothing at all. A millisecond clock reaches 2^52
+        // in about a hundred and forty thousand years, so the two spaces stay
+        // apart and both stay exact.
+        revision: crate::session::fresh_revision() | PREVIEW_REVISION_BIT,
     })
 }
+
+/// What marks a revision as a macro preview's rather than a document's.
+///
+/// Below 2^53, so it survives the trip through a JavaScript number intact:
+/// see [`preview_scene`].
+const PREVIEW_REVISION_BIT: u64 = 1 << 52;
 
 /// Abandons a capture, writing nothing.
 #[tauri::command]
@@ -1132,4 +1155,32 @@ fn geometry_of(region: &RegionShape, origin: [f64; 2]) -> ve_core::document::Geo
     let anchor = LonLat::new(wrap180(origin[0]), origin[1].clamp(-90.0, 90.0))
         .unwrap_or(LonLat { lon: 0.0, lat: 0.0 });
     crate::capture::region_geometry(region, anchor)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PREVIEW_REVISION_BIT;
+
+    /// A revision crosses IPC as a number, and JavaScript has only the
+    /// double (M33). Above 2^53 its low bits are lost, so the tile address
+    /// the map builds from a preview's revision would not be that revision
+    /// and every tile of the preview would be refused as stale — which is
+    /// exactly what a preview bit of 2^62 did: the macro preview showed
+    /// nothing at all.
+    #[test]
+    fn a_preview_revision_survives_a_javascript_number() {
+        // A millisecond clock well past today, and the counter above it.
+        for clock in [0u64, 1_760_000_000_000, 4_000_000_000_000] {
+            let revision = clock | PREVIEW_REVISION_BIT;
+            assert!(
+                revision < (1u64 << 53),
+                "a preview revision must stay under 2^53, got {revision}"
+            );
+            assert_eq!(
+                revision as f64 as u64, revision,
+                "and survive the round trip through a double"
+            );
+            assert_ne!(revision, clock, "while never being a document's own");
+        }
+    }
 }

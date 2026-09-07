@@ -66,4 +66,13 @@ stamp: [number, number] | null,
  * entry per frame, for the stamp hover to draw (M27). Empty otherwise,
  * and one entry for a macro that recorded no movement.
  */
-track: Array<[number, number]>, };
+track: Array<[number, number]>, 
+/**
+ * The kind of field being recorded, `wind` or `current`, or null when
+ * no capture is running.
+ *
+ * The map shows every kind the project holds (M31), but a preview is a
+ * scene of one: the legend would otherwise offer a scale for a kind the
+ * preview has nothing of (M33).
+ */
+kind: string | null, };

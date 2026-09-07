@@ -59,7 +59,8 @@ pub fn digests_of(scene: &Scene) -> Digests {
 /// on the lattice's content and the tile — neither of which changes — so it
 /// is computed once. The lattice is identified by its own content hash, so
 /// a re-imported or edited file is a different entry rather than a stale one.
-static TILE_MAXIMA: Mutex<Option<HashMap<([u8; 32], TileId), Option<f32>>>> = Mutex::new(None);
+type TileMaxima = HashMap<([u8; 32], TileId), Option<f32>>;
+static TILE_MAXIMA: Mutex<Option<TileMaxima>> = Mutex::new(None);
 
 /// How many entries the memo keeps: a few viewports of a few lattices.
 const MAXIMA_KEPT: usize = 8192;
@@ -67,7 +68,7 @@ const MAXIMA_KEPT: usize = 8192;
 fn tile_maximum(raster: &FlatRaster, tile: TileId, bounds: &TileBounds) -> Option<f32> {
     let key = (raster.grid.hash, tile);
     if let Ok(mut held) = TILE_MAXIMA.lock() {
-        let memo = held.get_or_insert_with(HashMap::new);
+        let memo = held.get_or_insert_with(TileMaxima::new);
         if let Some(found) = memo.get(&key) {
             return *found;
         }
@@ -76,7 +77,7 @@ fn tile_maximum(raster: &FlatRaster, tile: TileId, bounds: &TileBounds) -> Optio
         .grid
         .max_speed_in(bounds.west, bounds.east, bounds.north, bounds.south);
     if let Ok(mut held) = TILE_MAXIMA.lock() {
-        let memo = held.get_or_insert_with(HashMap::new);
+        let memo = held.get_or_insert_with(TileMaxima::new);
         // Dropped wholesale rather than by age: the memo is a saving, not a
         // correctness requirement, and an LRU clock would cost more than the
         // lookups it protects.
