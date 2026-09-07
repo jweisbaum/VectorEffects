@@ -2809,6 +2809,14 @@ here with its reason.
    low end of a band across the speeds a global forecast holds under a tile
    does re-render that tile, because it changes what the tile shows. Tests
    in `cull.rs`.
+2. **The eraser draws no chain of circles** (findings 2 and 6). Its swept
+   footprint was stroked, and a swept footprint is a union of stamps that
+   `Path2D` cannot take, so the stroke traced every stamp's own circle. The
+   sweep is filled and never stroked now; the dashed nib is one stamp,
+   whose outline is its own silhouette. The band the outlines use would
+   also do, but it is `destination-out` and has to run before anything else
+   on the frame, and the stroke already shows what it does — the field
+   leaves it as the pointer moves (M32).
 
 ### M32 — Edit tools show their effect as the pointer moves · **complete**
 

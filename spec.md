@@ -1447,6 +1447,11 @@ covered, or that a click landed on it.
   a ring alike — and centred on it, where a stroke of that width would be.
 - An **inverted** mask is drawn with a wide, faint band on top of its edge, since
   an outline alone cannot say which side is covered.
+- **The eraser's stroke in progress is filled, not outlined** (M33). It is the
+  same union, and the same rings would trail the pointer; it is being drawn
+  rather than sitting on the map, so a tint over the sweep and a dashed nib at
+  the pointer say where it is, and the field leaving it as the pointer moves
+  (§6.2) says what it does.
 
 The outlines come from the same footprint the evaluator paints, so what is
 highlighted is what is covered. Only what is visible is listed: a hidden layer's
