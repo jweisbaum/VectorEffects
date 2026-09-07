@@ -576,10 +576,12 @@ fn patch_sample(object: &FlatObject, patch: &FlatCapture, position: LonLat) -> O
     // The lattice is read in the object's own frame, and a capture that
     // recorded a moving region has already moved the *frame* — anchor,
     // footprint and all (spec.md 8.7) — so there is nothing to subtract here.
-    let sample =
-        patch
-            .capture
-            .sample_pick(patch.pick, local[0] / M_PER_DEGREE, local[1] / M_PER_DEGREE)?;
+    let sample = patch.capture.sample_pick(
+        patch.pick,
+        patch.plane,
+        local[0] / M_PER_DEGREE,
+        local[1] / M_PER_DEGREE,
+    )?;
     Some(Uv {
         u: sample[0],
         v: sample[1],

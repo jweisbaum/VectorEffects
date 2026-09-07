@@ -253,6 +253,11 @@ pub struct FlatCapture {
     /// How far the capture's region had moved by this frame, in degrees of
     /// the map — zero unless the capture recorded movement.
     pub shift_deg: [f64; 2],
+    /// Which plane of the capture this object paints (M34): the one holding
+    /// its layer's kind. A capture is taken from every visible layer under
+    /// the region, so it may hold wind and current together, and an object
+    /// paints the one its layer is for.
+    pub plane: usize,
 }
 
 /// One stroke of the eraser over an object, ready to evaluate (M29): the
@@ -1031,9 +1036,18 @@ fn translation_omega(from: LonLat, to: LonLat, dt: f64) -> [f64; 3] {
 /// aligned with the project's own hours from the object's first active step,
 /// so a captured run of frames plays where the patch was put rather than
 /// where it was taken.
-fn capture_of(project: &Project, object: &Object, step: u32) -> Option<FlatCapture> {
+fn capture_of(
+    project: &Project,
+    object: &Object,
+    step: u32,
+    kind: FieldKind,
+) -> Option<FlatCapture> {
     let hash = object.capture.as_deref()?;
     let capture = project.captures.get(hash)?;
+    // A capture may hold wind and current together (M34); an object paints
+    // the plane its layer is for, and nothing at all where the capture holds
+    // no field of that kind.
+    let plane = capture.plane_of(kind)?;
     if capture.frames.len() == 1 {
         return Some(FlatCapture {
             capture: Arc::clone(capture),
@@ -1043,6 +1057,7 @@ fn capture_of(project: &Project, object: &Object, step: u32) -> Option<FlatCaptu
                 blend: 0.0,
             },
             shift_deg: [0.0, 0.0],
+            plane,
         });
     }
     // A run of frames lands on the project's steps by the object's own rule
@@ -1077,6 +1092,7 @@ fn capture_of(project: &Project, object: &Object, step: u32) -> Option<FlatCaptu
         capture: Arc::clone(capture),
         pick,
         shift_deg: [dx, dy],
+        plane,
     })
 }
 
@@ -1146,7 +1162,7 @@ fn flatten_where(project: &Project, step: u32, wanted: impl Fn(&Layer) -> bool) 
                 // live beside the project, keyed by hash, so one whose entry
                 // is missing simply has none — it draws nothing, exactly as a
                 // GRIB layer whose file has gone.
-                let patch = capture_of(project, object, step);
+                let patch = capture_of(project, object, step, kind);
                 let mut derived = links.at.of(object.id);
                 // A macro that recorded a moving region moves the **whole
                 // object**: its anchor, and with it its footprint, its outline

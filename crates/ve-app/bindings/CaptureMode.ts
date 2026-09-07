@@ -68,11 +68,11 @@ stamp: [number, number] | null,
  */
 track: Array<[number, number]>, 
 /**
- * The kind of field being recorded, `wind` or `current`, or null when
- * no capture is running.
+ * The kinds of field being recorded, wind first, or empty when no
+ * capture is running (M34).
  *
- * The map shows every kind the project holds (M31), but a preview is a
- * scene of one: the legend would otherwise offer a scale for a kind the
- * preview has nothing of (M33).
+ * A capture takes every kind under the region, so a preview may hold
+ * wind and current together — and the legend shows a scale for each
+ * kind the preview holds, and for no other (M33).
  */
-kind: string | null, };
+kinds: Array<string>, };

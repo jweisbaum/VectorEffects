@@ -2471,6 +2471,16 @@ far better outcome than not launching.
 
 ### 8.7 Macros
 
+**A capture takes every kind of field under it** (M34). The map shows every
+kind the project holds (§5.3), so a copy of a region is a copy of all of it:
+the container holds one plane of samples per kind present, wind first, and an
+object placed from it paints the plane its layer is for — a macro of a storm
+carries the wind and the current that were beneath it. A capture from a
+project with no visible field layer holds one empty plane. Placing a macro
+puts one object in a layer of each kind it holds: the layer asked for where
+it is of that kind, the topmost visible painted layer of that kind
+otherwise, and a kind no layer can take is not placed.
+
 A **macro** is §8.5's capture over a *run* of frames, kept under a name in a
 library of `.vemacro` files rather than in any project, and dropped into a
 project that knows nothing about where it came from.
@@ -2529,8 +2539,8 @@ the map (M33): a press places only if it barely moved, so the preview can be
 looked around before it is stamped on. The legend shows the preview's one
 kind and not the document's, there being nothing of any other kind to scale.
 Of the copies: the original loops where it was recorded and a
-copy loops at every place clicked, all in the preview's one layer, none of
-them in any layer of the document, the panel or the file. They are for
+copy loops at every place clicked, in a layer per kind the capture holds,
+none of them in any layer of the document, the panel or the file. They are for
 looking at, and they go with the preview whatever ends it; *Edit macro*
 clears them, so the next preview reflects the edit alone. Nothing is
 written and the history lock stands throughout, as D71 says. The document's

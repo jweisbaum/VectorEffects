@@ -210,8 +210,14 @@ pub fn region_capture(
     with_session(state, |session| {
         let open = session.require_open()?;
         let project = &open.project;
-        // The kind the map is showing is the field that is copied (M29).
-        let kind = kind.unwrap_or(project.settings.field_kind);
+        // Every kind under the region is copied (M34): the map shows them
+        // all, and a copy of what is on screen is a copy of all of it. The
+        // kind asked for is the fallback for a project with no visible field
+        // layer at all, where every sample is undefined anyway.
+        let kinds = match project.kinds_present() {
+            present if !present.is_empty() => present,
+            _ => vec![kind.unwrap_or(project.settings.field_kind)],
+        };
         let bad = |why: &str| AppError::BadOption {
             field: "region",
             value: why.to_owned(),
@@ -245,27 +251,33 @@ pub fn region_capture(
         let mut frames = Vec::new();
         let mut previous_hash = None;
         for at_step in step..=last_step {
-            let scene = flatten_kind(project, at_step, kind);
-            let hash = scene_hash(&scene);
-            if previous_hash == Some(hash) {
+            let scenes: Vec<_> = kinds
+                .iter()
+                .map(|kind| flatten_kind(project, at_step, *kind))
+                .collect();
+            let hash: Vec<_> = scenes.iter().map(scene_hash).collect();
+            if previous_hash.as_ref() == Some(&hash) {
                 continue;
             }
             previous_hash = Some(hash);
-            let mut uv = Vec::with_capacity(ni as usize * nj as usize);
-            for j in 0..nj {
-                let lat = anchor.lat + y0 - f64::from(j) * spacing;
-                for i in 0..ni {
-                    let lon = anchor.lon + x0 + f64::from(i) * spacing;
-                    let Ok(at) = LonLat::new(wrap180(lon), lat.clamp(-90.0, 90.0)) else {
-                        uv.push(UNDEFINED);
-                        continue;
-                    };
-                    // Undefined where nothing wrote, which is what makes a
-                    // paste transparent exactly where its source was (D58).
-                    uv.push(match sample_scene_covered(&scene, at) {
-                        Some(sample) => [sample.u, sample.v],
-                        None => UNDEFINED,
-                    });
+            let mut uv = Vec::with_capacity(ni as usize * nj as usize * kinds.len());
+            // A plane per kind, in the kinds' own order (M34).
+            for scene in &scenes {
+                for j in 0..nj {
+                    let lat = anchor.lat + y0 - f64::from(j) * spacing;
+                    for i in 0..ni {
+                        let lon = anchor.lon + x0 + f64::from(i) * spacing;
+                        let Ok(at) = LonLat::new(wrap180(lon), lat.clamp(-90.0, 90.0)) else {
+                            uv.push(UNDEFINED);
+                            continue;
+                        };
+                        // Undefined where nothing wrote, which is what makes a
+                        // paste transparent exactly where its source was (D58).
+                        uv.push(match sample_scene_covered(scene, at) {
+                            Some(sample) => [sample.u, sample.v],
+                            None => UNDEFINED,
+                        });
+                    }
                 }
             }
             frames.push(CaptureFrame::still(
@@ -280,7 +292,7 @@ pub fn region_capture(
         };
 
         let capture = Capture::new(
-            kind,
+            kinds,
             CaptureLattice {
                 ni,
                 nj,
@@ -366,7 +378,7 @@ pub fn capture_paste(
                 value: "has no frames".to_owned(),
             })?;
             Arc::new(Capture::new(
-                capture.kind,
+                capture.kinds.clone(),
                 CaptureLattice {
                     ni: capture.ni,
                     nj: capture.nj,

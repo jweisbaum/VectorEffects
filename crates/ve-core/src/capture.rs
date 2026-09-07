@@ -43,9 +43,11 @@ const MAGIC: &[u8; 6] = b"VECAP\0";
 /// reader would misread; a reader refuses a version it does not know rather
 /// than guessing at the bytes after it.
 /// Version 2 added each frame's displacement, for a capture that recorded a
-/// moving region (spec.md 8.7). Version 1 is still read: its frames never
-/// moved.
-const VERSION: u16 = 2;
+/// moving region (spec.md 8.7). Version 3 lets a capture hold more than one
+/// kind of field, a plane of samples each (M34). Versions 1 and 2 are still
+/// read: their frames never moved, and they hold the one kind their header
+/// names.
+const VERSION: u16 = 3;
 
 /// One time slice of a captured field.
 #[derive(Debug, Clone, PartialEq)]
@@ -61,7 +63,12 @@ pub struct CaptureFrame {
     pub dx_deg: f64,
     /// And northward.
     pub dy_deg: f64,
-    /// `[u, v]` in m/s at `j * ni + i`, `NaN` where the source was undefined.
+    /// `[u, v]` in m/s at `plane * ni * nj + j * ni + i`, `NaN` where the
+    /// source was undefined.
+    ///
+    /// One plane per kind the capture holds, in [`Capture::kinds`] order
+    /// (M34): a region is captured from every visible layer under it, and a
+    /// project may hold wind and current together.
     pub uv: Vec<[f32; 2]>,
 }
 
@@ -86,8 +93,13 @@ impl CaptureFrame {
 /// travels, turns and scales with the object's frame.
 #[derive(Debug, Clone)]
 pub struct Capture {
-    /// Wind or current, from the project it was taken in.
-    pub kind: FieldKind,
+    /// The kinds of field captured, wind first (M34).
+    ///
+    /// One per plane of every frame's samples. A capture is taken from every
+    /// visible layer under the region, and a project may hold wind and
+    /// current layers together, so a macro of a storm holds both the wind and
+    /// the current that were under it.
+    pub kinds: Vec<FieldKind>,
     /// Columns.
     pub ni: u32,
     /// Rows.
@@ -131,9 +143,26 @@ pub fn is_undefined(sample: [f32; 2]) -> bool {
 pub const UNDEFINED: [f32; 2] = [f32::NAN, f32::NAN];
 
 impl Capture {
-    /// Nodes per frame.
+    /// Nodes per plane.
     pub fn node_count(&self) -> usize {
         self.ni as usize * self.nj as usize
+    }
+
+    /// Samples per frame: one plane per kind.
+    pub fn frame_len(&self) -> usize {
+        self.node_count() * self.kinds.len()
+    }
+
+    /// Which plane of a frame holds `kind`, or `None` where the capture holds
+    /// no field of that kind — a wind macro placed in a current layer paints
+    /// nothing, rather than painting the wind as a current.
+    pub fn plane_of(&self, kind: FieldKind) -> Option<usize> {
+        self.kinds.iter().position(|held| *held == kind)
+    }
+
+    /// The kind a capture is labelled by: the first it holds.
+    pub fn kind(&self) -> FieldKind {
+        self.kinds.first().copied().unwrap_or_default()
     }
 }
 
@@ -159,7 +188,7 @@ pub struct CaptureLattice {
 impl Capture {
     /// Builds a capture and computes its hash, checking the frames fill it.
     pub fn new(
-        kind: FieldKind,
+        kinds: Vec<FieldKind>,
         lattice: CaptureLattice,
         seconds_per_frame: f64,
         shape: Geometry,
@@ -182,17 +211,23 @@ impl Capture {
                 "a capture needs at least one frame".to_owned(),
             ));
         }
-        let expected = ni as usize * nj as usize;
+        if kinds.is_empty() {
+            return Err(CoreError::Capture(
+                "a capture needs at least one kind of field".to_owned(),
+            ));
+        }
+        let expected = ni as usize * nj as usize * kinds.len();
         for (at, frame) in frames.iter().enumerate() {
             if frame.uv.len() != expected {
                 return Err(CoreError::Capture(format!(
-                    "capture frame {at} holds {} samples for a {ni} x {nj} lattice",
-                    frame.uv.len()
+                    "capture frame {at} holds {} samples for a {ni} x {nj} lattice of {} kinds",
+                    frame.uv.len(),
+                    kinds.len()
                 )));
             }
         }
         let mut capture = Self {
-            kind,
+            kinds,
             ni,
             nj,
             spacing_deg,
@@ -235,13 +270,17 @@ impl Capture {
         let mut out = Vec::new();
         out.extend_from_slice(MAGIC);
         out.extend_from_slice(&VERSION.to_le_bytes());
-        out.push(match self.kind {
-            FieldKind::Wind => 0,
-            FieldKind::Current => 1,
-        });
-        // Room for a flag byte the format does not need yet, so the first one
-        // it does need is not a version bump.
+        // How many kinds, then a flag byte the format does not need yet, then
+        // the kinds themselves. Before version 3 the first of these was the
+        // one kind a capture could hold (M34).
+        out.push(self.kinds.len() as u8);
         out.push(0);
+        for kind in &self.kinds {
+            out.push(match kind {
+                FieldKind::Wind => 0,
+                FieldKind::Current => 1,
+            });
+        }
         out.extend_from_slice(&self.ni.to_le_bytes());
         out.extend_from_slice(&self.nj.to_le_bytes());
         out.extend_from_slice(&self.spacing_deg.to_le_bytes());
@@ -257,7 +296,7 @@ impl Capture {
             out.extend_from_slice(&frame.dy_deg.to_le_bytes());
         }
 
-        let mut raw = Vec::with_capacity(self.frames.len() * self.node_count() * 8);
+        let mut raw = Vec::with_capacity(self.frames.len() * self.frame_len() * 8);
         for frame in &self.frames {
             for sample in &frame.uv {
                 raw.extend_from_slice(&sample[0].to_le_bytes());
@@ -289,12 +328,30 @@ impl Capture {
                 "written by a newer version ({version})"
             )));
         }
-        let kind = match take(1)?[0] {
-            0 => FieldKind::Wind,
-            1 => FieldKind::Current,
-            other => return Err(bad(&format!("field kind {other}"))),
+        let kind_of = |byte: u8| -> Result<FieldKind> {
+            match byte {
+                0 => Ok(FieldKind::Wind),
+                1 => Ok(FieldKind::Current),
+                other => Err(bad(&format!("field kind {other}"))),
+            }
         };
-        let _flags = take(1)?[0];
+        let kinds = if version >= 3 {
+            let count = take(1)?[0] as usize;
+            let _flags = take(1)?[0];
+            if count == 0 {
+                return Err(bad("holds no kind of field"));
+            }
+            let mut kinds = Vec::with_capacity(count);
+            for _ in 0..count {
+                kinds.push(kind_of(take(1)?[0])?);
+            }
+            kinds
+        } else {
+            // One kind, and the flag byte after it.
+            let kind = kind_of(take(1)?[0])?;
+            let _flags = take(1)?[0];
+            vec![kind]
+        };
         let u32_of = |slice: &[u8]| -> Result<u32> {
             Ok(u32::from_le_bytes(
                 slice.try_into().map_err(|_| bad("a count"))?,
@@ -331,7 +388,7 @@ impl Capture {
         let raw = lz4_flex::decompress_size_prepended(packed)
             .map_err(|e| CoreError::Capture(format!("its samples: {e}")))?;
 
-        let nodes = ni as usize * nj as usize;
+        let nodes = ni as usize * nj as usize * kinds.len();
         let expected = frame_count * nodes * 8;
         if raw.len() != expected {
             return Err(CoreError::Capture(format!(
@@ -365,7 +422,7 @@ impl Capture {
             });
         }
         Self::new(
-            kind,
+            kinds,
             CaptureLattice {
                 ni,
                 nj,
@@ -402,7 +459,13 @@ impl Capture {
     /// an undefined corner is left out of the blend and the remaining weights
     /// renormalised, and all four undefined is no coverage at all. That is
     /// what makes a paste transparent exactly where the source was (D58).
-    pub fn sample(&self, frame: &CaptureFrame, x_deg: f64, y_deg: f64) -> Option<[f32; 2]> {
+    pub fn sample(
+        &self,
+        frame: &CaptureFrame,
+        plane: usize,
+        x_deg: f64,
+        y_deg: f64,
+    ) -> Option<[f32; 2]> {
         let (last_i, last_j) = (f64::from(self.ni - 1), f64::from(self.nj - 1));
         let fi = (x_deg - self.x0_deg) / self.spacing_deg;
         // Rows run north to south, so a larger `y` is a smaller row index.
@@ -419,7 +482,8 @@ impl Capture {
         let j1 = (j0 + 1).min(self.nj - 1);
         let tx = (fi - f64::from(i0)) as f32;
         let ty = (fj - f64::from(j0)) as f32;
-        let at = |i: u32, j: u32| frame.uv[j as usize * self.ni as usize + i as usize];
+        let base = plane * self.node_count();
+        let at = |i: u32, j: u32| frame.uv[base + j as usize * self.ni as usize + i as usize];
         let corners = [
             (at(i0, j0), (1.0 - tx) * (1.0 - ty)),
             (at(i1, j0), tx * (1.0 - ty)),
@@ -550,12 +614,18 @@ impl Capture {
     /// Undefined where **either** frame is: a cell that one frame never
     /// covered is a cell the blend has no honest value for, and inventing one
     /// would paint half a field over whatever is beneath (D58).
-    pub fn sample_pick(&self, pick: FramePick, x_deg: f64, y_deg: f64) -> Option<[f32; 2]> {
-        let a = self.sample(self.frames.get(pick.frame)?, x_deg, y_deg)?;
+    pub fn sample_pick(
+        &self,
+        pick: FramePick,
+        plane: usize,
+        x_deg: f64,
+        y_deg: f64,
+    ) -> Option<[f32; 2]> {
+        let a = self.sample(self.frames.get(pick.frame)?, plane, x_deg, y_deg)?;
         if pick.frame == pick.next || pick.blend <= 0.0 {
             return Some(a);
         }
-        let b = self.sample(self.frames.get(pick.next)?, x_deg, y_deg)?;
+        let b = self.sample(self.frames.get(pick.next)?, plane, x_deg, y_deg)?;
         let t = pick.blend;
         Some([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t])
     }
@@ -589,7 +659,7 @@ mod tests {
             })
             .collect();
         Capture::new(
-            FieldKind::Wind,
+            vec![FieldKind::Wind],
             CaptureLattice {
                 ni,
                 nj,
@@ -642,7 +712,7 @@ mod tests {
         capture.frames[0].uv[0] = [0.0, 0.0];
         capture.frames[0].uv[1] = UNDEFINED;
         let capture = Capture::new(
-            capture.kind,
+            capture.kinds.clone(),
             CaptureLattice {
                 ni: capture.ni,
                 nj: capture.nj,
@@ -681,7 +751,7 @@ mod tests {
     #[test]
     fn a_polygon_shape_survives_the_container() {
         let capture = Capture::new(
-            FieldKind::Current,
+            vec![FieldKind::Current],
             CaptureLattice {
                 ni: 2,
                 nj: 2,
@@ -702,7 +772,7 @@ mod tests {
         .expect("a capture");
         let back = Capture::decode(&capture.encode().expect("encode")).expect("decode");
         assert_eq!(back.shape, capture.shape);
-        assert_eq!(back.kind, FieldKind::Current);
+        assert_eq!(back.kinds, vec![FieldKind::Current]);
     }
 
     /// The sampler's rule is `RasterGrid::sample`'s: an undefined corner is
@@ -710,7 +780,7 @@ mod tests {
     #[test]
     fn sampling_leaves_undefined_corners_out_of_the_blend() {
         let capture = Capture::new(
-            FieldKind::Wind,
+            vec![FieldKind::Wind],
             CaptureLattice {
                 ni: 2,
                 nj: 2,
@@ -731,14 +801,14 @@ mod tests {
         .expect("a capture");
         let frame = &capture.frames[0];
         // On the defined row, exactly its value.
-        assert_eq!(capture.sample(frame, 0.5, 0.0), Some([10.0, 0.0]));
+        assert_eq!(capture.sample(frame, 0, 0.5, 0.0), Some([10.0, 0.0]));
         // Halfway to the undefined row: the defined corners carry it alone,
         // rather than being dragged toward a zero that was never there.
-        assert_eq!(capture.sample(frame, 0.5, -0.5), Some([10.0, 0.0]));
+        assert_eq!(capture.sample(frame, 0, 0.5, -0.5), Some([10.0, 0.0]));
         // On the undefined row there is nothing at all.
-        assert_eq!(capture.sample(frame, 0.5, -1.0), None);
+        assert_eq!(capture.sample(frame, 0, 0.5, -1.0), None);
         // And outside the lattice there is nothing either.
-        assert_eq!(capture.sample(frame, 5.0, 0.0), None);
+        assert_eq!(capture.sample(frame, 0, 5.0, 0.0), None);
     }
 }
 
@@ -750,7 +820,7 @@ mod resample_tests {
     /// A 6-hourly capture of three frames: 0, 6 and 12 hours.
     fn capture() -> Capture {
         Capture::new(
-            FieldKind::Wind,
+            vec![FieldKind::Wind],
             CaptureLattice {
                 ni: 1,
                 nj: 1,
@@ -785,7 +855,7 @@ mod resample_tests {
         let held = capture.pick(3.0, Resample::Hold, false).expect("a frame");
         assert_eq!((held.frame, held.next), (0, 0));
         assert_eq!(
-            capture.sample_pick(held, 0.0, 0.0),
+            capture.sample_pick(held, 0, 0.0, 0.0),
             Some([0.0, 0.0]),
             "hold shows the 0 h frame unchanged"
         );
@@ -797,7 +867,7 @@ mod resample_tests {
         assert!((blended.blend - 0.5).abs() < 1e-6);
         // Hand-computed: the 0 h frame is 0 and the 6 h frame is 10, so half
         // way is 5, and the displacement half way between 0 and 2 is 1.
-        assert_eq!(capture.sample_pick(blended, 0.0, 0.0), Some([5.0, 0.0]));
+        assert_eq!(capture.sample_pick(blended, 0, 0.0, 0.0), Some([5.0, 0.0]));
         let (dx, dy) = capture.displacement(blended);
         assert!((dx - 1.0).abs() < 1e-9 && dy.abs() < 1e-9);
     }
@@ -835,7 +905,7 @@ mod resample_tests {
         let mut frames = capture().frames;
         frames[1].uv[0] = UNDEFINED;
         let capture = Capture::new(
-            FieldKind::Wind,
+            vec![FieldKind::Wind],
             CaptureLattice {
                 ni: 1,
                 nj: 1,
@@ -854,9 +924,9 @@ mod resample_tests {
         let pick = capture
             .pick(3.0, Resample::Interpolate, false)
             .expect("a frame");
-        assert_eq!(capture.sample_pick(pick, 0.0, 0.0), None);
+        assert_eq!(capture.sample_pick(pick, 0, 0.0, 0.0), None);
         // Holding shows the frame that *is* defined.
         let held = capture.pick(3.0, Resample::Hold, false).expect("a frame");
-        assert_eq!(capture.sample_pick(held, 0.0, 0.0), Some([0.0, 0.0]));
+        assert_eq!(capture.sample_pick(held, 0, 0.0, 0.0), Some([0.0, 0.0]));
     }
 }

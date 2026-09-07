@@ -1255,7 +1255,7 @@ pub fn stroke_erase(state: &AppState, stroke: EraseStroke) -> Result<ProjectSumm
                             continue;
                         }
                         let rewritten = Capture::new(
-                            capture.kind,
+                            capture.kinds.clone(),
                             CaptureLattice {
                                 ni: capture.ni,
                                 nj: capture.nj,

@@ -2912,16 +2912,24 @@ that produces it is needed.
 M33 build, in order, one commit each.
 
 1. **A macro's timeline extent** — reported again. The insert path was
-   fixed in M33.4 and is verified end to end here: a three-frame macro
-   placed at step 1 of a six-step project has an active range of 1–3 in the
-   document *and* in the tree the timeline draws its bar and its handles
-   from. Nothing further was found to fix, so this commit adds the
-   tree-level assertion and changes no behaviour. What can still look
-   full-length: a macro placed before M33.4, whose range is what it was
-   created with and is dragged by its end handle; a macro whose frames
-   really do span the project; and a pasted region, which is a patch and
-   holds its last frame to the end by D65.
-
+   fixed in M33.4 and is verified end to end: a three-frame macro placed at
+   step 1 of a six-step project has an active range of 1–3 in the document
+   *and* in the tree the timeline draws from. Nothing more was found to
+   fix, so this commit adds the tree-level assertion and no behaviour. What
+   can still look full-length: a macro placed before M33.4, whose range is
+   what it was created with and is dragged by its end handle; a macro whose
+   frames really do span the project; and a pasted region, which is a patch
+   and holds its last frame to the end by D65.
+2. **A capture takes every kind under it** (finding 2, the user correcting
+   the M29 rule). `Capture.kind` became `kinds`, one plane of samples per
+   kind, container version 3 — versions 1 and 2 still read as the one kind
+   they name. The region copy and the macro bake both sample every kind
+   `kinds_present` reports; `capture_of` resolves the plane from the
+   layer's kind and paints nothing where the capture holds none; the
+   preview builds a layer per kind, so the legend shows a scale for each;
+   and an insert places one object per kind, in the layer asked for where
+   it is of that kind and the topmost visible painted layer of that kind
+   otherwise. Tests in `macros.rs`.
 ---
 
 ## 3. Testing strategy

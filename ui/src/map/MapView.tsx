@@ -1014,11 +1014,12 @@ export default function MapView({
   // One ramp per kind (M29, M31): wind and current are an order of magnitude
   // apart, and the map shows both, each on its own scale, with a legend
   // entry for each kind the project holds.
-  // A macro preview is a scene of one kind (M33): a legend offering a scale
-  // for a kind the preview has nothing of is a scale for nothing.
+  // A macro preview shows the kinds the capture holds and no others (M33,
+  // M34): a legend offering a scale for a kind the preview has nothing of is
+  // a scale for nothing, and a capture takes every kind under its region.
   const kindsShown: FieldKindName[] =
-    previewing && recording?.kind
-      ? [kindOf(recording.kind)]
+    previewing && recording && recording.kinds.length > 0
+      ? recording.kinds.map(kindOf)
       : project.kinds_present.map(kindOf);
   const autoScale = settings?.auto_scale ?? false;
   const [seenRanges, setSeenRanges] = useState<Record<FieldKindName, SeenRange>>({

@@ -143,6 +143,90 @@ fn field(state: &AppState, step: u32, lon: f64, lat: f64) -> (f32, f32) {
     (uv.u, uv.v)
 }
 
+/// A capture takes every kind under its region (M34).
+///
+/// The map shows every kind the project holds, so a copy of what is on
+/// screen is a copy of all of it: a project of wind and current layers
+/// yields a macro holding both, a plane of samples each, and placing it
+/// puts an object in a layer of each kind.
+#[test]
+fn a_capture_takes_every_kind_under_it() {
+    use ve_core::project::FieldKind;
+
+    let root = TempRoot::new("both-kinds");
+    let app = app(&root);
+    // Wind in layer 0, and a current layer of its own beneath the same water.
+    travelling_stroke(&app, 18.0);
+    ve_app::document::layer_add(&app, "Current".to_owned()).expect("layer");
+    let current = ve_app::document::tree(&app, 0).expect("tree").layers[1].id;
+    ve_app::document::layer_parameter(&app, current, "current").expect("parameter");
+    create::create(
+        &app,
+        NewObject {
+            tool: Tool::Brush,
+            gesture: Gesture::Stroke {
+                points: vec![[0.0, 0.0]],
+            },
+            options: vec![
+                number("SizeKm", 600.0),
+                number("Speed", 4.0),
+                number("Feather", 0.0),
+                ToolOption {
+                    property: "Direction".to_owned(),
+                    value: PropertyValue::Angle { degrees: 90.0 },
+                },
+            ],
+            layer: Some(current),
+        },
+    )
+    .expect("a current stroke");
+
+    macros::capture_start(&app, region(0.0, 0.0), 0, false, None).expect("start");
+    let library = macros::capture_finish(&app, "Both".to_owned(), 0).expect("finish");
+    let entry = &library.entries[0];
+    macros::macro_insert(&app, &entry.id, 100.0, 0.0, 0, None).expect("insert");
+
+    let project = {
+        let session = app.session.lock().expect("lock");
+        session.open.as_ref().expect("open").project.clone()
+    };
+    let capture = project.captures.values().next().expect("the capture");
+    assert_eq!(
+        capture.kinds,
+        vec![FieldKind::Wind, FieldKind::Current],
+        "both kinds, wind first"
+    );
+    assert_eq!(
+        capture.frames[0].uv.len(),
+        capture.node_count() * 2,
+        "a plane of samples each"
+    );
+
+    // One object per kind, each in a layer of that kind.
+    assert_eq!(
+        project.layers[0].objects.len(),
+        2,
+        "wind: the stroke and the macro"
+    );
+    assert_eq!(project.layers[1].objects.len(), 2, "current: the same");
+
+    // And each paints its own kind's field where it was placed.
+    let at = |kind: FieldKind| {
+        let scene = ve_render::scene::flatten_kind(&project, 0, kind);
+        sample_scene(&scene, LonLat::new(100.0, 0.0).unwrap()).u
+    };
+    assert!(
+        (at(FieldKind::Wind) - 18.0).abs() < 0.6,
+        "the wind that was under the region: {}",
+        at(FieldKind::Wind)
+    );
+    assert!(
+        (at(FieldKind::Current) - 4.0).abs() < 0.6,
+        "and the current: {}",
+        at(FieldKind::Current)
+    );
+}
+
 /// The plan's first acceptance: a region dragged to follow a moving stroke,
 /// captured **static**, inserts as that stroke standing still.
 #[test]
@@ -534,12 +618,12 @@ fn a_preview_writes_nothing_and_is_served_apart_from_the_document() {
         };
         assert!((at(0, 0.0) - 18.0).abs() < 0.6, "the stroke, at the stamp");
         assert!(at(0, 60.0).abs() < 1e-6, "and nothing else on the map");
-        assert_eq!(scene.layers.len(), 1);
+        assert_eq!(scene.layers.len(), 1, "a layer for the kind captured");
         assert_eq!(scene.layers[0].objects.len(), 1);
     }
     // Stamp it elsewhere: a new revision, the macro moved.
-    let moved = macros::preview_stamp(&app, 90.0, 0.0).expect("stamp");
-    assert_ne!(moved.preview_revision, Some(preview_revision));
+    let placed = macros::preview_stamp(&app, 90.0, 0.0).expect("stamp");
+    assert_ne!(placed.preview_revision, Some(preview_revision));
     {
         let session = app.session.lock().expect("lock");
         let scene = &session.preview.as_ref().expect("preview").project;

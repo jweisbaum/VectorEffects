@@ -326,9 +326,15 @@ pub struct ActiveCapture {
     /// Where the preview's stamp sits, `[lon, lat]`; the origin until the
     /// user clicks somewhere.
     pub stamp: [f64; 2],
-    /// The kind of field being recorded: the one the map showed when the
+    /// The kinds of field being recorded: every kind a visible layer held
+    /// when the capture began (M34), wind first.
+    ///
+    /// A region is captured from what is under it, and the map shows every
+    /// kind the project holds (M31) — so a macro of a storm holds the wind
+    /// and the current that were beneath it, a plane of samples each. Was
+    /// the one kind the map showed when the
     /// capture began (M29).
-    pub kind: ve_core::project::FieldKind,
+    pub kinds: Vec<ve_core::project::FieldKind>,
     /// Where the preview has been clicked (M29): a copy of the macro is shown
     /// looping at each, in the preview's own scene and nowhere else — they
     /// are for looking at, and go with the preview. Edit clears them.
@@ -439,13 +445,13 @@ pub struct CaptureMode {
     /// entry per frame, for the stamp hover to draw (M27). Empty otherwise,
     /// and one entry for a macro that recorded no movement.
     pub track: Vec<[f64; 2]>,
-    /// The kind of field being recorded, `wind` or `current`, or null when
-    /// no capture is running.
+    /// The kinds of field being recorded, wind first, or empty when no
+    /// capture is running (M34).
     ///
-    /// The map shows every kind the project holds (M31), but a preview is a
-    /// scene of one: the legend would otherwise offer a scale for a kind the
-    /// preview has nothing of (M33).
-    pub kind: Option<String>,
+    /// A capture takes every kind under the region, so a preview may hold
+    /// wind and current together — and the legend shows a scale for each
+    /// kind the preview holds, and for no other (M33).
+    pub kinds: Vec<String>,
 }
 
 fn mode_of(
@@ -468,7 +474,11 @@ fn mode_of(
             last_step: active.last_step,
             preview_revision: preview.map(|scene| scene.revision),
             stamp: (active.phase == CapturePhase::Previewing).then_some(active.stamp),
-            kind: Some(crate::projects::kind_name(active.kind).to_owned()),
+            kinds: active
+                .kinds
+                .iter()
+                .map(|kind| crate::projects::kind_name(*kind).to_owned())
+                .collect(),
             track: match (&active.baked, active.phase) {
                 (Some(baked), CapturePhase::Previewing) => baked
                     .frames
@@ -491,7 +501,7 @@ fn mode_of(
             preview_revision: None,
             stamp: None,
             track: Vec::new(),
-            kind: None,
+            kinds: Vec::new(),
         },
     }
 }
@@ -523,7 +533,13 @@ pub fn capture_start(
 ) -> Result<CaptureMode> {
     with_session(state, |session| {
         let origin = region_centre(&region)?;
-        let kind = kind.unwrap_or(session.require_open()?.project.settings.field_kind);
+        // Every kind under the region (M34); the kind asked for is the
+        // fallback for a project with no visible field layer at all.
+        let project = &session.require_open()?.project;
+        let kinds = match project.kinds_present() {
+            present if !present.is_empty() => present,
+            _ => vec![kind.unwrap_or(project.settings.field_kind)],
+        };
         // The lockout: one flag on the history, which every write path in the
         // application already goes through (spec.md 8.7).
         session.require_open()?.history.lock();
@@ -538,7 +554,7 @@ pub fn capture_start(
                 baked: None,
                 last_step: step,
                 stamp: origin,
-                kind,
+                kinds,
                 stamps: Vec::new(),
             }),
         };
@@ -758,13 +774,16 @@ fn preview_scene(
     baked: &Arc<Capture>,
     settings: ve_core::project::ProjectSettings,
 ) -> Result<PreviewScene> {
-    // The preview's own project is of the capture's kind, so its one layer
-    // flattens whichever kind the map is showing (M29).
+    // A layer per kind the capture holds (M34), so a macro taken over wind
+    // and current shows both — and the legend has a scale for each.
     let mut settings = settings;
-    settings.field_kind = baked.kind;
+    settings.field_kind = baked.kind();
     let mut project = ve_core::project::Project::new("Macro preview", settings);
-    if let Some(layer) = project.layers.first_mut() {
-        layer.parameter = baked.kind;
+    project.layers.clear();
+    for kind in &baked.kinds {
+        let mut layer = ve_core::document::Layer::new(crate::projects::kind_name(*kind));
+        layer.parameter = *kind;
+        project.layers.push(layer);
     }
     let step_count = settings.step_count;
     let mut object = Object::new(ToolKind::Macro, "Preview", step_count);
@@ -781,14 +800,14 @@ fn preview_scene(
         .captures
         .insert(baked.hash.clone(), Arc::clone(baked));
     // The original where it was recorded, and a copy at every place the
-    // preview has been clicked (M29) — all in the preview's one layer, all
+    // preview has been clicked (M29) — one per layer, since a capture may
+    // hold both kinds and each layer paints the plane it is for (M34); all
     // looping together, none of them the document's.
-    let places = std::iter::once(active.stamp).chain(active.stamps.iter().copied());
-    if let Some(layer) = project.layers.first_mut() {
-        for place in places {
+    for place in std::iter::once(active.stamp).chain(active.stamps.iter().copied()) {
+        let anchor = LonLat::new(wrap180(place[0]), place[1].clamp(-90.0, 90.0))?;
+        for layer in &mut project.layers {
             let mut copy = object.clone();
             copy.id = ve_core::id::Id::new();
-            let anchor = LonLat::new(wrap180(place[0]), place[1].clamp(-90.0, 90.0))?;
             if let Some(anim) = copy.props.get_mut(PropId::Position) {
                 anim.set_base(PropValue::LonLat(anchor));
             }
@@ -953,20 +972,23 @@ fn bake(
     for step in active.first_step..=last_step {
         // The key at this step, or the great circle between keys (D72).
         let held = active.position_at(step);
-        let scene = flatten_kind(project, step, active.kind);
-        let mut uv = Vec::with_capacity(ni as usize * nj as usize);
-        for j in 0..nj {
-            let lat = held[1] + y0 - f64::from(j) * spacing;
-            for i in 0..ni {
-                let lon = held[0] + x0 + f64::from(i) * spacing;
-                let Ok(at) = LonLat::new(wrap180(lon), lat.clamp(-90.0, 90.0)) else {
-                    uv.push(UNDEFINED);
-                    continue;
-                };
-                uv.push(match sample_scene_covered(&scene, at) {
-                    Some(sample) => [sample.u, sample.v],
-                    None => UNDEFINED,
-                });
+        let mut uv = Vec::with_capacity(ni as usize * nj as usize * active.kinds.len());
+        // A plane per kind, in the kinds' own order (M34).
+        for kind in &active.kinds {
+            let scene = flatten_kind(project, step, *kind);
+            for j in 0..nj {
+                let lat = held[1] + y0 - f64::from(j) * spacing;
+                for i in 0..ni {
+                    let lon = held[0] + x0 + f64::from(i) * spacing;
+                    let Ok(at) = LonLat::new(wrap180(lon), lat.clamp(-90.0, 90.0)) else {
+                        uv.push(UNDEFINED);
+                        continue;
+                    };
+                    uv.push(match sample_scene_covered(&scene, at) {
+                        Some(sample) => [sample.u, sample.v],
+                        None => UNDEFINED,
+                    });
+                }
             }
         }
         let elapsed = f64::from(step - active.first_step) * f64::from(settings.step_hours.hours());
@@ -988,7 +1010,7 @@ fn bake(
     }
 
     Capture::new(
-        active.kind,
+        active.kinds.clone(),
         CaptureLattice {
             ni,
             nj,
@@ -1054,17 +1076,79 @@ pub fn macro_insert(
             step_count,
             open.project.settings.step_hours.hours(),
         );
-        let target =
+        // One object per kind the capture holds (M34), each in a layer of
+        // that kind: an object paints the plane its layer is for, and a macro
+        // of wind and current together is two objects or it is half of
+        // itself. The layer asked for is used where it is of the right kind,
+        // and the topmost visible painted layer of that kind otherwise; a
+        // kind no layer can take is not placed, and if none can be the
+        // refusal is the ordinary one.
+        let asked =
             crate::document::creation_layer(&open.project, layer, crate::document::Placing::Field)?;
-        let (layer, index) = (target.id, target.objects.len());
+        let (asked_id, asked_kind) = (asked.id, asked.parameter());
+        let targets: Vec<_> = capture
+            .kinds
+            .iter()
+            .filter_map(|kind| {
+                let found = if asked_kind == *kind {
+                    Some(asked_id)
+                } else {
+                    open.project
+                        .layers
+                        .iter()
+                        .rev()
+                        .find(|layer| {
+                            layer.visible
+                                && !layer.locked
+                                && !layer.is_grib()
+                                && layer.parameter() == *kind
+                        })
+                        .map(|layer| layer.id)
+                };
+                let id = found?;
+                let index = open
+                    .project
+                    .layer(id)
+                    .map_or(0, |layer| layer.objects.len());
+                Some((id, index))
+            })
+            .collect();
+        if targets.is_empty() {
+            return Err(AppError::BadOption {
+                field: "layer",
+                value: format!(
+                    "no visible painted layer holds {}; make one and place it there",
+                    capture
+                        .kinds
+                        .iter()
+                        .map(|kind| crate::projects::kind_name(*kind))
+                        .collect::<Vec<_>>()
+                        .join(" or ")
+                ),
+            });
+        }
         open.project
             .captures
             .entry(capture.hash.clone())
             .or_insert_with(|| Arc::clone(&capture));
-        let command = Command::AddObject {
-            layer,
-            index,
-            object: Box::new(object),
+        let commands: Vec<Command> = targets
+            .into_iter()
+            .map(|(layer, index)| Command::AddObject {
+                layer,
+                index,
+                object: Box::new(object.clone()),
+            })
+            .collect();
+        let command = if commands.len() == 1 {
+            commands.into_iter().next().unwrap_or(Command::Batch {
+                label: "Place macro".to_owned(),
+                commands: Vec::new(),
+            })
+        } else {
+            Command::Batch {
+                label: "Place macro".to_owned(),
+                commands,
+            }
         };
         let (project, history) = (&mut open.project, &mut open.history);
         history.push(project, command)?;
