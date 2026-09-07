@@ -68,13 +68,20 @@ export class ImageCache {
    * Returns an entry per layer whether or not its texture has arrived: the
    * renderer skips the ones that have not, and redraws when `onChange` fires,
    * so a slow decode never blanks anything that is already on screen.
+   *
+   * `token` is the **opening's**, not the document's revision (M37). A
+   * picture's pixels depend on its file and on nothing an edit does, so
+   * addressing them by the revision made every edit a new address: dragging
+   * an image re-decoded the whole chart on every pointer report and drew
+   * nothing at all until the pointer was released. Where the picture goes
+   * comes from the placement in `views`, which is free to change every frame.
    */
-  draws(revision: number, views: readonly ImageLayerView[]): ImageDraw[] {
+  draws(token: number, views: readonly ImageLayerView[]): ImageDraw[] {
     const wanted = new Set<string>();
     const out: ImageDraw[] = [];
     for (const view of views) {
       if (!view.loaded || view.width === 0 || view.height === 0) continue;
-      const key = `image/${revision}/${view.layer}/${this.maxEdge}`;
+      const key = `image/${token}/${view.layer}/${this.maxEdge}`;
       wanted.add(key);
       out.push({
         layer: view.layer,

@@ -63,6 +63,12 @@ pub struct ProjectSummary {
     /// Tile URLs carry it, so an edit makes previously fetched tiles
     /// unreachable rather than stale.
     pub revision: u64,
+    /// What an image layer's picture is addressed by (spec.md 4.9, M37).
+    ///
+    /// Fixed for the opening, where the revision is not: a picture depends on
+    /// its file, not on the document, so an edit must not re-address it. See
+    /// `OpenProject::image_token`.
+    pub image_token: u64,
     /// Whether there is anything to undo.
     pub can_undo: bool,
     /// Whether there is anything to redo.
@@ -104,6 +110,7 @@ impl ProjectSummary {
             layer_count: open.project.layers.len() as u32,
             object_count: open.project.object_count() as u32,
             revision: open.revision,
+            image_token: open.image_token,
             can_undo: open.history.can_undo(),
             can_redo: open.history.can_redo(),
         }

@@ -68,6 +68,19 @@ pub struct OpenProject {
     /// document's tiles can never be served for another's. See
     /// [`fresh_revision`].
     pub revision: u64,
+    /// What an image layer's picture is addressed by (spec.md 4.9, M37).
+    ///
+    /// Unique to this opening, like [`Self::revision`], and — unlike it —
+    /// **fixed for the life of the opening**. The pixels an image layer
+    /// serves depend on its file and on nothing the document does, so
+    /// addressing them by the document's revision made every edit a new
+    /// address: the webview refetched every picture, the backend decoded it
+    /// again, and dragging one meant a full decode per pointer report with
+    /// nothing on screen in between. A layer id is fresh per import, so this
+    /// and the layer say which picture is meant; the opening is what keeps
+    /// two projects, or one reopened after its file changed on disk, from
+    /// sharing an immutable address.
+    pub image_token: u64,
 }
 
 impl OpenProject {
@@ -81,6 +94,7 @@ impl OpenProject {
             path: None,
             dirty: true,
             revision: fresh_revision(),
+            image_token: fresh_revision(),
         }
     }
 
@@ -92,6 +106,7 @@ impl OpenProject {
             path: Some(path),
             dirty: false,
             revision: fresh_revision(),
+            image_token: fresh_revision(),
         }
     }
 

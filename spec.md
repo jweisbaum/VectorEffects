@@ -834,9 +834,16 @@ the map, with no way to say which a drag meant.
 TIFF, through pure-Rust decoders. The picture is served through the same
 `ve-tile://` scheme the field tiles use — a chart scan is megabytes, which has
 no business crossing the IPC channel as JSON — at
-`<base>/image/<revision>/<layer>/<max edge>`, downsampled to what the caller's
-GPU will hold and re-encoded losslessly. The revision makes the address
-immutable, the same rule the tiles follow. **The file on disk is never
+`<base>/image/<token>/<layer>/<max edge>`, downsampled to what the caller's
+GPU will hold and re-encoded losslessly. The token makes the address
+immutable, the same rule the tiles follow — but it is the **opening's**, not
+the document's revision (M37): a picture's pixels depend on its file and on
+nothing an edit does, so a revision there re-addressed every image on every
+edit, and dragging one meant decoding the whole chart per pointer report
+with nothing on screen in between. A layer id is fresh per import, so the
+token and the layer say which picture is meant; the opening is what keeps
+two projects, or one reopened after its file changed on disk, from sharing
+an address. **The file on disk is never
 modified.**
 
 **Drawn above the land and below the field**, as a subdivided quad with world

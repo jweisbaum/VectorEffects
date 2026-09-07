@@ -2976,6 +2976,21 @@ before deleting them all.
    (D52). Nothing is deleted until it is answered — which is what
    `SettingsDialog.test.tsx` holds.
 
+### M37 — A picture is addressed by its opening · **complete**
+
+**Goal:** the user's instruction of 2026-09-07: a dragged image must render
+as it moves, rather than appearing when the pointer is released.
+
+**Delivered 2026-09-07**, one commit. An image's address carried the
+document's revision, which every edit bumps — so each report of a drag
+made a new address: the old texture was released, the whole chart was
+decoded again on the backend, and nothing was drawn until one landed,
+which is why the picture arrived at the release. The address now carries a
+token fixed for the opening (`OpenProject::image_token`, published on
+`ProjectSummary`), so the texture stays put and the picture moves because
+its placement did. It cost every edit a re-decode of every image, not only
+a drag. Test in `image_layers.rs`.
+
 ### M36 — An image is dragged by its picture · **complete**
 
 **Goal:** the user's instruction of 2026-09-07: an imported image must be

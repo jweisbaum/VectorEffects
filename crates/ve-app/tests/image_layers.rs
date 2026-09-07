@@ -431,6 +431,64 @@ fn control_points_place_an_image_and_a_drag_is_one_undo() {
     assert!(image::corners_set(&state, layer, [0.0, 0.0], [10.0, 0.0], [20.0, 0.0], None).is_err());
 }
 
+/// A picture is addressed by the *opening*, not by the document's revision
+/// (M37).
+///
+/// The address is served immutably, so the revision in it meant every edit
+/// re-addressed every image: the webview refetched the picture and the
+/// backend decoded the whole chart again. Dragging one was a decode per
+/// pointer report with nothing on screen in between, which is what "it only
+/// appears when the mouse is released" was.
+#[test]
+fn an_edit_does_not_re_address_a_picture() {
+    let root = TempRoot::new("token");
+    let state = app(&root);
+    open(&state);
+
+    let path = root.0.join("chart.png");
+    write_png(&path, 100, 50);
+    let after_import =
+        image::image_imported(&state, path.to_string_lossy().into_owned(), None).expect("import");
+    let token = after_import.image_token;
+
+    // Moving the picture is an edit like any other: the revision moves, the
+    // address does not.
+    let layer = image_layer(&state);
+    let moved = image::corners_set(
+        &state,
+        layer,
+        [1.0, 11.0],
+        [21.0, 11.0],
+        [1.0, 1.0],
+        Some("image:move".to_owned()),
+    )
+    .expect("move");
+    assert_ne!(moved.revision, after_import.revision, "the document moved");
+    assert_eq!(moved.image_token, token, "and the picture is where it was");
+
+    // A second opening is a second address, so no picture is ever served
+    // from another project's cache entry.
+    let other = TempRoot::new("token-two");
+    let elsewhere = app(&other);
+    open(&elsewhere);
+    let fresh = ve_app::document::tree(&elsewhere, 0).expect("tree");
+    let _ = fresh;
+    let summary = image::image_imported(
+        &elsewhere,
+        {
+            let path = other.0.join("chart.png");
+            write_png(&path, 100, 50);
+            path.to_string_lossy().into_owned()
+        },
+        None,
+    )
+    .expect("import");
+    assert_ne!(
+        summary.image_token, token,
+        "a second opening is a second address"
+    );
+}
+
 /// Opacity is clamped, editable and undoable.
 #[test]
 fn opacity_is_clamped_to_what_it_can_mean() {

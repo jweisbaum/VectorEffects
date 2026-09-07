@@ -81,6 +81,14 @@ object_count: number,
  */
 revision: number, 
 /**
+ * What an image layer's picture is addressed by (spec.md 4.9, M37).
+ *
+ * Fixed for the opening, where the revision is not: a picture depends on
+ * its file, not on the document, so an edit must not re-address it. See
+ * `OpenProject::image_token`.
+ */
+image_token: number, 
+/**
  * Whether there is anything to undo.
  */
 can_undo: boolean, 

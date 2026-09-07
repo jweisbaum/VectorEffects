@@ -1245,7 +1245,7 @@ export default function MapView({
         recordingRef.current?.preview_revision !== undefined &&
         recordingRef.current?.preview_revision !== null
           ? []
-          : (imagesRef.current?.draws(projectRef.current.revision, imageLayersRef.current) ??
+          : (imagesRef.current?.draws(projectRef.current.image_token, imageLayersRef.current) ??
             []),
     };
 
@@ -1700,9 +1700,10 @@ export default function MapView({
    * The image layers, re-read whenever the document changes.
    *
    * From the document tree, because that is where a layer's own view of itself
-   * lives and an image layer is a layer. The revision is part of a texture's
-   * address, so this arriving late is only a frame of an unpainted picture and
-   * never a wrong one.
+   * lives and an image layer is a layer. It carries where each picture sits,
+   * so a drag lands here — the texture itself is addressed by the opening's
+   * token and stays put (M37), and the picture moves because its placement
+   * did.
    */
   useEffect(() => {
     let live = true;

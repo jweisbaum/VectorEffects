@@ -145,9 +145,10 @@ enum Served {
         step: u32,
         id: tile::TileId,
     },
-    /// An image layer's picture (spec.md 4.9, M18).
+    /// An image layer's picture (spec.md 4.9, M18). The first segment is the
+    /// opening's image token, not the document's revision (M37).
     Image {
-        revision: u64,
+        token: u64,
         layer: u64,
         max_edge: u32,
     },
@@ -159,7 +160,7 @@ fn parse(path: &str) -> Option<Served> {
     let mut parts = path.trim_start_matches('/').split('/');
     let first = parts.next()?;
     if first == "image" {
-        let revision: u64 = parts.next()?.parse().ok()?;
+        let token: u64 = parts.next()?.parse().ok()?;
         let layer: u64 = parts.next()?.parse().ok()?;
         // The last segment may carry an extension; ignore anything after a dot.
         let max_edge: u32 = parts.next()?.split('.').next()?.parse().ok()?;
@@ -167,7 +168,7 @@ fn parse(path: &str) -> Option<Served> {
             return None;
         }
         return Some(Served::Image {
-            revision,
+            token,
             layer,
             max_edge,
         });
@@ -213,10 +214,10 @@ pub fn handle(app: &tauri::AppHandle, request: &Request<Vec<u8>>) -> Response<Ve
 
     let parsed = match parsed {
         Served::Image {
-            revision,
+            token,
             layer,
             max_edge,
-        } => return serve_image(app, revision, layer, max_edge),
+        } => return serve_image(app, token, layer, max_edge),
         Served::Tile { revision, step, id } => TileRequest { revision, step, id },
     };
 
@@ -254,15 +255,14 @@ struct TileRequest {
 
 /// Serves an image layer's picture, decoded and downsampled here.
 ///
-/// The revision in the address is the document's, so importing or replacing an
-/// image makes the old address unreachable rather than stale — the same rule
-/// the tiles follow, and the reason both can be served `immutable`.
-fn serve_image(
-    app: &tauri::AppHandle,
-    revision: u64,
-    layer: u64,
-    max_edge: u32,
-) -> Response<Vec<u8>> {
+/// The token in the address is the *opening's*, not the document's revision
+/// (M37): a picture depends on its file and on nothing an edit does, so
+/// addressing it by the revision meant every edit re-addressed every image —
+/// a fresh decode of a chart scan per pointer report while one was dragged,
+/// with the picture absent in between. The opening's token still keeps two
+/// projects, or one reopened after its file changed, from sharing an
+/// address that is served `immutable`.
+fn serve_image(app: &tauri::AppHandle, token: u64, layer: u64, max_edge: u32) -> Response<Vec<u8>> {
     let state = app.state::<AppState>();
     let path = {
         let Ok(session) = state.session.lock() else {
@@ -271,8 +271,8 @@ fn serve_image(
         let Some(open) = session.open.as_ref() else {
             return respond(409, Vec::new());
         };
-        if open.revision != revision {
-            tracing::debug!(revision, "image request for a stale revision");
+        if open.image_token != token {
+            tracing::debug!(token, "image request from another opening");
             return respond(409, Vec::new());
         }
         match open
@@ -436,7 +436,7 @@ mod tests {
         assert_eq!(
             parse("/image/12/34/4096"),
             Some(Served::Image {
-                revision: 12,
+                token: 12,
                 layer: 34,
                 max_edge: 4096,
             })
@@ -444,7 +444,7 @@ mod tests {
         assert_eq!(
             parse("/image/1/2/2048.png"),
             Some(Served::Image {
-                revision: 1,
+                token: 1,
                 layer: 2,
                 max_edge: 2048,
             })
@@ -452,7 +452,7 @@ mod tests {
         for path in [
             "/image/1/2",       // too few segments
             "/image/1/2/3/4",   // too many
-            "/image/x/2/4096",  // unparseable revision
+            "/image/x/2/4096",  // unparseable token
             "/image/1/2/large", // unparseable size
         ] {
             assert!(parse(path).is_none(), "{path:?} should not parse");
