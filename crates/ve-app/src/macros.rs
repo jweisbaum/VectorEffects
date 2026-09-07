@@ -724,8 +724,12 @@ pub fn preview_place(state: &AppState, lon: f64, lat: f64) -> Result<CaptureMode
     })
 }
 
-/// Moves the preview's stamp: the macro is shown centred there instead. A
-/// new revision, so the old stamp's tiles are unreachable rather than stale.
+/// Moves the preview's stamp: where the pointer's outline sits.
+///
+/// It moves no field any more (M34). The preview shows the copies the user
+/// has placed and nothing else, so there is no object at the stamp to move —
+/// and rebuilding the scene under a new revision for the sake of a cursor
+/// would throw away every tile on screen each time the pointer moved.
 pub fn preview_stamp(state: &AppState, lon: f64, lat: f64) -> Result<CaptureMode> {
     with_session(state, |session| {
         let settings = session.require_open()?.project.settings;
@@ -740,8 +744,8 @@ pub fn preview_stamp(state: &AppState, lon: f64, lat: f64) -> Result<CaptureMode
         if let Some(baked) = active.baked.clone()
             && active.phase == CapturePhase::Previewing
         {
+            let _ = (baked, settings);
             active.stamp = [wrap180(lon), lat.clamp(-90.0, 90.0)];
-            session.preview = Some(preview_scene(active, &baked, settings)?);
         }
         Ok(mode_of(&session.capturing, session.preview.as_ref(), None))
     })
@@ -799,11 +803,16 @@ fn preview_scene(
     project
         .captures
         .insert(baked.hash.clone(), Arc::clone(baked));
-    // The original where it was recorded, and a copy at every place the
-    // preview has been clicked (M29) — one per layer, since a capture may
-    // hold both kinds and each layer paints the plane it is for (M34); all
-    // looping together, none of them the document's.
-    for place in std::iter::once(active.stamp).chain(active.stamps.iter().copied()) {
+    // A copy at every place the preview has been clicked, and **only** those
+    // (M34). The copy that used to sit where the macro was recorded made the
+    // preview look like the document it was taken from — what had been placed
+    // could not be told from what was already there — so the preview opens
+    // empty and fills with what the user puts in it.
+    //
+    // One copy per layer, since a capture may hold both kinds and each layer
+    // paints the plane it is for; they loop together, and none is the
+    // document's.
+    for place in active.stamps.iter().copied() {
         let anchor = LonLat::new(wrap180(place[0]), place[1].clamp(-90.0, 90.0))?;
         for layer in &mut project.layers {
             let mut copy = object.clone();

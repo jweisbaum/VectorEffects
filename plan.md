@@ -2906,10 +2906,14 @@ px-sized strokes within a tenth as the same brush, at the target's width.
 If the strokes were sized in km the cause is elsewhere and the sequence
 that produces it is needed.
 
-### M34 — Macros take what is under them · **in progress**
+### M34 — Macros take what is under them · **complete**
 
 **Goal:** the three findings the user handed over on 2026-09-07 after the
 M33 build, in order, one commit each.
+
+**Delivered 2026-09-07**, three commits `M34.1`–`M34.3`. The second
+reopens M29's rule that a capture takes the kind on show, on the user's
+correction: it takes every kind under it. Not clicked through in the app.
 
 1. **A macro's timeline extent** — reported again. The insert path was
    fixed in M33.4 and is verified end to end: a three-frame macro placed at
@@ -2930,6 +2934,12 @@ M33 build, in order, one commit each.
    and an insert places one object per kind, in the layer asked for where
    it is of that kind and the topmost visible painted layer of that kind
    otherwise. Tests in `macros.rs`.
+3. **The preview shows only what was placed** (finding 3). The copy at the
+   recorded position is gone: the preview opens empty and fills with what
+   is clicked, so what the user placed can be told from what was already
+   there. `preview_stamp` no longer rebuilds the scene under a new
+   revision — there is no object at the stamp to move, and doing so threw
+   away every tile on screen whenever the pointer moved.
 ---
 
 ## 3. Testing strategy

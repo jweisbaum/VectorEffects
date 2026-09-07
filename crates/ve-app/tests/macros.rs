@@ -608,21 +608,21 @@ fn a_preview_writes_nothing_and_is_served_apart_from_the_document() {
     assert_ne!(preview_revision, revision_before, "never the document's");
     assert_eq!(mode.stamp, Some([0.0, 0.0]), "stamped where it was drawn");
 
-    // The preview scene is the macro alone: the field at the stamp is the
-    // stroke, and away from it nothing — the document's stroke is not there.
+    // The preview opens empty (M34): what is on it is what the user has
+    // placed, and nothing of the document or of the recording is there.
     {
         let session = app.session.lock().expect("lock");
         let scene = &session.preview.as_ref().expect("preview").project;
         let at = |step: u32, lon: f64| {
             sample_scene(&flatten(scene, step), LonLat::new(lon, 0.0).unwrap()).u
         };
-        assert!((at(0, 0.0) - 18.0).abs() < 0.6, "the stroke, at the stamp");
+        assert!(at(0, 0.0).abs() < 1e-6, "nothing where it was recorded");
         assert!(at(0, 60.0).abs() < 1e-6, "and nothing else on the map");
         assert_eq!(scene.layers.len(), 1, "a layer for the kind captured");
-        assert_eq!(scene.layers[0].objects.len(), 1);
+        assert!(scene.layers[0].objects.is_empty(), "and nothing in it");
     }
-    // Stamp it elsewhere: a new revision, the macro moved.
-    let placed = macros::preview_stamp(&app, 90.0, 0.0).expect("stamp");
+    // A click puts a copy there, under a new revision.
+    let placed = macros::preview_place(&app, 90.0, 0.0).expect("place");
     assert_ne!(placed.preview_revision, Some(preview_revision));
     {
         let session = app.session.lock().expect("lock");
@@ -724,11 +724,11 @@ fn a_click_in_the_preview_places_a_copy_in_the_preview_scene_alone() {
         let scene = &session.preview.as_ref().expect("preview").project;
         assert_eq!(
             scene.layers[0].objects.len(),
-            2,
-            "the original and the copy"
+            1,
+            "the copy the click placed, and only that (M34)"
         );
         let at = |lon: f64| sample_scene(&flatten(scene, 0), LonLat::new(lon, 0.0).unwrap()).u;
-        assert!((at(0.0) - 18.0).abs() < 0.6, "the original at the origin");
+        assert!(at(0.0).abs() < 1e-6, "nothing where the macro was recorded");
         assert!((at(90.0) - 18.0).abs() < 0.6, "and the copy at the click");
     }
     // Back to recording drops the copies; the next preview starts clean.
@@ -738,10 +738,9 @@ fn a_click_in_the_preview_places_a_copy_in_the_preview_scene_alone() {
     {
         let session = app.session.lock().expect("lock");
         let scene = &session.preview.as_ref().expect("preview").project;
-        assert_eq!(
-            scene.layers[0].objects.len(),
-            1,
-            "the copies went with the edit"
+        assert!(
+            scene.layers[0].objects.is_empty(),
+            "the copies went with the edit, and a fresh preview is empty (M34)"
         );
     }
     macros::capture_cancel(&app).expect("cancel");

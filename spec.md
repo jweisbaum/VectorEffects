@@ -2538,9 +2538,11 @@ preview's own scene** (M29). **A drag pans**, as it does everywhere else on
 the map (M33): a press places only if it barely moved, so the preview can be
 looked around before it is stamped on. The legend shows the preview's one
 kind and not the document's, there being nothing of any other kind to scale.
-Of the copies: the original loops where it was recorded and a
+**Only what has been placed is on it** (M34): the preview opens empty and a
 copy loops at every place clicked, in a layer per kind the capture holds,
-none of them in any layer of the document, the panel or the file. They are for
+none of them in any layer of the document, the panel or the file. A copy at
+the recorded position made the preview look like the document it was taken
+from, so what had been placed could not be told from what was already there. They are for
 looking at, and they go with the preview whatever ends it; *Edit macro*
 clears them, so the next preview reflects the edit alone. Nothing is
 written and the history lock stands throughout, as D71 says. The document's
