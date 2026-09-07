@@ -2791,11 +2791,18 @@ wind and a defined current together.
    clone reaches them. Not clicked through in the app. **Superseded in part
    by M33.1**, which culls the imported field per tile too.
 
-### M33 — The fifth pass · **in progress**
+### M33 — The fifth pass · **complete**
 
 **Goal:** the eight findings the user handed over on 2026-09-06 after the
 M32 build, in order, one commit each, with anything scoped down recorded
 here with its reason.
+
+**Delivered 2026-09-06**, seven commits `M33.1`–`M33.7`; findings 2 and 6
+are one item. Two of them had been reported before and not found: the
+macro preview (9) had never worked because a u64 revision cannot survive
+a JavaScript number, and the speed filter (4) is now local except at a
+band's low end. Nothing clicked through in the app; the reorder and the
+preview want it most.
 
 1. **An imported field is culled per tile** (findings 1 and 4). An erase
    and a change to a speed filter re-rendered the whole map because every
