@@ -2814,6 +2814,18 @@ live preview. Spec §6.3. Not clicked through in the app: the direction of a
 divergence and the sign of a turn on screen are the two things most worth
 a look.
 
+**Follow-up, 2026-09-06 — intensity strokes not merging.** The backend
+merges identical intensity strokes in every case that could be built — km
+and px space, clicks and strokes, over a brush stroke — with the exact
+option set the tool bar sends. The one way found to stop them is a size in
+**px**: it is resolved to km at the zoom of each stroke (§3.5) and the wheel
+zooms continuously, so two strokes of one pixel brush a scroll apart never
+agreed to the metre, and two modifier strokes that do not merge compound
+where they overlap, which is what makes it show. `merge.rs` now takes two
+px-sized strokes within a tenth as the same brush, at the target's width.
+If the strokes were sized in km the cause is elsewhere and the sequence
+that produces it is needed.
+
 ---
 
 ## 3. Testing strategy

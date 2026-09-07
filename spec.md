@@ -1077,7 +1077,10 @@ All tools produce **objects**. Common rules:
   - Every property equal, keyframes included, except `Position` — which the two
     necessarily differ in, and which must not be animated on the target (an
     animated position moves the frame the absorbed stroke would be expressed
-    in).
+    in) — and except the size of two strokes painted in **px** (M32), which
+    is resolved to km at each stroke's own zoom (§3.5): within a tenth of
+    each other they are one brush a scroll apart, and the stroke joins at the
+    target's width. A size typed in km is compared exactly.
   - Footprints actually overlap, measured segment-to-segment (§7.3).
   - Nothing between them in z-order overlaps the new stroke. Merging pulls a
     stroke down to the target's place in the stack, and an overlapping object in
@@ -1250,7 +1253,7 @@ built differently. A new tool gets them all, and the checklist below is what
 | Inert options | An option the object's own mode never reads is not shown. | §6.1 |
 | Creation-only options | An option that defines *what the object is* — the stamp's shape, the space it is defined in — is fixed once the object exists, refused at the write path and not merely hidden. An option that can be neither set at creation nor edited afterwards does not belong on the tool. | §6.1 |
 | Transform | Move, rotate, scale and re-anchor behave identically for every geometry, because they act on the object's frame rather than on its shape. A drag previews and writes once, on release. | §8.2 |
-| Merging | Two gestures of the same tool with identical properties and overlapping footprints merge into one object, subject to §6.1's conditions. Two that differ in *any* property — including the stamp's shape or space — never do. | §6.1 |
+| Merging | Two gestures of the same tool with identical properties and overlapping footprints merge into one object, subject to §6.1's conditions. Two that differ in *any* property — including the stamp's shape or space — never do. One allowance (M32): two strokes sized in **px** whose km sizes differ by up to a tenth are the same brush a scroll apart, and merge at the first one's width. | §6.1 |
 
 **The eyedropper samples what is visible.** The value it takes is the composite
 the evaluator produces at that point (§7.6) — every visible layer beneath the

@@ -25,6 +25,37 @@ use ve_render::sdf::chains_distance;
 /// further is better off as its own object with its own anchor.
 const MERGE_MAX_RADIUS_M: f64 = 10_007_543.0;
 
+/// How far apart, as a fraction, the sizes of two strokes painted in pixels
+/// may be and still merge (M32).
+///
+/// A size in px is resolved to km at the zoom the stroke was painted at
+/// (spec.md 3.5), and the wheel zooms continuously, so two strokes of one
+/// pixel brush a scroll apart never agreed to the metre — and two modifier
+/// strokes that do not merge compound where they overlap, doubling the
+/// effect. Within this much the stroke joins at the target's width, which
+/// under a feathered edge is the same brush to the eye; further apart it is
+/// a different brush and stays its own object. A size typed in km is exact
+/// and compared exactly.
+const PX_SIZE_TOLERANCE: f64 = 0.1;
+
+/// Whether a stroke's stamp is a shape on the map rather than the ground.
+fn is_projected(object: &Object) -> bool {
+    object
+        .props
+        .value_at(object.tool, PropId::StampSpace, 0)
+        .and_then(ve_core::PropValue::as_enum)
+        == Some(1)
+}
+
+/// The base of a size property, in km.
+fn size_of(object: &Object, id: PropId) -> Option<f64> {
+    object
+        .props
+        .value_at(object.tool, id, 0)
+        .and_then(ve_core::PropValue::as_f32)
+        .map(f64::from)
+}
+
 /// Finds the object `stroke` should be merged into, with the merged geometry.
 ///
 /// Merging is only safe when it changes nothing about how the layer composites.
@@ -92,6 +123,23 @@ fn merged_geometry(
             // An animated position moves the whole object, so the frame the new
             // stroke would be expressed in is not the frame it was painted in.
             if anim.is_animated() {
+                return None;
+            }
+            continue;
+        }
+        // Two pixel brushes a scroll apart are the same brush within a
+        // tolerance; the stroke takes the target's width (M32).
+        if *id == PropId::SizeKm
+            && is_projected(candidate)
+            && is_projected(stroke)
+            && !anim.is_animated()
+            && stroke
+                .props
+                .get(*id)
+                .is_some_and(|other| !other.is_animated())
+            && let (Some(a), Some(b)) = (size_of(candidate, *id), size_of(stroke, *id))
+        {
+            if (a - b).abs() > a.max(b) * PX_SIZE_TOLERANCE {
                 return None;
             }
             continue;
@@ -212,5 +260,52 @@ mod tests {
         let mut layer = Layer::new("L");
         layer.objects.push(moving);
         assert!(merge_target(&layer, &painted, &positions).is_none());
+    }
+
+    fn sized(mut object: Object, size_km: f32, projected: bool) -> Object {
+        object
+            .props
+            .get_mut(PropId::SizeKm)
+            .unwrap()
+            .set_base(PropValue::F32(size_km));
+        object
+            .props
+            .get_mut(PropId::StampSpace)
+            .unwrap()
+            .set_base(PropValue::Enum(u8::from(projected)));
+        object
+    }
+
+    /// Spec 6.1 (M32): a pixel brush is resolved to km at the zoom it was
+    /// painted at, so two strokes of one brush a scroll apart differ slightly
+    /// in km and merge within the tolerance; a real change of brush does not,
+    /// and a size typed in km is compared exactly.
+    #[test]
+    fn pixel_brushes_a_scroll_apart_merge_and_kilometre_ones_do_not() {
+        let anchor = LonLat::new(0.0, 0.0).unwrap();
+        let chain = vec![[0.0, 0.0], [200_000.0, 0.0]];
+        let positions = [
+            LonLat::new(1.0, 0.0).unwrap(),
+            LonLat::new(2.0, 0.0).unwrap(),
+        ];
+        let painted_at = LonLat::new(1.0, 0.0).unwrap();
+        let attempt = |target_km: f32, stroke_km: f32, projected: bool| {
+            let mut layer = Layer::new("L");
+            layer
+                .objects
+                .push(sized(brush(anchor, chain.clone()), target_km, projected));
+            let stroke = sized(brush(painted_at, chain.clone()), stroke_km, projected);
+            merge_target(&layer, &stroke, &positions).is_some()
+        };
+        assert!(attempt(800.0, 800.0, true), "the same brush merges");
+        assert!(
+            attempt(800.0, 850.0, true),
+            "a scroll apart in px is the same brush"
+        );
+        assert!(
+            !attempt(800.0, 1000.0, true),
+            "a quarter wider is another brush"
+        );
+        assert!(!attempt(800.0, 850.0, false), "a size typed in km is exact");
     }
 }
