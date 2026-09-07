@@ -162,6 +162,16 @@ export function addFootprint(
 const MAX_FOOTPRINTS = 4000;
 
 /**
+ * How far the edge of a swept footprint may fall inside the true silhouette,
+ * in screen pixels (M33).
+ *
+ * The union of discs along a stroke is scalloped by however far apart their
+ * centres are; under half a pixel the scallop is beneath what the screen can
+ * show, and the stamps stay few enough that a long stroke is still cheap.
+ */
+const SCALLOP_PX = 0.4;
+
+/**
  * How far along a stroke its swept path has been built.
  *
  * A stroke in progress gains a point per pointer report, and rebuilding the
@@ -262,11 +272,16 @@ export function extendStrokePath(
     const dLon = normalizeLon(to[0] - from[0]);
     const dLat = to[1] - from[1];
 
-    // Half a radius between stamps keeps the union solid without drawing far
-    // more than the fill needs.
+    // Stamps close enough that the scallop between them is under half a
+    // pixel (M33). Half a radius apart — what this was — leaves a sagitta of
+    // r/32, which is invisible on a small brush and a three-pixel bite out of
+    // the edge of a large one: the arcs the user could see along a stroke.
+    // The spacing that bounds the sagitta at `s` is 2*sqrt(2rs - s^2), so it
+    // grows with the square root of the radius rather than with the radius.
     const { ry } = footprintRadii(camera, from[1], radiusKm);
     const spanPx = Math.hypot(dLon * camera.pxPerDeg, dLat * camera.pxPerDeg);
-    const steps = Math.max(1, Math.ceil(spanPx / Math.max(ry * 0.5, 1)));
+    const stride = Math.max(1, 2 * Math.sqrt(Math.max(2 * ry * SCALLOP_PX - SCALLOP_PX ** 2, 0)));
+    const steps = Math.max(1, Math.ceil(spanPx / stride));
 
     for (let step = 1; step <= steps; step++) {
       const t = step / steps;

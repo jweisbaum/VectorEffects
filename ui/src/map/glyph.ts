@@ -353,7 +353,26 @@ export function glyphLayout(
 ): GlyphLayout {
   const stepDeg = glyphStepDegrees(pxPerDeg, GLYPH_TARGET_PX[style] * pixelRatio);
   const spacing = stepDeg * pxPerDeg;
-  return { stepDeg, spacing, lengthPx: spacing * GLYPH_SIZE_SCALE[style] };
+  return { stepDeg, spacing, lengthPx: spacing * glyphSizeScale(style, spacing, pixelRatio) };
+}
+
+/**
+ * A glyph's length as a fraction of the lattice spacing (M33).
+ *
+ * The plain fraction while the lattice is about as dense as the style asks
+ * for. Where the ladder has overshot — the step above was too fine to clear
+ * the target, so the one below is wider than wanted — the glyph is held to
+ * the size the style asked for rather than growing with the gap: zoomed
+ * right in, a lattice step of a quarter degree is hundreds of pixels wide,
+ * and a barb drawn to match covered the whole of what it was describing.
+ */
+export function glyphSizeScale(
+  style: "arrow" | "barb",
+  spacing: number,
+  pixelRatio: number,
+): number {
+  const target = GLYPH_TARGET_PX[style] * pixelRatio;
+  return GLYPH_SIZE_SCALE[style] * Math.min(1, spacing > 0 ? target / spacing : 1);
 }
 
 /**

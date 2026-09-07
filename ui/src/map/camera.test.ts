@@ -274,9 +274,10 @@ describe("glyph lattice", () => {
       const step = glyphStepDegrees(px, 40);
       const spacing = step * px;
       expect(spacing).toBeGreaterThanOrEqual(40);
-      // The ladder is at most 2x between neighbours, so a satisfying step is
-      // never more than about twice the target.
-      expect(spacing).toBeLessThan(40 * 3);
+      // The ladder's rungs are half a step apart at most, so a satisfying
+      // step never overshoots the target by much (M33) — which is what keeps
+      // a glyph sized from it from ballooning.
+      expect(spacing).toBeLessThan(40 * 1.6);
     }
   });
 

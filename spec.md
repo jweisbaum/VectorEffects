@@ -953,7 +953,10 @@ anywhere in the UI.
   chosen from the scale at the equator (§5.1).
 - **Two glyph styles ship in v1**, and the kind of field chooses between them
   (M30): a glyph switch in the title bar shows or hides them, and nothing
-  picks a style.
+  picks a style. A glyph is drawn at a fraction of the lattice spacing, but
+  never larger than its style's own target (M33) — the ladder of lattice
+  steps is discrete, and zoomed in far enough a step is hundreds of pixels
+  wide, which drew one barb across the whole of what it described.
   - **Arrows** — uniform instanced geometry, length optionally scaled by speed.
     What a current is always drawn with.
   - **Wind barbs** — the meteorological idiom, quantised to the conventional

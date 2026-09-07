@@ -349,7 +349,8 @@ export function tileBounds(z: number, x: number, y: number): ViewBounds {
  * zoom instead of continuously re-flowing.
  */
 export const GLYPH_STEPS_DEG = [
-  90, 60, 45, 30, 20, 15, 10, 5, 2.5, 2, 1, 0.5, 0.25, 0.1, 0.05, 0.025, 0.01,
+  90, 60, 45, 30, 20, 15, 10, 7.5, 5, 3, 2.5, 2, 1.5, 1, 0.75, 0.5, 0.3, 0.25,
+  0.15, 0.1, 0.075, 0.05, 0.03, 0.025, 0.015, 0.01,
 ];
 
 /**
@@ -357,7 +358,10 @@ export const GLYPH_STEPS_DEG = [
  *
  * The ladder reaches 90 degrees at the coarse end so that even a very small
  * window, where the whole globe is only a couple of hundred pixels wide, still
- * has a step that clears the target.
+ * has a step that clears the target. Its rungs are close together — half a
+ * step at most — because the spacing a rung gives is what a glyph is sized
+ * from, and a ladder that overshot the target by two and a half times drew
+ * glyphs two and a half times too big (M33).
  */
 export function glyphStepDegrees(pxPerDeg: number, targetPx: number): number {
   let chosen = GLYPH_STEPS_DEG[0] as number;

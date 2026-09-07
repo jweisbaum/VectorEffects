@@ -64,8 +64,8 @@ import { destination, distanceM } from "./geo";
 import {
   extendLatticeUnderStroke,
   freshLattice,
-  GLYPH_SIZE_SCALE,
   glyphGeometry,
+  glyphSizeScale,
   type LatticeProgress,
   latticeUnder,
   mapGlyphLayout,
@@ -2093,8 +2093,11 @@ export default function MapView({
       if (at.length === 0) return;
       const camera = cameraRef.current;
       const view = viewRef.current;
-      // The map's lattice, and this kind's length on it (M31).
-      const lengthPx = mapGlyphLayout(camera.pxPerDeg, dpr).spacing * GLYPH_SIZE_SCALE[glyphStyle];
+      // The map's lattice, and this kind's length on it (M31), held to the
+      // size the style asks for where the lattice is wider than it wanted
+      // (M33) — the same cap the map's own glyphs take.
+      const { spacing } = mapGlyphLayout(camera.pxPerDeg, dpr);
+      const lengthPx = spacing * glyphSizeScale(glyphStyle, spacing, dpr);
       const width = Math.max(1, 1.8 * dpr);
 
       const strokes = new Path2D();

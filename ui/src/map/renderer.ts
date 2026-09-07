@@ -19,7 +19,7 @@ import {
 } from "./camera";
 import type { Basemap } from "./format";
 import { KINDS, type FieldKindName } from "../kind";
-import { GLYPH_SIZE_SCALE, mapGlyphLayout } from "./glyph";
+import { glyphSizeScale, mapGlyphLayout } from "./glyph";
 import { SPEED_MAX } from "./tileRange";
 import {
   GEO_FRAG,
@@ -685,14 +685,18 @@ export class MapRenderer {
     // kinds (M31): each cell's kind picks the glyph, so a barb and an arrow
     // never share a point.
     const { stepDeg, spacing } = mapGlyphLayout(camera.pxPerDeg, state.pixelRatio);
+    // Held to the size each style asks for where the lattice is wider than
+    // it wanted (M33), the same cap the gesture preview's glyphs take.
+    const arrowScale = glyphSizeScale("arrow", spacing, state.pixelRatio);
+    const barbScale = glyphSizeScale("barb", spacing, state.pixelRatio);
     gl.useProgram(this.glyphProgram);
     gl.bindVertexArray(this.glyphVao);
     gl.uniform1i(this.glyphUniforms.uTile ?? null, 0);
     gl.uniform1f(this.glyphUniforms.uSpeedScale ?? null, SPEED_SCALE_MPS);
     gl.uniform1f(this.glyphUniforms.uSpacing ?? null, spacing);
     gl.uniform1f(this.glyphUniforms.uGlyphStep ?? null, stepDeg);
-    gl.uniform1f(this.glyphUniforms.uSizeScaleArrow ?? null, GLYPH_SIZE_SCALE.arrow);
-    gl.uniform1f(this.glyphUniforms.uSizeScaleBarb ?? null, GLYPH_SIZE_SCALE.barb);
+    gl.uniform1f(this.glyphUniforms.uSizeScaleArrow ?? null, arrowScale);
+    gl.uniform1f(this.glyphUniforms.uSizeScaleBarb ?? null, barbScale);
     gl.uniform1f(this.glyphUniforms.uPixelRatio ?? null, state.pixelRatio);
     gl.uniform4f(this.glyphUniforms.uColor ?? null, ...GLYPH);
     this.setOperator(this.glyphUniforms, state.view, state.operator ?? null, stage);

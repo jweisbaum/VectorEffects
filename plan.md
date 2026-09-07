@@ -2817,6 +2817,18 @@ here with its reason.
    also do, but it is `destination-out` and has to run before anything else
    on the frame, and the stroke already shows what it does — the field
    leaves it as the pointer moves (M32).
+3. **Smooth edges, and glyphs that stay their own size** (finding 3, and
+   the screenshot). A swept preview stamped every half radius, which leaves
+   a scallop of a thirty-second of the radius — invisible on a small brush
+   and a three-pixel bite out of a large one, the arcs the user could see.
+   The spacing now bounds the scallop at 0.4 px, so it grows with the
+   square root of the radius and a small brush costs *fewer* stamps than
+   before. Separately, the glyph ladder's rungs were up to two and a half
+   times apart and a glyph is sized from the spacing a rung gives, so
+   zoomed in one barb covered the stamp it described: the ladder is now
+   half-step rungs and `glyphSizeScale` holds a glyph to the size its style
+   asked for wherever the lattice is wider than that, on the map and in a
+   gesture's preview alike.
 
 ### M32 — Edit tools show their effect as the pointer moves · **complete**
 
