@@ -334,6 +334,33 @@ fn section6() -> Vec<u8> {
     out
 }
 
+/// Section 6 carrying a bitmap: one bit per grid node, set where a value is
+/// written (M38).
+///
+/// The export never needs one — a painted field has a value everywhere — but
+/// an imported observation does: GlobCurrent is masked over land and under
+/// sea ice, and a masked node has to arrive as *missing* rather than as a
+/// calm current, which the map would draw over the coastline (§7.6, D58).
+fn section6_bitmap(present: &[bool]) -> Vec<u8> {
+    let bytes = present.len().div_ceil(8);
+    let mut out = Vec::with_capacity(6 + bytes);
+    put_u32(&mut out, (6 + bytes) as u32);
+    put_u8(&mut out, 6);
+    put_u8(&mut out, 0); // a bitmap follows
+    // Most significant bit first, in scanning order, padded with zeros: a
+    // node past the end is one the grid does not have.
+    for chunk in present.chunks(8) {
+        let mut byte = 0u8;
+        for (bit, &here) in chunk.iter().enumerate() {
+            if here {
+                byte |= 0x80 >> bit;
+            }
+        }
+        out.push(byte);
+    }
+    out
+}
+
 fn section7(packed: &Packed) -> Vec<u8> {
     let mut out = Vec::with_capacity(5 + packed.data.len());
     put_u32(&mut out, (5 + packed.data.len()) as u32);
@@ -377,6 +404,61 @@ pub fn message(spec: &MessageSpec, values: &[f32]) -> Result<Vec<u8>> {
     Ok(out)
 }
 
+/// Builds one message whose field has holes in it (M38).
+///
+/// A non-finite value is a node the field says nothing about: it is left out
+/// of the data section and marked absent in a bitmap, so a decoder reads it
+/// back as missing rather than as a number. That is what an observation
+/// archive hands over — GlobCurrent is masked over land and under sea ice —
+/// and what [`message`] refuses, since a painted field with a hole in it is
+/// a bug rather than a measurement.
+///
+/// A field with no holes takes [`message`]'s path and no bitmap, so the two
+/// agree byte for byte where they can.
+pub fn message_masked(spec: &MessageSpec, values: &[f32]) -> Result<Vec<u8>> {
+    spec.reference_time.validate()?;
+    if values.len() as u64 != spec.grid.point_count() {
+        return Err(GribError::UnsupportedGrid(format!(
+            "{} values for a {}x{} grid",
+            values.len(),
+            spec.grid.ni,
+            spec.grid.nj
+        )));
+    }
+    let present: Vec<bool> = values.iter().map(|v| v.is_finite()).collect();
+    if present.iter().all(|here| *here) {
+        return message(spec, values);
+    }
+    let written: Vec<f32> = values.iter().copied().filter(|v| v.is_finite()).collect();
+    if written.is_empty() {
+        return Err(GribError::UnsupportedGrid(
+            "a message with no value anywhere on the grid".to_owned(),
+        ));
+    }
+
+    let packed = packing::pack(&written, spec.bits)?;
+    let body = [
+        section1(spec),
+        section3(spec.grid),
+        section4(spec),
+        section5(&packed),
+        section6_bitmap(&present),
+        section7(&packed),
+    ]
+    .concat();
+
+    let total = 16 + body.len() + 4;
+    let mut out = Vec::with_capacity(total);
+    out.extend_from_slice(b"GRIB");
+    put_u16(&mut out, 0); // reserved
+    put_u8(&mut out, spec.parameter.discipline());
+    put_u8(&mut out, 2); // edition 2
+    out.extend_from_slice(&(total as u64).to_be_bytes());
+    out.extend_from_slice(&body);
+    out.extend_from_slice(b"7777");
+    Ok(out)
+}
+
 /// Appends one message to a writer.
 ///
 /// Messages are written as they are produced rather than assembled into one
@@ -398,6 +480,65 @@ mod tests {
             nj: 181,
             micro_degrees: 1_000_000,
         }
+    }
+
+    /// A field with holes in it is written with a bitmap and read back with
+    /// those nodes missing (M38): an observation archive masks land and sea
+    /// ice, and a masked node must not come back as a calm current.
+    #[test]
+    fn a_masked_field_round_trips_through_a_bitmap() {
+        let spec = spec();
+        let count = spec.grid.point_count() as usize;
+        // A recognisable field with a hole in it: every fifth node absent.
+        let values: Vec<f32> = (0..count)
+            .map(|i| {
+                if i % 5 == 0 {
+                    f32::NAN
+                } else {
+                    (i % 97) as f32 * 0.25 - 12.0
+                }
+            })
+            .collect();
+
+        let bytes = message_masked(&spec, &values).expect("writes");
+        let decoded = crate::decode::read_all(&bytes).expect("reads");
+        let message = decoded.messages.first().expect("one message");
+        assert_eq!(message.values.len(), count, "a value per node of the grid");
+        for (at, (want, got)) in values.iter().zip(&message.values).enumerate() {
+            if want.is_nan() {
+                assert_eq!(
+                    *got,
+                    crate::decode::MISSING,
+                    "node {at} was masked and must read as missing"
+                );
+            } else {
+                assert!(
+                    (want - got).abs() < 0.01,
+                    "node {at}: {got} is not {want}"
+                );
+            }
+        }
+    }
+
+    /// A field with no holes takes the plain path, so nothing about the
+    /// export changes for having taught the writer about bitmaps.
+    #[test]
+    fn a_whole_field_is_written_without_a_bitmap() {
+        let spec = spec();
+        let values = vec![7.5f32; spec.grid.point_count() as usize];
+        assert_eq!(
+            message_masked(&spec, &values).expect("masked"),
+            message(&spec, &values).expect("plain"),
+        );
+    }
+
+    /// A field that is nothing but holes is refused rather than written as an
+    /// empty message a decoder would have to guess at.
+    #[test]
+    fn a_field_of_nothing_but_holes_is_refused() {
+        let spec = spec();
+        let values = vec![f32::NAN; spec.grid.point_count() as usize];
+        assert!(message_masked(&spec, &values).is_err());
     }
 
     fn spec() -> MessageSpec {
