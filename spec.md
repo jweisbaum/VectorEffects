@@ -957,19 +957,23 @@ anywhere in the UI.
 - Cursor readout: lon/lat, speed in the display unit, direction in the display
   convention, and the grid cell index under the cursor.
 
-**The map shows every kind of field the project holds, together** (M30;
-M29 showed one at a time, chosen by a *Show* menu, and the menu is gone).
-The wind layers are drawn as one pass and the current layers as another
-above it, each on its own colour scale with its own legend entry — wind as
-barbs, currents as arrows, so the two are told apart at a glance. The
-raster's alpha follows the speed, so a current shows through calm wind and
-wind shows wherever no current is painted. A tile address carries the kind,
-so the two are different tiles; readiness and the render pool cover every
-kind present, and playback advances when the tiles of every kind are
-resident. The readout, the eyedropper, a region copy and a macro capture
-take the *active layer's* kind, since that is what a stroke in it will
-paint, and a gesture's preview draws that kind's glyph. A macro preview
-shows its one kind alone. The auto scale is kept per kind.
+**The map shows every layer the project holds, in layer order, whatever
+its kind** (M31; M29 showed one kind at a time from a *Show* menu, M30 drew
+the two kinds as two passes, and both are gone). One tile holds the
+composite: each cell carries its field, how much of it was written, and the
+kind of the layer that won it (§7.6, §7.7). **Zero is not transparent;
+only undefined is.** A cell some layer wrote is drawn opaque whether it is
+calm or a gale; a cell nothing wrote shows the map beneath; a feathered
+edge fades with its coverage. A layer above hides the layers beneath
+wherever it is defined and shows them wherever it is not — a defined wind
+cell and a defined current cell are never shown together, even where one
+of them is calm. Each cell's kind picks its glyph — wind is always a barb, a
+current always an arrow, on one lattice — and its colour scale, with a
+legend entry for each kind the project holds and the auto scale kept per
+kind. The readout reports the composite: the kind that wins the cell, or
+*no field*. The eyedropper, a region copy and a macro capture take the
+*active layer's* kind, since that is what a stroke in it will paint, and a
+gesture's preview draws that kind's glyph.
 
 ### 5.4 Stale-tile behaviour
 
@@ -1486,9 +1490,11 @@ what the brush's hover says too.
 
 ### 6.3 Field modifiers
 
-Four tools that do not paint a field. Each reads the composite **beneath it in
-z-order**, transforms it, and writes the result back inside its own footprint —
-so what a modifier produces is always a function of what was already there.
+Four tools that do not paint a field. Each reads its **own layer** beneath it
+in z-order (M31; before that, every layer beneath it), transforms it, and
+writes the result back inside its own footprint — so what a modifier produces
+is always a function of what was already there in the layer it is in. A GRIB
+layer takes them too (§4.8, D66).
 Over calm water every one of them leaves calm water. That is the line between a
 modifier and a creation tool, and it is what makes them safe to stack: a
 modifier cannot invent a wind, only change one.
@@ -1818,39 +1824,59 @@ shows and no tool defines (§4.7, schema version 7).
 
 ### 7.6 Compositing
 
-Iterate the flat scene in z-order, writing into an accumulation buffer:
+**Each layer is composited on its own, and the layers are stacked** (M31).
+A layer's objects are iterated in z-order, writing into the layer's own
+accumulation buffer beside a coverage:
 
 ```
-for obj in scene:                     // bottom → top
-    for cell in obj.cap_cells:
-        if obj.sdf(cell) <= 0:
-            buffer[cell] = obj.vector_at(cell)   // OVERWRITE
+for layer in scene:                   // bottom → top
+    acc, cov = calm, 0
+    if layer.raster: where it has a value: acc = raster, cov = 1
+    for obj in layer.objects:         // bottom → top
+        w = coverage_and_feather(obj, cell)
+        acc = lerp(acc, obj.vector_at(cell), w)       // blend edge
+              or obj.vector_at(cell) * w              // replace edge
+        cov = cov + (1 - cov) * w                     // blend
+              or w                                    // replace
+              or cov * (1 - w)                        // a mask removes
+    out = out * (1 - cov) + acc       // acc is premultiplied by cov
+    out_cov = out_cov * (1 - cov) + cov
+    kind = layer.kind if cov >= ½, or if nothing yet covered half
 ```
 
-Cells never touched by any object are calm — `(0, 0)`.
+A cell no layer touched is calm with a coverage of zero — **undefined**,
+which the tile carries and the map draws as nothing (§5.3, D58); a cell a
+layer wrote as calm has a coverage of one and is drawn. A layer covers what
+is beneath it exactly as far as it is defined, so the layers beneath show
+through a gap, a regional grid's edge, a mask, or a filtered-out band, and
+through nothing else. The export bakes one kind at a time (§12.1), stacked
+by the same rule among the layers of that kind.
 
-**A modifier reads the buffer and writes it back** (§6.3):
+**A modifier reads its layer's buffer and writes it back** (§6.3):
 
 ```
-for obj in scene:                     // bottom → top
     if obj.is_modifier:
-        for cell in obj.cap_cells:
-            if obj.sdf(cell) <= 0:
-                w = coverage_and_feather(obj, cell)
-                buffer[cell] = lerp(buffer[cell], obj.transform(buffer[cell]), w)
+        w = coverage_and_feather(obj, cell)
+        acc = lerp(acc, obj.transform(acc), w)
 ```
 
-Because objects are processed in z-order, the buffer at that moment holds
-exactly "everything below this object" — the same guarantee the clone stamp
-relies on, and the reason a modifier needs no sub-scene of its own. The one
-exception is the **warp**, whose read is at another position and which
-therefore takes the clone stamp's path below, sharing its depth cap.
+Because a layer's objects are processed in z-order, the buffer at that
+moment holds exactly "everything below this object *in its layer*" — the
+same guarantee the clone stamp relies on, and the reason a modifier needs
+no sub-scene of its own. **A modifier never reaches another layer**: it
+edits the layer it is in, a GRIB layer's field included, and the layers
+beneath show through it untouched (M31). The one exception to the in-place
+read is the **warp**, whose read is at another position and which therefore
+takes the clone stamp's path below, sharing its depth cap — and which
+carries the coverage of the place it read from, so a patch dragged onto
+unwritten water writes there and leaves undefined where it came from.
 
 **Clone stamp** is the one creation tool that reads the buffer:
 
-- It samples the buffer at the offset source location. Because objects are
-  processed in z-order, the buffer at that moment contains exactly "everything
-  below this object," which is the specified semantic.
+- It samples its layer's buffer at the offset source location. Because
+  objects are processed in z-order, the buffer at that moment contains exactly
+  "everything below this object in its layer," which is the specified
+  semantic.
 - Source samples may fall outside the tile currently being rendered. The
   evaluator handles this by running a **nested evaluation of the sub-scene**
   (objects strictly below the clone stamp) at the required source points.
@@ -1875,15 +1901,22 @@ Tiles are served to the webview through a Tauri custom URI scheme, not through
 IPC message passing — raw bytes, no JSON, no base64:
 
 ```
-ve-tile://<frame_hash>/<z>/<x>/<y>
+ve-tile://<revision>/<step>/<z>/<x>/<y>
 ```
 
-Payload is RGBA8, 256×256, 256 KB per tile:
+Payload is RGBA8, 256×256, 256 KB per tile, one little-endian 32-bit word
+per texel (M31):
 
-| Channels | Content |
+| Bits | Content |
 |---|---|
-| R,G | speed as u16 LE, scaled by the project's display max |
-| B,A | azimuth-toward as u16 LE, `az/360 * 65535` |
+| 0–13 | speed, a 14-bit fraction of full scale (100 m/s; 0.006 m/s a step) |
+| 14–25 | azimuth-toward, a 12-bit fraction of a turn (0.09° a step) |
+| 26–30 | coverage, 0 for a cell nothing wrote, 31 for one fully written; a written cell never rounds to 0 |
+| 31 | kind: 1 wind, 0 current |
+
+Every quantisation step is well inside the preview tolerance (§7.9). The
+coverage is what tells a written calm from nothing (D58, §5.3), and the kind
+is what picks the glyph and the colour scale per cell.
 
 Because the frame hash is in the URL, the browser's own cache, our disk cache,
 and invalidation all key off the same identity, and stale tiles remain

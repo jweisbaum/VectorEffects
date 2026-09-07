@@ -23,10 +23,10 @@ use std::sync::{Arc, Condvar, Mutex};
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
-use ve_core::project::{FieldKind, Project};
+use ve_core::project::Project;
 use ve_render::cache::{SceneHash, TileKey, scene_hash};
 use ve_render::preview::Quality;
-use ve_render::scene::{Scene, flatten_kind};
+use ve_render::scene::{Scene, flatten};
 use ve_render::tile::TileId;
 
 use crate::commands::AppState;
@@ -107,26 +107,8 @@ impl Prepared {
 struct Snapshot {
     revision: u64,
     project: Arc<Project>,
-    /// Indexed by step, then by kind (M29): no map is iterated on this path.
-    steps: Mutex<Vec<[Option<Arc<Prepared>>; 2]>>,
-}
-
-/// The kinds a request or a readiness probe is about: the one named, or
-/// every kind a visible layer holds (M30). A project with no field layer yet
-/// wants nothing, and every step of it reads as ready.
-fn kinds_wanted(project: &Project, kind: Option<FieldKind>) -> Vec<FieldKind> {
-    match kind {
-        Some(kind) => vec![kind],
-        None => project.kinds_present(),
-    }
-}
-
-/// A kind's slot in a step's pair.
-fn kind_slot(kind: FieldKind) -> usize {
-    match kind {
-        FieldKind::Wind => 0,
-        FieldKind::Current => 1,
-    }
+    /// Indexed by step: no map is iterated on this path.
+    steps: Mutex<Vec<Option<Arc<Prepared>>>>,
 }
 
 impl Snapshot {
@@ -135,19 +117,19 @@ impl Snapshot {
         Self {
             revision,
             project: Arc::new(project),
-            steps: Mutex::new(vec![[None, None]; steps]),
+            steps: Mutex::new(vec![None; steps]),
         }
     }
 
-    /// The step's scene of one kind, prepared the first time it is asked for.
-    fn prepared(&self, state: &AppState, step: u32, kind: FieldKind) -> Arc<Prepared> {
+    /// The step's scene — every layer of every kind, as the map draws it
+    /// (M31) — prepared the first time it is asked for.
+    fn prepared(&self, state: &AppState, step: u32) -> Arc<Prepared> {
         if let Ok(steps) = self.steps.lock()
-            && let Some(pair) = steps.get(step as usize)
-            && let Some(prepared) = &pair[kind_slot(kind)]
+            && let Some(Some(prepared)) = steps.get(step as usize)
         {
             return Arc::clone(prepared);
         }
-        let scene = flatten_kind(&self.project, step, kind);
+        let scene = flatten(&self.project, step);
         let hash = scene_hash(&scene);
         let (_, quality) = protocol::plan_for(state, &scene);
         let prepared = Arc::new(Prepared {
@@ -156,9 +138,9 @@ impl Snapshot {
             quality,
         });
         if let Ok(mut steps) = self.steps.lock()
-            && let Some(pair) = steps.get_mut(step as usize)
+            && let Some(slot) = steps.get_mut(step as usize)
         {
-            pair[kind_slot(kind)] = Some(Arc::clone(&prepared));
+            *slot = Some(Arc::clone(&prepared));
         }
         prepared
     }
@@ -168,7 +150,6 @@ impl Snapshot {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Unit {
     step: u32,
-    kind: FieldKind,
     tile: TileId,
 }
 
@@ -243,17 +224,8 @@ impl RenderPool {
     /// the workers render from it without the lock. The old queue is simply
     /// dropped — a unit in flight finishes into a key that is either still
     /// wanted or harmlessly unreachable.
-    ///
-    /// `kind` narrows the queue to one kind of field; `None` queues every
-    /// kind the project holds, which is what the map draws (M30).
-    pub fn request(
-        &self,
-        state: &AppState,
-        current: u32,
-        tiles: &[TileAddress],
-        kind: Option<FieldKind>,
-    ) -> Result<()> {
-        let (snapshot, kinds) = {
+    pub fn request(&self, state: &AppState, current: u32, tiles: &[TileAddress]) -> Result<()> {
+        let snapshot = {
             let session = state
                 .session
                 .lock()
@@ -262,7 +234,6 @@ impl RenderPool {
                 self.clear();
                 return Ok(());
             };
-            let kinds = kinds_wanted(&open.project, kind);
             // Reuse the snapshot if the document has not moved: the hashes it
             // has already computed are still right.
             let existing = self
@@ -271,11 +242,10 @@ impl RenderPool {
                 .ok()
                 .and_then(|queue| queue.snapshot.clone())
                 .filter(|snapshot| snapshot.revision == open.revision);
-            let snapshot = match existing {
+            match existing {
                 Some(snapshot) => snapshot,
                 None => Arc::new(Snapshot::of(open.revision, open.project.clone())),
-            };
-            (snapshot, kinds)
+            }
         };
 
         let ids: Vec<TileId> = tiles
@@ -283,16 +253,10 @@ impl RenderPool {
             .filter_map(|t| TileId::new(t.z, t.x, t.y).ok())
             .collect();
         let last = snapshot.project.last_step();
-        let mut units = Vec::with_capacity(ids.len() * kinds.len() * (last as usize + 1));
+        let mut units = Vec::with_capacity(ids.len() * (last as usize + 1));
         for step in priority_order(current.min(last), last) {
-            for &kind in &kinds {
-                for tile in &ids {
-                    units.push(Unit {
-                        step,
-                        kind,
-                        tile: *tile,
-                    });
-                }
+            for tile in &ids {
+                units.push(Unit { step, tile: *tile });
             }
         }
         // Reversed so the workers can pop from the back in priority order.
@@ -333,7 +297,7 @@ impl RenderPool {
             (unit, snapshot)
         };
 
-        let prepared = snapshot.prepared(state, unit.step, unit.kind);
+        let prepared = snapshot.prepared(state, unit.step);
         let key = prepared.key(unit.tile);
         if state.tiles.contains(&key) {
             return true;
@@ -399,29 +363,20 @@ impl RenderPool {
     /// the timeline can ask often. The snapshot is taken or reused exactly as
     /// [`Self::request`] takes it, so the hashes the answer is built from are
     /// the hashes the pool is rendering under.
-    ///
-    /// `None` for the kind counts the tiles of every kind the project holds
-    /// (M30): a step is ready when the map has all of them.
-    pub fn readiness(
-        &self,
-        state: &AppState,
-        tiles: &[TileAddress],
-        kind: Option<FieldKind>,
-    ) -> Result<TimelineReadiness> {
-        let (snapshot, kinds) = {
+    pub fn readiness(&self, state: &AppState, tiles: &[TileAddress]) -> Result<TimelineReadiness> {
+        let snapshot = {
             let session = state
                 .session
                 .lock()
                 .map_err(|_| AppError::Internal("session lock was poisoned".to_owned()))?;
             let open = session.open.as_ref().ok_or(AppError::NoProjectOpen)?;
-            let kinds = kinds_wanted(&open.project, kind);
             let existing = self
                 .queue
                 .lock()
                 .ok()
                 .and_then(|queue| queue.snapshot.clone())
                 .filter(|snapshot| snapshot.revision == open.revision);
-            let snapshot = match existing {
+            match existing {
                 Some(snapshot) => snapshot,
                 None => {
                     let snapshot = Arc::new(Snapshot::of(open.revision, open.project.clone()));
@@ -430,26 +385,21 @@ impl RenderPool {
                     }
                     snapshot
                 }
-            };
-            (snapshot, kinds)
+            }
         };
 
         let ids: Vec<TileId> = tiles
             .iter()
             .filter_map(|t| TileId::new(t.z, t.x, t.y).ok())
             .collect();
-        let total = (ids.len() * kinds.len()) as u32;
+        let total = ids.len() as u32;
         let steps = (0..snapshot.project.settings.step_count)
             .map(|step| {
-                let ready = kinds
+                let prepared = snapshot.prepared(state, step);
+                let ready = ids
                     .iter()
-                    .map(|&kind| {
-                        let prepared = snapshot.prepared(state, step, kind);
-                        ids.iter()
-                            .filter(|tile| state.tiles.contains(&prepared.key(**tile)))
-                            .count() as u32
-                    })
-                    .sum();
+                    .filter(|tile| state.tiles.contains(&prepared.key(**tile)))
+                    .count() as u32;
                 StepReadiness { step, ready, total }
             })
             .collect();
@@ -494,29 +444,18 @@ pub fn render_ahead(
     pool: tauri::State<'_, Arc<RenderPool>>,
     current: u32,
     tiles: Vec<TileAddress>,
-    kind: Option<String>,
 ) -> Result<()> {
-    let kind = kind
-        .as_deref()
-        .map(crate::projects::parse_field_kind)
-        .transpose()?;
-    pool.request(&state, current, &tiles, kind)
+    pool.request(&state, current, &tiles)
 }
 
-/// How ready every step is, for the viewport — of every kind the map shows,
-/// or of the one named.
+/// How ready every step is, for the viewport.
 #[tauri::command]
 pub fn frame_readiness(
     state: tauri::State<'_, AppState>,
     pool: tauri::State<'_, Arc<RenderPool>>,
     tiles: Vec<TileAddress>,
-    kind: Option<String>,
 ) -> Result<TimelineReadiness> {
-    let kind = kind
-        .as_deref()
-        .map(crate::projects::parse_field_kind)
-        .transpose()?;
-    pool.readiness(&state, &tiles, kind)
+    pool.readiness(&state, &tiles)
 }
 
 #[cfg(test)]

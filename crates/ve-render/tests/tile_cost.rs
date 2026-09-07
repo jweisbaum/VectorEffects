@@ -43,6 +43,8 @@ fn scene_of(id: tile::TileId, count: u32, reach_m: f64, square: bool) -> Scene {
             let chains = vec![vec![[0.0, 0.0], [reach_m * 0.6, reach_m * 0.25]]];
             FlatObject {
                 erased: Vec::new(),
+                layer: 0,
+                kind: ve_core::project::FieldKind::Wind,
                 frame: Frame::new(anchor, f64::from(i) * 20.0, 100.0),
                 shape: if square {
                     Shape::SweptSquare {
@@ -95,6 +97,8 @@ fn scene_with_raster(id: tile::TileId) -> Scene {
         ve_core::raster::RasterGrid::new(ni, nj, 0.0, 90.0, 0.25, 0.25, uv).expect("valid grid");
     scene.rasters.push(ve_render::scene::FlatRaster {
         erased: Vec::new(),
+        layer: 0,
+        kind: ve_core::project::FieldKind::Wind,
         z: 0,
         grid: std::sync::Arc::new(grid),
         speed_range: None,

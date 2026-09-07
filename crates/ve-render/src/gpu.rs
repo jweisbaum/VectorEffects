@@ -12,16 +12,17 @@
 use std::borrow::Cow;
 use std::sync::{Arc, Mutex};
 
+use ve_core::project::FieldKind;
 use ve_core::vector::Uv;
 
 use crate::aeqd::Space;
 use crate::error::{RenderError, Result};
-use crate::evaluator::{FieldEvaluator, SamplePoint};
+use crate::evaluator::{FieldEvaluator, Sample, SamplePoint};
 use crate::scene::{DirectionMode, EdgeMode, Modifier, Scene, SpeedMode};
 use crate::sdf::Shape;
 
 /// Words per packed object. Must match the WGSL `Object` struct.
-const OBJECT_WORDS: usize = 32;
+const OBJECT_WORDS: usize = 36;
 /// Words per packed raster header. Must match the WGSL `Raster` struct.
 const RASTER_WORDS: usize = 12;
 /// Threads per workgroup. Must match the `@workgroup_size` in the shader.
@@ -119,6 +120,15 @@ fn push_f32(out: &mut Vec<u8>, value: f32) {
 
 fn push_u32(out: &mut Vec<u8>, value: u32) {
     out.extend_from_slice(&value.to_le_bytes());
+}
+
+/// The kind as the kernel reads it: 1 for wind, 0 for a current — the same
+/// bit the tile carries.
+fn kind_word(kind: FieldKind) -> u32 {
+    match kind {
+        FieldKind::Wind => 1,
+        FieldKind::Current => 0,
+    }
 }
 
 fn pack(scene: &Scene) -> Packed {
@@ -287,6 +297,14 @@ fn pack(scene: &Scene) -> Packed {
         push_f32(&mut objects, object.motion.omega[2] as f32);
         push_f32(&mut objects, object.motion.scale_rate as f32);
 
+        // Its layer, its kind and whether it removes rather than writes
+        // (M31): what the kernel stacks the layers by, draws the cell as,
+        // and takes the coverage down with. A fourth word keeps the row.
+        push_u32(&mut objects, object.layer);
+        push_u32(&mut objects, kind_word(object.kind));
+        push_u32(&mut objects, u32::from(object.erases));
+        push_u32(&mut objects, 0);
+
         debug_assert_eq!(objects.len() % (OBJECT_WORDS * 4), 0);
     }
 
@@ -321,7 +339,9 @@ fn pack(scene: &Scene) -> Packed {
             .map_or((0.0, f32::INFINITY), |band| (band.min_mps, band.max_mps));
         push_f32(&mut rasters, low);
         push_f32(&mut rasters, high);
-        push_u32(&mut rasters, 0);
+        // Its layer and kind (M31), packed in one word: the layer in the low
+        // sixteen bits, the kind above.
+        push_u32(&mut rasters, raster.layer | (kind_word(raster.kind) << 16));
         offset += grid.len() as u32;
         raster_key.push(grid.hash);
         debug_assert_eq!(rasters.len() % (RASTER_WORDS * 4), 0);
@@ -478,7 +498,7 @@ impl FieldEvaluator for GpuEvaluator {
         "wgpu"
     }
 
-    fn evaluate(&self, scene: &Scene, points: &[SamplePoint]) -> Result<Vec<Uv>> {
+    fn evaluate_samples(&self, scene: &Scene, points: &[SamplePoint]) -> Result<Vec<Sample>> {
         if points.is_empty() {
             return Ok(Vec::new());
         }
@@ -492,7 +512,7 @@ impl FieldEvaluator for GpuEvaluator {
         // Nothing to composite: every sample is calm, and a zero-length storage
         // buffer is not permitted anyway.
         if scene.objects.is_empty() && scene.rasters.is_empty() {
-            return Ok(vec![Uv::default(); points.len()]);
+            return Ok(vec![Sample::default(); points.len()]);
         }
 
         use wgpu::util::DeviceExt;
@@ -503,7 +523,8 @@ impl FieldEvaluator for GpuEvaluator {
             sample_bytes.extend_from_slice(&(point.lon as f32).to_le_bytes());
             sample_bytes.extend_from_slice(&(point.lat as f32).to_le_bytes());
         }
-        let output_size = (points.len() * 8) as u64;
+        // Four floats a sample: u, v, coverage, kind (M31).
+        let output_size = (points.len() * 16) as u64;
 
         let make = |label, contents: &[u8]| {
             self.device
@@ -611,11 +632,22 @@ impl FieldEvaluator for GpuEvaluator {
         let data = slice
             .get_mapped_range()
             .map_err(|err| RenderError::Flatten(format!("gpu buffer map failed: {err}")))?;
+        let word = |chunk: &[u8], at: usize| {
+            f32::from_le_bytes([chunk[at], chunk[at + 1], chunk[at + 2], chunk[at + 3]])
+        };
         let out = data
-            .chunks_exact(8)
-            .map(|chunk| Uv {
-                u: f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]),
-                v: f32::from_le_bytes([chunk[4], chunk[5], chunk[6], chunk[7]]),
+            .chunks_exact(16)
+            .map(|chunk| Sample {
+                uv: Uv {
+                    u: word(chunk, 0),
+                    v: word(chunk, 4),
+                },
+                coverage: word(chunk, 8),
+                kind: if word(chunk, 12) >= 0.5 {
+                    FieldKind::Wind
+                } else {
+                    FieldKind::Current
+                },
             })
             .collect();
         drop(data);

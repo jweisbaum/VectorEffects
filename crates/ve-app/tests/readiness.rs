@@ -267,17 +267,13 @@ fn rendering_ahead_makes_every_step_ready() {
     stamp(&state, 0.0, 0.0);
     let pool = RenderPool::new();
 
-    let before = pool
-        .readiness(&state, &viewport(), None)
-        .expect("readiness");
+    let before = pool.readiness(&state, &viewport()).expect("readiness");
     assert!(before.steps.iter().all(|s| s.ready == 0 && s.total == 2));
 
-    pool.request(&state, 0, &viewport(), None).expect("request");
+    pool.request(&state, 0, &viewport()).expect("request");
     pool.drain(&state);
 
-    let after = pool
-        .readiness(&state, &viewport(), None)
-        .expect("readiness");
+    let after = pool.readiness(&state, &viewport()).expect("readiness");
     assert_eq!(after.steps.len() as u32, STEPS);
     assert!(
         after.steps.iter().all(|s| s.ready == s.total),
@@ -295,15 +291,13 @@ fn an_edit_unreadies_exactly_the_steps_it_changed() {
     let id = stamp(&state, 0.0, 0.0);
     document::object_range(&state, id, 4, 6).expect("range");
     let pool = RenderPool::new();
-    pool.request(&state, 0, &viewport(), None).expect("request");
+    pool.request(&state, 0, &viewport()).expect("request");
     pool.drain(&state);
 
     document::set_property(&state, id, "Speed", PropertyValue::Number { value: 25.0 })
         .expect("edit");
 
-    let readiness = pool
-        .readiness(&state, &viewport(), None)
-        .expect("readiness");
+    let readiness = pool.readiness(&state, &viewport()).expect("readiness");
     let stale: Vec<u32> = readiness
         .steps
         .iter()
@@ -326,13 +320,11 @@ fn steps_that_look_the_same_share_their_tiles() {
     let id = stamp(&state, 0.0, 0.0);
     document::object_range(&state, id, 4, 6).expect("range");
     let pool = RenderPool::new();
-    pool.request(&state, 0, &viewport(), None).expect("request");
+    pool.request(&state, 0, &viewport()).expect("request");
     pool.drain(&state);
 
     assert_eq!(state.tiles.stats().entries, 4, "two frames, two tiles each");
-    let readiness = pool
-        .readiness(&state, &viewport(), None)
-        .expect("readiness");
+    let readiness = pool.readiness(&state, &viewport()).expect("readiness");
     assert!(
         readiness.steps.iter().all(|s| s.ready == s.total),
         "and every step is ready"
@@ -347,7 +339,7 @@ fn re_requesting_after_an_edit_renders_only_the_changed_steps() {
     let id = stamp(&state, 0.0, 0.0);
     animate(&state, id);
     let pool = RenderPool::new();
-    pool.request(&state, 0, &viewport(), None).expect("request");
+    pool.request(&state, 0, &viewport()).expect("request");
     pool.drain(&state);
     let entries_before = state.tiles.stats().entries;
     assert_eq!(
@@ -366,20 +358,16 @@ fn re_requesting_after_an_edit_renders_only_the_changed_steps() {
         Some(PropertyValue::Number { value: 0.0 }),
     )
     .expect("edit");
-    let before = pool
-        .readiness(&state, &viewport(), None)
-        .expect("readiness");
+    let before = pool.readiness(&state, &viewport()).expect("readiness");
     let unready = before.steps.iter().filter(|s| s.ready < s.total).count();
     assert_eq!(unready, 10);
 
-    pool.request(&state, 0, &viewport(), None).expect("request");
+    pool.request(&state, 0, &viewport()).expect("request");
     pool.drain(&state);
 
     // Only the unready steps were rendered: ten steps, two tiles each.
     assert_eq!(state.tiles.stats().entries, entries_before + 20);
-    let readiness = pool
-        .readiness(&state, &viewport(), None)
-        .expect("readiness");
+    let readiness = pool.readiness(&state, &viewport()).expect("readiness");
     assert!(readiness.steps.iter().all(|s| s.ready == s.total));
 }
 
@@ -391,13 +379,11 @@ fn the_playhead_is_rendered_first_and_its_neighbours_next() {
     let id = stamp(&state, 0.0, 0.0);
     animate(&state, id);
     let pool = RenderPool::new();
-    pool.request(&state, 5, &viewport(), None).expect("request");
+    pool.request(&state, 5, &viewport()).expect("request");
 
     let mut order = Vec::new();
     while pool.process_next(&state) {
-        let readiness = pool
-            .readiness(&state, &viewport(), None)
-            .expect("readiness");
+        let readiness = pool.readiness(&state, &viewport()).expect("readiness");
         for s in readiness.steps {
             if s.ready == s.total && !order.contains(&s.step) {
                 order.push(s.step);
@@ -420,13 +406,11 @@ fn a_new_request_replaces_the_queue() {
     let id = stamp(&state, 0.0, 0.0);
     animate(&state, id);
     let pool = RenderPool::new();
-    pool.request(&state, 0, &viewport(), None).expect("first");
-    pool.request(&state, 11, &viewport(), None).expect("second");
+    pool.request(&state, 0, &viewport()).expect("first");
+    pool.request(&state, 11, &viewport()).expect("second");
 
     assert!(pool.process_next(&state));
-    let readiness = pool
-        .readiness(&state, &viewport(), None)
-        .expect("readiness");
+    let readiness = pool.readiness(&state, &viewport()).expect("readiness");
     let first_ready = readiness.steps.iter().find(|s| s.ready > 0).map(|s| s.step);
     assert_eq!(
         first_ready,
@@ -443,7 +427,7 @@ fn a_warm_tile_is_served_in_well_under_the_budget() {
     let (_root, state) = project("warm");
     stamp(&state, 0.0, 0.0);
     let pool = RenderPool::new();
-    pool.request(&state, 0, &viewport(), None).expect("request");
+    pool.request(&state, 0, &viewport()).expect("request");
     pool.drain(&state);
 
     let doc = document_of(&state);

@@ -127,7 +127,11 @@ export const api = {
   tileBaseUrl: () => call<string>("tile_base_url"),
 
   /** Samples the field at a position, for the cursor readout. */
-  sampleField: (lon: number, lat: number, step: number, kind: FieldKindName) =>
+  /**
+   * The field at a point: of one kind, or, with `null`, the composite the map
+   * shows and the kind that wins the cell (M31).
+   */
+  sampleField: (lon: number, lat: number, step: number, kind: FieldKindName | null) =>
     call<FieldSample>("sample_field", { lon, lat, step, kind }),
 
   /**

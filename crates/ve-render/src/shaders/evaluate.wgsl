@@ -6,12 +6,14 @@
 // works in f32 and uses whatever approximations the hardware offers.
 //
 // Not handled here, deliberately:
-//   - the clone stamp, which reads the composite beneath itself and so needs
+//   - the clone stamp, which reads its layer beneath itself and so needs
 //     recursion; scenes containing one fall back to the CPU.
-//   - the warp modifier, for the same reason: it reads the composite at a
+//   - the warp modifier, for the same reason: it reads its layer at a
 //     displaced position (spec.md 6.3). The other three modifiers transform
 //     the vector where it already is and are handled below.
-// Everything else follows the same order of operations as the CPU path.
+// Everything else follows the same order of operations as the CPU path:
+// each layer composited on its own, the layers stacked by coverage, and
+// the coverage and the kind written out beside the field (M31).
 
 const EARTH_RADIUS_M: f32 = 6371229.0;
 const PI: f32 = 3.14159265358979;
@@ -71,6 +73,15 @@ struct Object {
     // fourth word is the relative rate of change of scale, per second.
     motion_omega: vec3<f32>,
     motion_scale_rate: f32,
+
+    // The layer the object is in, counting from the bottom; the kind of
+    // field its layer holds, 1 for wind; and whether it removes rather than
+    // writes — the mask (M31). The kernel composites each layer on its own
+    // and stacks the layers by coverage, as `composite` in cpu.rs does.
+    layer: u32,
+    kind: u32,
+    erases: u32,
+    pad0: u32,
 };
 
 // An imported field's time slice: a regular lat/lon lattice in canonical
@@ -90,13 +101,13 @@ struct Raster {
     wraps: u32,               // 1 when the column after the last is column 0
     speed_min: f32,           // the layer's speed band; 0..inf when it has none
     speed_max: f32,
-    pad0: u32,
+    layer_kind: u32,          // the layer in the low 16 bits, the kind above (M31)
 };
 
 @group(0) @binding(0) var<storage, read> objects: array<Object>;
 @group(0) @binding(1) var<storage, read> points: array<vec2<f32>>;
 @group(0) @binding(2) var<storage, read> samples: array<vec2<f32>>;   // lon, lat
-@group(0) @binding(3) var<storage, read_write> output: array<vec2<f32>>; // u, v
+@group(0) @binding(3) var<storage, read_write> output: array<vec4<f32>>; // u, v, coverage, kind
 @group(0) @binding(4) var<storage, read> rasters: array<Raster>;
 @group(0) @binding(5) var<storage, read> raster_data: array<vec2<f32>>; // u, v
 
@@ -550,29 +561,100 @@ fn modified_vector(object: Object, position: vec2<f32>, beneath: vec2<f32>) -> v
     return beneath;
 }
 
+// One layer's accumulation while the kernel walks it, and the stack of the
+// layers finished so far (spec.md 7.6, M31). Mirrors `stack` in cpu.rs.
+struct Composite {
+    out_uv: vec2<f32>,
+    out_coverage: f32,
+    out_kind: f32,
+    strong: bool,
+    acc: vec2<f32>,
+    coverage: f32,
+    layer: u32,
+    kind: u32,
+    open: bool,
+};
+
+// Stacks the layer being accumulated over what is beneath it. The
+// accumulation is premultiplied by its coverage, so the layer goes over the
+// stack by the usual rule; the kind is the topmost layer's that covers at
+// least half the cell, or, while none does, the topmost that touches it.
+fn close_layer(c: ptr<function, Composite>) {
+    if ((*c).open && (*c).coverage > 0.0) {
+        let cov = (*c).coverage;
+        (*c).out_uv = (*c).out_uv * (1.0 - cov) + (*c).acc;
+        (*c).out_coverage = (*c).out_coverage * (1.0 - cov) + cov;
+        if (cov >= 0.5) {
+            (*c).out_kind = f32((*c).kind);
+            (*c).strong = true;
+        } else if (!(*c).strong) {
+            (*c).out_kind = f32((*c).kind);
+        }
+    }
+    (*c).open = false;
+}
+
+// Begins accumulating `layer` if it is not the one open, closing the open one.
+fn enter_layer(c: ptr<function, Composite>, layer: u32, kind: u32) {
+    if ((*c).open && (*c).layer == layer) { return; }
+    close_layer(c);
+    (*c).acc = vec2<f32>(0.0, 0.0);
+    (*c).coverage = 0.0;
+    (*c).layer = layer;
+    (*c).kind = kind;
+    (*c).open = true;
+}
+
+// How much of the cell the layer has written after an object, the port of
+// `covered` in cpu.rs: a mask subtracts, a blend accumulates, a replace sets.
+fn covered(object: Object, before: f32, weight: f32) -> f32 {
+    if (object.erases != 0u) { return before * (1.0 - weight); }
+    if (object.edge_mode == 1u) { return weight; }
+    return before + (1.0 - before) * weight;
+}
+
+fn apply_raster(c: ptr<function, Composite>, raster: Raster, position: vec2<f32>) {
+    enter_layer(c, raster.layer_kind & 0xffffu, raster.layer_kind >> 16u);
+    let sampled = sample_raster(raster, position);
+    if (sampled.z > 0.5 && kept(raster, sampled.xy)) {
+        (*c).acc = sampled.xy;
+        (*c).coverage = 1.0;
+    }
+}
+
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     let index = id.x;
     if (index >= arrayLength(&samples)) { return; }
 
     let position = samples[index];
-    var accumulated = vec2<f32>(0.0, 0.0);
+    var c: Composite;
+    c.out_uv = vec2<f32>(0.0, 0.0);
+    c.out_coverage = 0.0;
+    c.out_kind = 1.0;
+    c.strong = false;
+    c.acc = vec2<f32>(0.0, 0.0);
+    c.coverage = 0.0;
+    c.layer = 0u;
+    c.kind = 1u;
+    c.open = false;
 
     // Imported fields are interleaved with the objects by z, as in
-    // `sample_upto`: a raster at z is applied just before object z. Where the
-    // grid has a value it overwrites outright.
+    // `sample_layer`: a raster at z is applied just before object z. Where the
+    // grid has a value it overwrites outright. A layer boundary — an object
+    // or a raster of another layer — stacks the layer so far and starts the
+    // next (M31).
     let raster_count = arrayLength(&rasters);
     var next_raster = 0u;
 
     let count = arrayLength(&objects);
     for (var o = 0u; o < count; o = o + 1u) {
         while (next_raster < raster_count && rasters[next_raster].z <= o) {
-            let raster = rasters[next_raster];
-            let sampled = sample_raster(raster, position);
-            if (sampled.z > 0.5 && kept(raster, sampled.xy)) { accumulated = sampled.xy; }
+            apply_raster(&c, rasters[next_raster], position);
             next_raster = next_raster + 1u;
         }
         let object = objects[o];
+        enter_layer(&c, object.layer, object.kind);
 
         // Coverage, the port of `coverage` in cpu.rs: the cap cull, the signed
         // distance, the feather ramp, and the inversion that turns all three
@@ -598,11 +680,11 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
         let local = to_local(object, position);
 
         // A modifier rewrites what is already in the buffer — everything below
-        // it in z-order — and fades from the old to the new by the same weight
-        // (spec.md 6.3, 7.6).
+        // it in its layer — and fades from the old to the new by the same
+        // weight (spec.md 6.3, 7.6).
         if (object.mod_kind != 0u) {
-            let modified = modified_vector(object, position, accumulated);
-            accumulated = accumulated + (modified - accumulated) * weight;
+            let modified = modified_vector(object, position, c.acc);
+            c.acc = c.acc + (modified - c.acc) * weight;
             continue;
         }
 
@@ -612,18 +694,18 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
         // than the two separately (spec.md 9.3).
         let vector = uv_from(speed, bearing) + motion_uv(object, position);
 
+        c.coverage = covered(object, c.coverage, weight);
         if (object.edge_mode == 1u) {
-            accumulated = vector * weight;
+            c.acc = vector * weight;
         } else {
-            accumulated = accumulated + (vector - accumulated) * weight;
+            c.acc = c.acc + (vector - c.acc) * weight;
         }
     }
     while (next_raster < raster_count && rasters[next_raster].z <= count) {
-        let raster = rasters[next_raster];
-        let sampled = sample_raster(raster, position);
-        if (sampled.z > 0.5 && kept(raster, sampled.xy)) { accumulated = sampled.xy; }
+        apply_raster(&c, rasters[next_raster], position);
         next_raster = next_raster + 1u;
     }
+    close_layer(&c);
 
-    output[index] = accumulated;
+    output[index] = vec4<f32>(c.out_uv, c.out_coverage, c.out_kind);
 }

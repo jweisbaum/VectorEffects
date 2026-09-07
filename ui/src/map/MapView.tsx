@@ -63,10 +63,11 @@ import { destination, distanceM } from "./geo";
 import {
   extendLatticeUnderStroke,
   freshLattice,
+  GLYPH_SIZE_SCALE,
   glyphGeometry,
-  glyphLayout,
   type LatticeProgress,
   latticeUnder,
+  mapGlyphLayout,
 } from "./glyph";
 import {
   DEFAULT_PROJECTION,
@@ -86,7 +87,7 @@ import type { MeasurementView } from "../generated/MeasurementView";
 import type { MeasurementKind } from "../generated/MeasurementKind";
 import type { NewMeasurement } from "../generated/NewMeasurement";
 import { showsHoverIndicator, showsMagnifier } from "./hover";
-import { KIND_LABELS, KINDS, type FieldKindName, kindLetter, kindOf } from "../kind";
+import { KIND_LABELS, KINDS, type FieldKindName, kindOf } from "../kind";
 import { trackKeyframes } from "./macroTrack";
 import { RAMP_STOPS, rampCss } from "./ramp";
 import { parseBasemap } from "./format";
@@ -156,7 +157,7 @@ import {
   draggedCorners,
   hasArea,
 } from "./place";
-import { type FieldPass, MapRenderer, type OperatorPreview, type RenderState } from "./renderer";
+import { MapRenderer, type OperatorPreview, type RenderState } from "./renderer";
 import { uniqueTiles } from "../timeline/playback";
 import { TileCache } from "./tiles";
 
@@ -169,6 +170,10 @@ interface Readout {
   directionDeg: number;
   /** The stored azimuth, toward, for drawing a glyph (spec.md 3.3). */
   azimuthTowardDeg: number;
+  /** Whether any layer wrote the cell (M31, D58). */
+  defined: boolean;
+  /** The kind of the layer that wins the cell. */
+  kind: FieldKindName;
 }
 
 /** What the readout shows: the sample under the cursor, and the zoom. */
@@ -308,10 +313,17 @@ function MapReadout({ store, convention }: { store: ReadoutStore; convention: st
         <>
           <span>{formatDegrees(sample.lat, "N", "S")}</span>
           <span>{formatDegrees(normalizeLon(sample.lon), "E", "W")}</span>
-          <span className="accent">{sample.speedKnots.toFixed(1)} kt</span>
-          <span>
-            {Math.round(sample.directionDeg)}° ({convention})
-          </span>
+          {sample.defined ? (
+            <>
+              <span className="muted">{sample.kind === "wind" ? "wind" : "current"}</span>
+              <span className="accent">{sample.speedKnots.toFixed(1)} kt</span>
+              <span>
+                {Math.round(sample.directionDeg)}° ({convention})
+              </span>
+            </>
+          ) : (
+            <span className="muted">no field</span>
+          )}
           <span className="muted">{zoomPercent}%</span>
         </>
       ) : (
@@ -541,14 +553,10 @@ export default function MapView({
    */
   const imageLayersRef = useRef<ImageLayerView[]>([]);
   /**
-   * The last frame of each kind whose tiles were all on screen. A frame that
-   * is not yet draws its missing tiles from this one, dimmed, rather than
-   * blank. Per kind (M30): the wind and the current tiles land separately.
+   * The last frame whose tiles were all on screen. A frame that is not yet
+   * draws its missing tiles from this one, dimmed, rather than blank.
    */
-  const shownFramesRef = useRef<Record<FieldKindName, string | null>>({
-    wind: null,
-    current: null,
-  });
+  const shownFrameRef = useRef<string | null>(null);
   const cameraRef = useRef<Camera>({ centerLon: 0, centerLat: 20, pxPerDeg: 3 });
   const viewRef = useRef<Viewport>({ width: 1, height: 1 });
   /**
@@ -637,11 +645,7 @@ export default function MapView({
   /** The active layer's kind, for the paths that read refs (M29). */
   const activeKindRef = useRef(activeKind);
   activeKindRef.current = activeKind;
-  /**
-   * The kinds the map draws, wind first (M30): every kind a visible layer
-   * holds. Empty until the project has a field layer.
-   */
-  const kindsRef = useRef<FieldKindName[]>([]);
+
   const loggedDrawError = useRef(false);
 
   /**
@@ -816,23 +820,11 @@ export default function MapView({
   const frameRevision = () =>
     recordingRef.current?.preview_revision ?? projectRef.current.revision;
   /**
-   * The kinds the map draws right now (M30): the preview's one kind while a
-   * macro preview is shown, every kind the project holds otherwise.
+   * A tile frame's address: revision, then step. An edit changes the
+   * revision, so a cached tile can never show a field that no longer exists.
+   * One tile holds every kind of field (M31).
    */
-  const kindsDrawn = (): FieldKindName[] => {
-    const capture = recordingRef.current;
-    if (capture?.preview_revision !== undefined && capture?.preview_revision !== null) {
-      return [kindOf(capture.kind)];
-    }
-    return kindsRef.current;
-  };
-  /**
-   * A tile frame's address: revision, then step, then kind. An edit changes
-   * the revision, so a cached tile can never show a field that no longer
-   * exists; the kind makes the wind and the current tiles different tiles.
-   */
-  const frameOf = (step: number, kind: FieldKindName): string =>
-    `${frameRevision()}/${step}/${kindLetter(kind)}`;
+  const frameOf = (step: number): string => `${frameRevision()}/${step}`;
   /** Whether movement is recorded by the *next* capture. */
   const [recordMovement, setRecordMovement] = useState(false);
   /** The macro library, for the insert tool's bar. */
@@ -1016,11 +1008,10 @@ export default function MapView({
    * and the next frame paints with. A frame that drew no field falls back
    * to the project's scale rather than to nothing.
    */
-  // One ramp per kind (M29, M30): wind and current are an order of magnitude
-  // apart, and the map shows both, each on its own scale.
+  // One ramp per kind (M29, M31): wind and current are an order of magnitude
+  // apart, and the map shows both, each on its own scale, with a legend
+  // entry for each kind the project holds.
   const kindsShown: FieldKindName[] = project.kinds_present.map(kindOf);
-  kindsRef.current = kindsShown;
-  const kindsKey = kindsShown.join(",");
   const autoScale = settings?.auto_scale ?? false;
   const [seenRanges, setSeenRanges] = useState<Record<FieldKindName, SeenRange>>({
     wind: null,
@@ -1193,33 +1184,23 @@ export default function MapView({
       overlayScheduled.current = null;
     }
 
-    // One pass per kind on the map (M30), each addressing its own tiles.
-    const kinds = kindsDrawn();
-    const fields: FieldPass[] = kinds.map((kind) => {
-      const frame = frameOf(stepRef.current, kind);
-      // The last frame of this kind fully on screen stands in for this one's
-      // missing tiles — but never across the preview's boundary (M28): the
-      // document's tiles held under the preview kept every layer on the map
-      // until the first click, and the preview's under the document kept the
-      // macro alone.
-      const previous = shownFramesRef.current[kind];
-      const shown =
-        previous !== null && isPreviewFrame(previous) === isPreviewFrame(frame)
-          ? previous
-          : null;
-      const ramp = rampRef.current[kind];
-      return {
-        frame,
-        heldFrame: shown !== null && shown !== frame ? shown : null,
-        glyphStyle: glyphStyleOf(kind),
-        rampMin: ramp.min,
-        rampMax: ramp.max,
-      };
-    });
+    const frame = frameOf(stepRef.current);
+    // The last frame fully on screen stands in for this one's missing tiles —
+    // but never across the preview's boundary (M28): the document's tiles
+    // held under the preview kept every layer on the map until the first
+    // click, and the preview's under the document kept the macro alone.
+    const previous = shownFrameRef.current;
+    const shown =
+      previous !== null && isPreviewFrame(previous) === isPreviewFrame(frame) ? previous : null;
     const state: RenderState = {
       camera: cameraRef.current,
       view: viewRef.current,
-      fields,
+      frame,
+      heldFrame: shown !== null && shown !== frame ? shown : null,
+      ramps: {
+        wind: { min: rampRef.current.wind.min, max: rampRef.current.wind.max },
+        current: { min: rampRef.current.current.min, max: rampRef.current.current.max },
+      },
       showGlyphs: showGlyphsRef.current,
       showGraticule: showGraticuleRef.current,
       pixelRatio: window.devicePixelRatio || 1,
@@ -1250,13 +1231,13 @@ export default function MapView({
     try {
       const ranges = renderer.render(state);
       // The auto scale follows what was drawn (spec.md 5.3, M27), per kind
-      // (M30). Applied only when a range moved by more than the eye can see,
+      // (M31). Applied only when a range moved by more than the eye can see,
       // and through state, so the next frame paints with it and the legend
       // says so.
       if (autoScaleRef.current) {
         let moved = false;
-        kinds.forEach((kind, index) => {
-          const seen = ranges[index] ?? null;
+        KINDS.forEach((kind) => {
+          const seen = ranges[kind];
           const last = seenRef.current[kind];
           const changed =
             seen === null
@@ -1271,15 +1252,10 @@ export default function MapView({
         });
         if (moved) setSeenRanges({ ...seenRef.current });
       }
-      // Once every tile of a kind's frame is on screen it is the one to hold.
+      // Once every tile of this frame is on screen it is the one to hold.
       const tiles = tilesRef.current;
-      if (tiles) {
-        kinds.forEach((kind, index) => {
-          const frame = fields[index]?.frame;
-          if (frame !== undefined && tiles.residentCount(frame, unique) === unique.length) {
-            shownFramesRef.current[kind] = frame;
-          }
-        });
+      if (tiles && tiles.residentCount(frame, unique) === unique.length) {
+        shownFrameRef.current = frame;
       }
     } catch (err) {
       // A GL failure inside an animation frame is easy to lose. Report it once
@@ -2009,13 +1985,7 @@ export default function MapView({
     const tiles = tilesRef.current;
     if (!tiles) return true;
     const unique = uniqueTiles(visibleTiles(cameraRef.current, viewRef.current));
-    // Every kind is asked for, resident or not: a step is ready only when the
-    // tiles of every kind on the map are (M30).
-    let resident = true;
-    for (const kind of kindsDrawn()) {
-      if (!tiles.prefetch(frameOf(target, kind), unique)) resident = false;
-    }
-    return resident;
+    return tiles.prefetch(frameOf(target), unique);
   }, []);
   const bounds = useCallback((): [number, number, number, number] | null => {
     const view = viewRef.current;
@@ -2116,7 +2086,8 @@ export default function MapView({
       if (at.length === 0) return;
       const camera = cameraRef.current;
       const view = viewRef.current;
-      const { lengthPx } = glyphLayout(glyphStyle, camera.pxPerDeg, dpr);
+      // The map's lattice, and this kind's length on it (M31).
+      const lengthPx = mapGlyphLayout(camera.pxPerDeg, dpr).spacing * GLYPH_SIZE_SCALE[glyphStyle];
       const width = Math.max(1, 1.8 * dpr);
 
       const strokes = new Path2D();
@@ -2183,7 +2154,7 @@ export default function MapView({
       // Every piece is its own subpath, so filling once merges overlapping
       // footprints into a single silhouette instead of drawing a chain of
       // outlines on top of each other -- and leaves a ring its hole.
-      const { stepDeg } = glyphLayout(glyphStyle, camera.pxPerDeg, dpr);
+      const { stepDeg } = mapGlyphLayout(camera.pxPerDeg, dpr);
       const footprint = preview.footprint;
       let covered: Array<[number, number]>;
 
@@ -3277,10 +3248,6 @@ export default function MapView({
   useEffect(() => {
     requestDraw();
   }, [rampsKey, requestDraw]);
-  // A kind arriving or leaving is a new pass of new tiles.
-  useEffect(() => {
-    requestDraw();
-  }, [kindsKey, requestDraw]);
 
   const onPointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -4055,7 +4022,8 @@ export default function MapView({
     void api
       // Read from the refs rather than the closure: a queued request runs from
       // an earlier pointer report's promise, after the step may have moved.
-      .sampleField(geo.lon, geo.lat, stepRef.current, activeKindRef.current)
+      // The composite the map shows, whichever kind wins the cell (M31).
+      .sampleField(geo.lon, geo.lat, stepRef.current, null)
       .then((sample) =>
         store?.set({
           sample: {
@@ -4067,6 +4035,8 @@ export default function MapView({
               sample.azimuth_toward_deg,
             ),
             azimuthTowardDeg: sample.azimuth_toward_deg,
+            defined: sample.defined,
+            kind: kindOf(sample.kind),
           },
         }),
       )
@@ -4625,15 +4595,12 @@ export default function MapView({
         renderer.render({
           camera: { ...base, centerLon: base.centerLon + i * 0.25 },
           view,
-          fields: [
-            {
-              frame: `${projectRef.current.revision}/0/w`,
-              heldFrame: null,
-              glyphStyle: "barb",
-              rampMin,
-              rampMax,
-            },
-          ],
+          frame: `${projectRef.current.revision}/0`,
+          heldFrame: null,
+          ramps: {
+            wind: { min: rampMin, max: rampMax },
+            current: { min: rampMin, max: rampMax },
+          },
           showGlyphs: true, showGraticule: true,
           pixelRatio: window.devicePixelRatio || 1,
         });
@@ -4644,15 +4611,12 @@ export default function MapView({
         renderer.render({
           camera: { ...base, centerLon: base.centerLon + i * 0.25 },
           view,
-          fields: [
-            {
-              frame: `${projectRef.current.revision}/0/w`,
-              heldFrame: null,
-              glyphStyle: "barb",
-              rampMin,
-              rampMax,
-            },
-          ],
+          frame: `${projectRef.current.revision}/0`,
+          heldFrame: null,
+          ramps: {
+            wind: { min: rampMin, max: rampMax },
+            current: { min: rampMin, max: rampMax },
+          },
           showGlyphs: true, showGraticule: true,
           pixelRatio: window.devicePixelRatio || 1,
         });

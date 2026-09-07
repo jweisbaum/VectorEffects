@@ -357,6 +357,16 @@ export function glyphLayout(
 }
 
 /**
+ * The lattice the map draws its glyphs on (M31): one lattice for both kinds,
+ * spaced for a barb, which needs the room; an arrow on it is drawn at its
+ * own length. The gesture preview draws on the same lattice, or its glyphs
+ * would sit beside the map's rather than on them.
+ */
+export function mapGlyphLayout(pxPerDeg: number, pixelRatio: number): GlyphLayout {
+  return glyphLayout("barb", pxPerDeg, pixelRatio);
+}
+
+/**
  * Whether a compact footprint covers a lattice point.
  *
  * Measured in degrees about the footprint's centre, the same way

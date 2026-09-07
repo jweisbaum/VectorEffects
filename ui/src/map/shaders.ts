@@ -198,6 +198,34 @@ void main() {
 }
 `;
 
+/**
+ * How a tile's texel is read (spec.md 7.7, M31).
+ *
+ * One little-endian 32-bit word per texel: the speed in the low 14 bits as a
+ * fraction of full scale, the azimuth-toward in the next 12 as a fraction of
+ * a turn, the coverage in the next 5, and the kind in the top bit, 1 for
+ * wind. Shared by the raster and the glyph programs so the two cannot read
+ * the same bytes differently. Expects the program to declare "uTile" and
+ * "uSpeedScale" first.
+ */
+const TEXEL = `
+uint texelWord(ivec2 texel) {
+  uvec4 b = uvec4(texelFetch(uTile, texel, 0) * 255.0 + 0.5);
+  return b.r | (b.g << 8u) | (b.b << 16u) | (b.a << 24u);
+}
+float wordSpeed(uint w) { return float(w & 16383u) / 16383.0 * uSpeedScale; }
+float wordAzimuth(uint w) { return float((w >> 14u) & 4095u) / 4096.0 * 360.0; }
+float wordCoverage(uint w) { return float((w >> 26u) & 31u) / 31.0; }
+bool wordIsWind(uint w) { return (w >> 31u) == 1u; }
+`;
+
+/**
+ * How opaque a written cell is. Below one so the land's shape still reads
+ * through a field painted over it; a written calm is exactly as opaque as a
+ * gale (M31) — only an unwritten cell shows the map beneath.
+ */
+export const FIELD_OPACITY = 0.9;
+
 export const RASTER_FRAG = `#version 300 es
 precision highp float;
 in vec2 vUV;
@@ -205,19 +233,18 @@ ${PROJECTION}
 uniform vec4 uTileGeo;      // west, north, spanX, spanY
 uniform sampler2D uTile;
 uniform float uSpeedScale;  // full-scale speed, m/s
-uniform float uRampMin;     // speed mapped to the bottom of the ramp (0 unless auto-scaled)
-uniform float uRampMax;     // speed mapped to the top of the ramp
+uniform vec2 uRampWind;     // speeds mapped to the ends of the wind ramp, m/s
+uniform vec2 uRampCurrent;  // and of the current ramp (M31)
 uniform float uDim;         // 1.0 normally, lower while a frame is stale
 ${MASK}
+${TEXEL}
 out vec4 fragColor;
 
-float decodeSpeed(ivec2 texel) {
-  vec4 t = texelFetch(uTile, texel, 0);
-  return (t.r * 255.0 + t.g * 255.0 * 256.0) / 65535.0 * uSpeedScale;
-}
+// The decoded speed, coverage and kind at the four texels about a point,
+// blended: the speed and the coverage bilinearly, the kind from the nearest.
+struct Field { float speed; float coverage; bool wind; };
 
-// Manual bilinear over decoded speeds.
-float sampleSpeed(vec2 uv) {
+Field sampleField(vec2 uv) {
   vec2 size = vec2(textureSize(uTile, 0));
   vec2 texel = uv * size - 0.5;
   vec2 base = floor(texel);
@@ -225,11 +252,18 @@ float sampleSpeed(vec2 uv) {
   ivec2 b = ivec2(base);
   ivec2 maxT = ivec2(size) - 1;
 
-  float s00 = decodeSpeed(clamp(b + ivec2(0, 0), ivec2(0), maxT));
-  float s10 = decodeSpeed(clamp(b + ivec2(1, 0), ivec2(0), maxT));
-  float s01 = decodeSpeed(clamp(b + ivec2(0, 1), ivec2(0), maxT));
-  float s11 = decodeSpeed(clamp(b + ivec2(1, 1), ivec2(0), maxT));
-  return mix(mix(s00, s10, f.x), mix(s01, s11, f.x), f.y);
+  uint w00 = texelWord(clamp(b + ivec2(0, 0), ivec2(0), maxT));
+  uint w10 = texelWord(clamp(b + ivec2(1, 0), ivec2(0), maxT));
+  uint w01 = texelWord(clamp(b + ivec2(0, 1), ivec2(0), maxT));
+  uint w11 = texelWord(clamp(b + ivec2(1, 1), ivec2(0), maxT));
+  Field out_;
+  out_.speed = mix(mix(wordSpeed(w00), wordSpeed(w10), f.x),
+                   mix(wordSpeed(w01), wordSpeed(w11), f.x), f.y);
+  out_.coverage = mix(mix(wordCoverage(w00), wordCoverage(w10), f.x),
+                      mix(wordCoverage(w01), wordCoverage(w11), f.x), f.y);
+  uint nearest = f.x < 0.5 ? (f.y < 0.5 ? w00 : w01) : (f.y < 0.5 ? w10 : w11);
+  out_.wind = wordIsWind(nearest);
+  return out_;
 }
 
 // Perceptually ordered ramp: dark and desaturated at calm, hot at the top, so
@@ -272,12 +306,15 @@ vec2 tileUV() {
 }
 
 void main() {
-  float speed = sampleSpeed(tileUV());
-  vec3 colour = ramp((speed - uRampMin) / max(uRampMax - uRampMin, 0.001));
-  // Calm water stays transparent so the basemap shows through.
-  // Capped below 1 so the basemap stays visible through the field; calm areas
-  // fade out entirely so the map is readable where there is nothing to show.
-  float alpha = clamp(speed / (uRampMax * 0.06), 0.0, 1.0) * 0.72;
+  Field field = sampleField(tileUV());
+  // Each kind on its own scale: wind and current are an order of magnitude
+  // apart, and the cell says which it is (M31).
+  vec2 rampEnds = field.wind ? uRampWind : uRampCurrent;
+  vec3 colour = ramp((field.speed - rampEnds.x) / max(rampEnds.y - rampEnds.x, 0.001));
+  // Zero and undefined are different things: a written calm is as opaque as
+  // any other written cell, and only where nothing wrote does the map show
+  // through (M31, D58). A feathered edge fades with its coverage.
+  float alpha = field.coverage * ${FIELD_OPACITY.toFixed(2)};
   fragColor = vec4(colour * uDim, alpha * maskFactor());
 }
 `;
@@ -305,9 +342,10 @@ uniform vec2 uGrid;         // columns, rows
 uniform float uSpacing;     // lattice spacing, screen px (step * pxPerDeg)
 uniform sampler2D uTile;
 uniform float uSpeedScale;
-uniform int uStyle;         // 0 = arrow, 1 = barb
-uniform float uSizeScale;   // glyph length as a fraction of spacing
+uniform float uSizeScaleArrow; // glyph length as a fraction of spacing, by style
+uniform float uSizeScaleBarb;
 uniform float uPixelRatio;  // device pixels per CSS pixel; keeps strokes even
+${TEXEL}
 out float vShade;
 
 const float DEG = 0.017453292519943295;
@@ -338,21 +376,29 @@ void main() {
 
   ivec2 size = textureSize(uTile, 0);
   ivec2 texel = clamp(ivec2(uv * vec2(size)), ivec2(0), size - 1);
-  vec4 t = texelFetch(uTile, texel, 0);
-  float speed = (t.r * 255.0 + t.g * 255.0 * 256.0) / 65535.0 * uSpeedScale;
-  float azimuth = (t.b * 255.0 + t.a * 255.0 * 256.0) / 65535.0 * 360.0;
+  uint word = texelWord(texel);
+  // Nothing wrote here: no glyph, whatever the calm beneath would draw as.
+  if (wordCoverage(word) <= 0.0) {
+    gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+    return;
+  }
+  float speed = wordSpeed(word);
+  float azimuth = wordAzimuth(word);
+  // The cell's kind chooses the glyph (M31): wind is a barb, a current an
+  // arrow, always.
+  bool barb = wordIsWind(word);
 
   vShade = clamp(speed / 25.0, 0.25, 1.0);
 
   // Screen space is y-down, so north is -y. Azimuth is clockwise from north.
   float az = azimuth * DEG;
   vec2 toward = vec2(sin(az), -cos(az));
-  float length_px = uSpacing * uSizeScale;
+  float length_px = uSpacing * (barb ? uSizeScaleBarb : uSizeScaleArrow);
 
   vec2 offset = vec2(0.0);
   int id = gl_VertexID;
 
-  if (uStyle == 0) {
+  if (!barb) {
     // ---- Arrow: shaft quad plus a head triangle ----
     float halfW = 0.9 * uPixelRatio;
     vec2 side = vec2(-toward.y, toward.x);

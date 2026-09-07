@@ -9,8 +9,9 @@ use std::sync::Arc;
 
 use ve_core::angle::Angle;
 use ve_core::capture::{Capture, FramePick, Resample};
+use ve_core::document::Layer;
 use ve_core::document::{Geometry, Object, PathNode, SpeedRange};
-use ve_core::project::Project;
+use ve_core::project::{FieldKind, Project};
 use ve_core::raster::RasterGrid;
 use ve_core::schema::{PropId, ToolKind};
 use ve_core::vector::Uv;
@@ -284,6 +285,15 @@ pub struct FlatRasterErasure {
 /// One object with every property resolved for a single time step.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FlatObject {
+    /// Which layer of the scene the object is in, counting from the bottom
+    /// (M31). A modifier, a clone stamp and a warp read the field of their
+    /// own layer beneath them and nothing below it; the layers are then
+    /// stacked by coverage (spec.md 7.6).
+    pub layer: u32,
+    /// The kind of field the object's layer holds (M31): what the cell it
+    /// wins is drawn as — a barb or an arrow, on the wind or the current
+    /// scale.
+    pub kind: FieldKind,
     /// What the eraser has taken from it at this step (M29): coverage is
     /// multiplied by what these leave.
     pub erased: Vec<FlatErasure>,
@@ -358,9 +368,8 @@ pub struct FlatObject {
     /// rather than a real zero, so that a patch taken over one is transparent
     /// there instead of painting a hole of dead air (spec.md 8.5, D58).
     ///
-    /// Read by the capture and by nothing else, so it is deliberately **not**
-    /// in the render cache's key: it changes no frame, and §7.10's rule is
-    /// that a key changes exactly when a frame does.
+    /// Read by the capture, and since M31 by the tile too: what a mask
+    /// removed is drawn as nothing, so it is in the render cache's key.
     pub erases: bool,
     /// The object's own movement, added to what it paints (spec.md 9.3, M13).
     ///
@@ -383,6 +392,10 @@ pub struct FlatRaster {
     /// How many objects lie beneath it. The raster is applied before object
     /// `z`, or after the last object when `z` equals the object count.
     pub z: usize,
+    /// The layer it belongs to, counting from the bottom (M31).
+    pub layer: u32,
+    /// The kind of field its layer holds (M31).
+    pub kind: FieldKind,
     /// The lattice, shared with the layer that owns it.
     pub grid: Arc<RasterGrid>,
     /// Which speeds the layer keeps, if it filters (spec.md 4.8).
@@ -398,6 +411,11 @@ pub struct FlatRaster {
 }
 
 /// A whole time step, ready to evaluate. Objects are in z-order, bottom first.
+///
+/// Objects and rasters carry the index of the layer they came from, and a
+/// layer's objects are contiguous (M31): the evaluator composites each layer
+/// on its own and stacks the layers by coverage, so a layer boundary is
+/// where one accumulation ends and the next begins.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Scene {
     /// Objects, bottom of the stack first.
@@ -827,6 +845,9 @@ pub fn flatten_object_at(object: &Object, step: u32, derived: Derived) -> Option
         capture: None,
         erases: object.tool == ToolKind::Mask,
         motion: Motion::default(),
+        // Set by `flatten`; a lone object is its own bottom layer.
+        layer: 0,
+        kind: FieldKind::Wind,
         // Only the mask has the property; everything else reads `false` and
         // covers what it is drawn over, as it always did.
         invert: object
@@ -1059,7 +1080,8 @@ fn capture_of(project: &Project, object: &Object, step: u32) -> Option<FlatCaptu
     })
 }
 
-/// Flattens a whole project for one time step, in z-order.
+/// Flattens a whole project for one time step, in z-order: every visible
+/// layer with a field, of every kind (M31). What the map draws.
 ///
 /// A layer's imported field, if it has one, goes in beneath the layer's own
 /// objects — at the steps the file has a message for, and at no others: a step
@@ -1071,29 +1093,35 @@ fn capture_of(project: &Project, object: &Object, step: u32) -> Option<FlatCaptu
 /// the *file* holds, so nothing below this line — the cache key, the
 /// readiness probe, either kernel — needs to know the choice was made.
 pub fn flatten(project: &Project, step: u32) -> Scene {
-    flatten_kind(project, step, project.settings.field_kind)
+    flatten_where(project, step, |_| true)
 }
 
 /// The scene of one **kind** of field at `step` (M29): the visible layers
-/// whose parameter is `kind`, in stack order. A project may hold wind and
-/// current layers together; the map shows one kind at a time and the export
-/// bakes each kind to its own message pair, and both come through here.
-/// [`flatten`] is this for the project's own kind, which is what a project
-/// made before layers carried one has.
-pub fn flatten_kind(project: &Project, step: u32, kind: ve_core::project::FieldKind) -> Scene {
+/// whose parameter is `kind`, in stack order. What the export bakes to that
+/// kind's message pair, and what a capture of that kind reads.
+pub fn flatten_kind(project: &Project, step: u32, kind: FieldKind) -> Scene {
+    flatten_where(project, step, |layer| layer.parameter() == kind)
+}
+
+fn flatten_where(project: &Project, step: u32, wanted: impl Fn(&Layer) -> bool) -> Scene {
     // Links are resolved once for the whole project, in dependency order: a
     // follower needs its primary placed first, and its primary may follow
     // something in turn (spec.md 9.3).
     let links = Links::resolve(project, step);
     let mut scene = Scene::default();
-    for layer in project
+    for (index, layer) in project
         .layers
         .iter()
-        .filter(|l| l.visible && l.has_field() && l.parameter() == kind)
+        .filter(|l| l.visible && l.has_field() && wanted(l))
+        .enumerate()
     {
+        let layer_index = index as u32;
+        let kind = layer.parameter();
         if let Some(frame) = layer.imported_frame(&project.settings, step) {
             scene.rasters.push(FlatRaster {
                 z: scene.objects.len(),
+                layer: layer_index,
+                kind,
                 grid: Arc::clone(&frame.grid),
                 speed_range: layer.speed_range,
                 erased: layer
@@ -1138,6 +1166,8 @@ pub fn flatten_kind(project: &Project, step: u32, kind: ve_core::project::FieldK
                     .ok();
                 }
                 let mut flat = flatten_object_at(object, step, derived)?;
+                flat.layer = layer_index;
+                flat.kind = kind;
                 flat.motion = motion_of(object, step, hours, last, &links);
                 flat.capture = patch;
                 Some(flat)

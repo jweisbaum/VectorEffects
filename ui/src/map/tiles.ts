@@ -16,13 +16,14 @@ interface Entry {
   texture: WebGLTexture | null;
   status: TileStatus;
   /**
-   * The tile's speed range as 16-bit fractions of full scale, read once at
-   * upload (`tileSpeedRange`), or null for a tile with no field in it.
+   * The tile's speed range of each kind as 14-bit fractions of full scale,
+   * read once at upload (`tileSpeedRange`), or null for a tile with no
+   * field in it.
    */
-  range: [number, number] | null;
+  range: TileRanges | null;
 }
 
-import { tileSpeedRange } from "./tileRange";
+import { type TileRanges, hasField, tileSpeedRange } from "./tileRange";
 
 /** Tracks fetched tiles and their textures. */
 export class TileCache {
@@ -82,10 +83,10 @@ export class TileCache {
   }
 
   /**
-   * A resident tile's speed range as 16-bit fractions of full scale, or null
-   * when it is not resident or holds no field. Fetches nothing.
+   * A resident tile's speed ranges as 14-bit fractions of full scale, or
+   * null when it is not resident or holds no field. Fetches nothing.
    */
-  rangeOf(frame: string, z: number, x: number, y: number): [number, number] | null {
+  rangeOf(frame: string, z: number, x: number, y: number): TileRanges | null {
     return this.entries.get(TileCache.key(frame, z, x, y))?.range ?? null;
   }
 
@@ -124,7 +125,12 @@ export class TileCache {
 
       entry.texture = this.upload(bytes);
       entry.status = entry.texture ? "ready" : "failed";
-      entry.range = entry.texture ? tileSpeedRange(bytes) : null;
+      if (entry.texture) {
+        const ranges = tileSpeedRange(bytes);
+        entry.range = hasField(ranges) ? ranges : null;
+      } else {
+        entry.range = null;
+      }
     } catch (error) {
       entry.status = "failed";
       const message = `tile ${key} failed: ${error instanceof Error ? error.message : String(error)}`;

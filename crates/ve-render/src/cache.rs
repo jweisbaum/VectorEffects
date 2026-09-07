@@ -38,8 +38,9 @@ pub type SceneHash = [u8; 32];
 /// — a kernel that reads the same object differently. It is part of every
 /// key, so a tile rendered by an older evaluator is unreachable rather than
 /// served as this one's (spec.md 7.10). 2: divergence radiates from a
-/// stroke's centreline (M29).
-pub const EVALUATOR_VERSION: u32 = 2;
+/// stroke's centreline (M29). 3: layers are composited on their own and
+/// stacked by coverage, and a tile carries the coverage and the kind (M31).
+pub const EVALUATOR_VERSION: u32 = 3;
 
 pub fn scene_hash(scene: &Scene) -> SceneHash {
     let mut hasher = blake3::Hasher::new();
@@ -55,6 +56,8 @@ pub fn scene_hash(scene: &Scene) -> SceneHash {
     hasher.update(&(scene.rasters.len() as u64).to_le_bytes());
     for raster in &scene.rasters {
         hasher.update(&(raster.z as u64).to_le_bytes());
+        hasher.update(&raster.layer.to_le_bytes());
+        hasher.update(&[kind_byte(raster.kind)]);
         hasher.update(&raster.grid.hash);
         // The speed band decides which of the lattice's samples are drawn at
         // all, so a tile keyed without it would be served from before the
@@ -86,11 +89,23 @@ pub fn scene_hash(scene: &Scene) -> SceneHash {
     *hasher.finalize().as_bytes()
 }
 
+fn kind_byte(kind: ve_core::project::FieldKind) -> u8 {
+    match kind {
+        ve_core::project::FieldKind::Wind => 0,
+        ve_core::project::FieldKind::Current => 1,
+    }
+}
+
 fn hash_f64(hasher: &mut blake3::Hasher, value: f64) {
     hasher.update(&value.to_le_bytes());
 }
 
 fn hash_object(hasher: &mut blake3::Hasher, object: &FlatObject) {
+    // Which layer the object is in decides what a modifier in it reads and
+    // where its layer's boundary falls in the stack; the kind is drawn; a
+    // mask's removal is what the tile's coverage shows (M31).
+    hasher.update(&object.layer.to_le_bytes());
+    hasher.update(&[kind_byte(object.kind), u8::from(object.erases)]);
     hash_f64(hasher, object.frame.anchor.lon);
     hash_f64(hasher, object.frame.anchor.lat);
     hash_f64(hasher, object.frame.rotation_deg);
@@ -638,6 +653,8 @@ mod tests {
     fn object(speed: f64) -> FlatObject {
         FlatObject {
             erased: Vec::new(),
+            layer: 0,
+            kind: ve_core::project::FieldKind::Wind,
             frame: Frame::new(
                 LonLat {
                     lon: 10.0,
@@ -695,6 +712,8 @@ mod tests {
                 .expect("valid grid");
         crate::scene::FlatRaster {
             erased: Vec::new(),
+            layer: 0,
+            kind: ve_core::project::FieldKind::Wind,
             z,
             grid: std::sync::Arc::new(grid),
             speed_range: None,

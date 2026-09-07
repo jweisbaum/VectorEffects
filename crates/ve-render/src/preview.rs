@@ -28,7 +28,7 @@ use ve_core::LonLat;
 use ve_core::vector::Uv;
 
 use crate::error::Result;
-use crate::evaluator::FieldEvaluator;
+use crate::evaluator::{FieldEvaluator, Sample};
 use crate::scene::Scene;
 use crate::tile::{TILE_SIZE, TileId};
 
@@ -60,30 +60,66 @@ impl Quality {
     }
 }
 
-/// Bilinear blend of four corner vectors.
-fn blend(c00: Uv, c10: Uv, c01: Uv, c11: Uv, tx: f32, ty: f32) -> Uv {
-    let top_u = c00.u + (c10.u - c00.u) * tx;
-    let top_v = c00.v + (c10.v - c00.v) * tx;
-    let bottom_u = c01.u + (c11.u - c01.u) * tx;
-    let bottom_v = c01.v + (c11.v - c01.v) * tx;
-    Uv {
-        u: top_u + (bottom_u - top_u) * ty,
-        v: top_v + (bottom_v - top_v) * ty,
+/// Interpolation error in coverage above which a cell on the edge of the
+/// written field is evaluated exactly (M31): a written cell beside an
+/// unwritten one is an edge whatever the field does there, and interpolating
+/// across it would feather a hard one. Only a cell with an unwritten corner
+/// or centre is tested — inside the field the coverage is at most a little
+/// off across overlapping feathered rims, which moves the alpha by less than
+/// the eye can see, and testing it there refined a third of a dense tile and
+/// cost the coarse path its advantage.
+const COVERAGE_REFINE_THRESHOLD: f32 = 0.2;
+
+fn lerp(a: f32, b: f32, t: f32) -> f32 {
+    a + (b - a) * t
+}
+
+/// Bilinear blend of four corner samples.
+///
+/// The field and the coverage interpolate; the kind cannot, so the nearest
+/// corner's is taken — a cell whose corners disagree about it is refined
+/// anyway, so the choice only ever decides a pixel inside a uniform cell.
+fn blend(c00: Sample, c10: Sample, c01: Sample, c11: Sample, tx: f32, ty: f32) -> Sample {
+    let top_u = lerp(c00.uv.u, c10.uv.u, tx);
+    let top_v = lerp(c00.uv.v, c10.uv.v, tx);
+    let bottom_u = lerp(c01.uv.u, c11.uv.u, tx);
+    let bottom_v = lerp(c01.uv.v, c11.uv.v, tx);
+    let top_c = lerp(c00.coverage, c10.coverage, tx);
+    let bottom_c = lerp(c01.coverage, c11.coverage, tx);
+    let nearest = match (tx < 0.5, ty < 0.5) {
+        (true, true) => c00,
+        (false, true) => c10,
+        (true, false) => c01,
+        (false, false) => c11,
+    };
+    Sample {
+        uv: Uv {
+            u: lerp(top_u, bottom_u, ty),
+            v: lerp(top_v, bottom_v, ty),
+        },
+        coverage: lerp(top_c, bottom_c, ty),
+        kind: nearest.kind,
     }
 }
 
-/// How far the true centre value departs from the interpolated one.
-fn interpolation_error(corners: [Uv; 4], centre: Uv) -> f32 {
+/// Whether the true centre value departs from the interpolated one by more
+/// than the eye is allowed to see — in the field, in the coverage, or in
+/// the kind, which either agrees across the cell or does not.
+fn needs_refining(corners: [Sample; 4], centre: Sample) -> bool {
     let predicted = blend(corners[0], corners[1], corners[2], corners[3], 0.5, 0.5);
-    (predicted.u - centre.u)
+    let field_error = (predicted.uv.u - centre.uv.u)
         .abs()
-        .max((predicted.v - centre.v).abs())
+        .max((predicted.uv.v - centre.uv.v).abs());
+    let on_the_edge = centre.coverage <= 0.0 || corners.iter().any(|corner| corner.coverage <= 0.0);
+    field_error > REFINE_THRESHOLD
+        || (on_the_edge && (predicted.coverage - centre.coverage).abs() > COVERAGE_REFINE_THRESHOLD)
+        || corners.iter().any(|corner| corner.kind != centre.kind)
 }
 
 /// Lattice nodes and the cells that need exact evaluation.
 struct CellPlan {
     nodes: u32,
-    node_values: Vec<Uv>,
+    node_values: Vec<Sample>,
     refine: Vec<(u32, u32)>,
 }
 
@@ -114,8 +150,8 @@ fn plan_cells(
         })
         .collect();
 
-    let node_values = evaluator.evaluate(scene, &node_positions)?;
-    let node = |column: u32, row: u32| -> Uv {
+    let node_values = evaluator.evaluate_samples(scene, &node_positions)?;
+    let node = |column: u32, row: u32| -> Sample {
         node_values
             .get((row * nodes + column) as usize)
             .copied()
@@ -138,7 +174,7 @@ fn plan_cells(
             })
         })
         .collect();
-    let centre_values = evaluator.evaluate(scene, &centre_positions)?;
+    let centre_values = evaluator.evaluate_samples(scene, &centre_positions)?;
 
     let mut refine: Vec<(u32, u32)> = Vec::new();
     for row in 0..cells {
@@ -153,7 +189,7 @@ fn plan_cells(
                 .get((row * cells + column) as usize)
                 .copied()
                 .unwrap_or_default();
-            if interpolation_error(corners, centre) > REFINE_THRESHOLD {
+            if needs_refining(corners, centre) {
                 refine.push((column, row));
             }
         }
@@ -191,16 +227,16 @@ pub fn render_tile(
     scene: &Scene,
     id: TileId,
     quality: Quality,
-) -> Result<Vec<Uv>> {
+) -> Result<Vec<Sample>> {
     let stride = quality.stride();
     if stride <= 1 {
-        return evaluator.evaluate(scene, &id.sample_positions());
+        return evaluator.evaluate_samples(scene, &id.sample_positions());
     }
 
     let plan = plan_cells(evaluator, scene, id, stride)?;
     let nodes = plan.nodes;
     let cells = TILE_SIZE / stride;
-    let node = |column: u32, row: u32| -> Uv {
+    let node = |column: u32, row: u32| -> Sample {
         plan.node_values
             .get((row * nodes + column) as usize)
             .copied()
@@ -208,7 +244,7 @@ pub fn render_tile(
     };
     let refine = plan.refine;
 
-    let mut out = vec![Uv::default(); (TILE_SIZE * TILE_SIZE) as usize];
+    let mut out = vec![Sample::default(); (TILE_SIZE * TILE_SIZE) as usize];
 
     // Interpolate everything first, then overwrite the refined cells.
     for py in 0..TILE_SIZE {
@@ -249,7 +285,10 @@ pub fn render_tile(
             }
         }
 
-        for (index, value) in targets.iter().zip(evaluator.evaluate(scene, &positions)?) {
+        for (index, value) in targets
+            .iter()
+            .zip(evaluator.evaluate_samples(scene, &positions)?)
+        {
             out[*index] = value;
         }
     }
@@ -276,6 +315,8 @@ mod tests {
             rasters: Vec::new(),
             objects: vec![FlatObject {
                 erased: Vec::new(),
+                layer: 0,
+                kind: ve_core::project::FieldKind::Wind,
                 frame: crate::aeqd::Frame::new(centre, 0.0, 100.0),
                 shape: Shape::Disc {
                     radius_m: 400_000.0,
@@ -301,7 +342,11 @@ mod tests {
     }
 
     fn render(scene: &Scene, quality: Quality) -> Vec<Uv> {
-        render_tile(&CpuEvaluator, scene, tile(), quality).expect("renders")
+        render_tile(&CpuEvaluator, scene, tile(), quality)
+            .expect("renders")
+            .into_iter()
+            .map(|sample| sample.uv)
+            .collect()
     }
 
     #[test]
@@ -369,6 +414,8 @@ mod tests {
             rasters: Vec::new(),
             objects: vec![FlatObject {
                 erased: Vec::new(),
+                layer: 0,
+                kind: ve_core::project::FieldKind::Wind,
                 frame: crate::aeqd::Frame::new(centre, 0.0, 100.0),
                 shape: Shape::Disc {
                     radius_m: 5_000_000.0,

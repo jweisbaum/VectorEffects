@@ -66,10 +66,4 @@ stamp: [number, number] | null,
  * entry per frame, for the stamp hover to draw (M27). Empty otherwise,
  * and one entry for a macro that recorded no movement.
  */
-track: Array<[number, number]>, 
-/**
- * The kind of field the capture records and its preview shows — `wind`
- * or `current` — so the map draws the preview's one kind and nothing
- * else (M30). Null when no capture is running.
- */
-kind: string | null, };
+track: Array<[number, number]>, };

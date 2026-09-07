@@ -267,6 +267,8 @@ fn object(rng: &mut Rng) -> FlatObject {
 
     FlatObject {
         erased: Vec::new(),
+        layer: 0,
+        kind: ve_core::project::FieldKind::Wind,
         modifier,
         smear: Vec::new(),
         invert,
@@ -330,6 +332,8 @@ fn raster(rng: &mut Rng, z: usize) -> FlatRaster {
     let grid = RasterGrid::new(ni, nj, lon0, lat0, d, d, uv).expect("valid grid");
     FlatRaster {
         erased: Vec::new(),
+        layer: 0,
+        kind: ve_core::project::FieldKind::Wind,
         z,
         grid: std::sync::Arc::new(grid),
         // A third of imported fields are filtered to a band of speeds

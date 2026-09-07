@@ -109,13 +109,24 @@ pub struct FieldSample {
     /// convention; no code below this boundary sees a "from" bearing
     /// (spec.md 3.3).
     pub azimuth_toward_deg: f64,
+    /// Whether anything wrote the cell (M31, D58): a calm cell some layer
+    /// wrote is defined; one nothing wrote is not, whatever the map shows
+    /// beneath it.
+    pub defined: bool,
+    /// The kind of the layer the cell shows — `wind` or `current` — when
+    /// the composite was sampled; the kind asked for otherwise.
+    pub kind: String,
 }
 
 /// Samples the field at one position.
 ///
 /// The readout calls this rather than decoding the tile texture, so it reports
-/// the true value instead of the tile's 16-bit quantisation, and no second copy
-/// of the tile bytes has to be kept on the JavaScript side.
+/// the true value instead of the tile's quantisation, and no second copy of
+/// the tile bytes has to be kept on the JavaScript side.
+///
+/// With a `kind`, the field of that kind alone — what the eyedropper wants
+/// for the layer it will paint. Without one, the composite the map shows
+/// (M31): every layer stacked, and the kind of the one that wins the cell.
 #[tauri::command]
 pub fn sample_field(
     state: tauri::State<'_, AppState>,
@@ -125,7 +136,6 @@ pub fn sample_field(
     kind: Option<String>,
 ) -> Result<FieldSample> {
     let position = ve_core::LonLat::new(lon, lat)?;
-    // The kind the map is showing (M29), or the project's own.
     let kind = kind
         .as_deref()
         .map(crate::projects::parse_field_kind)
@@ -139,19 +149,22 @@ pub fn sample_field(
         return Ok(FieldSample {
             speed_mps: 0.0,
             azimuth_toward_deg: 0.0,
+            defined: false,
+            kind: crate::projects::kind_name(kind.unwrap_or_default()).to_owned(),
         });
     };
 
-    let scene = ve_render::scene::flatten_kind(
-        &open.project,
-        step,
-        kind.unwrap_or(open.project.settings.field_kind),
-    );
-    let uv = ve_render::cpu::sample_scene(&scene, position);
-    let (speed, azimuth) = ve_core::vector::speed_azimuth_from_uv(uv);
+    let scene = match kind {
+        Some(kind) => ve_render::scene::flatten_kind(&open.project, step, kind),
+        None => ve_render::scene::flatten(&open.project, step),
+    };
+    let sample = ve_render::cpu::composite(&scene, position);
+    let (speed, azimuth) = ve_core::vector::speed_azimuth_from_uv(sample.uv);
     Ok(FieldSample {
         speed_mps: speed,
         azimuth_toward_deg: azimuth.degrees(),
+        defined: sample.coverage > 0.0,
+        kind: crate::projects::kind_name(kind.unwrap_or(sample.kind)).to_owned(),
     })
 }
 

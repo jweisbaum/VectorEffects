@@ -893,6 +893,8 @@ fn an_imported_field_is_sampled_bilinearly_between_its_nodes() {
         objects: Vec::new(),
         rasters: vec![FlatRaster {
             erased: Vec::new(),
+            layer: 0,
+            kind: ve_core::project::FieldKind::Wind,
             z: 0,
             grid: indexed_grid(),
             speed_range: None,
@@ -921,6 +923,8 @@ fn an_imported_field_overwrites_what_is_beneath_and_yields_to_what_is_above() {
         objects: vec![painted.clone()],
         rasters: vec![FlatRaster {
             erased: Vec::new(),
+            layer: 0,
+            kind: ve_core::project::FieldKind::Wind,
             z: 1,
             grid: atlantic(5.0, 0.0),
             speed_range: None,
@@ -935,6 +939,8 @@ fn an_imported_field_overwrites_what_is_beneath_and_yields_to_what_is_above() {
         objects: vec![painted],
         rasters: vec![FlatRaster {
             erased: Vec::new(),
+            layer: 0,
+            kind: ve_core::project::FieldKind::Wind,
             z: 0,
             grid: atlantic(5.0, 0.0),
             speed_range: None,
@@ -959,6 +965,8 @@ fn a_raster_beneath_a_clone_stamp_is_what_the_stamp_copies() {
         objects: vec![stamp],
         rasters: vec![FlatRaster {
             erased: Vec::new(),
+            layer: 0,
+            kind: ve_core::project::FieldKind::Wind,
             z: 0,
             grid: atlantic(3.0, 4.0),
             speed_range: None,

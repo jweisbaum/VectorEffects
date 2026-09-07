@@ -439,10 +439,6 @@ pub struct CaptureMode {
     /// entry per frame, for the stamp hover to draw (M27). Empty otherwise,
     /// and one entry for a macro that recorded no movement.
     pub track: Vec<[f64; 2]>,
-    /// The kind of field the capture records and its preview shows — `wind`
-    /// or `current` — so the map draws the preview's one kind and nothing
-    /// else (M30). Null when no capture is running.
-    pub kind: Option<String>,
 }
 
 fn mode_of(
@@ -473,7 +469,6 @@ fn mode_of(
                     .collect(),
                 _ => Vec::new(),
             },
-            kind: Some(crate::projects::kind_name(active.kind).to_owned()),
         },
         None => CaptureMode {
             active: false,
@@ -488,7 +483,6 @@ fn mode_of(
             preview_revision: None,
             stamp: None,
             track: Vec::new(),
-            kind: None,
         },
     }
 }

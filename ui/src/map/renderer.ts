@@ -18,7 +18,9 @@ import {
   visibleTiles,
 } from "./camera";
 import type { Basemap } from "./format";
-import { GLYPH_SIZE_SCALE, glyphLayout } from "./glyph";
+import { KINDS, type FieldKindName } from "../kind";
+import { GLYPH_SIZE_SCALE, mapGlyphLayout } from "./glyph";
+import { SPEED_MAX } from "./tileRange";
 import {
   GEO_FRAG,
   GEO_VERT,
@@ -98,19 +100,24 @@ export interface OperatorPreview {
 }
 
 /** What to draw. */
-/**
- * One kind of field to draw: its tiles, its ramp and its glyph style.
- *
- * The map draws every kind the project holds, one pass each (M30): wind as
- * barbs and currents as arrows, each on its own colour scale, since the two
- * are an order of magnitude apart. The raster is alpha-blended by speed, so a
- * later pass composes over an earlier one rather than covering it.
- */
-export interface FieldPass {
-  /** Opaque token naming the field's tiles, e.g. `<revision>/<step>/w`. */
+/** The range of speeds of each kind the last frame drew, m/s, or null for none. */
+export type SeenRanges = Record<FieldKindName, { min: number; max: number } | null>;
+
+/** One end-to-end span of the colour ramp, m/s. */
+export interface RampSpan {
+  /** Speed mapped to the bottom of the ramp: 0 unless the auto scale is on (spec.md 5.3, M27). */
+  min: number;
+  /** Speed mapped to the top of the ramp. */
+  max: number;
+}
+
+export interface RenderState {
+  camera: Camera;
+  view: Viewport;
+  /** Opaque token naming the field's tiles, e.g. `<revision>/<step>`. */
   frame: string;
   /**
-   * The frame of this kind shown before this one, or null.
+   * The frame shown before this one, or null.
    *
    * A tile this frame does not have yet is drawn from it, dimmed, rather than
    * left blank: a step change or an edit re-addresses every tile, and blanking
@@ -119,21 +126,12 @@ export interface FieldPass {
    * shows one at all, because it advances only into resident frames.
    */
   heldFrame: string | null;
-  glyphStyle: "arrow" | "barb";
   /**
-   * Speed mapped to the bottom of the colour ramp, m/s: 0 unless the auto
-   * scale is on (spec.md 5.3, M27).
+   * The colour ramp of each kind (M31). One tile holds both kinds, each cell
+   * saying which it is, and the shader picks the ramp per cell: wind and
+   * current are an order of magnitude apart.
    */
-  rampMin: number;
-  /** Speed mapped to the top of the colour ramp, m/s. */
-  rampMax: number;
-}
-
-export interface RenderState {
-  camera: Camera;
-  view: Viewport;
-  /** The fields to draw, bottom first. */
-  fields: readonly FieldPass[];
+  ramps: Record<FieldKindName, RampSpan>;
   showGlyphs: boolean;
   showGraticule: boolean;
   pixelRatio: number;
@@ -243,14 +241,14 @@ export class MapRenderer {
     this.geoUniforms = uniforms(gl, this.geoProgram, [...shared, "uColor"]);
     const mask = ["uMask", "uMaskSize", "uMaskMode"];
     this.rasterUniforms = uniforms(gl, this.rasterProgram, [
-      ...shared, ...mask, "uTileGeo", "uTile", "uSpeedScale", "uRampMin", "uRampMax", "uDim",
+      ...shared, ...mask, "uTileGeo", "uTile", "uSpeedScale", "uRampWind", "uRampCurrent", "uDim",
     ]);
     this.imageUniforms = uniforms(gl, this.imageProgram, [
       ...shared, "uPlaceLon", "uPlaceLat", "uImage", "uOpacity",
     ]);
     this.glyphUniforms = uniforms(gl, this.glyphProgram, [
       ...shared, ...mask, "uTileGeo", "uGlyphOrigin", "uGlyphStep", "uGrid", "uSpacing",
-      "uTile", "uSpeedScale", "uStyle", "uSizeScale", "uColor", "uPixelRatio",
+      "uTile", "uSpeedScale", "uSizeScaleArrow", "uSizeScaleBarb", "uColor", "uPixelRatio",
     ]);
 
     for (const lod of basemap.lods) {
@@ -421,7 +419,6 @@ export class MapRenderer {
   /** The speed raster, for one camera and one mask mode. */
   private drawRaster(
     state: RenderState,
-    field: FieldPass,
     camera: Camera,
     tiles: readonly VisibleTile[],
     mode: 0 | 1 | 2,
@@ -431,13 +428,17 @@ export class MapRenderer {
     gl.bindVertexArray(this.quadVao);
     gl.uniform1i(this.rasterUniforms.uTile ?? null, 0);
     gl.uniform1f(this.rasterUniforms.uSpeedScale ?? null, SPEED_SCALE_MPS);
-    gl.uniform1f(this.rasterUniforms.uRampMin ?? null, field.rampMin);
-    gl.uniform1f(this.rasterUniforms.uRampMax ?? null, field.rampMax);
+    gl.uniform2f(this.rasterUniforms.uRampWind ?? null, state.ramps.wind.min, state.ramps.wind.max);
+    gl.uniform2f(
+      this.rasterUniforms.uRampCurrent ?? null,
+      state.ramps.current.min,
+      state.ramps.current.max,
+    );
     this.setMask(this.rasterUniforms, state.view, mode);
     gl.activeTexture(gl.TEXTURE0);
 
     for (const tile of tiles) {
-      const { texture, held, frame } = this.textureFor(field, tile);
+      const { texture, held, frame } = this.textureFor(state, tile);
       if (!texture) continue;
       this.noteRange(frame, tile);
       const b = tileBounds(tile.z, tile.x, tile.y);
@@ -457,35 +458,40 @@ export class MapRenderer {
    * lands, the held frame's, which is marked so the raster can dim it.
    */
   private textureFor(
-    field: FieldPass,
+    state: RenderState,
     tile: VisibleTile,
   ): { texture: WebGLTexture | null; held: boolean; frame: string } {
-    const texture = this.tiles.get(field.frame, tile.z, tile.x, tile.y);
-    if (texture || !field.heldFrame) return { texture, held: false, frame: field.frame };
+    const texture = this.tiles.get(state.frame, tile.z, tile.x, tile.y);
+    if (texture || !state.heldFrame) return { texture, held: false, frame: state.frame };
     return {
-      texture: this.tiles.peek(field.heldFrame, tile.z, tile.x, tile.y),
+      texture: this.tiles.peek(state.heldFrame, tile.z, tile.x, tile.y),
       held: true,
-      frame: field.heldFrame,
+      frame: state.heldFrame,
     };
   }
 
   /**
-   * The range of speeds across the tiles the pass being drawn has covered, in
-   * m/s, or null when none of them held a field (spec.md 5.3, M27).
-   * Accumulated by the raster pass from each tile's own range, which the
-   * cache read at upload, and collected per field once the pass is done.
+   * The range of speeds of each kind across the tiles the last frame drew,
+   * in m/s, or null for a kind none of them held (spec.md 5.3, M27).
+   * Accumulated by the raster pass from each tile's own ranges, which the
+   * cache read at upload.
    */
-  private seen: { min: number; max: number } | null = null;
+  private seen: SeenRanges = { wind: null, current: null };
 
   private noteRange(frame: string, tile: VisibleTile): void {
-    const range = this.tiles.rangeOf(frame, tile.z, tile.x, tile.y);
-    if (range === null) return;
-    const min = (range[0] / 0xffff) * SPEED_SCALE_MPS;
-    const max = (range[1] / 0xffff) * SPEED_SCALE_MPS;
-    if (this.seen === null) this.seen = { min, max };
-    else {
-      if (min < this.seen.min) this.seen.min = min;
-      if (max > this.seen.max) this.seen.max = max;
+    const ranges = this.tiles.rangeOf(frame, tile.z, tile.x, tile.y);
+    if (ranges === null) return;
+    for (const kind of KINDS) {
+      const range = ranges[kind];
+      if (range === null) continue;
+      const min = (range[0] / SPEED_MAX) * SPEED_SCALE_MPS;
+      const max = (range[1] / SPEED_MAX) * SPEED_SCALE_MPS;
+      const seen = this.seen[kind];
+      if (seen === null) this.seen[kind] = { min, max };
+      else {
+        if (min < seen.min) seen.min = min;
+        if (max > seen.max) seen.max = max;
+      }
     }
   }
 
@@ -537,28 +543,25 @@ export class MapRenderer {
   /** The direction glyphs, for one camera and one mask mode. */
   private drawGlyphs(
     state: RenderState,
-    field: FieldPass,
     camera: Camera,
     tiles: readonly VisibleTile[],
     mode: 0 | 1 | 2,
   ): void {
     const gl = this.gl;
     // Spacing is resolved to a whole-degree lattice step so the grid is
-    // globally anchored. `glyphLayout` is shared with the gesture preview,
-    // which draws the same glyphs on the same lattice.
-    const { stepDeg, spacing } = glyphLayout(
-      field.glyphStyle,
-      camera.pxPerDeg,
-      state.pixelRatio,
-    );
+    // globally anchored. `mapGlyphLayout` is shared with the gesture preview,
+    // which draws the same glyphs on the same lattice. One lattice for both
+    // kinds (M31): each cell's kind picks the glyph, so a barb and an arrow
+    // never share a point.
+    const { stepDeg, spacing } = mapGlyphLayout(camera.pxPerDeg, state.pixelRatio);
     gl.useProgram(this.glyphProgram);
     gl.bindVertexArray(this.glyphVao);
     gl.uniform1i(this.glyphUniforms.uTile ?? null, 0);
     gl.uniform1f(this.glyphUniforms.uSpeedScale ?? null, SPEED_SCALE_MPS);
     gl.uniform1f(this.glyphUniforms.uSpacing ?? null, spacing);
     gl.uniform1f(this.glyphUniforms.uGlyphStep ?? null, stepDeg);
-    gl.uniform1i(this.glyphUniforms.uStyle ?? null, field.glyphStyle === "barb" ? 1 : 0);
-    gl.uniform1f(this.glyphUniforms.uSizeScale ?? null, GLYPH_SIZE_SCALE[field.glyphStyle]);
+    gl.uniform1f(this.glyphUniforms.uSizeScaleArrow ?? null, GLYPH_SIZE_SCALE.arrow);
+    gl.uniform1f(this.glyphUniforms.uSizeScaleBarb ?? null, GLYPH_SIZE_SCALE.barb);
     gl.uniform1f(this.glyphUniforms.uPixelRatio ?? null, state.pixelRatio);
     gl.uniform4f(this.glyphUniforms.uColor ?? null, ...GLYPH);
     this.setMask(this.glyphUniforms, state.view, mode);
@@ -568,7 +571,7 @@ export class MapRenderer {
     const centreY = projection.yOf(camera.centerLat);
 
     for (const tile of tiles) {
-      const { texture } = this.textureFor(field, tile);
+      const { texture } = this.textureFor(state, tile);
       if (!texture) continue;
       const b = tileBounds(tile.z, tile.x, tile.y);
       const originX =
@@ -610,15 +613,15 @@ export class MapRenderer {
   }
 
   /**
-   * Draws a frame and returns, per field pass and in the same order, the
-   * range of speeds across the tiles it drew, in m/s — null where none held
-   * a field. What the auto scale (spec.md 5.3) sets the next frame's ramps
-   * from, one per kind: wind and current share no scale.
+   * Draws a frame and returns the range of speeds of each kind across the
+   * tiles it drew, in m/s — null for a kind none held. What the auto scale
+   * (spec.md 5.3) sets the next frame's ramps from, one per kind: wind and
+   * current share no scale.
    */
-  render(state: RenderState): ({ min: number; max: number } | null)[] {
+  render(state: RenderState): SeenRanges {
     const gl = this.gl;
     const offsets = this.worldOffsets(state);
-    const ranges: ({ min: number; max: number } | null)[] = [];
+    this.seen = { wind: null, current: null };
     const lod = this.lodFor(state.camera.pxPerDeg);
 
     gl.viewport(0, 0, state.view.width, state.view.height);
@@ -681,15 +684,9 @@ export class MapRenderer {
 
     // --- Speed raster ---
     // The basemap is never masked: a mask takes away the field, not the
-    // coastline underneath it. One pass per kind, bottom first: the raster's
-    // alpha follows the speed, so a current shows through calm wind and wind
-    // shows where no current is painted (M30).
-    for (const field of state.fields) {
-      this.seen = null;
-      this.drawRaster(state, field, state.camera, tiles, mode);
-      if (source) this.drawRaster(state, field, source, sourceTiles, 2);
-      ranges.push(this.seen);
-    }
+    // coastline underneath it.
+    this.drawRaster(state, state.camera, tiles, mode);
+    if (source) this.drawRaster(state, source, sourceTiles, 2);
 
     // --- Coastlines, above the raster ---
     // The field covers land as well as sea, so a coastline drawn underneath it
@@ -719,12 +716,9 @@ export class MapRenderer {
     }
 
     // --- Glyphs ---
-    // Wind as barbs, currents as arrows, in the passes' order (M30).
     if (state.showGlyphs) {
-      for (const field of state.fields) {
-        this.drawGlyphs(state, field, state.camera, tiles, mode);
-        if (source) this.drawGlyphs(state, field, source, sourceTiles, 2);
-      }
+      this.drawGlyphs(state, state.camera, tiles, mode);
+      if (source) this.drawGlyphs(state, source, sourceTiles, 2);
     }
 
     gl.bindVertexArray(null);
@@ -736,7 +730,7 @@ export class MapRenderer {
       this.captureRequest = null;
       resolve(this.readPixels(state.view));
     }
-    return ranges;
+    return this.seen;
   }
 
   private readPixels(view: Viewport): ImageData | null {

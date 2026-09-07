@@ -9,7 +9,10 @@
 //! never sees components, so it cannot accidentally show them.
 
 use ve_core::LonLat;
-use ve_core::vector::{Uv, speed_azimuth_from_uv};
+use ve_core::project::FieldKind;
+use ve_core::vector::speed_azimuth_from_uv;
+
+use crate::evaluator::Sample;
 
 use crate::error::{RenderError, Result};
 
@@ -125,43 +128,89 @@ impl TileId {
     }
 }
 
-/// Encodes samples as RGBA8: speed in R+G, azimuth-toward in B+A.
-///
-/// Both are 16-bit little-endian pairs. Packing direction as an angle rather
-/// than as components means the glyph shader can read a bearing directly, and
-/// means `u`/`v` never cross into the webview at all.
-pub fn encode(samples: &[Uv]) -> Vec<u8> {
-    let mut out = vec![0u8; TILE_BYTES];
-    for (i, uv) in samples.iter().take(TILE_BYTES / 4).enumerate() {
-        let (speed, azimuth) = speed_azimuth_from_uv(*uv);
-        let speed_frac = (speed / f64::from(SPEED_SCALE_MPS)).clamp(0.0, 1.0);
-        let speed_u16 = (speed_frac * f64::from(u16::MAX)).round() as u16;
-        // 360 maps back onto 0, so the wrap is exact rather than one step short.
-        let az_u16 =
-            ((azimuth.degrees() / 360.0).rem_euclid(1.0) * f64::from(u16::MAX)).round() as u16;
+/// Bits of a texel's 32-bit word given to the speed (M31).
+pub const SPEED_BITS: u32 = 14;
+/// Bits given to the azimuth.
+pub const AZIMUTH_BITS: u32 = 12;
+/// Bits given to the coverage.
+pub const COVERAGE_BITS: u32 = 5;
+const SPEED_MAX: u32 = (1 << SPEED_BITS) - 1;
+const AZIMUTH_STEPS: u32 = 1 << AZIMUTH_BITS;
+const COVERAGE_MAX: u32 = (1 << COVERAGE_BITS) - 1;
 
-        let o = i * 4;
-        out[o] = (speed_u16 & 0xff) as u8;
-        out[o + 1] = (speed_u16 >> 8) as u8;
-        out[o + 2] = (az_u16 & 0xff) as u8;
-        out[o + 3] = (az_u16 >> 8) as u8;
+/// Encodes samples as RGBA8, one little-endian 32-bit word per texel
+/// (spec.md 7.7, M31): the speed in the low 14 bits as a fraction of full
+/// scale, the azimuth-toward in the next 12 as a fraction of a turn, the
+/// coverage in the next 5, and the kind in the top bit — 1 for wind.
+///
+/// Packing direction as an angle rather than as components means the glyph
+/// shader can read a bearing directly, and means `u`/`v` never cross into
+/// the webview at all. The coverage is what makes an unwritten cell
+/// transparent and a written calm one opaque (D58): zero and undefined are
+/// different things, and the tile carries the difference.
+pub fn encode(samples: &[Sample]) -> Vec<u8> {
+    let mut out = vec![0u8; TILE_BYTES];
+    for (i, sample) in samples.iter().take(TILE_BYTES / 4).enumerate() {
+        out[i * 4..i * 4 + 4].copy_from_slice(&encode_texel(sample).to_le_bytes());
     }
     out
 }
 
-/// Decodes one pixel back to `(speed m/s, azimuth-toward degrees)`.
+/// One texel's word.
+pub fn encode_texel(sample: &Sample) -> u32 {
+    let (speed, azimuth) = speed_azimuth_from_uv(sample.uv);
+    let speed_frac = (speed / f64::from(SPEED_SCALE_MPS)).clamp(0.0, 1.0);
+    let speed_bits = (speed_frac * f64::from(SPEED_MAX)).round() as u32;
+    // 360 maps back onto 0, so the wrap is exact rather than one step short.
+    let az_bits = ((azimuth.degrees() / 360.0).rem_euclid(1.0) * f64::from(AZIMUTH_STEPS)).round()
+        as u32
+        % AZIMUTH_STEPS;
+    // A cell that is written at all is written: the faint outer edge of a
+    // feathered stroke rounds up to the lowest step rather than to nothing.
+    let coverage = f64::from(sample.coverage.clamp(0.0, 1.0));
+    let coverage_bits = if coverage > 0.0 {
+        ((coverage * f64::from(COVERAGE_MAX)).round() as u32).max(1)
+    } else {
+        0
+    };
+    let kind_bit = u32::from(sample.kind == FieldKind::Wind);
+    speed_bits
+        | (az_bits << SPEED_BITS)
+        | (coverage_bits << (SPEED_BITS + AZIMUTH_BITS))
+        | (kind_bit << (SPEED_BITS + AZIMUTH_BITS + COVERAGE_BITS))
+}
+
+/// One texel decoded: speed in m/s, azimuth-toward in degrees, coverage 0
+/// to 1, and the kind.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Texel {
+    pub speed_mps: f64,
+    pub azimuth_deg: f64,
+    pub coverage: f64,
+    pub kind: FieldKind,
+}
+
+/// Decodes one pixel.
 ///
 /// The frontend does this in a shader; this exists so tests can assert the
 /// encoding round-trips rather than trusting it.
-pub fn decode_pixel(tile: &[u8], index: usize) -> Option<(f64, f64)> {
+pub fn decode_pixel(tile: &[u8], index: usize) -> Option<Texel> {
     let o = index * 4;
     let bytes = tile.get(o..o + 4)?;
-    let speed_u16 = u16::from(bytes[0]) | (u16::from(bytes[1]) << 8);
-    let az_u16 = u16::from(bytes[2]) | (u16::from(bytes[3]) << 8);
-    Some((
-        f64::from(speed_u16) / f64::from(u16::MAX) * f64::from(SPEED_SCALE_MPS),
-        f64::from(az_u16) / f64::from(u16::MAX) * 360.0,
-    ))
+    let word = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+    Some(Texel {
+        speed_mps: f64::from(word & SPEED_MAX) / f64::from(SPEED_MAX) * f64::from(SPEED_SCALE_MPS),
+        azimuth_deg: f64::from((word >> SPEED_BITS) & (AZIMUTH_STEPS - 1))
+            / f64::from(AZIMUTH_STEPS)
+            * 360.0,
+        coverage: f64::from((word >> (SPEED_BITS + AZIMUTH_BITS)) & COVERAGE_MAX)
+            / f64::from(COVERAGE_MAX),
+        kind: if word >> (SPEED_BITS + AZIMUTH_BITS + COVERAGE_BITS) == 1 {
+            FieldKind::Wind
+        } else {
+            FieldKind::Current
+        },
+    })
 }
 
 #[cfg(test)]
@@ -249,53 +298,97 @@ mod tests {
         }
     }
 
+    fn sample(speed: f64, azimuth: f64, coverage: f32, kind: FieldKind) -> Sample {
+        Sample {
+            uv: uv_from_speed_azimuth(speed, Angle::new(azimuth)),
+            coverage,
+            kind,
+        }
+    }
+
+    /// Speed within the 14-bit step, azimuth within the 12-bit one — both
+    /// far inside the preview tolerance of 0.25 m/s and 2 degrees (spec.md
+    /// 7.9) — and the coverage and the kind exactly, for both kinds.
     #[test]
     fn encoding_round_trips_within_quantisation() {
         let cases = [
-            (0.0, 0.0),
-            (12.5, 90.0),
-            (33.3, 187.5),
-            (99.0, 359.9),
-            (0.0, 180.0),
+            (0.0, 0.0, 1.0, FieldKind::Wind),
+            (12.5, 90.0, 1.0, FieldKind::Current),
+            (33.3, 187.5, 0.5, FieldKind::Wind),
+            (99.0, 359.9, 0.03, FieldKind::Current),
+            (0.0, 180.0, 1.0, FieldKind::Current),
         ];
-        let samples: Vec<Uv> = cases
+        let samples: Vec<Sample> = cases
             .iter()
-            .map(|(s, a)| uv_from_speed_azimuth(*s, Angle::new(*a)))
+            .map(|(s, a, c, k)| sample(*s, *a, *c, *k))
             .collect();
 
         let tile = encode(&samples);
         assert_eq!(tile.len(), TILE_BYTES);
 
-        for (i, (speed, azimuth)) in cases.iter().enumerate() {
-            let (got_speed, got_az) = decode_pixel(&tile, i).expect("in range");
+        let speed_step = f64::from(SPEED_SCALE_MPS) / f64::from(SPEED_MAX);
+        let azimuth_step = 360.0 / f64::from(AZIMUTH_STEPS);
+        for (i, (speed, azimuth, coverage, kind)) in cases.iter().enumerate() {
+            let got = decode_pixel(&tile, i).expect("in range");
             assert!(
-                (got_speed - speed).abs() < 0.01,
-                "speed {got_speed} != {speed}"
+                (got.speed_mps - speed).abs() <= speed_step,
+                "speed {} != {speed}",
+                got.speed_mps
             );
             if *speed > 0.0 {
-                let delta = (got_az - azimuth)
+                let delta = (got.azimuth_deg - azimuth)
                     .abs()
-                    .min(360.0 - (got_az - azimuth).abs());
-                assert!(delta < 0.02, "azimuth {got_az} != {azimuth}");
+                    .min(360.0 - (got.azimuth_deg - azimuth).abs());
+                assert!(
+                    delta <= azimuth_step,
+                    "azimuth {} != {azimuth}",
+                    got.azimuth_deg
+                );
             }
+            assert!(
+                (got.coverage - f64::from(*coverage)).abs() <= 1.0 / f64::from(COVERAGE_MAX),
+                "coverage {} != {coverage}",
+                got.coverage
+            );
+            assert_eq!(got.kind, *kind);
         }
     }
 
     #[test]
     fn speeds_beyond_full_scale_clamp_rather_than_wrap() {
-        let samples = vec![uv_from_speed_azimuth(500.0, Angle::new(45.0))];
+        let samples = vec![sample(500.0, 45.0, 1.0, FieldKind::Wind)];
         let tile = encode(&samples);
-        let (speed, _) = decode_pixel(&tile, 0).expect("in range");
+        let got = decode_pixel(&tile, 0).expect("in range");
         assert!(
-            (speed - f64::from(SPEED_SCALE_MPS)).abs() < 0.01,
-            "expected clamp to full scale, got {speed}"
+            (got.speed_mps - f64::from(SPEED_SCALE_MPS)).abs() < 0.01,
+            "expected clamp to full scale, got {}",
+            got.speed_mps
         );
     }
 
+    /// Zero and undefined are different things (D58): a written calm is
+    /// covered and an unwritten cell is not, and the faintest written edge
+    /// still reads as written rather than rounding away.
     #[test]
-    fn unwritten_pixels_are_calm() {
+    fn coverage_tells_a_written_calm_from_nothing() {
+        let tile = encode(&[
+            sample(0.0, 0.0, 1.0, FieldKind::Wind),
+            Sample::default(),
+            sample(3.0, 10.0, 0.001, FieldKind::Current),
+        ]);
+        assert_eq!(decode_pixel(&tile, 0).expect("in range").coverage, 1.0);
+        assert_eq!(decode_pixel(&tile, 1).expect("in range").coverage, 0.0);
+        assert!(decode_pixel(&tile, 2).expect("in range").coverage > 0.0);
+    }
+
+    #[test]
+    fn unwritten_pixels_are_calm_and_uncovered() {
         let tile = encode(&[]);
         assert_eq!(tile.len(), TILE_BYTES);
-        assert_eq!(decode_pixel(&tile, 1000), Some((0.0, 0.0)));
+        let got = decode_pixel(&tile, 1000).expect("in range");
+        assert_eq!(
+            (got.speed_mps, got.azimuth_deg, got.coverage),
+            (0.0, 0.0, 0.0)
+        );
     }
 }

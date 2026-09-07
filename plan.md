@@ -2727,7 +2727,37 @@ style, and a gesture's preview draws the active layer's. The active layer's
 kind still steers the readout, the eyedropper, a region copy and a macro
 capture. Spec §5.3 and §5.5 rewritten. Not clicked through in the app: the
 composition of two rasters and two glyph sets over one another is the part
-most worth a look.
+most worth a look. **Superseded by M31 the same day**: the two passes are
+one composite again.
+
+### M31 — Layers composite on their own, and a tile carries what was written · **complete**
+
+**Goal:** the user's four findings of 2026-09-06 after the M30 build: every
+edit seemed to redraw the whole map; edit objects must apply only in their
+own layer, and GRIB layers must take them; changing a GRIB layer's speed
+filter re-rendered the whole map; and in blending, zero must not be
+transparent — only undefined — with the layers rendered in order and the
+layer beneath shown only where the one above is undefined, never a defined
+wind and a defined current together.
+
+**Delivered 2026-09-06.** Three commits.
+
+1. **The composite.** `flatten` takes every visible layer of every kind in
+   stack order and tags each object and raster with its layer and kind;
+   `flatten_kind` is the export's and a capture's one-kind view of the same
+   walk. Both kernels composite each layer on its own — a modifier, a clone
+   and a warp read their own layer beneath them and nothing lower — and
+   stack the layers by coverage, premultiplied, the kind of a cell being the
+   topmost layer's that covers half of it. The evaluators return a `Sample`
+   (field, coverage, kind); the export still takes the field alone. The
+   tile is one 32-bit word a texel — speed 14 bits, azimuth 12, coverage 5,
+   kind 1 — and the shaders draw alpha from the coverage, the ramp and the
+   glyph from the kind, on one lattice. The address lost its kind segment,
+   the pool and the readiness probe prepare one scene a step again, the
+   readout samples the composite and says *no field* where nothing wrote,
+   and `EVALUATOR_VERSION` is 3. A warp carries the coverage of where it
+   read from, or a patch dragged onto open water vanished. Spec §5.3, §6.3,
+   §7.6 and §7.7 rewritten.
 
 ---
 
