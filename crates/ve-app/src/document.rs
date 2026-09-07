@@ -619,12 +619,18 @@ fn missing_layer(raw: u64) -> AppError {
 /// active one, whatever it was handed. `None` means the top of the stack,
 /// which is where a project with no layer chosen puts things.
 ///
-/// **An imported layer takes nothing.** A GRIB layer's field is its file, and
-/// an object composited above that file inside the same layer would be
-/// painted onto a forecast that is not the user's to paint on; the refusal
-/// names the layer so the hint area can say which one to pick instead. A
-/// locked layer is refused for the reason it is locked.
-pub(crate) fn creation_layer(project: &Project, layer: Option<u64>) -> Result<&Layer> {
+/// **An imported layer takes edits and no field of its own** (D66, M31). A
+/// GRIB layer's field is its file: a modifier, a mask, a clone or an eraser
+/// aimed at it edits that field in place, which is what an edit tool is for;
+/// a brush stroke, a shape, a pasted patch or an inserted macro would be a
+/// field painted over a forecast inside the layer that holds it, and is
+/// refused with the layer's name so the hint area can say which one to pick
+/// instead. A locked layer is refused for the reason it is locked.
+pub(crate) fn creation_layer(
+    project: &Project,
+    layer: Option<u64>,
+    placing: Placing,
+) -> Result<&Layer> {
     let found = match layer {
         Some(raw) => project
             .layer(object_id(raw))
@@ -634,11 +640,11 @@ pub(crate) fn creation_layer(project: &Project, layer: Option<u64>) -> Result<&L
             .last()
             .ok_or_else(|| AppError::Internal("project has no layers".to_owned()))?,
     };
-    if !found.source.is_painted() {
+    if !found.source.is_painted() && placing == Placing::Field {
         return Err(AppError::BadOption {
             field: "layer",
             value: format!(
-                "\"{}\" is an imported field and cannot hold objects; pick a painted layer",
+                "\"{}\" is an imported field and takes edits only, not a field of its own; pick a painted layer",
                 found.name
             ),
         });
@@ -650,6 +656,39 @@ pub(crate) fn creation_layer(project: &Project, layer: Option<u64>) -> Result<&L
         });
     }
     Ok(found)
+}
+
+/// What a path puts into a layer (M31): a field of its own, or an edit of
+/// the field already there. An imported layer takes the second and refuses
+/// the first (D66).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Placing {
+    /// An object that paints: the brush, the shapes, the curve, a patch, a
+    /// macro.
+    Field,
+    /// An object that changes what is beneath it: a modifier, the mask, the
+    /// clone stamp — and the eraser, which is no object at all.
+    Edit,
+}
+
+impl Placing {
+    /// What a tool's object is.
+    pub(crate) fn of(tool: ToolKind) -> Self {
+        if tool.is_modifier() || matches!(tool, ToolKind::Mask | ToolKind::CloneStamp) {
+            Self::Edit
+        } else {
+            Self::Field
+        }
+    }
+
+    /// What a set of objects is: a field if any of them paints one.
+    pub(crate) fn of_all(tools: impl IntoIterator<Item = ToolKind>) -> Self {
+        if tools.into_iter().any(|tool| Self::of(tool) == Self::Field) {
+            Self::Field
+        } else {
+            Self::Edit
+        }
+    }
 }
 
 /// Renames the project (M25): a document write, undoable.
@@ -1122,7 +1161,7 @@ pub fn stroke_erase(state: &AppState, stroke: EraseStroke) -> Result<ProjectSumm
                 Some(raw) => project
                     .layer(object_id(raw))
                     .ok_or_else(|| missing_layer(raw))?,
-                None => creation_layer(project, None)?,
+                None => creation_layer(project, None, Placing::Edit)?,
             };
             if layer.locked {
                 return Err(AppError::BadOption {
@@ -1403,10 +1442,11 @@ pub fn object_move(
     apply(state, |project| {
         let id = object_id(object);
         let (from_layer, from_index) = project.locate(id).ok_or_else(|| missing_object(object))?;
-        // The destination is a creation target like any other (D66): an
-        // object dragged onto an imported layer is refused the same way one
-        // painted onto it is.
-        let destination = creation_layer(project, Some(layer))?;
+        // The destination is a creation target like any other (D66): a
+        // field dragged onto an imported layer is refused the same way one
+        // painted onto it is, and an edit is taken the same way too (M31).
+        let tool = project.layers[from_layer].objects[from_index].tool;
+        let destination = creation_layer(project, Some(layer), Placing::of(tool))?;
         Ok(Command::MoveObject {
             object: id,
             from: (project.layers[from_layer].id, from_index),
@@ -1427,7 +1467,11 @@ pub fn object_duplicate(state: &AppState, object: u64) -> Result<ProjectSummary>
         let id = object_id(object);
         let (layer_index, index) = project.locate(id).ok_or_else(|| missing_object(object))?;
 
-        let target = creation_layer(project, Some(project.layers[layer_index].id.raw()))?;
+        let target = creation_layer(
+            project,
+            Some(project.layers[layer_index].id.raw()),
+            Placing::of(project.layers[layer_index].objects[index].tool),
+        )?;
 
         let mut copy = project.layers[layer_index].objects[index].clone();
         // A fresh identity, or the two would be the same object to every
@@ -1640,9 +1684,10 @@ pub fn clipboard_paste(
         // Read the clipboard before borrowing the project mutably.
         let nudge = session.clipboard.source_step() == step;
 
+        let placing = Placing::of_all(session.clipboard.tools());
         let (target, index, last_step) = {
             let project = &session.require_open()?.project;
-            let target = creation_layer(project, layer)?;
+            let target = creation_layer(project, layer, placing)?;
             (target.id, target.objects.len(), project.last_step())
         };
 

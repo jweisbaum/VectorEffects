@@ -62,6 +62,12 @@ impl Clipboard {
     }
 
     /// How many objects are held.
+    /// The tools the held objects were drawn with, in order: what a paste
+    /// puts into a layer, for the layer to accept or refuse (M31).
+    pub fn tools(&self) -> impl Iterator<Item = crate::schema::ToolKind> + '_ {
+        self.objects.iter().map(|object| object.tool)
+    }
+
     pub fn len(&self) -> usize {
         self.objects.len()
     }

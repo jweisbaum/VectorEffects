@@ -414,7 +414,8 @@ pub fn capture_paste(
             );
         }
 
-        let target = crate::document::creation_layer(&open.project, layer)?;
+        let target =
+            crate::document::creation_layer(&open.project, layer, crate::document::Placing::Field)?;
         let (layer, index) = (target.id, target.objects.len());
 
         // The samples go into the project *before* the command, so the object

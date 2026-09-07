@@ -421,7 +421,7 @@ pub fn outlines_at(
     with_session(state, |session| {
         let project = &session.require_open()?.project;
         let whole_layer = if all_in_layer {
-            crate::document::creation_layer(project, layer)
+            crate::document::creation_layer(project, layer, crate::document::Placing::Edit)
                 .ok()
                 .map(|found| found.id)
         } else {

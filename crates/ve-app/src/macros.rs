@@ -1025,7 +1025,8 @@ pub fn macro_insert(
         let open = session.require_open()?;
         let step_count = open.project.settings.step_count;
         let object = macro_object(&capture, anchor, step, step_count);
-        let target = crate::document::creation_layer(&open.project, layer)?;
+        let target =
+            crate::document::creation_layer(&open.project, layer, crate::document::Placing::Field)?;
         let (layer, index) = (target.id, target.objects.len());
         open.project
             .captures

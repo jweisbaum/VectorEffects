@@ -598,6 +598,14 @@ jet.
 It is a property of the layer and not of the lattice — a choice about what to
 show, not a fact about the file — so it costs two numbers in the project file,
 survives the file being re-read on open, and is undoable like any other edit.
+Changing it changes every tile the field reaches, so the whole map re-renders
+when it is released; a global forecast is every tile.
+
+**Edit tools work on a GRIB layer** (M31). The modifiers of §6.3, the mask,
+the clone stamp and the eraser can be aimed at an imported layer and edit its
+field in place — an intensified band, a turned region, a masked-out patch —
+and they reach nothing in the layers beneath (§7.6). Tools that paint a field
+of their own still cannot land in one (§6.1, D66).
 Both kernels apply it, in the same place: after the lattice is sampled and
 before it is written into the buffer. The scale the slider runs to is the file's
 own fastest sample, since a filter is set by looking at the field.
@@ -1126,9 +1134,12 @@ All tools produce **objects**. Common rules:
   to exactly one layer — the layer selected when they were created. **One
   rule decides that layer for every path that adds an object** — a gesture, a
   paste, a pasted patch, an inserted macro, a duplicate, the panel's
-  drag-drop — and **an imported layer takes nothing** (D66): a GRIB layer's
-  field is its file, and a creation aimed at one is refused with a hint
-  naming the layer rather than quietly landing somewhere else. **A layer is
+  drag-drop — and **an imported layer takes edits and no field of its own**
+  (D66, M31): a modifier, a mask, a clone or the eraser aimed at a GRIB layer
+  edits the file's field in place, which is what they are for, while a
+  stroke, a shape, a patch or a macro aimed at one is refused with a hint
+  naming the layer rather than quietly landing somewhere else. A paste is
+  taken only if every object in it is an edit. **A layer is
   dragged above or below any other** (M29): the drop lands on whichever
   half of the target row the pointer let go on, a line on that edge says so
   beforehand, and each row carries a grip to pick it up by.

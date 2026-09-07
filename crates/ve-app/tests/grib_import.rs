@@ -15,13 +15,15 @@
 use std::path::PathBuf;
 
 use ve_app::commands::AppState;
-use ve_app::document;
+use ve_app::create::{Gesture, NewObject, Tool, ToolOption};
+use ve_app::document::{self, PropertyValue};
 use ve_app::edit;
 use ve_app::import;
 use ve_app::paths::AppPaths;
 use ve_app::projects::{self, NewProjectRequest};
 use ve_core::LonLat;
 use ve_core::project::FieldKind;
+use ve_core::schema::PropId;
 use ve_grib::writer::{GridSpec, MessageSpec, Parameter, ReferenceTime, message};
 use ve_render::cpu::sample_scene;
 use ve_render::scene::flatten;
@@ -267,14 +269,17 @@ fn past_the_last_message_the_imported_field_is_gone_and_the_painting_stays() {
     }
 }
 
-/// An imported layer holds its file's field and nothing else (D66): every
-/// path that adds an object is refused by name when aimed at one, and the
-/// refusal says which layer to pick instead.
+/// An imported layer takes edits and no field of its own (D66, M31): every
+/// path that adds a field is refused by name when aimed at one, and the
+/// refusal says which layer to pick instead — while an edit tool aimed at it
+/// edits the file's field in place.
 #[test]
-fn an_imported_layer_takes_no_objects() {
+fn an_imported_layer_takes_edits_and_no_field() {
     let root = TempRoot::new("no-objects");
     let app = state(&root, 3, 4);
-    let path = write_file(&root, "field.grib2", &[FieldKind::Wind], &[0]);
+    // An eastward field of 3 m/s at forecast hour 3, which is step 1 of a
+    // three-hourly project.
+    let path = write_file(&root, "field.grib2", &[FieldKind::Wind], &[0, 3]);
     import::grib_import(&app, path).expect("import");
     let tree = document::tree(&app, 0).expect("tree");
     let painted = tree.layers[0].id;
@@ -306,7 +311,8 @@ fn an_imported_layer_takes_no_objects() {
     stroke(Some(painted)).expect("paint beneath");
     let object = document::tree(&app, 0).expect("tree").layers[0].objects[0].id;
 
-    // Pasting, duplicating-by-move and inserting are refused the same way.
+    // Pasting, duplicating-by-move and inserting a field are refused the
+    // same way.
     document::clipboard_copy(&app, &[object], 0).expect("copy");
     assert!(document::clipboard_paste(&app, Some(imported), 0, false, false).is_err());
     assert!(document::object_move(&app, object, imported, 0).is_err());
@@ -330,6 +336,47 @@ fn an_imported_layer_takes_no_objects() {
     let tree = document::tree(&app, 0).expect("tree");
     assert_eq!(tree.layers[1].objects.len(), 0);
     assert_eq!(tree.layers[0].objects.len(), 1);
+
+    // An edit is taken (M31): an intensity stroke of +100% over the field
+    // doubles it where the stroke lands and leaves it alone elsewhere.
+    let before = u_at(&app, 1);
+    assert!((before - 3.0).abs() < 1e-3, "the file's field: {before}");
+    ve_app::create::create(
+        &app,
+        NewObject {
+            tool: Tool::Intensity,
+            gesture: Gesture::Stroke {
+                points: vec![[-30.0, 45.0]],
+            },
+            options: vec![
+                ToolOption {
+                    property: format!("{:?}", PropId::SizeKm),
+                    value: PropertyValue::Number { value: 800.0 },
+                },
+                ToolOption {
+                    property: format!("{:?}", PropId::Gain),
+                    value: PropertyValue::Number { value: 100.0 },
+                },
+            ],
+            layer: Some(imported),
+        },
+    )
+    .expect("an edit lands in an imported layer");
+    let tree = document::tree(&app, 0).expect("tree");
+    assert_eq!(
+        tree.layers[1].objects.len(),
+        1,
+        "the modifier is the import's"
+    );
+    let after = u_at(&app, 1);
+    assert!(
+        (after - 6.0).abs() < 0.1,
+        "the intensity should double the file's field under it: {after}"
+    );
+    let session = app.session.lock().expect("lock");
+    let project = &session.open.as_ref().expect("open").project;
+    let far = sample_scene(&flatten(project, 1), LonLat::new(60.0, -20.0).unwrap()).u;
+    assert!((far - 3.0).abs() < 1e-3, "and leave the rest alone: {far}");
 }
 
 /// Both layers are shown (M29): the map shows one kind of field at a time,

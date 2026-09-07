@@ -2757,7 +2757,20 @@ wind and a defined current together.
    readout samples the composite and says *no field* where nothing wrote,
    and `EVALUATOR_VERSION` is 3. A warp carries the coverage of where it
    read from, or a patch dragged onto open water vanished. Spec §5.3, §6.3,
-   §7.6 and §7.7 rewritten.
+   §7.6 and §7.7 rewritten. The tile-cost benchmark is at parity with the
+   code before it (dense standard 44–48 ms against 47–54 ms), and both are
+   over the 40 ms CPU-fallback budget on the development machine today;
+   the GPU path is at 5–8 ms. Not reduced here.
+2. **Edit tools on a GRIB layer.** `creation_layer` takes what is being
+   placed: a field or an edit. An imported layer takes an edit — a
+   modifier, the mask, the clone stamp, and the eraser it already took —
+   and refuses a field, with the hint saying so; a paste is an edit only if
+   every object in it is; a move and a duplicate ask about the object
+   moved. With the composite of 1, a modifier in a GRIB layer edits the
+   file's field and reaches nothing beneath. D66 reopened in part, on the
+   user's instruction. Test: an intensity stroke on an imported layer
+   doubles its field where it lands and leaves it alone elsewhere, while a
+   brush there is still refused.
 
 ---
 
@@ -2875,7 +2888,7 @@ relitigated by accident.
 | D36 | Values are quantised where they enter the document, not where they leave it | D17 quantises at the serialisation boundary, which covers a value the user typed and misses one the application computed — a polygon's centroid, a dragged anchor. `PropValue::canonical` now applies in `Animatable`'s writers, which is one place and off the evaluator's per-sample path. Doing it in `LonLat::new` instead would have put a rounding on the clone stamp's inner loop (`ve-core::canonical`) |
 | D17 | Document `f64` values are quantised at the serialisation boundary | `serde_json``s parser is one ULP off on ~10% of `f64` values, so raw floats do not round-trip and a project would not equal itself across save/load. Chosen precisions are far finer than anything observable; `f32` is unaffected (`ve-core::canonical`) |
 | D65 | A region copy captures a run of frames from the copy step, deduplicated by scene hash, and a pasted patch's time runs from its paste step | One frame made a copied animation a still; capturing the whole timeline from step 0 would put the wrong frame under the paste. The bake is the macro's, and `capture_of` already measures from the object's first active step, so the patch needs no new sampler. Dedupe is the "steps that look the same share their tiles" property applied to frames, so a still scene costs one frame (M23). Proposed 2026-09-05 |
-| D66 | One creation target, and never a GRIB layer: a creation aimed at one is refused with a hint | Creation, paste, insert, duplicate and drag-drop each chose a layer their own way — the top of the stack, the active one, whatever was given — and none refused an imported layer. One function decides, refusing a layer whose source is a file and saying so in the hint area, rather than quietly redirecting to another layer the user did not choose (M23). Settled with the user 2026-09-05 |
+| D66 | One creation target, and never a GRIB layer for a *field*: a creation aimed at one is refused with a hint. Reopened in part by M31 on the user's instruction (2026-09-06): an imported layer takes edit objects — a modifier, a mask, a clone, the eraser — and refuses only objects that paint a field of their own | Creation, paste, insert, duplicate and drag-drop each chose a layer their own way — the top of the stack, the active one, whatever was given — and none refused an imported layer. One function decides, refusing a layer whose source is a file and saying so in the hint area, rather than quietly redirecting to another layer the user did not choose (M23). Settled with the user 2026-09-05 |
 | D67 | `Shift`+arrows nudge the selection; the map's pan moves to `Alt`+arrows, and the bindings table gains an `alt` modifier | The user asked for `Shift`+arrows by name, and it is the convention. Pan had the chord; rather than drop pan from the keyboard, the table's chord spelling grows one modifier so it stays one table with one collision rule (M23). Settled with the user 2026-09-05 |
 | D68 | The view controls reach the title bar through a portal, not by lifting the map's state | The tool, the glyph style and the graticule are the map's state and read by its draw loop; moving them to `App` for the sake of where a button sits would re-render the shell on every tool change, which is the class of bug the readout store was made to end (M25). Proposed 2026-09-05 |
 | D69 | ~~A project has no start time of its own~~ Superseded by M29.13 on the user's instruction (2026-09-06): a start time is optional and set from the Time row; the export still asks, pre-set to it | Until a forecast file gives the timeline a clock there is nothing to set — step 0 is "now" and the ruler counts hours. Opening a project from a GRIB or importing one derives the start from the file (§4.8), and the export dialog asks for the one the GRIB needs. The timeline's field and its clear button go, and no settings field replaces them (M25). Settled with the user 2026-09-05 |
