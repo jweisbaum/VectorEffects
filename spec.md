@@ -876,6 +876,15 @@ the total surface current, both hourly on a 0.25° global grid. Nothing else
 is read: a history import is not a general data browser, and the two fields
 the application paints are the two fields it fetches.
 
+**Only the times the project can show are fetched.** A step serves an
+imported message only where the file has one for that step's own forecast
+hour (§4.8), so on a three-hourly project two hours in every three could
+never be drawn. The import strides by the project's step and reads those
+hours and no others, and it stops at the end of the timeline: a range longer
+than the project's span has hours with no step to land on, and those are not
+fetched either. A day of range on a three-hourly project is nine reads per
+archive rather than twenty-five, and the wait falls with it.
+
 **The hours are fetched once and written to a file.** Each archive's range
 becomes a GRIB2 file in the application's data directory, packed at 16 bits
 with a bitmap over the points the archive has no value for — the land, for a
@@ -899,10 +908,17 @@ the way a project made from a GRIB takes the file's, and both the layers and
 that start time arrive as one history entry, so one undo takes the whole
 import back.
 
-**Bounded, and refused rather than abandoned.** Ten days of hourly data is
-the most one import fetches. A longer range is declined at the dialog, with
-its length, before anything is transferred; the user can ask for the next ten
-days as a second import, which lands as its own layer.
+**Bounded, and refused rather than abandoned.** Two hundred and forty steps
+per archive is the most one import fetches, which is the most steps a project
+can hold. The bound is on what is *read*, not on how long a span was named,
+so it is ten days on an hourly project and two months on a six-hourly one.
+The dialog says how many downloads a range comes to before the button is
+pressed, and a range that lands on no step at all is declined there.
+
+**It reports how far it has got.** A fetch is minutes of network, and an
+indeterminate spinner cannot tell a slow archive from a stalled one. The
+number of steps is known before the first byte moves, so the status bar shows
+a real fraction, named by the archive being read.
 
 **Times are UTC and land on the hour**, like every other time in the
 application (§3.6). The dialog says so on both labels: the control has no

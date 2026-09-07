@@ -15,6 +15,16 @@
 //! afterwards, so a project opened without a connection shows its history
 //! layers like any other.
 //!
+//! # Only the hours the project can show
+//!
+//! A step shows an imported message only where the file has one for that
+//! step's own forecast hour (spec.md 4.8, D48), so an hour that falls between
+//! two steps is never drawn and never exported. On a three-hourly project two
+//! hours in every three are exactly that, and fetching them would be minutes
+//! of a stranger's bandwidth spent on data nothing can display. So the import
+//! strides by the project's step, and reads the hours the project has steps
+//! for and no others.
+//!
 //! # Why it goes through a file
 //!
 //! A layer's field is read from a file (spec.md 4.8, invariants 1 and 2), and
@@ -26,6 +36,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use serde::Serialize;
+use ts_rs::TS;
 use ve_core::Command;
 use ve_core::document::Layer;
 use ve_grib::writer::{GridSpec, MessageSpec, Parameter, ReferenceTime, message_masked};
@@ -48,17 +60,41 @@ const GRID: GridSpec = GridSpec {
 /// current the archives hold, far finer than either is measured to.
 const BITS: u8 = 16;
 
-/// The most hours one import will fetch.
+/// The most steps one import will fetch from one archive.
 ///
-/// Ten days of hourly wind and current is a few hundred megabytes over the
-/// wire and a long wait on a domestic connection. A longer range is refused,
-/// with its length, before anything is fetched rather than abandoned halfway:
-/// the user can ask for the next ten days as a second import, and the two
-/// land as separate layers they can see and delete.
-pub const MAX_HOURS: i64 = 240;
+/// The wait is proportional to what is *fetched*, not to how long a span the
+/// user named, and striding by the project's step is what separates the two:
+/// 240 hourly steps is ten days, and the same 240 steps at six-hourly is two
+/// months. A request for more is refused, with its count, before anything is
+/// transferred rather than abandoned halfway — the user can ask for the next
+/// stretch as a second import, and the two land as separate layers they can
+/// see and delete.
+///
+/// The project's own step count bounds this already
+/// ([`ve_core::project::MAX_STEPS`] is the same number), so this is a guard
+/// rather than the binding limit. It is stated here because it is this
+/// module's promise about how long an import can run.
+pub const MAX_FETCHED_STEPS: usize = 240;
 
 /// Seconds in an hour. The archives are hourly and so is everything here.
 const HOUR: i64 = 3600;
+
+/// How far along a fetch is, emitted as the `history://progress` event.
+///
+/// A history import is minutes of silence otherwise, and an indeterminate
+/// spinner cannot tell a slow fetch from a stalled one. The steps are known
+/// before the first byte moves, so the bar is a real fraction rather than an
+/// animation.
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export, export_to = "HistoryProgress.ts")]
+pub struct HistoryProgress {
+    /// Which archive is being read, as [`Archive::label`] names it.
+    pub archive: String,
+    /// Steps fetched so far, across every archive of this import.
+    pub done: u32,
+    /// Steps this import will fetch in total, across every archive.
+    pub total: u32,
+}
 
 /// What the frontend asks for.
 #[derive(Debug, Clone)]
@@ -71,14 +107,16 @@ pub struct HistoryRequest {
     pub end_unix_s: i64,
 }
 
-/// Imports every hour of a range from each archive asked for.
+/// Imports the hours of a range that the project has steps for.
 #[tauri::command(async)]
 pub fn import_history(
+    app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     archives: Vec<String>,
     start_unix_s: i64,
     end_unix_s: i64,
 ) -> Result<ProjectSummary> {
+    use tauri::Emitter;
     history_import(
         &state,
         &HistoryRequest {
@@ -86,23 +124,63 @@ pub fn import_history(
             start_unix_s,
             end_unix_s,
         },
+        |progress| {
+            let _ = app.emit("history://progress", progress);
+        },
     )
 }
 
 /// Implementation of [`import_history`], callable without a Tauri handle.
-pub fn history_import(state: &AppState, request: &HistoryRequest) -> Result<ProjectSummary> {
-    let wanted = archives_of(request)?;
-    let hours = hours_asked_for(request)?;
-    tracing::info!(archives = ?request.archives, hours, "history import starting");
+pub fn history_import(
+    state: &AppState,
+    request: &HistoryRequest,
+    mut on_progress: impl FnMut(HistoryProgress),
+) -> Result<ProjectSummary> {
+    let archives = archives_of(request)?;
+
+    // The times the project can actually show. A step serves an imported
+    // message only where the file has one for that step's own forecast hour
+    // (spec.md 4.8, D48), so on a three-hourly project two hours in every
+    // three could never be drawn — and fetching them would be minutes spent
+    // on data the application throws away.
+    let (step_hours, step_count) = with_session(state, |session| {
+        let settings = &session.require_open()?.project.settings;
+        Ok((settings.step_hours.hours(), settings.step_count))
+    })?;
+    let wanted = wanted_hours(request, step_hours, step_count)?;
+    tracing::info!(
+        archives = ?request.archives,
+        steps = wanted.len(),
+        step_hours,
+        "history import starting"
+    );
 
     let directory = state.paths.history_dir.clone();
     std::fs::create_dir_all(&directory)?;
 
     // Fetched and written first, outside the session lock: this takes
     // minutes, and the document has to stay readable while it runs.
+    let total = (wanted.len() * archives.len()) as u32;
+    let mut done = 0u32;
     let mut written = Vec::new();
-    for archive in wanted {
-        written.push((archive, fetch_to_file(archive, request, &directory)?));
+    for archive in archives {
+        // Reported before the archive's first chunk as well as after each
+        // one: opening a store costs seconds, and a bar that only moves on
+        // the first completed step is another silence at the start.
+        on_progress(HistoryProgress {
+            archive: archive.label().to_owned(),
+            done,
+            total,
+        });
+        let path = fetch_to_file(archive, request, &wanted, &directory, |fetched| {
+            on_progress(HistoryProgress {
+                archive: archive.label().to_owned(),
+                done: done + fetched,
+                total,
+            });
+        })?;
+        done += wanted.len() as u32;
+        written.push((archive, path));
     }
 
     with_session(state, |session| {
@@ -174,47 +252,89 @@ fn archives_of(request: &HistoryRequest) -> Result<Vec<Archive>> {
         .collect()
 }
 
-/// How many hours a request covers, refusing a range that is backwards or
-/// longer than one import fetches.
-fn hours_asked_for(request: &HistoryRequest) -> Result<i64> {
+/// The hours of a request that land on one of the project's steps.
+///
+/// The project's first step is the file's first hour (spec.md 4.8), so the
+/// hours it can show are the range's start and every `step_hours` after it,
+/// and there are at most `step_count` of them however long the range is. Both
+/// bounds matter: the stride is what stops a three-hourly project fetching
+/// three times what it can draw, and the count is what stops a range running
+/// past the end of the timeline fetching hours with no step to land on.
+fn wanted_hours(request: &HistoryRequest, step_hours: u32, step_count: u32) -> Result<Vec<i64>> {
     if request.end_unix_s < request.start_unix_s {
         return Err(bad_range("the start is after the end"));
     }
-    let hours = (request.end_unix_s - request.start_unix_s) / HOUR + 1;
-    if hours > MAX_HOURS {
+    // A step of zero hours is not a project the app can make; guarding it
+    // here keeps this a total function rather than a division by zero.
+    let stride = i64::from(step_hours.max(1)) * HOUR;
+    let start = request.start_unix_s.div_euclid(HOUR) * HOUR;
+    let hours: Vec<i64> = (0..i64::from(step_count))
+        .map(|step| start + step * stride)
+        .take_while(|hour| *hour <= request.end_unix_s)
+        .collect();
+    if hours.is_empty() {
+        return Err(bad_range("that range holds none of the project's steps"));
+    }
+    if hours.len() > MAX_FETCHED_STEPS {
         return Err(bad_range(&format!(
-            "{hours} hours is more than one import fetches; ask for {MAX_HOURS} or fewer"
+            "{} steps is more than one import fetches; ask for {MAX_FETCHED_STEPS} or fewer",
+            hours.len()
         )));
     }
     Ok(hours)
 }
 
-/// Fetches every hour of the range from one archive and writes it as GRIB2.
+/// Fetches the wanted hours from one archive and writes them as GRIB2.
+///
+/// `wanted` is the project's own step times, so nothing between two steps is
+/// read: the archive is walked, and an hour it holds that no step lands on is
+/// skipped without being fetched. An hour a step wants and the archive lacks
+/// is skipped too, leaving that step with no message, which is what a step
+/// with no message means everywhere else (spec.md 4.8, D48).
 ///
 /// The file is named for the archive and the range, so asking for the same
 /// hours twice rewrites one file rather than filling the directory, and so
 /// someone looking in the directory can tell what each file holds.
-fn fetch_to_file(archive: Archive, request: &HistoryRequest, directory: &Path) -> Result<PathBuf> {
+fn fetch_to_file(
+    archive: Archive,
+    request: &HistoryRequest,
+    wanted: &[i64],
+    directory: &Path,
+    mut on_step: impl FnMut(u32),
+) -> Result<PathBuf> {
     let source = archive.open().map_err(zarr_failed)?;
-    let steps = source
+    // Every hour the archive holds in the range, by hour. Asked for as a
+    // range rather than hour by hour because that is the call that knows the
+    // store's coverage, and its refusal names what the store actually has —
+    // which is the message worth showing when a range is out of reach.
+    let held: std::collections::BTreeMap<i64, ve_zarr::Step> = source
         .steps_in_range(at_hour(request.start_unix_s), at_hour(request.end_unix_s))
-        .map_err(zarr_failed)?;
-    let Some(first) = steps.first() else {
-        return Err(bad_range(&format!(
-            "{} holds no hour of that range",
-            archive.label()
-        )));
-    };
+        .map_err(zarr_failed)?
+        .into_iter()
+        .map(|step| (step.valid_time.hours_since_unix_epoch(), step))
+        .collect();
 
-    // Forecast hours count from the file's own first hour, which is what
-    // makes this a forecast file like any other: the importer aligns a file's
-    // first message with the project's first step (spec.md 4.8), and a
-    // history layer is to behave exactly as an imported one does.
-    let anchor = first.valid_time.hours_since_unix_epoch();
+    // Forecast hours count from the range's first wanted hour rather than
+    // from whatever the archive happens to hold first, so two archives
+    // fetched together agree step for step. The importer rebases a file onto
+    // its own first message (spec.md 4.8), so this matters only when an
+    // archive is missing the range's opening hours — and then it is the two
+    // layers agreeing with each other that is worth more than either one
+    // starting where it was asked to.
+    let anchor = wanted[0].div_euclid(HOUR);
     let reference = reference_time(anchor * HOUR)?;
+
     let mut bytes = Vec::new();
-    for step in &steps {
-        let forecast_hour = u32::try_from(step.valid_time.hours_since_unix_epoch() - anchor)
+    let mut written = 0u32;
+    for (at, unix_s) in wanted.iter().enumerate() {
+        let hour = unix_s.div_euclid(HOUR);
+        // A step the archive has no hour for is simply left out, and that
+        // step then shows nothing — which is what a step with no message
+        // means everywhere else (spec.md 4.8, D48).
+        let Some(step) = held.get(&hour) else {
+            continue;
+        };
+        let forecast_hour = u32::try_from(hour - anchor)
             .map_err(|_| bad_range("the archive returned an hour before the range's start"))?;
         bytes.extend(encode_hour(
             GRID,
@@ -222,6 +342,14 @@ fn fetch_to_file(archive: Archive, request: &HistoryRequest, directory: &Path) -
             forecast_hour,
             &source.read_step(step).map_err(zarr_failed)?,
         )?);
+        written += 1;
+        on_step(at as u32 + 1);
+    }
+    if written == 0 {
+        return Err(bad_range(&format!(
+            "{} holds no step of that range",
+            archive.label()
+        )));
     }
 
     let path = directory.join(format!(
@@ -233,10 +361,10 @@ fn fetch_to_file(archive: Archive, request: &HistoryRequest, directory: &Path) -
     std::fs::write(&path, &bytes)?;
     tracing::info!(
         archive = archive.id(),
-        hours = steps.len(),
+        steps = written,
         bytes = bytes.len(),
         path = %path.display(),
-        "history hours written"
+        "history steps written"
     );
     Ok(path)
 }
@@ -360,33 +488,100 @@ mod tests {
         }
     }
 
-    /// The range is bounded, and the refusal says by how much, before
-    /// anything is fetched: an import that would run for an hour should be
-    /// declined at the dialog rather than abandoned halfway (M38).
+    /// The point of M38's follow-up: a project that shows every third hour
+    /// downloads every third hour. Fetching the two hours between them is
+    /// minutes of transfer for data no step could ever draw (spec.md 4.8,
+    /// D48).
     #[test]
-    fn a_range_longer_than_the_cap_is_refused_with_its_length() {
-        let hours = MAX_HOURS + 10;
-        let error = hours_asked_for(&request(0, HOUR * (hours - 1))).expect_err("refused");
-        let message = format!("{error}");
-        assert!(message.contains(&hours.to_string()), "{message}");
-        assert!(message.contains(&MAX_HOURS.to_string()), "{message}");
+    fn only_the_hours_the_project_steps_on_are_fetched() {
+        // A day of range on a three-hourly project.
+        assert_eq!(
+            wanted_hours(&request(0, HOUR * 24), 3, 240).expect("a plan"),
+            (0..=8).map(|k| k * 3 * HOUR).collect::<Vec<_>>(),
+            "every third hour, both ends included"
+        );
+        // Hourly is every hour, which is what it was before.
+        assert_eq!(
+            wanted_hours(&request(0, HOUR * 24), 1, 240)
+                .expect("a plan")
+                .len(),
+            25
+        );
+        // Six-hourly is a quarter of the three-hourly count.
+        assert_eq!(
+            wanted_hours(&request(0, HOUR * 24), 6, 240).expect("a plan"),
+            vec![0, 6 * HOUR, 12 * HOUR, 18 * HOUR, 24 * HOUR]
+        );
+    }
+
+    /// A range longer than the timeline is cut at the timeline: an hour past
+    /// the last step has no step to land on, so fetching it is waste of the
+    /// same kind.
+    #[test]
+    fn no_more_hours_than_the_project_has_steps() {
+        let hours = wanted_hours(&request(0, HOUR * 1000), 3, 8).expect("a plan");
+        assert_eq!(hours.len(), 8, "eight steps, not a thousand hours");
+        assert_eq!(hours.last(), Some(&(7 * 3 * HOUR)));
     }
 
     /// Both ends are inclusive, so a start and an end in the same hour is one
-    /// hour of data and not zero.
+    /// hour of data and not none.
     #[test]
     fn the_range_is_inclusive_at_both_ends() {
-        assert_eq!(hours_asked_for(&request(0, 0)).expect("a range"), 1);
-        assert_eq!(hours_asked_for(&request(0, HOUR)).expect("a range"), 2);
         assert_eq!(
-            hours_asked_for(&request(0, HOUR * (MAX_HOURS - 1))).expect("a range"),
-            MAX_HOURS
+            wanted_hours(&request(0, 0), 1, 240).expect("a plan"),
+            vec![0]
+        );
+        assert_eq!(
+            wanted_hours(&request(0, HOUR), 1, 240).expect("a plan"),
+            vec![0, HOUR]
+        );
+        // An end one second short of the next step does not reach it.
+        assert_eq!(
+            wanted_hours(&request(0, HOUR * 3 - 1), 3, 240).expect("a plan"),
+            vec![0]
+        );
+    }
+
+    /// A start part-way through an hour names the hour it falls in: the
+    /// archives are hourly, and a step at 00:30 would match nothing.
+    #[test]
+    fn a_start_is_taken_to_the_hour_it_falls_in() {
+        assert_eq!(
+            wanted_hours(&request(1800, HOUR * 6), 3, 240).expect("a plan"),
+            vec![0, 3 * HOUR, 6 * HOUR]
+        );
+    }
+
+    /// The cap counts what is fetched, not how long a span was named. Only a
+    /// project with more steps than the app allows can reach it, so this is a
+    /// guard — but the message still has to say what it refused.
+    #[test]
+    fn more_steps_than_one_import_fetches_is_refused_with_the_count() {
+        let over = (MAX_FETCHED_STEPS + 5) as u32;
+        let error = wanted_hours(&request(0, HOUR * 100_000), 1, over).expect_err("refused");
+        let message = format!("{error}");
+        assert!(message.contains(&over.to_string()), "{message}");
+        assert!(
+            message.contains(&MAX_FETCHED_STEPS.to_string()),
+            "{message}"
+        );
+    }
+
+    /// The same 240 steps is ten days hourly and two months six-hourly. The
+    /// cap is on the fetching, so a coarser project may reach further back.
+    #[test]
+    fn a_coarser_project_may_ask_for_a_longer_span() {
+        let month = HOUR * 24 * 30;
+        assert!(
+            wanted_hours(&request(0, 2 * month), 6, 240).is_ok(),
+            "two months six-hourly is 240 steps"
         );
     }
 
     #[test]
     fn a_backwards_range_is_refused() {
-        assert!(hours_asked_for(&request(HOUR * 5, 0)).is_err());
+        assert!(wanted_hours(&request(HOUR * 5, 0), 1, 240).is_err());
     }
 
     /// An archive the reader does not know is named in the refusal rather

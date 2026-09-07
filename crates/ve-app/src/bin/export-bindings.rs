@@ -21,6 +21,7 @@ use ve_app::document::{
 use ve_app::edit::{BrushDirectionMode, BrushShape, BrushStroke};
 use ve_app::error::AppErrorPayload;
 use ve_app::export::{ExportEstimate, ExportProgress, ExportRequest, ExportResult};
+use ve_app::history::HistoryProgress;
 use ve_app::palette::{
     GestureSelector, OptionDependency, PreviewKind, Sizing, ToolOptionSpec, ToolSchema,
 };
@@ -113,6 +114,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ExportRequest::export_all(&cfg)?;
     ExportResult::export_all(&cfg)?;
     ExportProgress::export_all(&cfg)?;
+    HistoryProgress::export_all(&cfg)?;
     ExportEstimate::export_all(&cfg)?;
 
     println!("bindings written to {}", out_dir.display());

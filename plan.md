@@ -3070,15 +3070,55 @@ still a finding, and in `ve-zarr` only the two archives are allowed.
    day ending a week back, because both archives trail real time and a
    range ending now is one neither has yet.
 
-**Not done, and why.** The fetch shows the status bar's spinner and
-nothing finer: there is no per-hour progress and no way to cancel it
-part-way. Both want the fetch to report from a worker rather than run
-inside the command, which is a larger change than the import needed, and
-the cap keeps the wait bounded in the meantime. Nothing tests the two
+5. **Only what the project can show, and a bar while it is fetched.** The
+   first version read every hour of the range, which on a three-hourly
+   project was three times what any step could draw: an imported message
+   reaches a step only at that step's own forecast hour (§4.8, D48), so
+   the rest was minutes of transfer for data the app throws away.
+   `wanted_hours` is now the plan — the range's start and every
+   `step_hours` after it, at most `step_count` of them — and the fetch
+   walks that and nothing else. The cap moved with it, from a span in
+   hours to a count of reads, which is what the wait is actually
+   proportional to: 240 reads is ten days hourly and two months
+   six-hourly. The dialog counts downloads rather than hours, and the
+   status bar carries a determinate bar fed by `history://progress`,
+   since the count is known before the first byte moves. The bar is
+   bounded by the busy store rather than by its own last event, so a
+   failed import clears it the same way a finished one does.
+
+   Measured before the change, on a domestic connection: ERA5 wind cost
+   2.5 s an hour and GlobCurrent 0.83 s, so 24 hourly steps from both was
+   about 90 s and 160 MB. The same day on a three-hourly project is now
+   nine steps, about 30 s.
+
+6. **The dialog's own presentation.** Three defects the first version
+   shipped, all found by using it. `.modal input` is 6.5 rem wide, which
+   cut the hour off a `datetime-local` control, and `.modal label` is a
+   column, which stacked each archive's checkbox above its own text: both
+   are right for the export and new-project forms they were written for,
+   so the history dialog now overrides them under its own class rather
+   than changing them. And it is rendered through a portal to the body —
+   the layer panel is a stacking context, so a modal rendered inside it
+   painted *under* the timeline whatever its `z-index` said.
+
+**Not done, and why.** There is still no way to cancel a fetch part-way;
+that wants the read to run on a worker with a cancellation flag, the way
+the export does, rather than inside the command. Nothing tests the two
 archives end to end either — a test that reaches the network would put
 the one exception to invariant 5 into CI, where no user asked for it —
 so the seam is tested instead: `ve-zarr` against its own store fixtures,
 and the encode-and-read-back join against hand-made fields.
+
+**Known upstream gap.** ERA5's root attributes advertise data about two
+days past what is actually written: on 2026-09-07 they claimed hours
+through 2026-09-01T23:00Z while the last written chunk was
+2026-08-30T23:00Z. `Era5Store` takes the attributes at their word, so a
+range inside that gap fails on the first missing hour — quickly, and
+with a message naming the chunk, but it fails. The dialog's default was
+a week back, which landed in it; the default is a fortnight now, which
+clears both the lag and the overstatement. Clamping the *coverage* to
+what is written would need a probe per range and is not done: the
+refusal is already fast and says which chunk is missing.
 
 ---
 
