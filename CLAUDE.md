@@ -169,7 +169,7 @@ They are specified in full in `spec.md` §3.
 | One clipboard | `copy_objects` drops the held capture and `capture_region` drops the object clipboard; the frontend asks `clipboard_kind` on paste. Never a second flag in the frontend remembering which was copied. |
 | Move gesture | `motion_of` carries the **pressed point** to the pointer, never the pivot: a body grabbed away from the centroid must not jump. |
 | Grid resolution | Governs the export only. It must never reach the preview path — a 0.1° project pans and zooms exactly as fast as a 1° one. **Exception**: an import that is not on a lat/lon grid — unstructured or projected — is resampled onto it, since there is no other lattice to put the field on (spec §4.8). |
-| Document `f64` | Every `f64` that reaches a project file needs a `canonical::*_field` serde helper. `serde_json`'s parser is one ULP off on ~10% of values, so a raw `f64` does not round-trip. `f32` is unaffected. See `canonical.rs`. |
+| Document `f64` | Every `f64` that reaches a project file needs a `canonical::*_field` serde helper. `serde_json`'s parser is one ULP off on ~10% of values, so a raw `f64` does not round-trip. `f32` is unaffected. See `canonical.rs`. **A passing round-trip does not mean the helper is unnecessary**: since M38 the workspace build has `serde_json/float_roundtrip` on, because `zarrs` asks for it and Cargo unifies features, so a raw `f64` round-trips under `cargo test --workspace` and does not under `cargo test -p ve-core`. The rounding is the guarantee; the feature is a coincidence of the build graph. |
 
 ---
 
