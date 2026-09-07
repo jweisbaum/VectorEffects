@@ -2807,18 +2807,24 @@ export default function MapView({
     }
 
     // The eraser's footprint (spec.md 8.1, M29): the stamp at the pointer,
-    // and a tint over the swept stroke while the button is down, in pink —
-    // the colour of what the tool will take. Before the schema check, since
-    // the eraser has none.
+    // in pink — the colour of what the tool will take. Before the schema
+    // check, since the eraser has none.
     //
-    // **The sweep is filled and never stroked** (M33). A swept footprint is a
+    // **Outline only: nothing the eraser touches is tinted.** The sweep and
+    // the nib were filled with a translucent pink, which over the dark map
+    // read as a purple wash sitting on the very field the tool was taking
+    // away — and the wash was redundant from the moment the erase became
+    // live (M32), since the field now leaves under the pointer as it moves.
+    // What is left is the nib's own edge, which is what a brush cursor is
+    // for: it says where the tool bites and how wide, and it is a silhouette
+    // rather than a union so it may be stroked.
+    //
+    // **The sweep is never stroked either** (M33). A swept footprint is a
     // union of stamps and `Path2D` has no union, so stroking one traces every
     // stamp's own circle and leaves a chain of rings trailing the pointer.
-    // The union's true edge would need the band the outlines use, which is
-    // `destination-out` and has to run before anything else on the frame; the
-    // stroke is already showing what it does — the field leaves it as the
-    // pointer moves (M32) — so a tint over it and a nib at the pointer say
-    // the rest.
+    // Its true edge would need the band the outlines use, which is
+    // `destination-out` and has to run before anything else on the frame —
+    // and with the erase itself visible there is nothing left for it to say.
     if (tool === ERASE && recording === null) {
       const drag = eraseDrag.current;
       const brush = eraserRef.current;
@@ -2831,20 +2837,12 @@ export default function MapView({
           drag?.radiusKm ??
           (brush.unit === "px" ? kmFromPixels(camera, first[1], brush.size) : brush.size) / 2;
         context.save();
-        if (points.length > 1) {
-          const swept = new Path2D();
-          buildStrokePath(swept, camera, view, points, radiusKm, brush.shape, "geodesic");
-          context.fillStyle = "rgba(255, 110, 190, 0.12)";
-          context.fill(swept);
-        }
         // The nib: one stamp, whose outline is its own silhouette and so may
         // be stroked. At the pointer while it is over the map, and at the
         // head of the stroke otherwise.
         const nib = at ?? { lon: first[0], lat: first[1] };
         const stamp = new Path2D();
         addFootprint(stamp, camera, view, nib.lon, nib.lat, radiusKm, brush.shape, "geodesic");
-        context.fillStyle = "rgba(255, 110, 190, 0.12)";
-        context.fill(stamp);
         context.strokeStyle = "rgba(255, 110, 190, 0.95)";
         context.lineWidth = Math.max(1, dpr);
         context.setLineDash([5 * dpr, 4 * dpr]);

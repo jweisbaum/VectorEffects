@@ -3008,6 +3008,31 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M39 — The eraser's stroke carries no colour of its own
+
+**Goal:** the user's report of 2026-09-07: the eraser's stroke had a
+purple tint before the button came up, and the tint had to go from both
+the brush circle and the swept stroke.
+
+The tint was pink at 12% over a dark blue map, which reads purple, and it
+sat on top of the field the tool was in the middle of taking away — a
+wash over the result, right where the eye is looking. It made sense when
+it was written: the erase only landed on release, so the tint was the
+only thing saying which ground the stroke had covered. M32 made the erase
+live, and from that moment the field leaving under the pointer said it
+better, and the tint said nothing the map was not already showing.
+
+Both fills are gone, from the sweep and from the nib. What is left is the
+nib's dashed outline, which is a brush cursor doing a brush cursor's job:
+where the tool bites and how wide. The sweep is still never stroked, for
+M33's reason — a swept footprint is a union and a stroked union traces
+every stamp's own circle — and now there is nothing left for a sweep
+outline to say either.
+
+The pink stays everywhere else it is used: the highlight on the object
+under the pointer, and the rim an erasure leaves in an outline. Those
+mark things that are *on* the map rather than tinting them.
+
 ### M38 — Importing from the record · **done**
 
 **Goal:** the user's instruction of 2026-09-07: import history from the ERA5

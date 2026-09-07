@@ -1566,11 +1566,14 @@ covered, or that a click landed on it.
   longer all there. Each outline carries the erasures standing against it at
   that step: the band is cut where a piece is gone and the piece's own rim is
   drawn inside the object in its place.
-- **The eraser's stroke in progress is filled, not outlined** (M33). It is the
-  same union, and the same rings would trail the pointer; it is being drawn
-  rather than sitting on the map, so a tint over the sweep and a dashed nib at
-  the pointer say where it is, and the field leaving it as the pointer moves
-  (§6.2) says what it does.
+- **The eraser's stroke in progress is neither filled nor outlined.** It is
+  the same union, so the same rings would trail the pointer if it were
+  stroked; and a tint over the sweep, which is what it carried at first,
+  put a coloured wash over the very field the tool was taking away. Nothing
+  is drawn for the sweep at all now. What says where the stroke is going is
+  the dashed nib at the pointer, and what says what it does is the field
+  leaving under it as the pointer moves (§6.2) — which has been live since
+  M32 and made the tint redundant the moment it arrived.
 
 The outlines come from the same footprint the evaluator paints, so what is
 highlighted is what is covered. Only what is visible is listed: a hidden layer's
