@@ -75,13 +75,21 @@ export function isErrorPayload(value: unknown): value is AppErrorPayload {
 }
 
 /**
+ * What the status bar calls a history fetch (spec 4.10, M38).
+ *
+ * Named rather than written twice: the progress bar shows only while this
+ * label is in the busy set, so the two have to be the same string.
+ */
+export const HISTORY_LABEL = "Fetching history";
+
+/**
  * The commands that can take seconds, and what the status bar's spinner says
  * while each runs. Everything else answers within a frame and is not shown:
  * a spinner that spins for every hit test spins forever.
  */
 const LONG_RUNNING: Readonly<Record<string, string>> = {
   import_grib: "Importing GRIB",
-  import_history: "Fetching history",
+  import_history: HISTORY_LABEL,
   new_project_from_grib: "Opening GRIB",
   import_image: "Importing image",
   open_project: "Opening project",

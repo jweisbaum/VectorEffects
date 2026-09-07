@@ -398,6 +398,7 @@ export default function LayerPanel({
 
       {historyOpen && (
         <HistoryImportDialog
+          project={project}
           now={Date.now() / 1000}
           onImport={importHistory}
           onClose={() => setHistoryOpen(false)}

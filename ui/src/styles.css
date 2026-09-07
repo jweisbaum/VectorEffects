@@ -651,6 +651,24 @@ body {
 }
 .progress-fill { height: 100%; background: var(--accent); transition: width 120ms linear; }
 
+/* The status bar's history fetch (spec.md 4.10, M38): a determinate bar, since
+   the number of steps is known before the first byte moves. Inline and small —
+   it shares the bar with the spinner and the grid size. */
+.history-progress {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.history-progress .progress-bar {
+  width: 90px;
+  height: 5px;
+  margin-bottom: 0;
+  display: inline-block;
+}
+.history-progress .progress-fill { display: block; }
+
 .modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
 .modal-actions button {
   background: #16233a;
@@ -745,33 +763,61 @@ body {
   padding: 4px 7px;
 }
 
-/* The history range dialog's fields. */
-.modal .field {
+/* --- The history range dialog (spec 4.10, M38) ------------------------- */
+
+/* Its own scope, because the shared `.modal` rules are written for the export
+   and new-project forms: `.modal input` is 6.5rem wide, which cuts the hour
+   off a datetime control, and `.modal label` is a column, which stacks a
+   checkbox above its own text. Both are right for those forms and wrong here,
+   so this overrides rather than changes them. */
+.history-import .field {
   display: flex;
   flex-direction: column;
   gap: 4px;
   margin: 10px 0;
   font-size: 12px;
 }
-.modal fieldset.field {
+.history-import fieldset.field {
   border: 1px solid var(--border);
   border-radius: 7px;
-  padding: 8px 10px;
+  padding: 6px 10px 8px;
 }
-.modal fieldset.field legend { padding: 0 4px; color: var(--muted); }
-.modal .field input[type="datetime-local"] {
+.history-import fieldset.field legend { padding: 0 4px; color: var(--muted); }
+
+/* A datetime control has an intrinsic width and will not stretch to a flex
+   line on WebKit, so the width is stated. `min-content` keeps it from being
+   squeezed narrower than the text it must show. */
+.history-import .field input[type="datetime-local"] {
+  width: 100%;
+  min-width: min-content;
+  box-sizing: border-box;
   background: #0d1526;
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 6px;
-  padding: 5px 7px;
+  padding: 5px 8px;
   font: inherit;
 }
-.modal .check {
-  display: flex;
+
+.history-import .check {
+  flex-direction: row;
   align-items: center;
-  gap: 7px;
-  padding: 2px 0;
+  gap: 8px;
+  padding: 3px 0;
+  color: var(--text);
+}
+.history-import .check input[type="checkbox"] {
+  width: auto;
+  flex: none;
+  margin: 0;
+}
+.history-import p { margin: 0 0 10px; }
+
+/* Tall enough to overrun a short window, so it scrolls inside itself rather
+   than pushing its own buttons off the bottom. */
+.history-import {
+  max-height: min(86vh, 640px);
+  overflow-y: auto;
 }
 
 /* The visibility toggle is an eye, shown rather than said. */

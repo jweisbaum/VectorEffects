@@ -15,9 +15,11 @@ import type { CSSProperties } from "react";
 
 import { stillPasteChord } from "./chords";
 import type { FieldKindName } from "./kind";
-import { api, IpcError } from "./ipc";
+import { listen } from "@tauri-apps/api/event";
+import { api, HISTORY_LABEL, IpcError } from "./ipc";
 import { reportError, shown, useHint } from "./hint";
 import { isBusy, useBusy } from "./busy";
+import type { HistoryProgress } from "./generated/HistoryProgress";
 import { type PanelState, loadPanels, savePanels, togglePanel } from "./panels/layout";
 import SettingsDialog from "./settings/SettingsDialog";
 import type { AppInfo } from "./generated/AppInfo";
@@ -672,6 +674,7 @@ export default function App() {
 
       <div className="statusbar">
         <BusySpinner />
+        <HistoryProgressBar />
         {info && (
           <>
             <span className="muted">v{info.version}</span>
@@ -758,6 +761,58 @@ function BusySpinner() {
       aria-label={on ? busy.labels.join(", ") : "Idle"}
       title={on ? busy.labels.join(" · ") : undefined}
     />
+  );
+}
+
+/**
+ * How far a history fetch has got (spec.md 4.10, M38).
+ *
+ * A fetch is minutes of network with nothing else to look at, and a spinner
+ * that only turns cannot tell a slow archive from a stalled one. The backend
+ * knows how many steps it will read before it reads the first, so this is a
+ * real fraction and not an animation.
+ *
+ * It is bounded by the busy store rather than by the last event: an import
+ * that fails leaves its final progress behind, and the bar has to go when the
+ * command does, whichever way it ended.
+ *
+ * Its own component, and its own subscription, so a progress event re-renders
+ * this bar and not the shell.
+ */
+function HistoryProgressBar() {
+  const busy = useBusy();
+  const [progress, setProgress] = useState<HistoryProgress | null>(null);
+  const running = busy.labels.includes(HISTORY_LABEL);
+
+  useEffect(() => {
+    const pending = listen<HistoryProgress>("history://progress", (event) => {
+      setProgress(event.payload);
+    });
+    return () => {
+      void pending.then((unlisten) => unlisten());
+    };
+  }, []);
+
+  // Cleared on the way out, so the next fetch does not open on the last
+  // one's bar before its first event lands.
+  useEffect(() => {
+    if (!running) setProgress(null);
+  }, [running]);
+
+  if (!running) return null;
+  const total = progress?.total ?? 0;
+  const percent = total > 0 ? Math.round(((progress?.done ?? 0) / total) * 100) : 0;
+  const label =
+    progress === null
+      ? "Opening the archives"
+      : `${progress.archive} · ${progress.done}/${progress.total}`;
+  return (
+    <span className="history-progress" title={label} aria-label={label}>
+      <span className="progress-bar">
+        <span className="progress-fill" style={{ width: `${percent}%` }} />
+      </span>
+      <span className="muted">{label}</span>
+    </span>
   );
 }
 
