@@ -3008,6 +3008,60 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M41 — Why a history import looked like a hang
+
+**The report:** the import never finished and showed no data, while
+GribHistory fetched the same archives quickly.
+
+**What it was not.** The app's log showed three imports starting and
+none finishing, with no error. Two candidates were ruled out by
+measurement rather than by reasoning. `reqwest`'s blocking client
+documents a panic when built inside an async runtime, which would leave
+a Tauri task dead and its promise unresolved — the exact shape of the
+symptom — but a probe on a Tauri runtime worker opened both archives and
+read four steps without complaint. And driving `history_import` directly,
+with a real `AppState` and no Tauri at all, imported eight steps from
+both archives in 41 s and built the layers. The path works.
+
+**What it was.** It is slow, and it was silent. Timed against the
+archives from this connection: ERA5 costs about 2.5 s per step and
+GlobCurrent about 0.8 s, opening the two stores costs another ten,
+and a step is two chunks of a few megabytes. Eight steps from both
+archives is the better part of a minute; the three abandoned attempts
+were given 50 s, 108 s and 132 s. Nothing was written until an entire
+archive was done, so the log went quiet for the whole of it and there
+was no way to tell a slow fetch from a stopped one — which is exactly
+what the report says.
+
+**What changed.**
+
+1. **A line per step in the log**, with the archive, the step and the
+   elapsed time, plus one when a store opens and one when the import
+   ends. A log that says an import began and nothing more cannot be
+   told from one that hung.
+2. **Failures are logged, not only returned.** The only report of a
+   failure was a line in the status bar that the next hint replaces.
+3. **Four steps at once**, streamed to the file through a bounded
+   channel. Measured, the link is already saturated by one request —
+   four chunks sequentially took 7 s and four at once took 8 — so this
+   is for the latency, not the throughput, and it is four rather than
+   GribHistory's eight because eight made every fetch land at the same
+   moment and turned the wait into one silent jump. The bound on the
+   channel is what keeps a 240-step import out of the heap: it used to
+   build the whole file in memory, which is over a gigabyte at the cap.
+4. **The read-back happens outside the session lock.** Decoding is
+   hundreds of megabytes at the cap and was freezing every edit and
+   every tile for the length of it.
+5. **The fetch runs on a plain `std::thread`.** Not because the runtime
+   was the cause — it was not — but because `reqwest` documents that its
+   blocking client must not be built inside an async runtime, and
+   relying on it tolerating one is not a thing to leave in place.
+   GribHistory does the same, for the same reason.
+
+**Still true.** A 24-step import from both archives is about two minutes
+at this link's ~1.9 MB/s, and both archives are ticked by default, so it
+fetches twice what one would.
+
 ### M40 — An erase preview takes one layer, not the stack
 
 **Goal:** the user's report of 2026-09-07: erasing on a layer that is not

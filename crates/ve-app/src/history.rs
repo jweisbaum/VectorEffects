@@ -79,6 +79,28 @@ pub const MAX_FETCHED_STEPS: usize = 240;
 /// Seconds in an hour. The archives are hourly and so is everything here.
 const HOUR: i64 = 3600;
 
+/// How many steps are fetched at once.
+///
+/// Four rather than one, because a step is a couple of megabytes over a link
+/// whose latency is a real share of the wait, and four rather than a dozen
+/// because of what the second number does to the first. Measured against
+/// these archives from a domestic connection: four chunks one after another
+/// took 7 s and the same four at once took 8 s, so the link was already
+/// saturated by one. All concurrency buys there is a longer silence — every
+/// fetch finishing at once instead of one every few seconds — and a bar that
+/// does not move is the thing this import can least afford. Four keeps the
+/// gain where a link *is* latency-bound without turning the whole wait into
+/// one step.
+const FETCHES_AT_ONCE: usize = 4;
+
+/// Steps the hand-off channel may hold beyond what the workers are reading.
+///
+/// The bound is the point: it is what keeps a long import inside a bounded
+/// amount of memory. Unbounded, a fast link would build the whole file in the
+/// heap before the first byte reached the disk — 240 steps is well over a
+/// gigabyte.
+const CHANNEL_SLACK: usize = 2;
+
 /// How far along a fetch is, emitted as the `history://progress` event.
 ///
 /// A history import is minutes of silence otherwise, and an indeterminate
@@ -117,28 +139,54 @@ pub struct HistoryRequest {
 }
 
 /// Imports the hours of a range that the project has steps for.
+///
+/// # Why a plain thread rather than the command's own
+///
+/// The archives are read through `reqwest`'s blocking client, which will not
+/// run inside a Tokio context — and `#[tauri::command(async)]` on a
+/// synchronous function runs its body on Tauri's async runtime, which is
+/// Tokio. On that thread the first chunk request never returns and the import
+/// hangs with the spinner turning, which is exactly what it did. A
+/// `std::thread` has no runtime context at all.
+///
+/// The command still returns the project, rather than reporting only through
+/// events: the frontend's spinner, its error reporting and its refresh all
+/// hang off the call, and the progress events are a bar on top of that rather
+/// than a replacement for it. Joining the thread parks one runtime worker for
+/// the length of the import; the tile protocol does its work on the blocking
+/// pool, so the map keeps drawing while it runs.
 #[tauri::command(async)]
 pub fn import_history(
     app: tauri::AppHandle,
-    state: tauri::State<'_, AppState>,
     archives: Vec<String>,
     start_unix_s: i64,
     end_unix_s: i64,
     set_start_time: bool,
 ) -> Result<ProjectSummary> {
-    use tauri::Emitter;
-    history_import(
-        &state,
-        &HistoryRequest {
-            archives,
-            start_unix_s,
-            end_unix_s,
-            set_start_time,
-        },
-        |progress| {
-            let _ = app.emit("history://progress", progress);
-        },
-    )
+    let request = HistoryRequest {
+        archives,
+        start_unix_s,
+        end_unix_s,
+        set_start_time,
+    };
+    let worker = app.clone();
+    let outcome = std::thread::spawn(move || {
+        use tauri::{Emitter, Manager};
+        let state = worker.state::<AppState>();
+        history_import(&state, &request, |progress| {
+            let _ = worker.emit("history://progress", progress);
+        })
+    })
+    .join()
+    .map_err(|_| AppError::Internal("the history import panicked".to_owned()))?;
+    // Logged here as well as returned. An import is minutes long and the only
+    // report of a failure is a line in the status bar that the next hint
+    // replaces; without this the log says an import started and then nothing
+    // at all, which reads as a hang whatever actually happened.
+    if let Err(err) = &outcome {
+        tracing::error!(%err, "history import failed");
+    }
+    outcome
 }
 
 /// Implementation of [`import_history`], callable without a Tauri handle.
@@ -159,6 +207,7 @@ pub fn history_import(
         Ok((settings.step_hours.hours(), settings.step_count))
     })?;
     let wanted = wanted_hours(request, step_hours, step_count)?;
+    let began = std::time::Instant::now();
     tracing::info!(
         archives = ?request.archives,
         steps = wanted.len(),
@@ -194,12 +243,17 @@ pub fn history_import(
         written.push((archive, path));
     }
 
-    with_session(state, |session| {
+    // Read back before the lock is taken, not under it. Decoding is hundreds
+    // of megabytes at the cap, and holding the session for it would freeze
+    // every edit and every tile for the length of it.
+    let mut layers = Vec::with_capacity(written.len());
+    for (archive, path) in &written {
+        layers.push(history_layer(*archive, path, request)?);
+    }
+
+    let summary = with_session(state, |session| {
         let open = session.require_open()?;
-        let mut layers = Vec::with_capacity(written.len());
-        for (archive, path) in &written {
-            layers.push(history_layer(*archive, path, request)?);
-        }
+        let layers = std::mem::take(&mut layers);
 
         // The first hour any of them holds, which is what step 0 will show:
         // the importer aligns a file's first message with the project's
@@ -242,7 +296,14 @@ pub fn history_import(
         history.push(project, command)?;
         open.touch();
         Ok(ProjectSummary::of(session.require_open()?))
-    })
+    })?;
+
+    tracing::info!(
+        layers = summary.layer_count,
+        elapsed_s = format!("{:.1}", began.elapsed().as_secs_f64()),
+        "history import finished"
+    );
+    Ok(summary)
 }
 
 /// The archives a request names, in the order they are read.
@@ -325,6 +386,20 @@ fn wanted_hours(request: &HistoryRequest, step_hours: u32, step_count: u32) -> R
 /// is skipped too, leaving that step with no message, which is what a step
 /// with no message means everywhere else (spec.md 4.8, D48).
 ///
+/// # Why a pool of threads and a channel
+///
+/// A step is a megabyte or two over a link whose latency dominates it, so
+/// reading them one after another spends most of its time waiting. Several
+/// at once is most of the difference between a minute and a quarter of one;
+/// past about a dozen connections the archives' own throughput is the limit
+/// and more buys nothing.
+///
+/// They come back out of order and a GRIB2 file is written in order, so the
+/// writer holds what has arrived early and lets through what has become
+/// contiguous. The channel is bounded, which is what keeps a long import
+/// inside a bounded amount of memory: without it a fast link would build the
+/// whole file in the heap before the first byte reached the disk.
+///
 /// The file is named for the archive and the range, so asking for the same
 /// hours twice rewrites one file rather than filling the directory, and so
 /// someone looking in the directory can tell what each file holds.
@@ -335,7 +410,19 @@ fn fetch_to_file(
     directory: &Path,
     mut on_step: impl FnMut(u32),
 ) -> Result<PathBuf> {
-    let source = archive.open().map_err(zarr_failed)?;
+    use std::io::{BufWriter, Write};
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let started = std::time::Instant::now();
+    let source = Arc::<dyn ve_zarr::FieldSource>::from(archive.open().map_err(zarr_failed)?);
+    // Opening reads the whole time axis, which is seconds on a cold start and
+    // is silent; saying so is the difference between a slow start and an
+    // apparent hang.
+    tracing::info!(
+        archive = archive.id(),
+        elapsed_s = format!("{:.1}", started.elapsed().as_secs_f64()),
+        "history archive opened"
+    );
     // Every hour the archive holds in the range, by hour. Asked for as a
     // range rather than hour by hour because that is the call that knows the
     // store's coverage, and its refusal names what the store actually has —
@@ -357,28 +444,20 @@ fn fetch_to_file(
     let anchor = wanted[0].div_euclid(HOUR);
     let reference = reference_time(anchor * HOUR)?;
 
-    let mut bytes = Vec::new();
-    let mut written = 0u32;
-    for (at, unix_s) in wanted.iter().enumerate() {
-        let hour = unix_s.div_euclid(HOUR);
-        // A step the archive has no hour for is simply left out, and that
-        // step then shows nothing — which is what a step with no message
-        // means everywhere else (spec.md 4.8, D48).
-        let Some(step) = held.get(&hour) else {
-            continue;
-        };
-        let forecast_hour = u32::try_from(hour - anchor)
-            .map_err(|_| bad_range("the archive returned an hour before the range's start"))?;
-        bytes.extend(encode_hour(
-            GRID,
-            reference,
-            forecast_hour,
-            &source.read_step(step).map_err(zarr_failed)?,
-        )?);
-        written += 1;
-        on_step(at as u32 + 1);
-    }
-    if written == 0 {
+    // What to read, and where each answer belongs on the timeline. A step the
+    // archive has no hour for is simply not in here, and that step then shows
+    // nothing — which is what a step with no message means everywhere else
+    // (spec.md 4.8, D48).
+    let plan: Vec<(u32, ve_zarr::Step)> = wanted
+        .iter()
+        .filter_map(|unix_s| {
+            let hour = unix_s.div_euclid(HOUR);
+            let step = held.get(&hour)?;
+            let forecast_hour = u32::try_from(hour - anchor).ok()?;
+            Some((forecast_hour, *step))
+        })
+        .collect();
+    if plan.is_empty() {
         return Err(bad_range(&format!(
             "{} holds no step of that range",
             archive.label()
@@ -391,13 +470,97 @@ fn fetch_to_file(
         request.start_unix_s,
         request.end_unix_s
     ));
-    std::fs::write(&path, &bytes)?;
+    let mut out = BufWriter::with_capacity(1 << 20, std::fs::File::create(&path)?);
+
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let stop = AtomicBool::new(false);
+    let (tx, rx) = std::sync::mpsc::sync_channel::<(usize, Result<Vec<u8>>)>(CHANNEL_SLACK);
+    let workers = FETCHES_AT_ONCE.min(plan.len());
+    let mut bytes_written = 0usize;
+
+    let outcome = std::thread::scope(|scope| -> Result<()> {
+        for _ in 0..workers {
+            let tx = tx.clone();
+            let (next, stop, plan, source) = (&next, &stop, &plan, &source);
+            scope.spawn(move || {
+                loop {
+                    if stop.load(Ordering::Relaxed) {
+                        return;
+                    }
+                    let position = next.fetch_add(1, Ordering::Relaxed);
+                    let Some((forecast_hour, step)) = plan.get(position) else {
+                        return;
+                    };
+                    let built = source
+                        .read_step(step)
+                        .map_err(zarr_failed)
+                        .and_then(|fields| encode_hour(GRID, reference, *forecast_hour, &fields));
+                    let failed = built.is_err();
+                    if tx.send((position, built)).is_err() {
+                        // The writer has gone; there is nothing to hand back to.
+                        return;
+                    }
+                    if failed {
+                        // Stop the others rather than keep fetching for a file
+                        // that is already going to be thrown away.
+                        stop.store(true, Ordering::Relaxed);
+                        return;
+                    }
+                }
+            });
+        }
+        // The writer's loop ends when every sender has dropped, so it must not
+        // hold one itself.
+        drop(tx);
+
+        let mut early: std::collections::BTreeMap<usize, Vec<u8>> =
+            std::collections::BTreeMap::new();
+        let mut expected = 0usize;
+        let mut arrived = 0u32;
+        for (position, built) in rx {
+            early.insert(position, built?);
+            // The bar counts what has *arrived*, not what has been written in
+            // order: with several fetches in flight the earliest can be the
+            // last to land, and a bar that waited for it would stand still
+            // through most of the download and then jump.
+            arrived += 1;
+            on_step(arrived);
+            while let Some(bytes) = early.remove(&expected) {
+                out.write_all(&bytes)?;
+                bytes_written += bytes.len();
+                expected += 1;
+                // Per step, not per archive. An archive is a minute of silence
+                // otherwise, and a log that says an import began and nothing
+                // more cannot be told from one that hung.
+                tracing::info!(
+                    archive = archive.id(),
+                    step = expected,
+                    of = plan.len(),
+                    elapsed_s = format!("{:.1}", started.elapsed().as_secs_f64()),
+                    "history step written"
+                );
+            }
+        }
+        Ok(())
+    });
+
+    // A failure leaves a part-written file, which would be read back as a
+    // short import rather than as the failure it was.
+    if let Err(err) = outcome {
+        drop(out);
+        let _ = std::fs::remove_file(&path);
+        return Err(err);
+    }
+    out.flush()?;
+    drop(out);
+
     tracing::info!(
         archive = archive.id(),
-        steps = written,
-        bytes = bytes.len(),
+        steps = plan.len(),
+        bytes = bytes_written,
+        elapsed_s = format!("{:.1}", started.elapsed().as_secs_f64()),
         path = %path.display(),
-        "history steps written"
+        "history archive written"
     );
     Ok(path)
 }

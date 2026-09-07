@@ -935,7 +935,19 @@ pressed, and a range that lands on no step at all is declined there.
 **It reports how far it has got.** A fetch is minutes of network, and an
 indeterminate spinner cannot tell a slow archive from a stalled one. The
 number of steps is known before the first byte moves, so the status bar shows
-a real fraction, named by the archive being read.
+a real fraction, named by the archive being read, and the log carries a line
+per step with the time it took. A step counts when it *arrives*, not when it
+is written: several are fetched at once, the earliest can be the last to
+land, and a bar that waited for it would stand still through the download and
+then jump.
+
+**A few steps are fetched at once, not many.** The archives are read over a
+link that is often already saturated by a single request — measured from a
+domestic connection, four chunks one after another took 7 s and the same four
+at once took 8 s — so the concurrency that matters is the little that hides
+latency, not the amount that would fill a fast pipe. Beyond that it buys no
+throughput and costs the only thing the wait has going for it, which is a bar
+that keeps moving.
 
 **Times are UTC and land on the hour**, like every other time in the
 application (§3.6). The dialog says so on both labels: the control has no
