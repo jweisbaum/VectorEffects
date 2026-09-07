@@ -3035,6 +3035,41 @@ still a finding, and in `ve-zarr` only the two archives are allowed.
    fields on the ERA5 0.25 degree grid, GlobCurrent regridded onto it, so a
    field goes into a GRIB2 message as it is.
 
+2. **A bitmap in the writer.** `writer::message_masked` writes the points a
+   field has no value for as absent, through a section 6 bitmap, rather than
+   packing a NaN or a zero. GlobCurrent has no current over land, and a
+   land value of zero is not "no current" but "dead calm" — the distinction
+   D58 exists to keep. A field with no holes still goes through the plain
+   `message`, so nothing about existing output changes; a field with
+   nothing anywhere is refused. Round-tripped through the decoder, which
+   reads the masked nodes back as missing.
+
+3. **The pipeline.** `ve_app::history` opens each archive, walks the hours
+   in the range, and writes them as GRIB2 into the application's data
+   directory — one file per archive, named for the archive and the range.
+   The file is then read by the *ordinary* importer, so a history layer
+   holds exactly what a forecast layer holds and there is no second
+   decoding path to keep in step, and so the alignment rule is §4.8's
+   unchanged: the file's first hour is its own reference, so it lands on the
+   project's first step. A project with no start time takes that hour as its
+   own, in the same history entry as the layers, so one undo takes the whole
+   import back. `Layer::from_history` is
+   `Layer::from_grib` plus the provenance, built as one so the two cannot
+   drift. Ten days is the cap, refused at the dialog with its length rather
+   than abandoned halfway. The document keeps the file's path, the archive
+   and the hours, and never a sample (invariants 1 and 2).
+
+4. **The dialog.** A calendar button beside *Import image* — dates, not a
+   file, which is what distinguishes it — opens a start, an end and a
+   checkbox per archive. `historyRange.ts` holds every rule about the
+   times, tested against arithmetic rather than against a second copy of
+   its own formula: both ends inclusive, the cap at its boundary, a date
+   that does not exist refused rather than rolled into the next month, and
+   the value read as **UTC** and never as local time, which would shift
+   every fetched hour by the reader's own offset. The default range is a
+   day ending a week back, because both archives trail real time and a
+   range ending now is one neither has yet.
+
 ---
 
 ## 3. Testing strategy

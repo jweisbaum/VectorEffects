@@ -27,6 +27,18 @@
 //! observable is lost.
 //!
 //! `f32` needs none of this, which is why scalar properties are left alone.
+//!
+//! # Why the feature is not the answer
+//!
+//! `serde_json`'s `float_roundtrip` feature makes its parser correct, and
+//! since M38 the workspace has it on — `zarrs`, reached through `ve-zarr`
+//! for the history import, asks for it, and Cargo unifies features across a
+//! build. That is not something to rely on. It is on because of a crate this
+//! one does not depend on, it is off when `ve-core` is built alone, and a
+//! project file's identity across a save and a load cannot turn on who else
+//! is in the build graph (invariant 4). The rounding below is what makes a
+//! canonical value name itself exactly under any correctly rounded parser,
+//! and it stays.
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -157,18 +169,45 @@ mod tests {
         assert_eq!(checked, 60_000);
     }
 
-    /// Documents the upstream defect this module works around. If a future
-    /// serde_json fixes its parser, this test fails and the module can go.
+    /// The guarantee is the rounding, not a `serde_json` feature.
+    ///
+    /// `serde_json`'s parser is correctly rounded only with `float_roundtrip`
+    /// on, and whether it is on is not this crate's decision: Cargo unifies
+    /// features across a build, so `zarrs` — pulled in by `ve-zarr` for the
+    /// history import (spec.md 4.10) — turns it on for the whole workspace,
+    /// while `cargo test -p ve-core` alone leaves it off. A document's
+    /// identity across a save and a load must not depend on which other
+    /// crates happen to be in the build (invariant 4).
+    ///
+    /// So the reference here is `std`'s parser, which is correctly rounded
+    /// always and is not `serde_json`'s: a canonical value has few enough
+    /// significant digits that its own text names it exactly, whichever
+    /// parser reads the file back.
+    ///
+    /// This replaces a canary that asserted `serde_json` still *had* the
+    /// defect. It stopped meaning anything the moment a dependency could
+    /// switch the defect off from outside the crate.
     #[test]
-    fn raw_floats_still_need_the_workaround() {
-        let value: f64 = 380_812.358_415_356_84;
-        let json = serde_json::to_string(&value).expect("finite");
-        let back: f64 = serde_json::from_str(&json).expect("valid json");
-        assert_ne!(
-            back.to_bits(),
-            value.to_bits(),
-            "serde_json now round-trips raw f64 correctly; canonical.rs may be removable"
-        );
+    fn a_canonical_value_is_named_exactly_by_its_own_text() {
+        // The value the old canary used: one of the ~10% that a defective
+        // parser lands one ULP away from.
+        let hostile = [
+            380_812.358_415_356_84_f64,
+            -107.943_262_213_740_03,
+            1.000_000_000_000_000_2,
+        ];
+        for value in hostile {
+            for rounder in [metres as fn(f64) -> f64, degrees, ratio] {
+                let canonical = rounder(value);
+                let json = serde_json::to_string(&canonical).expect("finite");
+                let by_std: f64 = json.parse().expect("a number");
+                assert_eq!(
+                    by_std.to_bits(),
+                    canonical.to_bits(),
+                    "{canonical} is not what {json} names"
+                );
+            }
+        }
     }
 
     #[test]

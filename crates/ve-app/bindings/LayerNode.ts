@@ -37,7 +37,12 @@ grib: GribLayerInfo | null,
 image: ImageLayerView | null, 
 /**
  * What the layer is (M29): `"painted"`, `"raster"` for an imported GRIB,
- * `"image"` for a picture. Says which controls the panel offers.
+ * `"image"` for a picture, `"zarr"` for hours fetched from a history
+ * archive (spec.md 4.10, M38). Says which controls the panel offers.
+ *
+ * A `"zarr"` layer offers everything a `"raster"` one does — it is a
+ * GRIB layer that remembers where it came from — so a branch that
+ * treats only `"raster"` as an imported field is a bug, not a choice.
  */
 source: string, 
 /**

@@ -1002,6 +1002,67 @@ mod tests {
         assert!(loaded.layers[0].source.is_painted());
     }
 
+    /// A history layer is a GRIB layer plus where it came from (spec.md
+    /// 4.10, M38), and both halves have to survive the archive: the path,
+    /// because the field is re-read from it on open, and the provenance,
+    /// because a layer that forgot which hours it holds cannot say what it
+    /// is. Its samples stay out, exactly as a GRIB layer's do.
+    #[test]
+    fn a_history_layer_keeps_its_archive_and_its_hours() {
+        use crate::document::LayerSource;
+        use crate::raster::{RasterFrame, RasterGrid, RasterSequence};
+        use std::sync::Arc;
+
+        let grid = RasterGrid::new(2, 2, 0.0, 1.0, 1.0, 1.0, vec![[3.0, 4.0]; 4]).unwrap();
+        let sequence = RasterSequence::new(
+            FieldKind::Wind,
+            vec![RasterFrame {
+                offset_hours: 0.0,
+                valid_unix_s: 1_600_000_000,
+                grid: Arc::new(grid),
+            }],
+        )
+        .unwrap();
+        let mut project = sample();
+        project.layers.push(Layer::from_history(
+            "ERA5 10 m wind",
+            PathBuf::from("/history/era5-wind-1600000000-1600086400.grib2"),
+            Arc::new(sequence),
+            "era5-wind",
+            1_600_000_000,
+            1_600_086_400,
+        ));
+
+        let json = to_canonical_json(&project).unwrap();
+        assert!(json.contains("era5-wind"), "the archive is the provenance");
+
+        let dir = TempDir::new();
+        let path = dir.path("history.veproj");
+        save(&project, &path).unwrap();
+        let loaded = load(&path).unwrap();
+        let layer = &loaded.layers[1];
+        assert_eq!(
+            layer.source,
+            LayerSource::Zarr {
+                path: PathBuf::from("/history/era5-wind-1600000000-1600086400.grib2"),
+                field: FieldKind::Wind,
+                archive: "era5-wind".to_owned(),
+                start_unix_s: 1_600_000_000,
+                end_unix_s: 1_600_086_400,
+            }
+        );
+        assert!(
+            layer.raster.is_none(),
+            "the field is re-read from the file, never stored (invariants 1 and 2)"
+        );
+        // Everything a GRIB layer offers, it offers: the same field kind, the
+        // same file to read, and the same answer to "is this imported".
+        assert_eq!(layer.parameter(), FieldKind::Wind);
+        assert!(layer.is_grib());
+        assert!(layer.source.raster_file().is_some());
+        assert!(layer.visible, "a fetched layer is shown");
+    }
+
     #[test]
     fn canonical_json_is_stable_across_calls() {
         let project = sample();

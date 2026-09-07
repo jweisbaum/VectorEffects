@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use ve_core::Command;
-use ve_core::document::{Layer, LayerSource};
+use ve_core::document::Layer;
 use ve_core::project::{FieldKind, MAX_STEPS, Project, ProjectSettings, Resolution, StepHours};
 use ve_core::raster::RasterSequence;
 use ve_grib::import;
@@ -278,10 +278,12 @@ pub fn attach_rasters(project: &mut Project) -> Vec<(String, AppError)> {
     let resolution = project.settings.resolution;
     let mut cache = std::mem::take(&mut project.regrid);
     for layer in &mut project.layers {
-        let LayerSource::Grib { path, field } = &layer.source else {
+        // A history layer reads a GRIB file of its own (M38), so it comes
+        // back the same way a forecast does.
+        let Some((path, field)) = layer.source.raster_file() else {
             continue;
         };
-        let (path, field) = (path.clone(), *field);
+        let (path, field) = (path.to_path_buf(), field);
         let target = resolution.target_grid();
         let result = {
             let mut resampling = import::Resampling::new(target, &mut cache);

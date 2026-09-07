@@ -21,6 +21,13 @@ pub struct AppPaths {
     pub autosave_dir: PathBuf,
     /// Rolling log files.
     pub log_dir: PathBuf,
+    /// GRIB2 files written by the history import (spec.md 4.10, M38).
+    ///
+    /// Application *data*, not cache: a project points at what was imported
+    /// the way it points at any other GRIB file, so deleting these takes the
+    /// field away from the projects that use them. The render cache next
+    /// door is the one that is safe to delete.
+    pub history_dir: PathBuf,
 }
 
 impl AppPaths {
@@ -35,6 +42,7 @@ impl AppPaths {
             cache_dir: dirs.cache_dir().join("render"),
             autosave_dir: data.join("autosave"),
             log_dir: data.join("logs"),
+            history_dir: data.join("history"),
         };
         paths.create_all()?;
         Ok(paths)
@@ -50,6 +58,7 @@ impl AppPaths {
             cache_dir: root.join("cache"),
             autosave_dir: root.join("autosave"),
             log_dir: root.join("logs"),
+            history_dir: root.join("history"),
         };
         paths.create_all()?;
         Ok(paths)
@@ -61,6 +70,7 @@ impl AppPaths {
             &self.cache_dir,
             &self.autosave_dir,
             &self.log_dir,
+            &self.history_dir,
         ] {
             std::fs::create_dir_all(dir)?;
         }

@@ -864,6 +864,55 @@ the field away, not what is beneath it.
 **No bars and no messages on the timeline.** An image is static: it has no
 forecast hour, so there is nothing for a step to show or not show.
 
+### 4.10 History layers
+
+A range of *past* hours, fetched from a public archive and imported as
+layers. The calendar button beside the two import buttons asks for a start,
+an end and which archives to read; what comes back is one layer per archive,
+and each one is a GRIB layer in every way that matters.
+
+**Two archives, one field each.** ERA5 gives 10 m wind and GlobCurrent gives
+the total surface current, both hourly on a 0.25° global grid. Nothing else
+is read: a history import is not a general data browser, and the two fields
+the application paints are the two fields it fetches.
+
+**The hours are fetched once and written to a file.** Each archive's range
+becomes a GRIB2 file in the application's data directory, packed at 16 bits
+with a bitmap over the points the archive has no value for — the land, for a
+current field. The layer then reads that file exactly as an imported forecast
+does (§4.8): the same frames on the same steps, the same speed filter, the
+same edit objects and modifiers, the same eraser, the same macros, the same
+export. **The layer type is `zarr`**, which is provenance and not behaviour:
+it records which archive and which hours, so the layer can say what it is.
+
+That is why it goes through a file rather than holding the fetched hours in
+memory. A project has to open the same way on a train as on a desk, and a
+layer whose field only exists while a connection does would be a layer that
+sometimes is not there.
+
+**It aligns the way an imported forecast does.** The file's forecast hours
+count from its own first hour, so the first hour of the range lands on the
+project's first step and the rest follow at their own spacing — §4.8's rule,
+unchanged, because a history layer is to behave exactly as an imported one
+does. A project with no start time takes the first fetched hour as its own,
+the way a project made from a GRIB takes the file's, and both the layers and
+that start time arrive as one history entry, so one undo takes the whole
+import back.
+
+**Bounded, and refused rather than abandoned.** Ten days of hourly data is
+the most one import fetches. A longer range is declined at the dialog, with
+its length, before anything is transferred; the user can ask for the next ten
+days as a second import, which lands as its own layer.
+
+**Times are UTC and land on the hour**, like every other time in the
+application (§3.6). The dialog says so on both labels: the control has no
+timezone of its own, and reading it as local time would shift every fetched
+hour silently.
+
+**This is the one path that reaches the network** (invariant 5). It runs when
+the button is pressed and at no other moment: no timer, no startup check, no
+refresh. Everything it needs afterwards is on disk.
+
 ---
 
 ## 5. Map view

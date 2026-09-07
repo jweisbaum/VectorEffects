@@ -512,10 +512,7 @@ mod tests {
                     "node {at} was masked and must read as missing"
                 );
             } else {
-                assert!(
-                    (want - got).abs() < 0.01,
-                    "node {at}: {got} is not {want}"
-                );
+                assert!((want - got).abs() < 0.01, "node {at}: {got} is not {want}");
             }
         }
     }

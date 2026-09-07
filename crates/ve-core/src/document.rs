@@ -600,6 +600,27 @@ pub enum LayerSource {
         #[serde(with = "crate::canonical::ratio_field")]
         opacity: f64,
     },
+    /// A field imported from a history archive (spec.md 4.10, M38).
+    ///
+    /// **A GRIB layer that remembers where it came from.** The hours the user
+    /// asked for are fetched once and written to a GRIB2 file of their own,
+    /// which this layer then reads exactly as a [`Self::Grib`] layer reads a
+    /// forecast: the same sequence of frames, the same speed filter, the same
+    /// eraser, the same export. What it adds is the provenance — which
+    /// archive, and which hours — so the layer can say what it is, and so a
+    /// range can be asked for again.
+    Zarr {
+        /// The GRIB2 file the fetched hours were written to.
+        path: PathBuf,
+        /// Which of the file's fields this layer carries.
+        field: FieldKind,
+        /// The archive it came from: `era5-wind` or `globcurrent`.
+        archive: String,
+        /// First hour asked for, in Unix seconds.
+        start_unix_s: i64,
+        /// Last hour asked for, in Unix seconds.
+        end_unix_s: i64,
+    },
 }
 
 impl LayerSource {
@@ -612,7 +633,22 @@ impl LayerSource {
     pub fn path(&self) -> Option<&std::path::Path> {
         match self {
             Self::Painted => None,
-            Self::Grib { path, .. } | Self::Image { path, .. } => Some(path),
+            Self::Grib { path, .. } | Self::Image { path, .. } | Self::Zarr { path, .. } => {
+                Some(path)
+            }
+        }
+    }
+
+    /// The GRIB2 file and field this layer's raster is read from, if it has
+    /// one (M38).
+    ///
+    /// A history layer is a GRIB layer that remembers where it came from, so
+    /// everything that reads a raster off a file asks this rather than
+    /// matching on the variant and forgetting one of them.
+    pub fn raster_file(&self) -> Option<(&std::path::Path, crate::project::FieldKind)> {
+        match self {
+            Self::Grib { path, field } | Self::Zarr { path, field, .. } => Some((path, *field)),
+            Self::Painted | Self::Image { .. } => None,
         }
     }
 }
@@ -781,7 +817,7 @@ impl Layer {
     /// layer's own otherwise (M29).
     pub fn parameter(&self) -> crate::project::FieldKind {
         match &self.source {
-            LayerSource::Grib { field, .. } => *field,
+            LayerSource::Grib { field, .. } | LayerSource::Zarr { field, .. } => *field,
             _ => self.parameter,
         }
     }
@@ -830,6 +866,34 @@ impl Layer {
             speed_range: None,
             frame_overrides: Vec::new(),
             erased: Vec::new(),
+        }
+    }
+
+    /// A layer carrying hours fetched from a history archive (spec.md 4.10).
+    ///
+    /// The same layer [`Self::from_grib`] makes, down to the raster it reads,
+    /// plus where the hours came from. Built here rather than by editing a
+    /// GRIB layer's source afterwards, so the two cannot drift: a history
+    /// layer that lost a field a GRIB layer has would behave subtly unlike
+    /// one, and behaving exactly like one is the whole requirement.
+    pub fn from_history(
+        name: impl Into<String>,
+        path: PathBuf,
+        raster: Arc<RasterSequence>,
+        archive: impl Into<String>,
+        start_unix_s: i64,
+        end_unix_s: i64,
+    ) -> Self {
+        let field = raster.kind;
+        Self {
+            source: LayerSource::Zarr {
+                path: path.clone(),
+                field,
+                archive: archive.into(),
+                start_unix_s,
+                end_unix_s,
+            },
+            ..Self::from_grib(name, path, raster, true)
         }
     }
 

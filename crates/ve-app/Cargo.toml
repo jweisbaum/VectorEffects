@@ -21,6 +21,7 @@ path = "src/main.rs"
 ve-core = { workspace = true }
 ve-grib = { workspace = true }
 ve-render = { workspace = true }
+ve-zarr = { workspace = true }
 
 anyhow = { workspace = true }
 serde = { workspace = true }

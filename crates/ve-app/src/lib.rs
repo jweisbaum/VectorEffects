@@ -13,6 +13,7 @@ pub mod edit;
 pub mod error;
 pub mod export;
 pub mod frames;
+pub mod history;
 pub mod image;
 pub mod import;
 pub mod logging;
@@ -109,6 +110,7 @@ pub fn run() -> anyhow::Result<()> {
             export::cancel_export,
             import::import_grib,
             import::new_project_from_grib,
+            history::import_history,
             document::document_tree,
             document::object_properties,
             document::set_object_property,

@@ -56,7 +56,12 @@ pub struct LayerNode {
     /// The picture beneath everything, for an image layer (spec.md 4.9, M18).
     pub image: Option<crate::image::ImageLayerView>,
     /// What the layer is (M29): `"painted"`, `"raster"` for an imported GRIB,
-    /// `"image"` for a picture. Says which controls the panel offers.
+    /// `"image"` for a picture, `"zarr"` for hours fetched from a history
+    /// archive (spec.md 4.10, M38). Says which controls the panel offers.
+    ///
+    /// A `"zarr"` layer offers everything a `"raster"` one does — it is a
+    /// GRIB layer that remembers where it came from — so a branch that
+    /// treats only `"raster"` as an imported field is a bug, not a choice.
     pub source: String,
     /// Which field the layer is part of — `"wind"` or `"current"`: its
     /// file's for a raster layer, none that matters for an image (M29).
@@ -304,16 +309,24 @@ fn tree_of(project: &Project, step: u32) -> DocumentTree {
                     ve_core::document::LayerSource::Painted => "painted",
                     ve_core::document::LayerSource::Grib { .. } => "raster",
                     ve_core::document::LayerSource::Image { .. } => "image",
+                    // A history layer says what it is (M38): it reads a GRIB
+                    // file and behaves as a raster layer in every way, and
+                    // the panel names the archive rather than the file.
+                    ve_core::document::LayerSource::Zarr { .. } => "zarr",
                 }
                 .to_owned(),
                 parameter: crate::projects::kind_name(layer.parameter()).to_owned(),
                 image: crate::image::view(layer.id, &layer.source),
-                grib: match &layer.source {
-                    // An image contributes no field, so it has no GRIB view; it
-                    // has an `image` one instead (spec.md 4.9, M18).
-                    ve_core::document::LayerSource::Painted
-                    | ve_core::document::LayerSource::Image { .. } => None,
-                    ve_core::document::LayerSource::Grib { path, field } => Some(GribLayerInfo {
+                // Every layer that reads a raster file gets this view — an
+                // imported forecast and a fetched history alike, which is
+                // what makes the panel offer a history layer the speed
+                // filter and the step bars (spec.md 4.10). An image
+                // contributes no field, so it has none; it has an `image`
+                // view instead (spec.md 4.9, M18).
+                grib: layer
+                    .source
+                    .raster_file()
+                    .map(|(path, field)| GribLayerInfo {
                         path: path.to_string_lossy().into_owned(),
                         field_kind: match field {
                             ve_core::FieldKind::Wind => "wind".to_owned(),
@@ -353,7 +366,6 @@ fn tree_of(project: &Project, step: u32) -> DocumentTree {
                             })
                             .collect(),
                     }),
-                },
                 objects: layer
                     .objects
                     .iter()
@@ -1173,7 +1185,9 @@ pub fn stroke_erase(state: &AppState, stroke: EraseStroke) -> Result<ProjectSumm
             let mut removals: Vec<(usize, Command)> = Vec::new();
             let mut new_captures: Vec<std::sync::Arc<Capture>> = Vec::new();
 
-            if matches!(layer.source, LayerSource::Grib { .. }) {
+            // Erasing works on any layer whose field comes from a file — a
+            // forecast or a history import alike (M38).
+            if layer.source.raster_file().is_some() {
                 let mut after = layer.erased.clone();
                 after.push(RasterErasure {
                     chains: vec![points.clone()],
