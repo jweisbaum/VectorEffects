@@ -41,10 +41,16 @@ stop and raise it rather than working around it.
    same commit; only the tolerance is loose.
 4. **Export is deterministic and byte-reproducible** across machines. Export
    uses `CpuEvaluator`, never the GPU, unless the user opts into `fast_export`.
-5. **Zero runtime network access.** No CDN fonts, no map tiles, no telemetry, no
-   remote schema fetches. `npm run check:offline` enforces this statically in CI
+5. **Nothing is fetched that the user did not ask for.** No CDN fonts, no map
+   tiles, no telemetry, no remote schema fetches, and the webview's CSP stays
+   `'self'`-only. `npm run check:offline` enforces this statically in CI
    (source URLs, remote references in the built bundle, and CSP strength). A
    socket-level test over the packaged app arrives with M10.
+   **One exception, added on the user's instruction (M38):** the history
+   import of spec §4.10 reads the ERA5 and GlobCurrent archives over HTTPS
+   when the user asks it to. It lives in `ve-zarr` and nothing else may reach
+   the network — the offline check allows those URLs in that crate alone. A
+   new fetch anywhere else is still the violation it always was.
 6. **Interaction stays fast; export may be slow.** Never trade frame rate for
    export throughput.
 

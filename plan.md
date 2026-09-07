@@ -3008,6 +3008,33 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M38 — Importing from the record · **in progress**
+
+**Goal:** the user's instruction of 2026-09-07: import history from the ERA5
+and GlobCurrent archives over a date range, ERA5 wind in one layer and
+GlobCurrent in another, both behaving exactly as GRIB layers do, of layer
+type zarr, reached by a calendar button beside *Import image*.
+
+**This reopens invariant 5**, on the user's instruction: the application
+fetched nothing, and a history import fetches. The invariant is now
+"nothing is fetched that the user did not ask for" — no CDN, no tiles, no
+telemetry, no update check, the webview's CSP still `'self'`-only — and the
+one exception is confined to `ve-zarr`, which nothing calls but the import.
+`check-offline.sh` enforces exactly that: a URL anywhere else in Rust is
+still a finding, and in `ve-zarr` only the two archives are allowed.
+
+1. **The reader.** `ve-zarr` reads ERA5 10 m wind (ARCO-ERA5 on Google
+   Cloud) and GlobCurrent total surface current (Copernicus Marine), both
+   public and anonymous, both Zarr V2 read with `zarrs`. Carried over from
+   the GribHistory application with its tests — the archives, their quirks
+   and the reasoning about provisional hours are the same problem — with
+   two changes: the blosc codec stays the pure-Rust one, and the HTTP store
+   is written here rather than taken from `zarrs_http`, which pulls
+   `reqwest` with `native-tls` and so `openssl-sys`, a system C library the
+   three-platform build forbids. Rustls links none. Both sources hand back
+   fields on the ERA5 0.25 degree grid, GlobCurrent regridded onto it, so a
+   field goes into a GRIB2 message as it is.
+
 ---
 
 ## 3. Testing strategy

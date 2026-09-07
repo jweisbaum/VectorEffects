@@ -27,7 +27,9 @@ CONF=crates/ve-app/tauri.conf.json
 # compares it as a string and dereferences nothing. It is required in an SVG
 # carried as a data URI (the map's cursors, M24), which otherwise renders as
 # nothing at all.
-ALLOW='schema\.tauri\.app|//localhost:|\.localhost|//127\.0\.0\.1|www\.w3\.org/2000/svg'
+# `.invalid` is reserved by RFC 2606 and never resolves, which is what makes it
+# the right host for a test that must not reach anything.
+ALLOW='schema\.tauri\.app|//localhost:|\.localhost|//127\.0\.0\.1|www\.w3\.org/2000/svg|\.invalid'
 # Pure comment lines. A URL in a comment fetches nothing, and the generated
 # ts-rs bindings carry a provenance URL in their header.
 COMMENT=':[0-9]+:[[:space:]]*(//|\*|/\*)'
@@ -44,9 +46,19 @@ hits=$(grep -rnE 'https?://' ui/src ui/index.html 2>/dev/null \
   | grep -vE "$COMMENT" | grep -vE "$ALLOW" || true)
 [ -n "$hits" ] && report "absolute URL in frontend source" "$hits"
 
-hits=$(find crates -name '*.rs' -exec grep -nHE 'https?://' {} + 2>/dev/null \
+# `ve-zarr` is the one crate allowed to name a remote host: the history import
+# of spec 4.10 reads the ERA5 and GlobCurrent archives, and only when the user
+# asks it to (invariant 5). Everywhere else a URL in Rust is still a finding,
+# so a fetch that creeps into another crate is caught.
+hits=$(find crates -name '*.rs' -not -path 'crates/ve-zarr/*' -exec grep -nHE 'https?://' {} + 2>/dev/null \
   | grep -vE "$COMMENT" | grep -vE "$ALLOW" || true)
 [ -n "$hits" ] && report "absolute URL in rust source" "$hits"
+
+# And in that crate, only the two archives it exists to read.
+ARCHIVES='storage\.googleapis\.com/gcp-public-data-arco-era5|s3\.waw3-1\.cloudferro\.com/mdl-arco-time'
+hits=$(find crates/ve-zarr -name '*.rs' -exec grep -nHE 'https?://' {} + 2>/dev/null \
+  | grep -vE "$COMMENT" | grep -vE "$ALLOW" | grep -vE "$ARCHIVES" || true)
+[ -n "$hits" ] && report "unexpected remote host in ve-zarr" "$hits"
 
 hits=$(grep -nE 'https?://' "$CONF" 2>/dev/null | grep -vE "$ALLOW" || true)
 [ -n "$hits" ] && report "absolute URL in tauri.conf.json" "$hits"

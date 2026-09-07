@@ -4,6 +4,7 @@ members = [
     "crates/ve-core",
     "crates/ve-render",
     "crates/ve-grib",
+    "crates/ve-zarr",
     "crates/ve-app",
     "tools/basemap-builder",
     "tools/icon-grid-builder",
@@ -20,6 +21,7 @@ repository = "https://github.com/jweisbaum/VectorEffects"
 ve-core = { path = "crates/ve-core" }
 ve-grib = { path = "crates/ve-grib" }
 ve-render = { path = "crates/ve-render" }
+ve-zarr = { path = "crates/ve-zarr" }
 
 anyhow = "1"
 # Pure-Rust decoders for the two GRIB2 packings the forecast centres ship

@@ -82,8 +82,16 @@ is a design regression, not a trade-off.
    coarsely and interpolate (§7.7).
 4. **Export is deterministic.** The same project exported twice on any two
    machines produces byte-identical GRIB2 output.
-5. **Zero runtime network access.** The basemap and every other asset are
-   bundled.
+5. **Nothing is fetched that the user did not ask for.** The basemap and every
+   other asset are bundled; there is no CDN, no map tile server, no telemetry,
+   no remote schema and no update check, and the webview's CSP stays
+   `'self'`-only so it can load nothing remote whatever the page says.
+   **The one exception is an import the user starts** (§4.10, M38): reading a
+   history archive is a file dialog that happens to read from a public archive
+   rather than a disk, and it is confined to `ve-zarr`, which nothing calls
+   except that import. Was "zero runtime network access" until the history
+   import, and the difference is *who asked*: nothing here runs on a timer, at
+   startup, or behind the user's back.
 6. **Interaction stays fast; export is allowed to be slow.** Never trade frame
    rate for export throughput.
 
