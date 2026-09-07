@@ -143,6 +143,77 @@ fn field(state: &AppState, step: u32, lon: f64, lat: f64) -> (f32, f32) {
     (uv.u, uv.v)
 }
 
+/// A macro's bar is as wide as the macro has frames — which for a macro
+/// recorded over a whole timeline is the whole timeline (M34).
+///
+/// The user's own case, reported as a bug three times: a 24-step project of
+/// three-hourly steps, a macro recorded from step 0 with the playhead taken
+/// to the end, so the run is 24 frames spanning 69 hours. Placed at step 0
+/// it covers every step, because it has a frame for every step; placed at
+/// step 13 it starts there and is cut off by the end of the timeline. The
+/// length of the *run* is what decides this, and the run is the steps from
+/// the first to wherever the playhead is when the preview is taken.
+#[test]
+fn a_macro_is_as_wide_as_its_frames_even_when_that_is_everything() {
+    let root = TempRoot::new("full-length");
+    let app = AppState::new(AppPaths::in_directory(&root.0).expect("paths"));
+    settings::macro_directory_set(&app, root.0.join("library").to_string_lossy().into_owned())
+        .expect("library directory");
+    projects::create(
+        &app,
+        NewProjectRequest {
+            name: "Long".to_owned(),
+            field_kind: "wind".to_owned(),
+            resolution: "1.0".to_owned(),
+            step_hours: 3,
+            step_count: 24,
+        },
+        false,
+    )
+    .expect("create");
+    create::create(
+        &app,
+        NewObject {
+            tool: Tool::Brush,
+            gesture: Gesture::Stroke {
+                points: vec![[0.0, 0.0]],
+            },
+            options: vec![
+                number("SizeKm", 900.0),
+                number("Speed", 18.0),
+                number("Feather", 0.0),
+            ],
+            layer: None,
+        },
+    )
+    .expect("a stroke");
+
+    // Recorded from step 0, previewed with the playhead at the last step.
+    macros::capture_start(&app, region(0.0, 0.0), 0, false, None).expect("start");
+    macros::capture_place(&app, 1, 2.0, 0.0).expect("place");
+    macros::capture_place(&app, 2, 4.0, 0.0).expect("place");
+    let library = macros::capture_finish(&app, "Macro 0".to_owned(), 23).expect("finish");
+    let entry = &library.entries[0];
+    assert_eq!(
+        (entry.frames, entry.span_hours),
+        (24, 69.0),
+        "a run to the end of a 24-step, three-hourly project"
+    );
+
+    let bar = |at: u32| {
+        macros::macro_insert(&app, &entry.id, -70.5, 27.5, at, None).expect("insert");
+        let tree = ve_app::document::tree(&app, 0).expect("tree");
+        let node = tree.layers[0]
+            .objects
+            .last()
+            .cloned()
+            .expect("the macro is in the tree");
+        (node.start_step, node.end_step)
+    };
+    assert_eq!(bar(0), (0, 23), "24 frames from step 0 is every step");
+    assert_eq!(bar(13), (13, 23), "and from step 13, what is left of them");
+}
+
 /// A capture takes every kind under its region (M34).
 ///
 /// The map shows every kind the project holds, so a copy of what is on

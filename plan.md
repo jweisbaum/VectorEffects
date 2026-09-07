@@ -2924,6 +2924,22 @@ correction: it takes every kind under it. Not clicked through in the app.
    what it was created with and is dragged by its end handle; a macro whose
    frames really do span the project; and a pasted region, which is a patch
    and holds its last frame to the end by D65.
+
+   **Reported a third time with a screenshot, and answered (2026-09-07).**
+   The screenshot's macro is *Macro 0 · 24 frames · 69 h* in a 24-step,
+   three-hourly project: it has a frame for every step of the timeline, so a
+   bar over every step is exactly as wide as its frames.
+   `a_macro_is_as_wide_as_its_frames_even_when_that_is_everything` is that
+   case end to end — 24 frames from step 0 gives 0–23, from step 13 gives
+   13–23. What makes a macro that long is the **run**: every step the
+   playhead visits while recording becomes a key (D72) and the run ends
+   where the playhead is when *Preview* is pressed, so scrubbing to the end
+   to watch the field records to the end. Two ways to make macros shorter,
+   neither taken here because both change a settled decision and the user
+   should choose: end the run at the last step the region was *dragged* at,
+   ignoring steps merely scrubbed through (reverses D72's "visiting keys");
+   or drop trailing frames whose field and position repeat the one before
+   (changes what a still macro paints past its last change).
 2. **A capture takes every kind under it** (finding 2, the user correcting
    the M29 rule). `Capture.kind` became `kinds`, one plane of samples per
    kind, container version 3 — versions 1 and 2 still read as the one kind
