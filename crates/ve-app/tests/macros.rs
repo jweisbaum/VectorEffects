@@ -219,6 +219,17 @@ fn a_macro_reaches_only_as_far_as_its_frames() {
         field(&app, 4, 100.0, 0.0).0.abs() < 0.6,
         "and nothing past it"
     );
+    // And the timeline is drawn from the tree, so the tree has to say so too.
+    let node = ve_app::document::tree(&app, 0).expect("tree").layers[0]
+        .objects
+        .last()
+        .cloned()
+        .expect("the macro is in the tree");
+    assert_eq!(
+        (node.start_step, node.end_step),
+        (1, 3),
+        "the timeline's own start and end indicators"
+    );
 }
 
 /// A macro begins at the step it was placed (M23).

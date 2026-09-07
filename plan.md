@@ -2906,6 +2906,22 @@ px-sized strokes within a tenth as the same brush, at the target's width.
 If the strokes were sized in km the cause is elsewhere and the sequence
 that produces it is needed.
 
+### M34 — Macros take what is under them · **in progress**
+
+**Goal:** the three findings the user handed over on 2026-09-07 after the
+M33 build, in order, one commit each.
+
+1. **A macro's timeline extent** — reported again. The insert path was
+   fixed in M33.4 and is verified end to end here: a three-frame macro
+   placed at step 1 of a six-step project has an active range of 1–3 in the
+   document *and* in the tree the timeline draws its bar and its handles
+   from. Nothing further was found to fix, so this commit adds the
+   tree-level assertion and changes no behaviour. What can still look
+   full-length: a macro placed before M33.4, whose range is what it was
+   created with and is dragged by its end handle; a macro whose frames
+   really do span the project; and a pasted region, which is a patch and
+   holds its last frame to the end by D65.
+
 ---
 
 ## 3. Testing strategy
