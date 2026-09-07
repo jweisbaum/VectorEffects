@@ -171,6 +171,17 @@ export interface RenderState {
    */
   heldFrame: string | null;
   /**
+   * The same frame with the layer being erased left out, or null (M40).
+   *
+   * An eraser takes one layer's contribution away, but the mask preview acts
+   * on the composited tile — so removing where the gesture covers took the
+   * whole stack with it, and a stroke on a lower layer blanked every layer
+   * above it until the button came up. This is what the hole is filled back
+   * in with: the field the map would show if that layer were not there,
+   * which is exactly what the erase leaves behind.
+   */
+  belowFrame?: string | null;
+  /**
    * The colour ramp of each kind (M31). One tile holds both kinds, each cell
    * saying which it is, and the shader picks the ramp per cell: wind and
    * current are an order of magnitude apart.
@@ -553,6 +564,7 @@ export class MapRenderer {
     camera: Camera,
     tiles: readonly VisibleTile[],
     stage: OpStage,
+    frame?: string,
   ): void {
     const gl = this.gl;
     gl.useProgram(this.rasterProgram);
@@ -569,9 +581,10 @@ export class MapRenderer {
     gl.activeTexture(gl.TEXTURE0);
 
     for (const tile of tiles) {
-      const { texture, held, frame } = this.textureFor(state, tile);
-      if (!texture) continue;
-      this.noteRange(frame, tile);
+      const shown = this.textureFor(state, tile, frame);
+      if (!shown.texture) continue;
+      const { texture, held } = shown;
+      this.noteRange(shown.frame, tile);
       const b = tileBounds(tile.z, tile.x, tile.y);
       this.setShared(this.rasterUniforms, camera, state.view, tile.lonOffset);
       gl.uniform1f(this.rasterUniforms.uDim ?? null, held ? HELD_DIM : 1.0);
@@ -591,7 +604,15 @@ export class MapRenderer {
   private textureFor(
     state: RenderState,
     tile: VisibleTile,
+    from?: string,
   ): { texture: WebGLTexture | null; held: boolean; frame: string } {
+    // A frame other than this one's — the field beneath an erase (M40) — is
+    // drawn from what it has and from nothing else. Falling back to the held
+    // frame there would fill the hole with the very stack the erase is
+    // taking a layer out of, which is the bug this exists to fix.
+    if (from !== undefined && from !== state.frame) {
+      return { texture: this.tiles.get(from, tile.z, tile.x, tile.y), held: false, frame: from };
+    }
     const texture = this.tiles.get(state.frame, tile.z, tile.x, tile.y);
     if (texture || !state.heldFrame) return { texture, held: false, frame: state.frame };
     return {
@@ -677,6 +698,7 @@ export class MapRenderer {
     camera: Camera,
     tiles: readonly VisibleTile[],
     stage: OpStage,
+    frame?: string,
   ): void {
     const gl = this.gl;
     // Spacing is resolved to a whole-degree lattice step so the grid is
@@ -706,7 +728,7 @@ export class MapRenderer {
     const centreY = projection.yOf(camera.centerLat);
 
     for (const tile of tiles) {
-      const { texture } = this.textureFor(state, tile);
+      const { texture } = this.textureFor(state, tile, frame);
       if (!texture) continue;
       const b = tileBounds(tile.z, tile.x, tile.y);
       const originX =
@@ -787,6 +809,14 @@ export class MapRenderer {
     // from pixel to pixel: the field is drawn alone into a texture first and
     // read back displaced.
     const smearing = operator?.kind === "smear";
+    // The stack without the layer being erased. Only meaningful while a
+    // remove is live, and only when it is a frame of its own: with no layer
+    // named it is the same tiles, and drawing them into the hole would put
+    // back exactly what was taken out.
+    const below =
+      operator !== null && state.belowFrame && state.belowFrame !== state.frame
+        ? state.belowFrame
+        : null;
 
     // Which tiles each camera sees, once per frame rather than once per pass:
     // the raster and the glyphs walk the same set.
@@ -847,6 +877,13 @@ export class MapRenderer {
     // The basemap is never masked: a mask takes away the field, not the
     // coastline underneath it.
     this.drawRaster(state, state.camera, tiles, stage);
+    // What the erase leaves behind, drawn into the hole the remove opened
+    // (M40). An eraser takes one layer away and the mask acts on the whole
+    // composite, so without this a stroke on a lower layer blanked every
+    // layer above it until the button came up. Only for `remove`: a modifier
+    // changes the field in place rather than taking it away, and blending
+    // two stacks would not express that.
+    if (stage === "remove" && below) this.drawRaster(state, state.camera, tiles, "keep", below);
     if (source) this.drawRaster(state, source, sourceTiles, "keep");
     if (smearing && this.fieldTarget) {
       gl.useProgram(this.smearProgram);
@@ -890,6 +927,9 @@ export class MapRenderer {
     // they are the apply stage rather than the remove one.
     if (state.showGlyphs) {
       this.drawGlyphs(state, state.camera, tiles, smearing ? "apply" : stage);
+      if (stage === "remove" && below) {
+        this.drawGlyphs(state, state.camera, tiles, "keep", below);
+      }
       if (source) this.drawGlyphs(state, source, sourceTiles, "keep");
     }
 

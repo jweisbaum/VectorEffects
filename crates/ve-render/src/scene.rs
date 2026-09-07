@@ -1112,6 +1112,20 @@ pub fn flatten(project: &Project, step: u32) -> Scene {
     flatten_where(project, step, |_| true)
 }
 
+/// The scene at `step` with one layer left out (M40).
+///
+/// What the map draws *beneath* the layer an eraser is working on, so the
+/// live preview can take that layer's contribution away and leave the rest
+/// of the stack alone. A remove that is applied to the whole composite takes
+/// the layers above it as well, which is not what erasing one layer does.
+///
+/// The remaining layers keep their order, and so their compositing: the
+/// index a layer carries is its place in this scene, and dropping one
+/// renumbers the rest without reordering them.
+pub fn flatten_without(project: &Project, step: u32, layer: ve_core::Id) -> Scene {
+    flatten_where(project, step, |l| l.id != layer)
+}
+
 /// The scene of one **kind** of field at `step` (M29): the visible layers
 /// whose parameter is `kind`, in stack order. What the export bakes to that
 /// kind's message pair, and what a capture of that kind reads.

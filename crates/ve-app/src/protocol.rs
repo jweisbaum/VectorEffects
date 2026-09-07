@@ -77,25 +77,48 @@ impl Frame {
 /// A viewport is over a hundred tiles and flattening and hashing are per
 /// *frame*, not per tile, so without this every tile would redo the same work.
 #[derive(Debug, Default)]
-pub struct SceneCache(Mutex<Option<CachedFrame>>);
+pub struct SceneCache(Mutex<Vec<CachedFrame>>);
 
-/// The one frame the cache holds, and what it was flattened for.
+/// One frame the cache holds, and what it was flattened for.
 #[derive(Debug)]
 struct CachedFrame {
     revision: u64,
     step: u32,
+    without: Option<u64>,
     frame: Arc<Frame>,
 }
 
+/// How many frames are held at once.
+///
+/// Two, because an erase in progress draws from two of them on every frame:
+/// the whole stack, and the stack without the layer being erased (M40). One
+/// slot would re-flatten the project twice per redraw, at pointer rate.
+const FRAMES_HELD: usize = 2;
+
 impl SceneCache {
-    /// Returns the frame for `(revision, step)`, flattening it if needed.
-    pub fn frame_for(&self, state: &AppState, revision: u64, step: u32) -> Option<Arc<Frame>> {
-        if let Ok(cached) = self.0.lock()
-            && let Some(held) = cached.as_ref()
-            && held.revision == revision
-            && held.step == step
+    /// Returns the frame for an address, flattening it if it is not held.
+    ///
+    /// `without` names a layer to leave out, for the scene beneath the one an
+    /// eraser is working on (M40).
+    pub fn frame_for(
+        &self,
+        state: &AppState,
+        revision: u64,
+        step: u32,
+        without: Option<u64>,
+    ) -> Option<Arc<Frame>> {
+        let matches = |held: &CachedFrame| {
+            held.revision == revision && held.step == step && held.without == without
+        };
+        if let Ok(mut cached) = self.0.lock()
+            && let Some(at) = cached.iter().position(matches)
         {
-            return Some(Arc::clone(&held.frame));
+            // Most recently used first, so the frame a redraw asks for twice
+            // is the one an eviction never takes.
+            let held = cached.remove(at);
+            let frame = Arc::clone(&held.frame);
+            cached.insert(0, held);
+            return Some(frame);
         }
 
         let session = state.session.lock().ok()?;
@@ -103,10 +126,16 @@ impl SceneCache {
         // what the map draws (M31) — or the macro preview at its own revision
         // (D71): a one-object project the session holds while a capture is
         // being looked at before it is kept.
+        let flatten_at = |project: &ve_core::project::Project| match without {
+            Some(raw) => {
+                ve_render::scene::flatten_without(project, step, crate::document::object_id(raw))
+            }
+            None => flatten(project, step),
+        };
         let scene = match session.open.as_ref() {
-            Some(open) if open.revision == revision => flatten(&open.project, step),
+            Some(open) if open.revision == revision => flatten_at(&open.project),
             _ => match session.preview.as_ref() {
-                Some(preview) if preview.revision == revision => flatten(&preview.project, step),
+                Some(preview) if preview.revision == revision => flatten_at(&preview.project),
                 _ => return None,
             },
         };
@@ -114,11 +143,17 @@ impl SceneCache {
 
         let frame = Arc::new(Frame::of(scene));
         if let Ok(mut cached) = self.0.lock() {
-            *cached = Some(CachedFrame {
-                revision,
-                step,
-                frame: Arc::clone(&frame),
-            });
+            cached.retain(|held| !matches(held));
+            cached.insert(
+                0,
+                CachedFrame {
+                    revision,
+                    step,
+                    without,
+                    frame: Arc::clone(&frame),
+                },
+            );
+            cached.truncate(FRAMES_HELD);
         }
         Some(frame)
     }
@@ -143,6 +178,10 @@ enum Served {
     Tile {
         revision: u64,
         step: u32,
+        /// A layer to leave out of the scene, if this is a "beneath" tile
+        /// (M40): what the map draws under the layer an eraser is working
+        /// on, so the live remove takes that layer away and not the stack.
+        without: Option<u64>,
         id: tile::TileId,
     },
     /// An image layer's picture (spec.md 4.9, M18). The first segment is the
@@ -156,9 +195,19 @@ enum Served {
 
 /// Extracts `<revision>/<step>/<z>/<x>/<y>`, or an image address, from a
 /// path. One tile holds every kind of field (M31).
+///
+/// A tile of the scene without one layer is the same address behind
+/// `without/<layer>/` (M40). It is a prefix rather than a query string
+/// because the frontend's tile cache treats everything before the `z/x/y` as
+/// one opaque frame token, and a prefix keeps that true.
 fn parse(path: &str) -> Option<Served> {
     let mut parts = path.trim_start_matches('/').split('/');
-    let first = parts.next()?;
+    let mut first = parts.next()?;
+    let mut without = None;
+    if first == "without" {
+        without = Some(parts.next()?.parse().ok()?);
+        first = parts.next()?;
+    }
     if first == "image" {
         let token: u64 = parts.next()?.parse().ok()?;
         let layer: u64 = parts.next()?.parse().ok()?;
@@ -184,6 +233,7 @@ fn parse(path: &str) -> Option<Served> {
     Some(Served::Tile {
         revision,
         step,
+        without,
         id: tile::TileId::new(z, x, y).ok()?,
     })
 }
@@ -218,13 +268,23 @@ pub fn handle(app: &tauri::AppHandle, request: &Request<Vec<u8>>) -> Response<Ve
             layer,
             max_edge,
         } => return serve_image(app, token, layer, max_edge),
-        Served::Tile { revision, step, id } => TileRequest { revision, step, id },
+        Served::Tile {
+            revision,
+            step,
+            without,
+            id,
+        } => TileRequest {
+            revision,
+            step,
+            without,
+            id,
+        },
     };
 
     let state = app.state::<AppState>();
-    let Some(frame) = app
-        .state::<SceneCache>()
-        .frame_for(&state, parsed.revision, parsed.step)
+    let Some(frame) =
+        app.state::<SceneCache>()
+            .frame_for(&state, parsed.revision, parsed.step, parsed.without)
     else {
         // The document moved on, or nothing is open. Refusing beats answering
         // with current data under a URL that names an older revision.
@@ -250,6 +310,7 @@ pub fn handle(app: &tauri::AppHandle, request: &Request<Vec<u8>>) -> Response<Ve
 struct TileRequest {
     revision: u64,
     step: u32,
+    without: Option<u64>,
     id: tile::TileId,
 }
 
@@ -361,11 +422,12 @@ pub fn tile_keys(
     revision: u64,
     step: u32,
     tiles: Vec<crate::render_pool::TileAddress>,
+    without: Option<u64>,
 ) -> crate::error::Result<Vec<String>> {
     let state = app.state::<AppState>();
     let frame = app
         .state::<SceneCache>()
-        .frame_for(&state, revision, step)
+        .frame_for(&state, revision, step, without)
         .ok_or_else(|| {
             crate::error::AppError::Internal(format!("revision {revision} is not the one open"))
         })?;
@@ -411,9 +473,45 @@ mod tests {
     /// A tile address, unpacked.
     fn tile_of(path: &str) -> (u64, u32, tile::TileId) {
         match parse(path).expect("should parse") {
-            Served::Tile { revision, step, id } => (revision, step, id),
+            Served::Tile {
+                revision, step, id, ..
+            } => (revision, step, id),
             other => panic!("{path:?} parsed as {other:?}"),
         }
+    }
+
+    /// The layer a "beneath" address leaves out (M40).
+    fn without_of(path: &str) -> Option<u64> {
+        match parse(path).expect("should parse") {
+            Served::Tile { without, .. } => without,
+            other => panic!("{path:?} parsed as {other:?}"),
+        }
+    }
+
+    /// A "beneath" tile is the same address behind `without/<layer>/`
+    /// (M40), and it must not be confused with an ordinary one: the two
+    /// carry different scenes under otherwise identical `z/x/y`.
+    #[test]
+    fn a_beneath_address_names_the_layer_it_leaves_out() {
+        assert_eq!(without_of("/without/42/7/3/2/5/1"), Some(42));
+        assert_eq!(tile_of("/without/42/7/3/2/5/1"), tile_of("/7/3/2/5/1"));
+        assert_eq!(
+            without_of("/7/3/2/5/1"),
+            None,
+            "an ordinary tile leaves none out"
+        );
+    }
+
+    /// The prefix is a real segment, not a revision that happens to read as
+    /// a word: a layer id that failed to parse must refuse the address
+    /// rather than fall through to the ordinary shape.
+    #[test]
+    fn a_beneath_address_without_a_layer_is_refused() {
+        assert!(parse("/without/7/3/2/5/1").is_none(), "too few segments");
+        assert!(
+            parse("/without/x/7/3/2/5/1").is_none(),
+            "layer is not a number"
+        );
     }
 
     #[test]

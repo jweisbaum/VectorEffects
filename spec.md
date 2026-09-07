@@ -1660,7 +1660,23 @@ drags it along the stroke, and the mask and the eraser take it away — and
 keeps applying it after the release until the committed tiles land. It is a
 screen-space proxy of the kernels' answer, the way every preview is (§7.9):
 a twist has none, and a push is previewed as a clone of the field under the
-start. A swathe of field is therefore intensified
+start.
+
+**A preview that takes the field away takes one layer's, not the stack's**
+(M40). The map draws the composite of every visible layer as a single tile,
+so a remove applied to it took the layers *above* the one being erased as
+well: a stroke on a lower layer blanked everything over it until the button
+came up, and then the release put it all back. What fills the hole now is
+the same frame with that one layer left out — the field the map would draw
+if the layer were not there, which is exactly what the erase leaves behind.
+Where a layer above covers the stroke, nothing changes, which is what
+erasing underneath it does. It is addressed as an ordinary frame of tiles
+and warmed while the eraser is merely in hand, so the stroke does not wait
+for it. The modifiers are not scoped this way: they change the field in
+place rather than taking it away, and two stacks blended by a mask cannot
+express that.
+
+A swathe of field is therefore intensified
 or turned in one gesture, and **two strokes of one modifier with identical
 settings and overlapping footprints merge into a single object**, exactly as two
 brush strokes do (§6.1) — with the exception below. All four animate like

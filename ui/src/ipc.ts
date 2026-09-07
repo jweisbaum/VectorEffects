@@ -317,8 +317,14 @@ export const api = {
    * The keys a frame's tiles are cached under (spec.md 7.10, M31): what the
    * map keeps its textures by, so an edit refetches only the tiles it reaches.
    */
-  tileKeys: (revision: number, step: number, tiles: TileAddress[]) =>
-    call<string[]>("tile_keys", { revision, step, tiles }),
+  tileKeys: (
+    revision: number,
+    step: number,
+    tiles: TileAddress[],
+    /** A layer to leave out of the scene, for the field beneath an erase (M40). */
+    without: number | null = null,
+  ) =>
+    call<string[]>("tile_keys", { revision, step, tiles, without }),
 
   endGesture: () => call<void>("end_gesture"),
 

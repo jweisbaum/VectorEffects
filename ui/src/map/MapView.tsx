@@ -163,6 +163,7 @@ import {
 import { MapRenderer, type OperatorPreview, type RenderState } from "./renderer";
 import { uniqueTiles } from "../timeline/playback";
 import { TileCache } from "./tiles";
+import { beneathToken, frameToken, parseFrameToken } from "./frameToken";
 
 interface Readout {
   lon: number;
@@ -848,7 +849,18 @@ export default function MapView({
    * revision, so a cached tile can never show a field that no longer exists.
    * One tile holds every kind of field (M31).
    */
-  const frameOf = (step: number): string => `${frameRevision()}/${step}`;
+  const frameOf = (step: number): string => frameToken(frameRevision(), step);
+  /**
+   * The same frame with one layer left out (spec.md 6.2, M40).
+   *
+   * The eraser acts on one layer, but the live remove acts on the composited
+   * tile, so removing where the gesture covers took the whole stack with it:
+   * a stroke on a lower layer blanked every layer above it until the button
+   * came up. The map draws this frame back into the hole, which is the field
+   * the erase actually leaves behind.
+   */
+  const beneathOf = (step: number, layer: number): string =>
+    beneathToken(frameRevision(), step, layer);
   /** Whether movement is recorded by the *next* capture. */
   const [recordMovement, setRecordMovement] = useState(false);
   /** The macro library, for the insert tool's bar. */
@@ -1014,6 +1026,13 @@ export default function MapView({
    */
   const toolStateRef = useRef(toolState);
   toolStateRef.current = toolState;
+  // The draw loop holds no dependencies of its own, so anything a frame reads
+  // reaches it through a ref. Which tool is in hand and which layer it writes
+  // to decide the frame drawn beneath an erase (M40).
+  const toolRef = useRef(tool);
+  toolRef.current = tool;
+  const activeLayerRef = useRef(activeLayer);
+  activeLayerRef.current = activeLayer;
 
   // An armed mode belongs to the tool that armed it. Switching tools — by key
   // or by button — drops both, so a click with the new tool is an ordinary one.
@@ -1237,6 +1256,16 @@ export default function MapView({
       // The gesture's own operation while it is being drawn, and the one it
       // committed while its tiles are still on their way.
       operator: operatorRef.current ?? heldOperator(settling.current),
+      // What the erase leaves behind (M40). Named whenever the eraser has a
+      // layer in hand rather than only while the button is down, so the
+      // frame is warmed in the pause before the first stroke rather than
+      // during it. A tile the layer does not reach hashes the same with the
+      // layer left out as with it, so those are already resident and only
+      // the tiles the layer actually covers are rendered.
+      belowFrame:
+        toolRef.current === ERASE && activeLayerRef.current !== null
+          ? beneathOf(stepRef.current, activeLayerRef.current)
+          : null,
       // Georeferenced images, above the land and below the field (M18). The
       // revision is part of the texture's address, so an import or a reopen
       // makes the old one unreachable rather than stale.
@@ -1256,6 +1285,18 @@ export default function MapView({
     if (key !== reportedViewport.current) {
       reportedViewport.current = key;
       onViewportRef.current(unique);
+    }
+
+    // The field beneath the erase, warmed before a stroke needs it (M40).
+    // The hole a stroke opens is filled from that frame, and asking for it
+    // only once the button is down would open every stroke with the very
+    // flash of a blanked stack this exists to prevent. Asked for while the
+    // eraser is merely in hand, so the round trip happens in the pause
+    // between choosing the tool and using it. `get` is a lookup once the
+    // tile is resident, so repeating it per frame costs nothing.
+    if (state.belowFrame && !state.operator) {
+      const cache = tilesRef.current;
+      if (cache) for (const tile of unique) cache.get(state.belowFrame, tile.z, tile.x, tile.y);
     }
 
     try {
@@ -1423,8 +1464,9 @@ export default function MapView({
         // A frame's tiles are kept by key, and the keys come from the
         // backend (spec.md 7.10, M31): the token is `<revision>/<step>`.
         tiles.resolver = (frame, wanted) => {
-          const [revision, step] = frame.split("/");
-          return api.tileKeys(Number(revision), Number(step), [...wanted]);
+          const at = parseFrameToken(frame);
+          if (!at) return Promise.resolve(wanted.map(() => ""));
+          return api.tileKeys(at.revision, at.step, [...wanted], at.without);
         };
         pictures = new ImageCache(gl, baseUrl);
         pictures.onChange = () => requestDraw();

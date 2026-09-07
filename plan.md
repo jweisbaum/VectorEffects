@@ -3008,6 +3008,49 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M40 — An erase preview takes one layer, not the stack
+
+**Goal:** the user's report of 2026-09-07: erasing on a layer that is not
+the top one visibly erased every layer above it until the mouse came up.
+
+**Cause.** The map draws the composite of every visible layer as one
+tile, and the live preview is a screen-space mask applied to that tile
+(M32). "Remove where the gesture covers" therefore removed the whole
+stack. The commit was always right — `erase_stroke` writes to exactly
+one layer — so the release put everything back, which is what made it
+read as a flash rather than as damage.
+
+**Fix.** Fill the hole with the same frame minus the layer being erased.
+`flatten_where` already took a layer predicate, so the scene side is
+`flatten_without`, one line. The frame is addressed as
+`without/<layer>/<revision>/<step>`, a prefix rather than a query because
+the tile cache treats everything before the `z/x/y` as one opaque token
+and a prefix keeps that true. `SceneCache` holds two frames now instead
+of one: an erase draws from both on every frame, and a single slot would
+re-flatten the project twice per redraw at pointer rate.
+
+The renderer already had the shape for this — the clone stamp draws the
+field twice, `remove` then `keep` — so the change there is a second
+source of tiles rather than a second camera. `frameToken.ts` owns the
+token's shape for both the builder and the resolver, since two copies
+would drift and the failure is silent: the tiles of one scene, correctly
+cached, under an address that names another.
+
+**Why it costs little.** A texture is kept by the content hash of what
+reaches it, so a tile the erased layer does not touch hashes the same
+with the layer left out as with it and is already resident. Only the
+tiles that layer actually covers are rendered. The frame is warmed while
+the eraser is in hand rather than at the first pointer-down, so the round
+trip happens in the pause before the stroke.
+
+**Not done.** The modifiers — intensify, rotate, diverge, liquify — still
+preview against the whole composite. They change the field in place
+rather than taking it away, so blending two stacks does not express what
+they do; scoping them needs the active layer's own contribution as a
+separate texture, which is a third frame and a shader that composites.
+Their previews are wrong in the same way on a lower layer, and less
+visibly, since they alter the field rather than removing it.
+
 ### M39 — The eraser's stroke carries no colour of its own
 
 **Goal:** the user's report of 2026-09-07: the eraser's stroke had a
