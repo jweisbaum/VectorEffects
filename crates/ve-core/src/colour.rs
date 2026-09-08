@@ -32,6 +32,9 @@ pub struct Gradient {
     /// What the document stores.
     pub id: &'static str,
     /// What the settings offer.
+    ///
+    /// Free to change: nothing stores it. [`Self::id`] is what a project
+    /// file holds, and changing *that* is a migration.
     pub label: &'static str,
     /// A sentence on what it is for.
     pub note: &'static str,
@@ -48,6 +51,12 @@ pub const DEFAULT_ID: &str = "vector";
 /// Currents are read for where the water is going as much as for how fast, so
 /// they open on a palette built for exactly that — light where the water is
 /// slack and dark where it runs — rather than on the wind's.
+///
+/// The identifier stays `speed` though the label reads "Green" (M43). An
+/// identifier is what project files hold, so changing one is a migration:
+/// every file naming the old one would fall back to the default and lose the
+/// choice its author made. A label is what a person reads and costs nothing
+/// to change.
 pub const DEFAULT_CURRENT_ID: &str = "speed";
 
 /// Every gradient, in the order the settings list them.
@@ -144,8 +153,8 @@ pub const GRADIENTS: &[Gradient] = &[
     },
     Gradient {
         id: "speed",
-        label: "Speed",
-        note: "The cmocean palette drawn for current speed: pale when slack, dark when it runs.",
+        label: "Green",
+        note: "cmocean's palette for current speed: pale when slack, deep green when it runs.",
         stops: &[
             [1.000, 0.992, 0.929],
             [0.831, 0.902, 0.643],

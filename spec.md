@@ -1071,6 +1071,11 @@ anywhere in the UI.
   appearance by being opened; currents open on a palette built for current
   speed.
 
+  The gradient named `speed` is labelled **Green**. Its identifier is what a
+  project file holds and does not change with the label: renaming one is a
+  migration, and every file naming the old identifier would fall back to the
+  default and lose the choice its author made.
+
   **The gradients are chosen from a picker that shows them.** It is a
   dropdown, because the settings are a column of them and nine open at once
   would push the rest of the panel away; and it is one of the application's

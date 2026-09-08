@@ -110,7 +110,17 @@ body {
 }
 /* Holds a closed panel's place in the row so the other side stays put. */
 .dock-space { width: 0; flex: 0 0 0; }
-.panel-section { display: flex; flex-direction: column; min-height: 0; }
+/* A docked section sizes to its content and is never squeezed (M43).
+   `min-height: 0` alone let the flex column shrink one below what it held,
+   and with nothing clipping it the overflow was *drawn over the section
+   underneath*: the inspector's rows and the history's entries on the same
+   lines. The sidebar scrolls instead, which is what it is for. */
+.panel-section {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  min-height: 0;
+}
 .panel-section > header {
   display: flex;
   align-items: center;
@@ -1087,8 +1097,16 @@ body {
 
 /* --- History ----------------------------------------------------------- */
 
-.history-panel { border-top: 1px solid var(--border); margin-top: 6px; }
-.history { list-style: none; margin: 0; padding: 4px 0 10px; }
+.history-panel { border-top: 1px solid var(--border); margin-top: 6px; min-height: 0; }
+/* The history grows without bound as the user works, so it scrolls in its own
+   box rather than pushing every panel above it off the top of the sidebar. */
+.history {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0 10px;
+  max-height: min(45vh, 420px);
+  overflow-y: auto;
+}
 .history .entry {
   padding: 3px 12px;
   font-size: 12px;

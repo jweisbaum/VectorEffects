@@ -3008,6 +3008,28 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M43 — Panels that do not overlap, and a gradient renamed
+
+**The overlap.** The right sidebar is a flex column and each panel is one
+item in it. A flex item shrinks below its content by default and nothing
+there clipped, so once the history grew past the room left for it the
+properties above were squeezed and their rows were painted straight over
+the history's — two panels' text on the same lines, both unreadable. A
+section is `flex: 0 0 auto` now, so it is never squeezed, and the sidebar
+takes up the slack by scrolling, which is what it is for. The history is
+the panel that grows without bound, so it also bounds its own height and
+scrolls inside it rather than pushing everything else off the top.
+
+Asserted against the stylesheet, as the toolbar's wrapping rule is:
+happy-dom has no layout engine and could not measure an overlap, but it
+can fail when the declarations that prevent one are removed.
+
+**The rename.** `speed` is labelled "Green". The identifier stays as it
+was — that is what project files hold, so changing it is a migration, and
+every file naming the old one would fall back to the default and lose the
+choice its author made. The label costs nothing to change, and
+`Gradient::label` now says so beside itself.
+
 ### M42 — Colour gradients, and an eraser that respects a hidden layer
 
 **Goal:** the user's instructions of 2026-09-07: erasing on a hidden
