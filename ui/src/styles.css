@@ -824,16 +824,38 @@ body {
   overflow-y: auto;
 }
 
-/* The run of colours a gradient names, beside the select that names it: a
-   list of words would be asking the reader to remember what each looks like
-   (M42). */
-.settings-field .gradient-bar {
-  display: block;
-  height: 10px;
-  margin-top: 5px;
+/* Choosing a gradient (M42). A list rather than a dropdown, because the one
+   thing worth showing about a gradient is the gradient, and a native select
+   renders nothing but text. */
+.gradient-choice {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px 10px 8px;
+  margin: 0 0 1rem;
+}
+.gradient-choice legend { color: var(--muted); padding: 0 6px; font-size: 12px; }
+.gradient-option {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 4px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text);
+}
+.gradient-option:hover { background: #16233a; }
+.gradient-option.on { background: #1d2d49; }
+.gradient-option input { width: auto; flex: none; margin: 0; }
+.gradient-option .gradient-bar {
+  flex: none;
+  width: 84px;
+  height: 12px;
   border-radius: 3px;
   border: 1px solid var(--border);
 }
+.gradient-option .gradient-name { flex: 1; }
 
 /* The visibility toggle is an eye, shown rather than said. */
 .layer-panel .eye {

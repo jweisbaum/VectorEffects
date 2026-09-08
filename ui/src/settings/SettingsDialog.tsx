@@ -22,7 +22,7 @@ import NumberField from "../NumberField";
 import { api } from "../ipc";
 import { chordLabel } from "./bindings";
 import type { GradientView } from "../generated/GradientView";
-import { knownGradients, loadGradients, stopsOf } from "../gradients";
+import { knownGradients, loadGradients } from "../gradients";
 import { rampStops } from "../map/ramp";
 
 /** The rows the Shortcuts section lists, in order, with their labels. */
@@ -239,56 +239,79 @@ export default function SettingsDialog({
           {/*
             The gradient is the project's too, and for the same reason: it is
             what the map is painted with, so two people opening one file
-            should see the same colours (M42). The catalogue is the backend's
-            — one table of names, notes and stops — and each option shows the
-            run of colours it names, since a list of words would be asking
-            the user to remember what "Haxby" looks like.
+            should see the same colours (M42).
+
+            **A list rather than a dropdown.** A native `select` renders
+            nothing but text in its options, and the one thing worth showing
+            about a gradient is the gradient: a column of names asks the
+            reader to remember what "Haxby" looks like, which is exactly what
+            they came here to find out. So it is a radio group, and each row
+            carries the colours it names.
           */}
           {project !== null &&
-            (["wind", "current"] as const).map((kind) => (
-              <label className="settings-field" key={kind}>
-                {kind === "wind"
-                  ? "This project\u2019s colour gradient for wind"
-                  : "This project\u2019s colour gradient for currents"}
-                <select
-                  value={project[`${kind}_gradient`]}
-                  onChange={(event) => {
-                    setError(null);
-                    void api
-                      .setColourGradient(kind, event.target.value)
-                      .then(onProject)
-                      .catch(report);
-                  }}
-                >
-                  {gradients.map((gradient) => (
-                    <option key={gradient.id} value={gradient.id} title={gradient.note}>
-                      {gradient.label}
-                    </option>
+            (["wind", "current"] as const).map((kind) => {
+              const chosen = project[`${kind}_gradient`];
+              // A project written by a later version may name a gradient this
+              // build has never heard of. It is drawn with the default, and a
+              // row of its own is offered — with no colours, since there are
+              // none to show — so the list says what the file says rather
+              // than silently reading as something else.
+              const rows = gradients.some((entry) => entry.id === chosen)
+                ? gradients.map((entry) => ({ ...entry, known: true }))
+                : [
+                    ...gradients.map((entry) => ({ ...entry, known: true })),
+                    {
+                      id: chosen,
+                      label: `${chosen} (not in this version)`,
+                      note: "Drawn with the default until this project is opened by the version that has it.",
+                      stops: [],
+                      known: false,
+                    },
+                  ];
+              return (
+                <fieldset className="settings-field gradient-choice" key={kind}>
+                  <legend>
+                    {kind === "wind"
+                      ? "This project\u2019s colour gradient for wind"
+                      : "This project\u2019s colour gradient for currents"}
+                  </legend>
+                  {rows.map((entry) => (
+                    <label
+                      key={entry.id}
+                      className={entry.id === chosen ? "gradient-option on" : "gradient-option"}
+                      title={entry.note}
+                    >
+                      <input
+                        type="radio"
+                        name={`gradient-${kind}`}
+                        value={entry.id}
+                        checked={entry.id === chosen}
+                        disabled={!entry.known}
+                        onChange={() => {
+                          setError(null);
+                          void api
+                            .setColourGradient(kind, entry.id)
+                            .then(onProject)
+                            .catch(report);
+                        }}
+                      />
+                      <span
+                        className="gradient-bar"
+                        aria-hidden="true"
+                        style={{
+                          background: entry.known
+                            ? `linear-gradient(to right, ${rampStops(
+                                entry.stops as readonly (readonly [number, number, number])[],
+                              ).join(", ")})`
+                            : "transparent",
+                        }}
+                      />
+                      <span className="gradient-name">{entry.label}</span>
+                    </label>
                   ))}
-                  {/*
-                    A project written by a later version may name a gradient
-                    this build has never heard of. It is drawn with the
-                    default, and the option is offered so the select shows
-                    what the file says rather than silently reading as
-                    something else.
-                  */}
-                  {!gradients.some((entry) => entry.id === project[`${kind}_gradient`]) && (
-                    <option value={project[`${kind}_gradient`]}>
-                      {project[`${kind}_gradient`]} (not in this version)
-                    </option>
-                  )}
-                </select>
-                <span
-                  className="gradient-bar"
-                  aria-hidden="true"
-                  style={{
-                    background: `linear-gradient(to right, ${rampStops(
-                      stopsOf(gradients, project[`${kind}_gradient`]),
-                    ).join(", ")})`,
-                  }}
-                />
-              </label>
-            ))}
+                </fieldset>
+              );
+            })}
           <label className="settings-field">
             Default for new wind projects
             <NumberField

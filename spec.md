@@ -1071,6 +1071,12 @@ anywhere in the UI.
   appearance by being opened; currents open on a palette built for current
   speed.
 
+  **The gradients are chosen from a list that shows them**, not a dropdown
+  that names them: a native menu renders nothing but text, and the one thing
+  worth knowing about a gradient is what it looks like. Each row carries the
+  run of colours it names, and a gradient the build does not have appears as
+  a row saying so — unpickable, since there is nothing to pick.
+
   A gradient reaches no exported file and no evaluation. The tiles carry
   speed and direction, and the colour is chosen when a pixel is drawn, so
   changing one is a redraw and never a re-render — the same property that
