@@ -1181,6 +1181,18 @@ pub fn stroke_erase(state: &AppState, stroke: EraseStroke) -> Result<ProjectSumm
                     value: format!("{} is locked", layer.name),
                 });
             }
+            // A hidden layer is not on the map, so a stroke over it was aimed
+            // at whatever *is* — and taking a piece out of something the user
+            // cannot see is an edit they cannot check, cannot see the result
+            // of, and would find later without knowing what made it. Refused
+            // rather than silently ignored: the pointer went down on purpose,
+            // and the status bar should say why nothing happened.
+            if !layer.visible {
+                return Err(AppError::BadOption {
+                    field: "layer",
+                    value: format!("{} is hidden; show it to erase from it", layer.name),
+                });
+            }
             let mut commands = Vec::new();
             let mut removals: Vec<(usize, Command)> = Vec::new();
             let mut new_captures: Vec<std::sync::Arc<Capture>> = Vec::new();

@@ -261,6 +261,67 @@ fn an_erase_stroke_over_open_water_is_no_edit() {
     );
 }
 
+/// A hidden layer is not on the map, so a stroke over it was aimed at
+/// whatever is. Taking a piece out of something the user cannot see is an
+/// edit they cannot check and would find later without knowing what made it.
+#[test]
+fn erasing_from_a_hidden_layer_does_nothing() {
+    let (_root, state) = painted("erase-hidden");
+    let layer = document::tree(&state, 0).expect("tree").layers[0].id;
+    let entries = |state: &AppState| {
+        let session = state.session.lock().expect("lock");
+        session.open.as_ref().expect("open").history.entries().len()
+    };
+
+    // The same stroke on the same object, shown and then hidden.
+    let covered = covered_at(&state, 0.0, 0.0, 0);
+    assert!(
+        covered.is_some(),
+        "the object is under the stroke to begin with"
+    );
+
+    document::layer_visibility(&state, layer, false).expect("hide");
+    let before = entries(&state);
+    let refused = document::stroke_erase(
+        &state,
+        document::EraseStroke {
+            points: vec![[0.0, 0.0]],
+            radius_km: 400.0,
+            square: false,
+            feather: 0.0,
+            step: None,
+            at_step: 0,
+            layer: Some(layer),
+        },
+    )
+    .expect_err("a hidden layer is refused");
+    assert!(
+        format!("{refused}").contains("hidden"),
+        "the refusal says why: {refused}"
+    );
+    assert_eq!(entries(&state), before, "and writes nothing");
+
+    // Shown again, the field is exactly as it was: the refused stroke left
+    // no mark on the layer it was aimed at. (A hidden layer reaches no scene,
+    // so this has to be asked once it is back.)
+    document::layer_visibility(&state, layer, true).expect("show");
+    assert_eq!(
+        covered_at(&state, 0.0, 0.0, 0),
+        covered,
+        "the field is untouched"
+    );
+
+    // And the identical stroke does take it away now, so the refusal was
+    // about the layer being hidden and not about the stroke.
+    erase(&state, vec![[0.0, 0.0]], 400.0, None);
+    assert!(entries(&state) > before, "an edit lands once it is visible");
+    assert_eq!(
+        covered_at(&state, 0.0, 0.0, 0),
+        None,
+        "and the field is gone where it fell"
+    );
+}
+
 // --- The tree ---------------------------------------------------------------
 
 #[test]
