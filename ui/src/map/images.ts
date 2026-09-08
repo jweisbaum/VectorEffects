@@ -76,7 +76,19 @@ export class ImageCache {
    * nothing at all until the pointer was released. Where the picture goes
    * comes from the placement in `views`, which is free to change every frame.
    */
-  draws(token: number, views: readonly ImageLayerView[]): ImageDraw[] {
+  /**
+   * The images to draw, in the order given.
+   *
+   * `over` names the layers that sit above every visible field layer (M49):
+   * those are drawn on top of the field rather than under it, because the
+   * field is nearly opaque and an image the user has moved to the top of the
+   * stack is one they have asked to see.
+   */
+  draws(
+    token: number,
+    views: readonly ImageLayerView[],
+    over: ReadonlySet<number> = new Set(),
+  ): ImageDraw[] {
     const wanted = new Set<string>();
     const out: ImageDraw[] = [];
     for (const view of views) {
@@ -87,6 +99,7 @@ export class ImageCache {
         layer: view.layer,
         texture: this.texture(key),
         opacity: view.opacity,
+        over: over.has(view.layer),
         ...placeVectors(view),
       });
     }

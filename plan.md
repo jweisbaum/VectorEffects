@@ -3009,6 +3009,35 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M49 — Image layers respect the eye and the stack
+
+**The reports (6 and 7):** image layers ignored hide/show, and an image
+moved to the top of the stack did not appear.
+
+Both come from the same place. The map collected image layers with
+`tree.layers.flatMap(l => l.image ? [l.image] : [])` — no mention of
+`visible` — and the renderer drew every one of them in a single pass
+before the field.
+
+Visibility is filtered at the collection rather than at the draw, so a
+hidden picture also offers no control points and cannot be dragged. An
+eye that hides a layer hides all of it; a picture that answered the
+pointer while invisible would be a handle on nothing.
+
+Order took a second pass. An image belongs under the field because it is
+a reference to trace against, but the field is nearly opaque, so an image
+above every field layer has to be drawn above it or moving it to the top
+does nothing visible. `imagesOverField` is that rule on its own, with the
+boundary cases tested — directly above the top field layer, directly
+below it, and what a hidden layer does to each — because an order is
+wrong by one and looks nearly right.
+
+**Not done:** an image cannot be interleaved *between* two field layers.
+The field is one composited tile for the whole stack, so there is no
+seam to put it in; splitting it per layer is a different render path.
+Above every field layer or below all of them are the two answers
+available.
+
 ### M48 — Two small ones from the list
 
 **The export dialog closes when the export finishes (13).** It was what

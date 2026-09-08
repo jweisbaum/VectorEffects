@@ -854,8 +854,20 @@ two projects, or one reopened after its file changed on disk, from sharing
 an address. **The file on disk is never
 modified.**
 
-**Drawn above the land and below the field**, as a subdivided quad with world
-copies at ±360°. Subdivided because the placement is affine in *degrees*: a
+**Drawn above the land and below the field** — unless the layer is above every
+field layer, in which case it is drawn above the field too (M49). An image is a
+reference to trace against, which is why it belongs underneath; but a layer
+moved to the top of the stack is one the user has asked to see, and the field
+is nearly opaque, so leaving it under would make it vanish. The stack decides
+which side of the field it lands on, and hidden layers count for neither: a
+hidden field layer holds nothing down, and a hidden image is not drawn at all.
+
+**A hidden image layer is hidden completely** (M49). It is not drawn, offers no
+control points and cannot be dragged: an eye that hides a layer hides all of
+it, and a picture that answered the pointer while invisible would be a handle
+on nothing.
+
+Drawn as a subdivided quad with world copies at ±360°. Subdivided because the placement is affine in *degrees*: a
 straight line across the image is straight in lon/lat, and a straight line in
 lon/lat is not straight on the map under any projection but the flat one
 (§5.1). It is never masked, for the reason the basemap is not — a mask takes

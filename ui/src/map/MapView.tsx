@@ -165,6 +165,7 @@ import { uniqueTiles } from "../timeline/playback";
 import { TileCache } from "./tiles";
 import { beneathToken, frameToken, onlyToken, parseFrameToken } from "./frameToken";
 import { releaseFocus } from "./focus";
+import { imagesOverField } from "./imageStack";
 import { knownGradients, loadGradients, stopsOf } from "../gradients";
 
 interface Readout {
@@ -564,6 +565,8 @@ export default function MapView({
    * texture's address.
    */
   const imageLayersRef = useRef<ImageLayerView[]>([]);
+  /** The image layers that sit above every visible field layer (M49). */
+  const imagesOverRef = useRef<ReadonlySet<number>>(new Set());
   /**
    * The last frame whose tiles were all on screen. A frame that is not yet
    * draws its missing tiles from this one, dimmed, rather than blank.
@@ -1345,8 +1348,11 @@ export default function MapView({
         recordingRef.current?.preview_revision !== undefined &&
         recordingRef.current?.preview_revision !== null
           ? []
-          : (imagesRef.current?.draws(projectRef.current.image_token, imageLayersRef.current) ??
-            []),
+          : (imagesRef.current?.draws(
+              projectRef.current.image_token,
+              imageLayersRef.current,
+              imagesOverRef.current,
+            ) ?? []),
     };
 
     // Tell the timeline which tiles are on screen, once per change rather
@@ -1827,8 +1833,21 @@ export default function MapView({
       .documentTree(0)
       .then((tree) => {
         if (!live) return;
-        const images = tree.layers.flatMap((layer) => (layer.image ? [layer.image] : []));
-        imageLayersRef.current = images;
+        // Hidden layers are not on the map, images included (M49). Dropped
+        // here rather than at the draw, so a hidden picture also offers no
+        // control points and cannot be dragged: an eye that hides a layer
+        // hides all of it.
+        imageLayersRef.current = tree.layers
+          .filter((layer) => layer.visible)
+          .flatMap((layer) => (layer.image ? [layer.image] : []));
+        // And which of them draw over the field rather than under it.
+        imagesOverRef.current = imagesOverField(
+          tree.layers.map((layer) => ({
+            id: layer.id,
+            visible: layer.visible,
+            isImage: layer.image !== null,
+          })),
+        );
         requestDraw();
       })
       .catch(() => undefined);

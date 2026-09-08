@@ -70,6 +70,15 @@ const IMAGE_CELLS = 16;
 export interface ImageDraw {
   /** The layer, which is also the texture's key. */
   layer: number;
+  /**
+   * Whether this image sits above every visible field layer (M49).
+   *
+   * An image is a reference to trace against, so it is drawn under the field
+   * — but a layer moved to the top of the stack is one the user has asked to
+   * see, and the field is nearly opaque, so drawing it underneath makes it
+   * vanish. The stack order decides which side of the field it lands on.
+   */
+  over: boolean;
   /** Its texture, or null while the picture is still being fetched. */
   texture: WebGLTexture | null;
   /** `lon = a·u + b·v + c` with `u` and `v` across the whole image, 0 to 1. */
@@ -630,6 +639,31 @@ export class MapRenderer {
     }
   }
 
+  /** Draws a run of georeferenced images, in the order given. */
+  private drawImages(
+    state: RenderState,
+    offsets: readonly number[],
+    images: readonly ImageDraw[],
+  ): void {
+    if (images.length === 0) return;
+    const gl = this.gl;
+    gl.useProgram(this.imageProgram);
+    gl.bindVertexArray(this.imageMesh.vao);
+    gl.uniform1i(this.imageUniforms.uImage ?? null, 0);
+    gl.activeTexture(gl.TEXTURE0);
+    for (const image of images) {
+      if (!image.texture || image.opacity <= 0) continue;
+      gl.uniform3f(this.imageUniforms.uPlaceLon ?? null, ...image.placeLon);
+      gl.uniform3f(this.imageUniforms.uPlaceLat ?? null, ...image.placeLat);
+      gl.uniform1f(this.imageUniforms.uOpacity ?? null, image.opacity);
+      gl.bindTexture(gl.TEXTURE_2D, image.texture);
+      for (const offset of offsets) {
+        this.setShared(this.imageUniforms, state.camera, state.view, offset);
+        gl.drawArrays(gl.TRIANGLES, 0, this.imageMesh.count);
+      }
+    }
+  }
+
   /**
    * Binds the tile-without-the-edited-layer for this tile, and says whether
    * it is there (M44).
@@ -934,23 +968,7 @@ export class MapRenderer {
     // being painted stays on top. Never masked, for the same reason the
     // basemap is not — a mask takes the field away, not what is beneath it.
     const images = state.images ?? [];
-    if (images.length > 0) {
-      gl.useProgram(this.imageProgram);
-      gl.bindVertexArray(this.imageMesh.vao);
-      gl.uniform1i(this.imageUniforms.uImage ?? null, 0);
-      gl.activeTexture(gl.TEXTURE0);
-      for (const image of images) {
-        if (!image.texture || image.opacity <= 0) continue;
-        gl.uniform3f(this.imageUniforms.uPlaceLon ?? null, ...image.placeLon);
-        gl.uniform3f(this.imageUniforms.uPlaceLat ?? null, ...image.placeLat);
-        gl.uniform1f(this.imageUniforms.uOpacity ?? null, image.opacity);
-        gl.bindTexture(gl.TEXTURE_2D, image.texture);
-        for (const offset of offsets) {
-          this.setShared(this.imageUniforms, state.camera, state.view, offset);
-          gl.drawArrays(gl.TRIANGLES, 0, this.imageMesh.count);
-        }
-      }
-    }
+    this.drawImages(state, offsets, images.filter((image) => !image.over));
 
     // --- The field alone, for a liquify to read back ---
     if (smearing) {
@@ -994,6 +1012,14 @@ export class MapRenderer {
       gl.uniform1i(this.smearUniforms.uField ?? null, 0);
       gl.drawArrays(gl.TRIANGLES, 0, 6);
     }
+
+    // --- Images above the field (M49) ---
+    // An image is a reference to trace against and belongs under the field,
+    // but a layer moved above every field layer is one the user has asked to
+    // see: the field is nearly opaque, so leaving it underneath would make it
+    // vanish. The coastlines and the glyphs still draw over it, as they draw
+    // over everything.
+    this.drawImages(state, offsets, images.filter((image) => image.over));
 
     // --- Coastlines, above the raster ---
     // The field covers land as well as sea, so a coastline drawn underneath it
