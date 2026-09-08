@@ -87,7 +87,7 @@ pub fn frames_copy(state: &AppState, layer: u64, steps: Vec<u32>) -> Result<Fram
             .project
             .layer(id)
             .ok_or(AppError::Core(ve_core::CoreError::MissingLayer(layer)))?;
-        let settings = open.project.settings;
+        let settings = open.project.settings.clone();
         let mut steps: Vec<u32> = steps
             .into_iter()
             .filter(|&s| s < settings.step_count && found.imported_frame(&settings, s).is_some())

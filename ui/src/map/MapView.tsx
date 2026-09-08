@@ -90,7 +90,7 @@ import type { NewMeasurement } from "../generated/NewMeasurement";
 import { showsHoverIndicator, showsMagnifier } from "./hover";
 import { KIND_LABELS, KINDS, type FieldKindName, kindOf } from "../kind";
 import { trackKeyframes } from "./macroTrack";
-import { RAMP_STOPS, rampCss } from "./ramp";
+import { rampCss, rampStops } from "./ramp";
 import { parseBasemap } from "./format";
 import { marqueeBounds } from "./marquee";
 import {
@@ -164,6 +164,7 @@ import { MapRenderer, type OperatorPreview, type RenderState } from "./renderer"
 import { uniqueTiles } from "../timeline/playback";
 import { TileCache } from "./tiles";
 import { beneathToken, frameToken, parseFrameToken } from "./frameToken";
+import { knownGradients, loadGradients, stopsOf } from "../gradients";
 
 interface Readout {
   lon: number;
@@ -651,6 +652,34 @@ export default function MapView({
    * values rather than whatever its closure captured. Setting React state and
    * drawing in the same tick would otherwise render the previous options.
    */
+  /**
+   * The gradient catalogue (spec.md 5.3, M42), for the draw loop, the legend
+   * and every preview. Fetched once; a ref because the draw loop holds no
+   * dependencies, and state as well so a legend re-renders when it lands.
+   */
+  const [gradientCatalogue, setGradientCatalogue] = useState(knownGradients);
+  const gradientsRef = useRef(gradientCatalogue);
+  gradientsRef.current = gradientCatalogue;
+  useEffect(() => {
+    let dropped = false;
+    void loadGradients()
+      .then((list) => {
+        if (!dropped) {
+          setGradientCatalogue(list);
+          requestDraw();
+        }
+      })
+      .catch((err: unknown) => void api.frontendLog("error", String(err)));
+    return () => {
+      dropped = true;
+    };
+  }, []);
+  /** The stops each kind is painted with, for this frame. */
+  const gradientStops = (summary: ProjectSummary) => ({
+    wind: stopsOf(gradientsRef.current, summary.wind_gradient),
+    current: stopsOf(gradientsRef.current, summary.current_gradient),
+  });
+
   const showGlyphsRef = useRef(true);
   const showGraticuleRef = useRef(true);
   const stepRef = useRef(0);
@@ -1250,6 +1279,7 @@ export default function MapView({
         wind: { min: rampRef.current.wind.min, max: rampRef.current.wind.max },
         current: { min: rampRef.current.current.min, max: rampRef.current.current.max },
       },
+      gradients: gradientStops(projectRef.current),
       showGlyphs: showGlyphsRef.current,
       showGraticule: showGraticuleRef.current,
       pixelRatio: window.devicePixelRatio || 1,
@@ -2944,7 +2974,13 @@ export default function MapView({
         ? null
         : footprintOf(schemaTool, toolState, drawing, camera);
     const field = previewField(schemaTool ?? "brush", toolState, inProgress);
-    const paint = rampCss(mpsFromKnots(field.knots), rampMax, PREVIEW_MIN_ALPHA, rampMin);
+    const paint = rampCss(
+      mpsFromKnots(field.knots),
+      rampMax,
+      PREVIEW_MIN_ALPHA,
+      rampMin,
+      stopsOf(gradientsRef.current, projectRef.current[`${activeKindRef.current}_gradient`]),
+    );
 
     // What the overlay draws is the tool's preview kind, decided in one place
     // (`overlayPlan`): the field for a tool that paints one, an outline for the
@@ -4326,7 +4362,13 @@ export default function MapView({
       const operator = operatorRef.current;
       const settled: HeldPreview = {
         footprint,
-        paint: rampCss(mpsFromKnots(field.knots), rampMax, PREVIEW_MIN_ALPHA, rampMin),
+        paint: rampCss(
+          mpsFromKnots(field.knots),
+          rampMax,
+          PREVIEW_MIN_ALPHA,
+          rampMin,
+          stopsOf(gradientsRef.current, projectRef.current[`${activeKindRef.current}_gradient`]),
+        ),
         knots: field.knots,
         azimuthAt: field.azimuthAt,
         revision: null,
@@ -4903,6 +4945,7 @@ export default function MapView({
             wind: { min: rampMin, max: rampMax },
             current: { min: rampMin, max: rampMax },
           },
+          gradients: gradientStops(projectRef.current),
           showGlyphs: true, showGraticule: true,
           pixelRatio: window.devicePixelRatio || 1,
         });
@@ -4919,6 +4962,7 @@ export default function MapView({
             wind: { min: rampMin, max: rampMax },
             current: { min: rampMin, max: rampMax },
           },
+          gradients: gradientStops(projectRef.current),
           showGlyphs: true, showGraticule: true,
           pixelRatio: window.devicePixelRatio || 1,
         });
@@ -5538,9 +5582,19 @@ export default function MapView({
                 <span>{KIND_LABELS[kind]}</span>
                 <span className="muted">{kind === "wind" ? "barbs" : "arrows"}</span>
               </div>
+              {/*
+                The bar is the gradient the map is actually painted with
+                (M42), not a fixed one: a legend that showed a different run
+                of colours from the pixels beside it would be worse than no
+                legend at all.
+              */}
               <div
                 className="legend-bar"
-                style={{ background: `linear-gradient(to right, ${RAMP_STOPS.join(", ")})` }}
+                style={{
+                  background: `linear-gradient(to right, ${rampStops(
+                    stopsOf(gradientCatalogue, project[`${kind}_gradient`]),
+                  ).join(", ")})`,
+                }}
               />
               <div className="legend-labels">
                 <span>{ramps[kind].minKnots}</span>

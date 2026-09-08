@@ -1063,6 +1063,57 @@ mod tests {
         assert!(layer.visible, "a fetched layer is shown");
     }
 
+    /// The gradient a project is drawn with travels with the project, and a
+    /// name this build does not know travels too: a file written by a later
+    /// version must go back to that version saying what it said. Drawing it
+    /// with the default is the right answer to "I do not know this colour";
+    /// rewriting the file to say so is not.
+    #[test]
+    fn a_gradient_survives_a_round_trip_even_when_it_is_unknown() {
+        use crate::colour::{ColourGradients, gradient_or_default};
+
+        let mut project = sample();
+        project.settings.colour_gradients = Some(ColourGradients {
+            wind: "viridis".to_owned(),
+            current: "from-a-later-version".to_owned(),
+        });
+
+        let dir = TempDir::new();
+        let path = dir.path("gradients.veproj");
+        save(&project, &path).unwrap();
+        let loaded = load(&path).unwrap();
+        let chosen = loaded.settings.gradients();
+        assert_eq!(chosen.wind, "viridis");
+        assert_eq!(
+            chosen.current, "from-a-later-version",
+            "an unfamiliar name is kept, not replaced"
+        );
+        // And it is drawn with something rather than not at all.
+        assert_eq!(gradient_or_default(&chosen.current).id, "vector");
+        assert_eq!(gradient_or_default(&chosen.wind).id, "viridis");
+    }
+
+    /// A project that names none is drawn exactly as it was before the
+    /// setting existed, so no file changes appearance by being opened.
+    #[test]
+    fn a_project_without_a_gradient_takes_the_defaults() {
+        let dir = TempDir::new();
+        let path = dir.path("no-gradient.veproj");
+        let project = sample();
+        assert!(project.settings.colour_gradients.is_none());
+        let json = to_canonical_json(&project).unwrap();
+        assert!(
+            !json.contains("colour_gradients"),
+            "and writes nothing for it: {json}"
+        );
+        save(&project, &path).unwrap();
+        let loaded = load(&path).unwrap();
+        assert_eq!(
+            loaded.settings.gradients(),
+            crate::colour::ColourGradients::default()
+        );
+    }
+
     #[test]
     fn canonical_json_is_stable_across_calls() {
         let project = sample();

@@ -310,6 +310,17 @@ bool wordIsWind(uint w) { return (w >> 31u) == 1u; }
  */
 export const FIELD_OPACITY = 0.9;
 
+/**
+ * Stops the raster shader reserves for a gradient.
+ *
+ * A uniform array has a fixed length in GLSL, so this is the ceiling on how
+ * many stops a gradient in the catalogue may have. Twelve is comfortably
+ * above the eight the longest of them uses; `gradients.test.ts` holds the
+ * catalogue to it, so a gradient that would be silently truncated on the map
+ * fails the suite instead.
+ */
+export const RAMP_MAX_STOPS = 12;
+
 export const RASTER_FRAG = `#version 300 es
 precision highp float;
 in vec2 vUV;
@@ -319,6 +330,13 @@ uniform sampler2D uTile;
 uniform float uSpeedScale;  // full-scale speed, m/s
 uniform vec2 uRampWind;     // speeds mapped to the ends of the wind ramp, m/s
 uniform vec2 uRampCurrent;  // and of the current ramp (M31)
+// The gradient each kind is painted with (spec.md 5.3, M42). Uniforms rather
+// than constants because a gradient is a setting: the tiles carry speed and
+// not colour, so changing one is a redraw and never a re-render.
+uniform vec3 uRampStopsWind[${RAMP_MAX_STOPS}];
+uniform vec3 uRampStopsCurrent[${RAMP_MAX_STOPS}];
+uniform highp int uRampCountWind;
+uniform highp int uRampCountCurrent;
 uniform float uDim;         // 1.0 normally, lower while a frame is stale
 ${OPERATOR}
 ${OPERATOR_FRAG}
@@ -353,23 +371,22 @@ Field sampleField(vec2 uv) {
   return out_;
 }
 
-// Perceptually ordered ramp: dark and desaturated at calm, hot at the top, so
-// speed reads as intensity rather than as an arbitrary hue cycle.
-vec3 ramp(float t) {
+// The gradient's stops, evenly spaced from calm to the top and interpolated
+// linearly between — the same walk rampColour in ramp.ts makes, so the legend
+// and a pixel agree.
+vec3 ramp(float t, bool wind) {
   t = clamp(t, 0.0, 1.0);
-  vec3 c0 = vec3(0.05, 0.09, 0.16);
-  vec3 c1 = vec3(0.12, 0.35, 0.62);
-  vec3 c2 = vec3(0.16, 0.68, 0.66);
-  vec3 c3 = vec3(0.55, 0.80, 0.35);
-  vec3 c4 = vec3(0.96, 0.78, 0.24);
-  vec3 c5 = vec3(0.92, 0.42, 0.20);
-  vec3 c6 = vec3(0.78, 0.16, 0.36);
-  if (t < 0.1667) return mix(c0, c1, t / 0.1667);
-  if (t < 0.3333) return mix(c1, c2, (t - 0.1667) / 0.1667);
-  if (t < 0.5000) return mix(c2, c3, (t - 0.3333) / 0.1667);
-  if (t < 0.6667) return mix(c3, c4, (t - 0.5000) / 0.1667);
-  if (t < 0.8333) return mix(c4, c5, (t - 0.6667) / 0.1667);
-  return mix(c5, c6, (t - 0.8333) / 0.1667);
+  int count = wind ? uRampCountWind : uRampCountCurrent;
+  // A gradient with fewer than two stops is not one. It cannot happen from
+  // the catalogue, but an uninitialised uniform can, and black is a better
+  // answer than reading past the end of the array.
+  if (count < 2) return vec3(0.0);
+  float scaled = t * float(count - 1);
+  int lower = int(min(floor(scaled), float(count - 2)));
+  float f = scaled - float(lower);
+  vec3 a = wind ? uRampStopsWind[lower] : uRampStopsCurrent[lower];
+  vec3 b = wind ? uRampStopsWind[lower + 1] : uRampStopsCurrent[lower + 1];
+  return mix(a, b, f);
 }
 
 /**
@@ -399,7 +416,7 @@ void main() {
   // Each kind on its own scale: wind and current are an order of magnitude
   // apart, and the cell says which it is (M31).
   vec2 rampEnds = field.wind ? uRampWind : uRampCurrent;
-  vec3 colour = ramp((field.speed - rampEnds.x) / max(rampEnds.y - rampEnds.x, 0.001));
+  vec3 colour = ramp((field.speed - rampEnds.x) / max(rampEnds.y - rampEnds.x, 0.001), field.wind);
   // Zero and undefined are different things: a written calm is as opaque as
   // any other written cell, and only where nothing wrote does the map show
   // through (M31, D58). A feathered edge fades with its coverage.

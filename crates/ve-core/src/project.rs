@@ -166,7 +166,12 @@ pub struct ShrinkImpact {
 }
 
 /// Project-wide settings (spec.md 4.1).
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+///
+/// `Clone` and not `Copy` since M42: a gradient is named by its identifier,
+/// which is a `String`, and the alternative — an enumeration of the gradients
+/// this build happens to know — could not carry a name from a later version
+/// back out to the file it came from.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProjectSettings {
     /// Wind or current. Immutable after creation.
     pub field_kind: FieldKind,
@@ -197,6 +202,15 @@ pub struct ProjectSettings {
     /// migration is needed and no project changes appearance on open.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub colour_scale: Option<ColourScale>,
+    /// Which gradient each kind of field is painted with (spec.md 5.3).
+    ///
+    /// Absent from an older file, which then takes the defaults — the
+    /// application's own gradient for wind, which is exactly what it was
+    /// drawn with before the setting existed, so no project changes
+    /// appearance on open. Currents take a palette built for current speed,
+    /// which older projects did not have and would not have chosen.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub colour_gradients: Option<crate::colour::ColourGradients>,
 }
 
 impl ProjectSettings {
@@ -206,6 +220,11 @@ impl ProjectSettings {
     /// made before the setting existed looks exactly as it did.
     pub fn scale(&self) -> ColourScale {
         self.colour_scale.unwrap_or_else(ColourScale::defaults)
+    }
+
+    /// The gradients this project draws with, for the same reason.
+    pub fn gradients(&self) -> crate::colour::ColourGradients {
+        self.colour_gradients.clone().unwrap_or_default()
     }
 
     /// Sensible defaults for a new project of `field_kind`.
@@ -225,6 +244,7 @@ impl ProjectSettings {
             step_count: step_count.clamp(1, MAX_STEPS),
             start_unix_s: None,
             colour_scale: None,
+            colour_gradients: None,
             direction_convention: match field_kind {
                 FieldKind::Wind => DirectionConvention::From,
                 FieldKind::Current => DirectionConvention::Toward,
@@ -233,12 +253,12 @@ impl ProjectSettings {
     }
 
     /// The last valid step index.
-    pub fn last_step(self) -> u32 {
+    pub fn last_step(&self) -> u32 {
         self.step_count.saturating_sub(1)
     }
 
     /// Forecast hour of `step`.
-    pub fn forecast_hour(self, step: u32) -> u32 {
+    pub fn forecast_hour(&self, step: u32) -> u32 {
         step * self.step_hours.hours()
     }
 }
@@ -398,12 +418,13 @@ pub struct Project {
 impl Project {
     /// A new project with one empty layer.
     pub fn new(name: impl Into<String>, settings: ProjectSettings) -> Self {
+        let kind = settings.field_kind;
         Self {
             schema_version: SCHEMA_VERSION,
             id: Id::new(),
             name: name.into(),
             settings,
-            layers: vec![Layer::of_kind("Layer 1", settings.field_kind)],
+            layers: vec![Layer::of_kind("Layer 1", kind)],
             annotations: Annotations::default(),
             view: ViewState::default(),
             regrid: std::collections::BTreeMap::new(),

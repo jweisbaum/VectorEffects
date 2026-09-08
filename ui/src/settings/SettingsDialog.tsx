@@ -21,6 +21,9 @@ import type { Shortcut } from "../generated/Shortcut";
 import NumberField from "../NumberField";
 import { api } from "../ipc";
 import { chordLabel } from "./bindings";
+import type { GradientView } from "../generated/GradientView";
+import { knownGradients, loadGradients, stopsOf } from "../gradients";
+import { rampStops } from "../map/ramp";
 
 /** The rows the Shortcuts section lists, in order, with their labels. */
 const ACTIONS: ReadonlyArray<{ action: Shortcut["action"]; tool: string; label: string }> = [
@@ -81,6 +84,19 @@ export default function SettingsDialog({
   /** The row waiting for a key press, if any. */
   const [capturing, setCapturing] = useState<string | null>(null);
   const [library, setLibrary] = useState<MacroLibrary | null>(null);
+  /** The gradients on offer (M42), from the backend's own table. */
+  const [gradients, setGradients] = useState<readonly GradientView[]>(knownGradients);
+  useEffect(() => {
+    let dropped = false;
+    void loadGradients()
+      .then((list) => {
+        if (!dropped) setGradients(list);
+      })
+      .catch(() => undefined);
+    return () => {
+      dropped = true;
+    };
+  }, []);
   /** Whether the "delete every macro" confirmation is up (M35). */
   const [confirmClear, setConfirmClear] = useState(false);
   useEffect(() => {
@@ -220,6 +236,59 @@ export default function SettingsDialog({
               />
             </label>
           )}
+          {/*
+            The gradient is the project's too, and for the same reason: it is
+            what the map is painted with, so two people opening one file
+            should see the same colours (M42). The catalogue is the backend's
+            — one table of names, notes and stops — and each option shows the
+            run of colours it names, since a list of words would be asking
+            the user to remember what "Haxby" looks like.
+          */}
+          {project !== null &&
+            (["wind", "current"] as const).map((kind) => (
+              <label className="settings-field" key={kind}>
+                {kind === "wind"
+                  ? "This project\u2019s colour gradient for wind"
+                  : "This project\u2019s colour gradient for currents"}
+                <select
+                  value={project[`${kind}_gradient`]}
+                  onChange={(event) => {
+                    setError(null);
+                    void api
+                      .setColourGradient(kind, event.target.value)
+                      .then(onProject)
+                      .catch(report);
+                  }}
+                >
+                  {gradients.map((gradient) => (
+                    <option key={gradient.id} value={gradient.id} title={gradient.note}>
+                      {gradient.label}
+                    </option>
+                  ))}
+                  {/*
+                    A project written by a later version may name a gradient
+                    this build has never heard of. It is drawn with the
+                    default, and the option is offered so the select shows
+                    what the file says rather than silently reading as
+                    something else.
+                  */}
+                  {!gradients.some((entry) => entry.id === project[`${kind}_gradient`]) && (
+                    <option value={project[`${kind}_gradient`]}>
+                      {project[`${kind}_gradient`]} (not in this version)
+                    </option>
+                  )}
+                </select>
+                <span
+                  className="gradient-bar"
+                  aria-hidden="true"
+                  style={{
+                    background: `linear-gradient(to right, ${rampStops(
+                      stopsOf(gradients, project[`${kind}_gradient`]),
+                    ).join(", ")})`,
+                  }}
+                />
+              </label>
+            ))}
           <label className="settings-field">
             Default for new wind projects
             <NumberField

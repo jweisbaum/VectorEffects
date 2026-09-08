@@ -673,7 +673,7 @@ pub fn capture_preview(state: &AppState, last_step: u32) -> Result<CaptureMode> 
                 last_step.max(active.first_step),
             )?)
         };
-        let settings = session.require_open()?.project.settings;
+        let settings = session.require_open()?.project.settings.clone();
         let active = session
             .capturing
             .active
@@ -705,7 +705,7 @@ pub fn place_preview(state: tauri::State<'_, AppState>, lon: f64, lat: f64) -> R
 /// one more copy in it is a new set of tiles.
 pub fn preview_place(state: &AppState, lon: f64, lat: f64) -> Result<CaptureMode> {
     with_session(state, |session| {
-        let settings = session.require_open()?.project.settings;
+        let settings = session.require_open()?.project.settings.clone();
         let active = session
             .capturing
             .active
@@ -732,7 +732,7 @@ pub fn preview_place(state: &AppState, lon: f64, lat: f64) -> Result<CaptureMode
 /// would throw away every tile on screen each time the pointer moved.
 pub fn preview_stamp(state: &AppState, lon: f64, lat: f64) -> Result<CaptureMode> {
     with_session(state, |session| {
-        let settings = session.require_open()?.project.settings;
+        let settings = session.require_open()?.project.settings.clone();
         let active = session
             .capturing
             .active
@@ -782,6 +782,7 @@ fn preview_scene(
     // and current shows both — and the legend has a scale for each.
     let mut settings = settings;
     settings.field_kind = baked.kind();
+    let step_count = settings.step_count;
     let mut project = ve_core::project::Project::new("Macro preview", settings);
     project.layers.clear();
     for kind in &baked.kinds {
@@ -789,7 +790,6 @@ fn preview_scene(
         layer.parameter = *kind;
         project.layers.push(layer);
     }
-    let step_count = settings.step_count;
     let mut object = Object::new(ToolKind::Macro, "Preview", step_count);
     object.geometry = baked.shape.clone();
     object.capture = Some(baked.hash.clone());
@@ -913,7 +913,7 @@ pub fn capture_finish(state: &AppState, name: String, last_step: u32) -> Result<
                 value: "no capture is running".to_owned(),
             })?;
         let open = session.require_open()?;
-        let settings = open.project.settings;
+        let settings = open.project.settings.clone();
         // The preview's bake is the macro, when there is one: what was looked
         // at is what is kept. Finishing straight from recording bakes now.
         let capture = match &active.baked {
@@ -963,7 +963,7 @@ fn bake(
     project: &ve_core::project::Project,
     last_step: u32,
 ) -> Result<Capture> {
-    let settings = project.settings;
+    let settings = project.settings.clone();
     let spacing = settings.resolution.degrees();
     let (half_w, half_h) = half_extents(&active.shape);
     if !(half_w > 0.0 && half_h > 0.0) {

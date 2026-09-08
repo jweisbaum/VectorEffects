@@ -30,6 +30,7 @@ import {
   GLYPH_VERT,
   IMAGE_FRAG,
   IMAGE_VERT,
+  RAMP_MAX_STOPS,
   RASTER_FRAG,
   RASTER_VERT,
 } from "./shaders";
@@ -187,6 +188,13 @@ export interface RenderState {
    * current are an order of magnitude apart.
    */
   ramps: Record<FieldKindName, RampSpan>;
+  /**
+   * The gradient each kind is painted with (spec.md 5.3, M42): stops as
+   * `0`–`1` RGB, calm first, evenly spaced. Uploaded per frame, which costs
+   * nothing — the tiles carry speed and not colour, so a gradient is a redraw
+   * and never a re-render.
+   */
+  gradients: Record<FieldKindName, readonly (readonly [number, number, number])[]>;
   showGlyphs: boolean;
   showGraticule: boolean;
   pixelRatio: number;
@@ -311,6 +319,9 @@ export class MapRenderer {
     this.smearUniforms = uniforms(gl, this.smearProgram, [...mask, "uField"]);
     this.rasterUniforms = uniforms(gl, this.rasterProgram, [
       ...shared, ...mask, "uTileGeo", "uTile", "uSpeedScale", "uRampWind", "uRampCurrent", "uDim",
+      // An array's location is asked for by its first element, which is what
+      // `getUniformLocation` accepts; `uniform3fv` then writes the whole run.
+      "uRampStopsWind[0]", "uRampStopsCurrent[0]", "uRampCountWind", "uRampCountCurrent",
     ]);
     this.imageUniforms = uniforms(gl, this.imageProgram, [
       ...shared, "uPlaceLon", "uPlaceLat", "uImage", "uOpacity",
@@ -577,6 +588,7 @@ export class MapRenderer {
       state.ramps.current.min,
       state.ramps.current.max,
     );
+    this.setGradients(state);
     this.setOperator(this.rasterUniforms, state.view, state.operator ?? null, stage);
     gl.activeTexture(gl.TEXTURE0);
 
@@ -596,6 +608,39 @@ export class MapRenderer {
       gl.drawArrays(gl.TRIANGLES, 0, 6);
     }
   }
+
+  /**
+   * Points the raster program at the gradients this frame is drawn with.
+   *
+   * Longer runs than the shader reserves are cut rather than overflowed, and
+   * the catalogue is held to that length by a test, so a gradient that would
+   * be silently truncated here fails the suite instead.
+   */
+  private setGradients(state: RenderState): void {
+    const gl = this.gl;
+    for (const [kind, stops] of [
+      ["wind", state.gradients.wind],
+      ["current", state.gradients.current],
+    ] as const) {
+      const used = stops.slice(0, RAMP_MAX_STOPS);
+      const flat = this.gradientArrays[kind];
+      flat.fill(0);
+      used.forEach((stop, at) => {
+        flat[at * 3] = stop[0];
+        flat[at * 3 + 1] = stop[1];
+        flat[at * 3 + 2] = stop[2];
+      });
+      const suffix = kind === "wind" ? "Wind" : "Current";
+      gl.uniform3fv(this.rasterUniforms[`uRampStops${suffix}[0]`] ?? null, flat);
+      gl.uniform1i(this.rasterUniforms[`uRampCount${suffix}`] ?? null, used.length);
+    }
+  }
+
+  /** The stop arrays, padded to what the shader declares. */
+  private gradientArrays = {
+    wind: new Float32Array(RAMP_MAX_STOPS * 3),
+    current: new Float32Array(RAMP_MAX_STOPS * 3),
+  };
 
   /**
    * This frame's texture for a tile, fetching it if absent — or, until it

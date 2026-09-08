@@ -824,6 +824,17 @@ body {
   overflow-y: auto;
 }
 
+/* The run of colours a gradient names, beside the select that names it: a
+   list of words would be asking the reader to remember what each looks like
+   (M42). */
+.settings-field .gradient-bar {
+  display: block;
+  height: 10px;
+  margin-top: 5px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+}
+
 /* The visibility toggle is an eye, shown rather than said. */
 .layer-panel .eye {
   display: inline-flex;

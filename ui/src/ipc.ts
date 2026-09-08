@@ -12,6 +12,7 @@ import { beginBusy } from "./busy";
 import type { AppErrorPayload } from "./generated/AppErrorPayload";
 import type { AppInfo } from "./generated/AppInfo";
 import type { FieldSample } from "./generated/FieldSample";
+import type { GradientView } from "./generated/GradientView";
 import type { NewProjectRequest } from "./generated/NewProjectRequest";
 import type { BrushStroke } from "./generated/BrushStroke";
 import type { NewObject } from "./generated/NewObject";
@@ -622,6 +623,11 @@ export const api = {
   /** The top of the colour ramp for one kind of field, in knots (M29). */
   setColourScale: (kind: FieldKindName, maxKnots: number) =>
     call<ProjectSummary>("set_colour_scale", { kind, maxKnots }),
+  /** Every gradient the map can paint speed with (spec 5.3, M42). */
+  colourGradients: () => call<GradientView[]>("colour_gradients"),
+  /** Which gradient one kind of field is painted with. An undoable write. */
+  setColourGradient: (kind: FieldKindName, gradient: string) =>
+    call<ProjectSummary>("set_colour_gradient", { kind, gradient }),
 
   /** The macro library (spec.md 8.7, M16). */
   macroLibrary: () => call<MacroLibrary>("macro_library", {}),

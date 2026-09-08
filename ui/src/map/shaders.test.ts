@@ -199,6 +199,7 @@ describe("the renderer's uniform lookups", () => {
       "uMask", "uMaskSize", "uOpKind", "uOpAmount", "uOpCount", "uOpRadius", "uOpFeather",
       "uField",
       "uTileGeo", "uTile", "uSpeedScale", "uRampWind", "uRampCurrent", "uDim",
+      "uRampStopsWind", "uRampStopsCurrent", "uRampCountWind", "uRampCountCurrent",
       "uGlyphOrigin", "uGlyphStep", "uGrid", "uSpacing",
       "uSizeScaleArrow", "uSizeScaleBarb", "uColor", "uPixelRatio",
     ]);

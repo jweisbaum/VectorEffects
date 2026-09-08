@@ -204,7 +204,7 @@ pub fn run(
         });
     }
     let started = std::time::Instant::now();
-    let settings = project.settings;
+    let settings = &project.settings;
     let grid = GridSpec {
         ni: settings.resolution.ni(),
         nj: settings.resolution.nj(),

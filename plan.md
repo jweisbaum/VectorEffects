@@ -3008,6 +3008,53 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M42 — Colour gradients, and an eraser that respects a hidden layer
+
+**Goal:** the user's instructions of 2026-09-07: erasing on a hidden
+layer should do nothing, and the colour gradient should be a setting
+with presets for wind and for current, taking Panoply for inspiration.
+
+**The eraser.** `stroke_erase` checked that a layer was not locked and
+never that it was visible, so a stroke over a hidden layer took pieces
+out of it — an edit with no visible effect, found later with nothing to
+say what made it. Refused now, with a message, rather than dropped
+silently: the pointer went down on purpose. The live preview already
+did the right thing since M40, because what fills the hole is the stack
+without that layer and a hidden layer is not in the stack to begin with.
+
+**The gradients.** Nine, in `ve_core::colour`: the application's own,
+the three perceptually uniform Matplotlib palettes, the NCAR blue-to-red
+much of the published meteorology is drawn with, GMT's Haxby, cmocean's
+speed and thermal, and a greyscale for print. They are approximations,
+sampled at the anchor points those palettes are usually quoted at — a
+ramp is read as "faster is hotter" rather than as a measurement, and the
+difference between eight stops and two hundred does not survive being
+stretched over a colour bar an inch tall.
+
+The table is one table: identifier, label, note and stops together,
+served to the frontend rather than written there. A list of names in
+Rust and a list of colours in TypeScript is the arrangement that drifts,
+and the drift would be silent — the map painting one palette while the
+legend drew another.
+
+The shader takes the stops as a uniform array instead of carrying them
+as constants, so choosing a gradient is a redraw and never a re-render:
+the tiles hold speed, not colour. `ramp.ts` takes a gradient as an
+argument for the legend, the brush previews and the stroke previews,
+which all have to agree with the pixels beside them.
+
+**Two things the design turns on.** The identifier is what the project
+file stores, and a name this build does not know is drawn with the
+default and *saved back unchanged*, so a file from a later version can
+go home intact. And `ProjectSettings` is no longer `Copy` — a gradient
+is named by a `String`, and the alternative, an enumeration of the ones
+this build happens to have, could not carry that name back out.
+
+**Not done.** There is no application-level default for new projects, as
+there is for the scale; a new project takes the built-in pair. Adding
+one is another two preferences and another two fields, and nothing has
+asked for it yet.
+
 ### M41 — Why a history import looked like a hang
 
 **The report:** the import never finished and showed no data, while

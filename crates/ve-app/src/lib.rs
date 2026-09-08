@@ -167,6 +167,8 @@ pub fn run() -> anyhow::Result<()> {
             measure::remove_measurement,
             measure::clear_measurements,
             settings::set_colour_scale,
+            settings::colour_gradients,
+            settings::set_colour_gradient,
             macros::macro_library,
             macros::delete_macros,
             macros::start_capture,

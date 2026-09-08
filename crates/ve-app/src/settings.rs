@@ -515,6 +515,90 @@ pub fn colour_scale_set(
     })
 }
 
+/// Which gradients the map may be drawn with (spec.md 5.3, M42).
+///
+/// Served rather than written into the frontend, so the names, the colours
+/// and the notes are one table: a list of names here and a list of colours
+/// there is the arrangement that drifts, and the drift would be silent —
+/// the map painting one palette while the legend drew another.
+#[tauri::command]
+pub fn colour_gradients() -> Vec<GradientView> {
+    ve_core::colour::GRADIENTS
+        .iter()
+        .map(GradientView::of)
+        .collect()
+}
+
+/// One gradient on the wire.
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export, export_to = "GradientView.ts")]
+pub struct GradientView {
+    /// What the document stores, e.g. `"viridis"`.
+    pub id: String,
+    /// What the settings offer.
+    pub label: String,
+    /// A sentence on what it is for.
+    pub note: String,
+    /// Stops as `0.0`–`1.0` RGB, calm first, evenly spaced across the range.
+    pub stops: Vec<[f32; 3]>,
+}
+
+impl GradientView {
+    fn of(gradient: &ve_core::colour::Gradient) -> Self {
+        Self {
+            id: gradient.id.to_owned(),
+            label: gradient.label.to_owned(),
+            note: gradient.note.to_owned(),
+            stops: gradient.stops.to_vec(),
+        }
+    }
+}
+
+/// Sets the gradient one kind of field is painted with (spec.md 5.3, M42).
+#[tauri::command]
+pub fn set_colour_gradient(
+    state: tauri::State<'_, AppState>,
+    kind: String,
+    gradient: String,
+) -> Result<crate::projects::ProjectSummary> {
+    colour_gradient_set(&state, &kind, &gradient)
+}
+
+/// Implementation of [`set_colour_gradient`]: an undoable document write, as
+/// the scale beside it is.
+///
+/// An unknown identifier is refused here rather than stored and drawn with
+/// the default. A file *arriving* with a name this build does not know is a
+/// different case — that one is carried through untouched, since the version
+/// that wrote it can still read it — but a name this build is being *asked*
+/// to write can only be a caller's mistake.
+pub fn colour_gradient_set(
+    state: &AppState,
+    kind: &str,
+    gradient: &str,
+) -> Result<crate::projects::ProjectSummary> {
+    let kind = crate::projects::parse_field_kind(kind)?;
+    if ve_core::colour::gradient(gradient).is_none() {
+        return Err(AppError::BadOption {
+            field: "gradient",
+            value: format!("{gradient} is not a gradient this draws"),
+        });
+    }
+    with_session(state, |session| {
+        let open = session.require_open()?;
+        let before = open.project.settings.colour_gradients.clone();
+        let after = Some(open.project.settings.gradients().with_id(kind, gradient));
+        if before == after {
+            return Ok(crate::projects::ProjectSummary::of(session.require_open()?));
+        }
+        let command = ve_core::Command::SetColourGradients { before, after };
+        let (project, history) = (&mut open.project, &mut open.history);
+        history.push(project, command)?;
+        open.touch();
+        Ok(crate::projects::ProjectSummary::of(session.require_open()?))
+    })
+}
+
 /// Sets how the map lays the world out (M11).
 #[tauri::command]
 pub fn set_projection(

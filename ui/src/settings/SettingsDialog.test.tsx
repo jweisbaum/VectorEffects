@@ -40,6 +40,10 @@ const held = vi.hoisted(() => {
 
 vi.mock("../ipc", () => ({
   api: {
+    // The dialog asks for the gradient catalogue on mount (M42). An empty
+    // one is a real state — the first frames see it — and the dialog has to
+    // render through it.
+    colourGradients: () => Promise.resolve([]),
     macroLibrary: () => Promise.resolve(held.library),
     deleteMacros: (id: string | null) => {
       held.deleted.push(id);

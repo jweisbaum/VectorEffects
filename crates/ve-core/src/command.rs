@@ -267,6 +267,13 @@ pub enum Command {
         /// New scale.
         after: Option<crate::project::ColourScale>,
     },
+    /// Sets which gradient each kind of field is painted with (spec.md 5.3).
+    SetColourGradients {
+        /// Previous choice, if one was set.
+        before: Option<crate::colour::ColourGradients>,
+        /// New choice.
+        after: Option<crate::colour::ColourGradients>,
+    },
     /// Sets when step 0 is (spec.md 9.1).
     SetStartTime {
         /// Previous start, seconds since the epoch.
@@ -417,6 +424,7 @@ impl Command {
             Self::SetProperty { prop, .. } => format!("Change {prop:?}"),
             Self::SetProjectName { .. } => "Rename project".into(),
             Self::SetColourScale { .. } => "Change the colour scale".into(),
+            Self::SetColourGradients { .. } => "Change the colour gradient".into(),
             Self::SetStartTime { .. } => "Set start time".into(),
             Self::SetStepCount { .. } => "Change duration".into(),
             Self::SetAnnotations { .. } => "Change measurements".into(),
@@ -574,6 +582,10 @@ impl Command {
             }
             Self::SetColourScale { after, .. } => {
                 project.settings.colour_scale = *after;
+                Ok(())
+            }
+            Self::SetColourGradients { after, .. } => {
+                project.settings.colour_gradients = after.clone();
                 Ok(())
             }
             Self::SetAnnotations { after, .. } => {
@@ -747,6 +759,10 @@ impl Command {
             }
             Self::SetColourScale { before, .. } => {
                 project.settings.colour_scale = *before;
+                Ok(())
+            }
+            Self::SetColourGradients { before, .. } => {
+                project.settings.colour_gradients = before.clone();
                 Ok(())
             }
             Self::SetAnnotations { before, .. } => {

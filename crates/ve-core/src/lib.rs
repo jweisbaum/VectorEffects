@@ -10,6 +10,7 @@ pub mod annotation;
 pub mod canonical;
 pub mod capture;
 pub mod clipboard;
+pub mod colour;
 pub mod command;
 pub mod document;
 pub mod error;

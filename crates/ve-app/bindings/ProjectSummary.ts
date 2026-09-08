@@ -61,6 +61,15 @@ direction_convention: string,
  */
 wind_scale_knots: number, current_scale_knots: number, 
 /**
+ * The gradient the wind layers are painted with (spec.md 5.3, M42), by
+ * identifier: `colour_gradients` says what the identifiers mean.
+ */
+wind_gradient: string, 
+/**
+ * And the current layers, which start on a different one.
+ */
+current_gradient: string, 
+/**
  * The kinds of field the visible layers hold — `"wind"`, `"current"` —
  * wind first: what an export writes, and what the map can show (M29).
  */

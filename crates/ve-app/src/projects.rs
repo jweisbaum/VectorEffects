@@ -51,6 +51,11 @@ pub struct ProjectSummary {
     /// carry speed and not colour, so changing either costs no render.
     pub wind_scale_knots: f64,
     pub current_scale_knots: f64,
+    /// The gradient the wind layers are painted with (spec.md 5.3, M42), by
+    /// identifier: `colour_gradients` says what the identifiers mean.
+    pub wind_gradient: String,
+    /// And the current layers, which start on a different one.
+    pub current_gradient: String,
     /// The kinds of field the visible layers hold — `"wind"`, `"current"` —
     /// wind first: what an export writes, and what the map can show (M29).
     pub kinds_present: Vec<String>,
@@ -77,7 +82,7 @@ pub struct ProjectSummary {
 
 impl ProjectSummary {
     pub(crate) fn of(open: &OpenProject) -> Self {
-        let settings = open.project.settings;
+        let settings = open.project.settings.clone();
         Self {
             name: open.project.name.clone(),
             path: open.path.as_ref().map(|p| p.to_string_lossy().into_owned()),
@@ -101,6 +106,8 @@ impl ProjectSummary {
             .to_owned(),
             wind_scale_knots: settings.scale().wind_knots,
             current_scale_knots: settings.scale().current_knots,
+            wind_gradient: settings.gradients().wind,
+            current_gradient: settings.gradients().current,
             kinds_present: open
                 .project
                 .kinds_present()
@@ -279,8 +286,8 @@ pub fn create(
         let project = Project::new(name, settings);
         tracing::info!(
             name = %project.name,
-            resolution = %settings.resolution.label(),
-            steps = settings.step_count,
+            resolution = %project.settings.resolution.label(),
+            steps = project.settings.step_count,
             "created project"
         );
         session.open = Some(OpenProject::created(project));

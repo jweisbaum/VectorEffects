@@ -248,9 +248,9 @@ pub fn grib_project(
         tracing::info!(
             name = %project.name,
             path = %path.display(),
-            resolution = %settings.resolution.label(),
-            step_hours = settings.step_hours.hours(),
-            steps = settings.step_count,
+            resolution = %project.settings.resolution.label(),
+            step_hours = project.settings.step_hours.hours(),
+            steps = project.settings.step_count,
             "created project from grib"
         );
         session.open = Some(OpenProject::created(project));

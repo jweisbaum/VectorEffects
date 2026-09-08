@@ -1054,6 +1054,27 @@ anywhere in the UI.
   (§8.6), toggled from the title bar's view controls beside the graticule: a
   way of looking, not a fact about the project, and it changes no stored or
   exported value.
+
+  **Which colours the ramp runs through is a project setting** (M42), one for
+  wind and one for currents, chosen from a catalogue the application ships.
+  It is the project's and not the application's, for the reason the scale is:
+  two people opening one file should see the same map. The catalogue is a
+  table in `ve_core::colour` — identifier, label, note and stops together —
+  and the map, the legend, the settings dialog and every gesture preview read
+  from it, so a gradient cannot be added in one place and missing from
+  another. The identifier is what the project file stores, and a file naming
+  a gradient this build has never heard of is **drawn with the default and
+  saved back saying what it said**: the version that wrote it can still read
+  it, which refusing to open it or rewriting the name would both take away.
+  Wind opens on the application's own gradient, which is exactly what every
+  project was drawn with before the setting existed, so no file changes
+  appearance by being opened; currents open on a palette built for current
+  speed.
+
+  A gradient reaches no exported file and no evaluation. The tiles carry
+  speed and direction, and the colour is chosen when a pixel is drawn, so
+  changing one is a redraw and never a re-render — the same property that
+  lets the scale be a live edit.
 - **Direction** as instanced glyphs on a lattice anchored to the globe — points
   sit at whole-degree multiples chosen so their on-screen spacing stays near a
   target, and the step snaps to a fixed ladder so it changes only at discrete
@@ -1549,6 +1570,15 @@ Hover: yes — the same footprint outline the brush shows, since it sweeps the
 same stamp along the same kind of polyline. Like the clone stamp, and unlike
 every tool that paints a field, it keeps that outline *through* the drag and
 draws nothing else while masking (§6.1).
+
+**Erasing needs the layer to be visible.** A hidden layer is not on the map,
+so a stroke over it was aimed at whatever is; taking a piece out of something
+the user cannot see is an edit they cannot check, cannot see the result of,
+and would find later without knowing what made it. The stroke is refused, and
+the refusal says so, rather than being silently dropped: the pointer went
+down on purpose. The live preview shows nothing either way, since what fills
+the hole is the stack without that layer (§6.2) and a hidden layer is already
+not in it.
 
 **A mask's edge is drawn on the map**, because a mask paints calm and is
 otherwise invisible: there is nothing to say where one is, which side of it is
