@@ -862,6 +862,27 @@ is nearly opaque, so leaving it under would make it vanish. The stack decides
 which side of the field it lands on, and hidden layers count for neither: a
 hidden field layer holds nothing down, and a hidden image is not drawn at all.
 
+**Eight grips, and three points behind them** (M50). Three corners determine
+an affine exactly, which is why there are three corner handles and not four —
+a fourth would let the user ask for a shape no affine can make. But reaching
+every placement through two of them is a poor way to do the two things a chart
+scan actually needs: an **edge** grip on each side moves that side and leaves
+the opposite one, and a **rotation** grip on a stalk above the top edge turns
+the picture about its centre. Both are the same three points arrived at
+differently, so the document, the command and the undo are unchanged.
+
+An edge reads the pointer in the *picture's* own coordinates, so a sheared or
+turned picture answers along its own axes rather than the map's, and it stops
+before the picture could be folded through itself. A rotation is stateless —
+the grip goes where the pointer is — and is computed in a space where a degree
+of longitude is scaled by the cosine of the centre's latitude: the placement is
+affine in degrees, and turning it in raw degrees would lean the picture rather
+than turn it anywhere but the equator.
+
+A grip takes the drag ahead of every tool, so it takes the cursor too: the
+crosshair of the tool in hand would promise a stroke that is not going to
+happen.
+
 **A hidden image layer is hidden completely** (M49). It is not drawn, offers no
 control points and cannot be dragged: an eye that hides a layer hides all of
 it, and a picture that answered the pointer while invisible would be a handle

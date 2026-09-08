@@ -28,6 +28,14 @@ export interface CursorContext {
   recording: boolean;
   /** The pointer is over the active image layer's picture, which a drag moves (M36). */
   onImage: boolean;
+  /**
+   * The picture grip under the pointer, if any (M50).
+   *
+   * A grip takes the drag ahead of every tool, so it takes the cursor too:
+   * the crosshair of the tool in hand would promise a stroke where a drag
+   * would resize a chart instead.
+   */
+  grip: "corner" | "edge" | "rotate" | null;
 }
 
 /**
@@ -53,6 +61,11 @@ export function cursorFor(context: CursorContext): string {
   // While a capture records, the region is dragged with the selection cursor
   // (spec.md 8.7): nothing else on the map does anything.
   if (context.recording) return "default";
+  // A picture's grip takes the drag ahead of every tool (M50), so it takes
+  // the cursor: `crosshair` here would promise a stroke that will not happen.
+  if (context.grip === "corner") return "nwse-resize";
+  if (context.grip === "edge") return "move";
+  if (context.grip === "rotate") return "grab";
   if (context.insideRegion) return BUCKET_CURSOR;
   switch (context.tool) {
     case HAND:

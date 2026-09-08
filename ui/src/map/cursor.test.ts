@@ -11,6 +11,7 @@ const base: CursorContext = {
   panning: false,
   recording: false,
   onImage: false,
+  grip: null,
 };
 
 describe("cursorFor", () => {
@@ -66,5 +67,29 @@ describe("cursorFor", () => {
 
   it("uses the selection cursor while a capture records", () => {
     expect(cursorFor({ ...base, tool: "brush", recording: true })).toBe("default");
+  });
+});
+
+describe("a picture's grips (M50)", () => {
+  /**
+   * A grip takes the drag ahead of every tool, so it takes the cursor: the
+   * crosshair of the tool in hand would promise a stroke where a drag is
+   * about to resize a chart instead.
+   */
+  it("outranks the tool in hand", () => {
+    for (const tool of [ERASE, SELECT, MEASURE] as const) {
+      expect(cursorFor({ ...base, tool, grip: "corner" })).toBe("nwse-resize");
+    }
+  });
+
+  it("says which grip it is", () => {
+    expect(cursorFor({ ...base, grip: "corner" })).toBe("nwse-resize");
+    expect(cursorFor({ ...base, grip: "edge" })).toBe("move");
+    expect(cursorFor({ ...base, grip: "rotate" })).toBe("grab");
+  });
+
+  /** But an armed pick still comes first: the user asked for that one place. */
+  it("does not outrank a pick", () => {
+    expect(cursorFor({ ...base, grip: "rotate", picking: true })).toBe("crosshair");
   });
 });

@@ -152,12 +152,15 @@ import { ImageCache } from "./images";
 import type { ImageLayerView } from "../generated/ImageLayerView";
 import {
   CORNER_REACH_CSS,
-  type CornerPick,
-  cornerUnder,
+  type Corners,
+  type GripPick,
+  draggedByGrip,
+  edgeGrips,
+  gripUnder,
+  rotateGrip,
   cornersOf,
   imageUnder,
   movedCorners,
-  draggedCorners,
   hasArea,
 } from "./place";
 import { MapRenderer, type OperatorPreview, type RenderState } from "./renderer";
@@ -757,11 +760,11 @@ export default function MapView({
     queued: null,
   });
   /** The image control point being dragged (spec.md 4.9, M18). */
-  const cornerDrag = useRef<CornerPick | null>(null);
+  const cornerDrag = useRef<GripPick | null>(null);
   /** The placement in flight, and the one waiting behind it. */
   const cornerMove = useRef<{
     inFlight: boolean;
-    queued: ReturnType<typeof draggedCorners> | null;
+    queued: Corners | null;
   }>({ inFlight: false, queued: null });
   /**
    * The image being dragged bodily, and what it was when the drag began
@@ -2862,19 +2865,43 @@ export default function MapView({
         context.stroke();
         context.setLineDash([]);
 
-        // Three handles, not four: three points determine an affine, and a
-        // fourth would let the user ask for a shape no affine can make.
+        // Three corner handles, not four: three points determine an affine,
+        // and a fourth would let the user ask for a shape no affine can make.
+        // The edges and the rotation grip are the same three points reached a
+        // different way (M50), so they add gestures rather than freedom.
         const corners = cornersOf(placing);
-        for (const corner of [corners.topLeft, corners.topRight, corners.bottomLeft]) {
-          const at = toScreen(camera, view, { lon: corner[0], lat: corner[1] });
+        const dot = (point: readonly [number, number], radius: number) => {
+          const at = toScreen(camera, view, { lon: point[0], lat: point[1] });
           context.beginPath();
-          context.arc(at.x, at.y, 5 * dpr, 0, Math.PI * 2);
+          context.arc(at.x, at.y, radius * dpr, 0, Math.PI * 2);
           context.fillStyle = "rgba(120, 200, 255, 0.95)";
           context.fill();
           context.strokeStyle = "rgba(20, 28, 44, 0.9)";
           context.lineWidth = Math.max(1, dpr);
           context.stroke();
+          return at;
+        };
+        // The edges smaller than the corners, so which is which reads at a
+        // glance and a corner still looks like the finer control it is.
+        for (const edge of Object.values(edgeGrips(corners))) dot(edge, 3.5);
+        for (const corner of [corners.topLeft, corners.topRight, corners.bottomLeft]) {
+          dot(corner, 5);
         }
+        // The rotation grip, on a stalk from the top edge so it reads as
+        // belonging to the picture rather than floating beside it.
+        const stalkFrom = toScreen(camera, view, {
+          lon: edgeGrips(corners).top[0],
+          lat: edgeGrips(corners).top[1],
+        });
+        const grip = rotateGrip(corners);
+        const stalkTo = toScreen(camera, view, { lon: grip[0], lat: grip[1] });
+        context.beginPath();
+        context.moveTo(stalkFrom.x, stalkFrom.y);
+        context.lineTo(stalkTo.x, stalkTo.y);
+        context.strokeStyle = "rgba(120, 200, 255, 0.85)";
+        context.lineWidth = Math.max(1, dpr);
+        context.stroke();
+        dot(grip, 4.5);
         context.restore();
       }
     }
@@ -3506,7 +3533,12 @@ export default function MapView({
    * `createReadoutStore` exists to prevent.
    */
   const applyCursor = useCallback(
-    (insideRegion: boolean, panning: boolean, onImage = false) => {
+    (
+      insideRegion: boolean,
+      panning: boolean,
+      onImage = false,
+      grip: "corner" | "edge" | "rotate" | null = null,
+    ) => {
       const canvas = canvasRef.current;
       if (!canvas) return;
       const wanted = cursorFor({
@@ -3517,6 +3549,7 @@ export default function MapView({
         panning,
         recording: recording !== null,
         onImage,
+        grip,
       });
       if (canvas.style.cursor !== wanted) canvas.style.cursor = wanted;
     },
@@ -3562,7 +3595,7 @@ export default function MapView({
     // layer has any, so a chart being placed does not take clicks meant for the
     // brush on some other layer.
     {
-      const grabbed = cornerUnder(
+      const grabbed = gripUnder(
         imageLayersRef.current,
         activeLayer,
         cameraRef.current,
@@ -4000,6 +4033,17 @@ export default function MapView({
             viewRef.current,
             point,
           ) !== null,
+        // The grip under the pointer, or the one being dragged: a drag that
+        // has left the grip behind still says what it is doing (M50).
+        (cornerDrag.current ??
+          gripUnder(
+            imageLayersRef.current,
+            activeLayer,
+            cameraRef.current,
+            viewRef.current,
+            point,
+            CORNER_REACH_CSS * (window.devicePixelRatio || 1),
+          ))?.grip.kind ?? null,
       );
     }
 
@@ -4231,7 +4275,7 @@ export default function MapView({
       const image = imageLayersRef.current.find((v) => v.layer === grabbed.layer);
       if (image) {
         const geo = unproject(cameraRef.current, viewRef.current, point);
-        const next = draggedCorners(image, grabbed.corner, [geo.lon, geo.lat], event.shiftKey);
+        const next = draggedByGrip(image, grabbed.grip, [geo.lon, geo.lat], event.shiftKey);
         // A drag that would flatten the image is refused by the backend; not
         // sending it means the picture simply stops following rather than
         // filling the log at pointer rate.

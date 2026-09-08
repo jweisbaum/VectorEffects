@@ -3,13 +3,20 @@ import { describe, expect, it } from "vitest";
 import type { ImageLayerView } from "../generated/ImageLayerView";
 import { project, type Camera, type Viewport } from "./camera";
 import {
+  type Corners,
+  centreOf,
   cornerUnder,
   cornersOf,
   draggedCorners,
+  draggedEdge,
+  edgeGrips,
+  fourthCorner,
   hasArea,
   imageUnder,
   insideImage,
   movedCorners,
+  rotateGrip,
+  rotatedCorners,
 } from "./place";
 
 const view: Viewport = { width: 800, height: 600 };
@@ -210,5 +217,128 @@ describe("movedCorners", () => {
   it("normalises longitude", () => {
     const moved = movedCorners(cornersOf(image()), 175, 0);
     expect(moved.topRight[0]).toBeCloseTo(-175, 9);
+  });
+});
+
+// --- Edges and rotation (M50) -----------------------------------------------
+
+describe("dragging an edge", () => {
+  /** A unit square from (0,0) to (1,-1): north-up, one degree each way. */
+  const square: Corners = { topLeft: [0, 0], topRight: [1, 0], bottomLeft: [0, -1] };
+
+  /** The edge follows the pointer and the opposite edge stays. */
+  it("moves the edge it is given and leaves the far one", () => {
+    const top = draggedEdge(square, "top", [0.5, -0.25]);
+    expect(top.topLeft).toEqual([0, -0.25]);
+    expect(top.topRight).toEqual([1, -0.25]);
+    expect(top.bottomLeft, "the bottom is where it was").toEqual([0, -1]);
+
+    const right = draggedEdge(square, "right", [0.4, -0.5]);
+    expect(right.topRight[0]).toBeCloseTo(0.4, 12);
+    expect(right.topLeft, "the left is where it was").toEqual([0, 0]);
+  });
+
+  /** Only the axis the edge owns moves; the other is untouched. */
+  it("changes one axis and not the other", () => {
+    const bottom = draggedEdge(square, "bottom", [0.5, -3]);
+    expect(bottom.bottomLeft).toEqual([0, -3]);
+    expect(bottom.topRight, "the width is unchanged").toEqual([1, 0]);
+  });
+
+  /**
+   * A picture cannot be folded through itself: dragging an edge past the
+   * opposite one stops short rather than turning the placement inside out.
+   */
+  it("stops before the picture is folded flat", () => {
+    const past = draggedEdge(square, "top", [0.5, -5]);
+    expect(past.topLeft[1]).toBeLessThan(0);
+    expect(past.topLeft[1], "still above the bottom").toBeGreaterThan(-1);
+    expect(hasArea(past)).toBe(true);
+
+    const back = draggedEdge(square, "right", [-4, -0.5]);
+    expect(back.topRight[0]).toBeGreaterThan(0);
+    expect(hasArea(back)).toBe(true);
+  });
+
+  /**
+   * The pointer is read in the picture's own coordinates, so a sheared
+   * picture answers along its own axes rather than the map's.
+   */
+  it("follows the picture's own axes when it is sheared", () => {
+    const sheared: Corners = { topLeft: [0, 0], topRight: [2, 1], bottomLeft: [0, -1] };
+    // Half way down the picture's own down-axis.
+    const top = draggedEdge(sheared, "top", [0, -0.5]);
+    expect(top.topLeft[1]).toBeCloseTo(-0.5, 12);
+    expect(top.topRight[1], "the whole edge moves together").toBeCloseTo(0.5, 12);
+  });
+});
+
+describe("rotating a picture", () => {
+  const square: Corners = { topLeft: [-1, 1], topRight: [1, 1], bottomLeft: [-1, -1] };
+
+  /** The centre is what it turns about, so the centre does not move. */
+  it("keeps the centre", () => {
+    const before = centreOf(square);
+    const after = centreOf(rotatedCorners(square, [3, 0]));
+    expect(after[0]).toBeCloseTo(before[0], 9);
+    expect(after[1]).toBeCloseTo(before[1], 9);
+  });
+
+  /** And the size: a turn is not a scale, however far the pointer is. */
+  it("keeps the picture's own width and height", () => {
+    const span = (c: Corners): [number, number] => [
+      Math.hypot(c.topRight[0] - c.topLeft[0], c.topRight[1] - c.topLeft[1]),
+      Math.hypot(c.bottomLeft[0] - c.topLeft[0], c.bottomLeft[1] - c.topLeft[1]),
+    ];
+    const [w0, h0] = span(square);
+    // Far away and close by: the grip's distance says nothing about the size.
+    for (const at of [[9, 0], [0.1, 0.1]] as [number, number][]) {
+      const [w1, h1] = span(rotatedCorners(square, at));
+      expect(w1).toBeCloseTo(w0, 9);
+      expect(h1).toBeCloseTo(h0, 9);
+    }
+  });
+
+  /** Pointing at where the grip already is leaves the picture alone. */
+  it("does nothing when the grip is where it already points", () => {
+    const same = rotatedCorners(square, rotateGrip(square));
+    expect(same.topLeft[0]).toBeCloseTo(square.topLeft[0], 9);
+    expect(same.topLeft[1]).toBeCloseTo(square.topLeft[1], 9);
+    expect(same.topRight[0]).toBeCloseTo(square.topRight[0], 9);
+  });
+
+  /** A quarter turn puts the top edge where the right edge was. */
+  it("turns the picture to face the pointer", () => {
+    // The grip is above the centre; asking for it to the right is a quarter
+    // turn clockwise, which carries the top-left corner to the top-right.
+    const turned = rotatedCorners(square, [3, 0]);
+    expect(turned.topLeft[0]).toBeCloseTo(1, 6);
+    expect(turned.topLeft[1]).toBeCloseTo(1, 6);
+    expect(turned.topRight[0]).toBeCloseTo(1, 6);
+    expect(turned.topRight[1]).toBeCloseTo(-1, 6);
+  });
+});
+
+describe("the grips", () => {
+  const square: Corners = { topLeft: [0, 0], topRight: [2, 0], bottomLeft: [0, -2] };
+
+  it("puts an edge grip at the middle of each edge", () => {
+    const grips = edgeGrips(square);
+    expect(grips.top).toEqual([1, 0]);
+    expect(grips.bottom).toEqual([1, -2]);
+    expect(grips.left).toEqual([0, -1]);
+    expect(grips.right).toEqual([2, -1]);
+  });
+
+  /** Outside the top edge, on the picture's own up-axis. */
+  it("puts the rotation grip beyond the top edge", () => {
+    const grip = rotateGrip(square);
+    expect(grip[0]).toBeCloseTo(1, 12);
+    expect(grip[1], "above the top edge").toBeGreaterThan(0);
+  });
+
+  /** The fourth corner is the one the other three imply. */
+  it("implies the fourth corner", () => {
+    expect(fourthCorner(square)).toEqual([2, -2]);
   });
 });

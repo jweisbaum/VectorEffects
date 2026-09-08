@@ -3009,6 +3009,35 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M50 — Edges and rotation for a placed picture
+
+**The report (8):** more sophisticated image adjustment — rotation, edge
+move.
+
+Three corners are an affine exactly, so the placement could already
+express any of this; what it could not do was let anyone *ask* for it in
+one gesture. Rotating a chart meant dragging the top-right and then the
+bottom-left and hoping they agreed; nudging one side in meant moving two
+corners by the same amount by eye.
+
+Five grips are added and no freedom is: an edge on each side, and a
+rotation grip on a stalk above the top edge. Every one of them lands as
+the same three points, so the command, the document and the undo are
+untouched, and `hasArea` still guards the result.
+
+Two pieces of the geometry are worth naming. An edge reads the pointer in
+the *picture's* own coordinates — solving the 2×2 affine rather than
+projecting onto an axis — so a sheared picture answers along its own
+axes; and it clamps, so a side cannot be dragged through the far one. A
+rotation is stateless, the grip going where the pointer is, so letting go
+and grabbing again picks up where it left off; and it turns in a space
+where longitude is scaled by the cosine of the centre's latitude, because
+the placement is affine in *degrees* and turning it in raw degrees leans
+the picture rather than turning it anywhere but the equator.
+
+The grips take the cursor as well as the drag: `crosshair` over a corner
+would promise a stroke that is not going to happen.
+
 ### M49 — Image layers respect the eye and the stack
 
 **The reports (6 and 7):** image layers ignored hide/show, and an image
