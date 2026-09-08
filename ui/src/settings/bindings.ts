@@ -10,6 +10,7 @@
  * keys at a browser.
  */
 
+import { IS_MAC } from "../chords";
 import type { AppSettings } from "../generated/AppSettings";
 import type { Shortcut } from "../generated/Shortcut";
 import type { ShortcutAction } from "../generated/ShortcutAction";
@@ -22,18 +23,22 @@ export function chordOf(event: {
   ctrlKey: boolean;
   altKey: boolean;
 }): string | null {
-  // A shortcut is a key with shift, alt, both or neither. Anything with a
-  // command or control modifier belongs to the application's own menu keys.
-  // Modifiers are spelled in a fixed order — `alt+shift+key` — the same order
-  // the backend spells them, so the two tables compare equal.
-  if (event.metaKey || event.ctrlKey) return null;
+  // Modifiers are spelled in a fixed order — `accel+alt+shift+key` — the same
+  // order the backend spells them, so the two tables compare equal.
+  //
+  // The command key was a *disqualifier* until M47: a chord carrying one
+  // belonged to the window's own menu keys and nothing here. Deselect is
+  // accel-D, which is what a hand reaches for, so the table can now hold one
+  // — and a chord that is *only* the accel spelling is still not a plain
+  // one, so nothing that was bound before now answers to a menu key.
   const key = event.key.toLowerCase();
-  return `${event.altKey ? "alt+" : ""}${event.shiftKey ? "shift+" : ""}${key}`;
+  const accel = event.metaKey || event.ctrlKey;
+  return `${accel ? "accel+" : ""}${event.altKey ? "alt+" : ""}${event.shiftKey ? "shift+" : ""}${key}`;
 }
 
 /** The chord a binding is set to. */
 export function chordFor(binding: Shortcut): string {
-  return `${binding.alt ? "alt+" : ""}${binding.shift ? "shift+" : ""}${binding.key}`;
+  return `${binding.accel ? "accel+" : ""}${binding.alt ? "alt+" : ""}${binding.shift ? "shift+" : ""}${binding.key}`;
 }
 
 /** What a chord does, or nothing. */
@@ -73,7 +78,9 @@ export function chordLabel(binding: Shortcut | null): string {
     arrowdown: "↓",
   };
   const key = named[binding.key] ?? binding.key.toUpperCase();
-  return `${binding.alt ? "Alt-" : ""}${binding.shift ? "Shift-" : ""}${key}`;
+  // The command key by the symbol this machine actually shows on it.
+  const accel = binding.accel ? (IS_MAC ? "\u2318" : "Ctrl-") : "";
+  return `${accel}${binding.alt ? "Alt-" : ""}${binding.shift ? "Shift-" : ""}${key}`;
 }
 
 /** A tool's shortcut, for its palette button. */

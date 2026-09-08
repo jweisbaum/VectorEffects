@@ -6,4 +6,4 @@
  * A closed set rather than free text: a binding names an *action*, and an
  * action that is not in this list is one nothing would perform.
  */
-export type ShortcutAction = "play_pause" | "step_back" | "step_forward" | "pan_left" | "pan_right" | "pan_up" | "pan_down" | "zoom_in" | "zoom_out" | "nudge_left" | "nudge_right" | "nudge_up" | "nudge_down" | "tool";
+export type ShortcutAction = "play_pause" | "step_back" | "step_forward" | "pan_left" | "pan_right" | "pan_up" | "pan_down" | "zoom_in" | "zoom_out" | "nudge_left" | "nudge_right" | "nudge_up" | "nudge_down" | "deselect" | "tool";

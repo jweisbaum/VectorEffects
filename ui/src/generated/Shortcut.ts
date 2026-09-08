@@ -30,4 +30,14 @@ shift: boolean,
  * window does not own. The chord spelling grows one word and the table
  * stays one table with one collision rule.
  */
-alt: boolean, };
+alt: boolean, 
+/**
+ * Whether the binding wants the command key held — `Cmd` on a Mac,
+ * `Ctrl` elsewhere (M47).
+ *
+ * Added with the deselect, which the drawing applications settled on as
+ * accel-D long enough ago that it is what a hand reaches for. Absent
+ * from a settings file written before it, which then reads as false —
+ * exactly the bindings that file already had.
+ */
+accel: boolean, };

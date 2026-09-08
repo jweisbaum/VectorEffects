@@ -5,11 +5,12 @@ import { actionFor, bindingFor, chordLabel, chordOf, toolChord } from "./binding
 
 const settings: AppSettings = {
   shortcuts: [
-    { action: "play_pause", tool: "", key: " ", shift: false, alt: false },
-    { action: "step_back", tool: "", key: "arrowleft", shift: false, alt: false },
-    { action: "nudge_left", tool: "", key: "arrowleft", shift: true, alt: false },
-    { action: "pan_left", tool: "", key: "arrowleft", shift: false, alt: true },
-    { action: "tool", tool: "brush", key: "p", shift: false, alt: false },
+    { action: "play_pause", tool: "", key: " ", shift: false, alt: false, accel: false },
+    { action: "step_back", tool: "", key: "arrowleft", shift: false, alt: false, accel: false },
+    { action: "nudge_left", tool: "", key: "arrowleft", shift: true, alt: false, accel: false },
+    { action: "pan_left", tool: "", key: "arrowleft", shift: false, alt: true, accel: false },
+    { action: "tool", tool: "brush", key: "p", shift: false, alt: false, accel: false },
+    { action: "deselect", tool: "", key: "d", shift: false, alt: false, accel: true },
   ],
   autosave: "recovery",
   default_wind_scale_knots: 60,
@@ -26,13 +27,30 @@ describe("chordOf", () => {
     expect(chordOf({ ...base, key: "ArrowLeft", shiftKey: true })).toBe("shift+arrowleft");
   });
 
-  it("leaves command and control combinations alone", () => {
-    // Those belong to the application's own menu keys; a tool letter must not
-    // fire on cmd-P.
+  /**
+   * The command key is a modifier of the chord, not a disqualifier (M47).
+   * It was the latter until the deselect needed accel-D — but a chord
+   * carrying it still spells differently from the bare one, so a tool letter
+   * cannot fire on cmd-P and nothing bound before now answers to a menu key.
+   */
+  it("reads command and control as one modifier, spelled apart from the bare key", () => {
     for (const mod of ["metaKey", "ctrlKey"] as const) {
       const event = { key: "p", shiftKey: false, metaKey: false, ctrlKey: false, altKey: false };
-      expect(chordOf({ ...event, [mod]: true })).toBeNull();
+      expect(chordOf({ ...event, [mod]: true })).toBe("accel+p");
+      expect(chordOf({ ...event, [mod]: true })).not.toBe(chordOf(event));
     }
+    // And a menu key finds no action, because nothing is bound to it.
+    expect(actionFor(settings, "accel+p")).toBeNull();
+  });
+
+  /** Which is what makes the deselect reachable at all. */
+  it("finds the deselect on the command key", () => {
+    const event = { key: "d", shiftKey: false, metaKey: true, ctrlKey: false, altKey: false };
+    const chord = chordOf(event);
+    expect(chord).toBe("accel+d");
+    expect(actionFor(settings, chord as string)?.action).toBe("deselect");
+    // The bare letter is the fill tool's territory, not the deselect's.
+    expect(actionFor(settings, "d")).toBeNull();
   });
 
   it("reads alt as a modifier of its own", () => {

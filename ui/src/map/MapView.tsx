@@ -1947,6 +1947,19 @@ export default function MapView({
         nudgeSelection(bound.action);
         return;
       }
+      // Deselect (M47). Bound to accel-D by default, which is what a hand
+      // reaches for. It drops the objects and the rubber band together —
+      // both are "what is selected", and leaving one of them would make the
+      // key mean half of what it says.
+      if (bound?.action === "deselect") {
+        event.preventDefault();
+        if (selection.length > 0) onSelect([]);
+        if (marquee.current !== null) {
+          marquee.current = null;
+          requestOverlay();
+        }
+        return;
+      }
 
       // Enter closes a gesture built up click by click — the polygon and the
       // curve, which have no pointer-up to end them, and the dividers, which

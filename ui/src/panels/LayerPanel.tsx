@@ -241,6 +241,26 @@ export default function LayerPanel({
     if (event.shiftKey) event.preventDefault();
   };
 
+  /**
+   * Makes a layer the active one, and drops any selection that is not in it
+   * (M47).
+   *
+   * A selected object in another layer is a selection the panel is no longer
+   * showing and the tools no longer act on: the next edit goes to the layer
+   * just chosen, while the handles and the inspector still describe something
+   * in a layer the user has moved away from. Whichever of the two you follow,
+   * the other is wrong, so the selection follows the layer.
+   *
+   * Clicking an object is the exception — that activates the object's own
+   * layer and selects it in the same gesture, so nothing is dropped.
+   */
+  const activateLayer = (layer: number) => {
+    onActivateLayer(layer);
+    const mine = new Set(tree?.layers.find((l) => l.id === layer)?.objects.map((o) => o.id) ?? []);
+    const kept = selection.filter((id) => mine.has(id));
+    if (kept.length !== selection.length) onSelect(kept);
+  };
+
   /** Click semantics: plain replaces the selection, accel adds or removes. */
   const clickObject = (id: number, layer: number, event: React.MouseEvent) => {
     onActivateLayer(layer);
@@ -427,7 +447,7 @@ export default function LayerPanel({
                   .join(" ")}
                 onClick={() => {
                   if (dragged.current) return;
-                  onActivateLayer(layer.id);
+                  activateLayer(layer.id);
                 }}
                 onMouseDown={noTextSelect}
                 onPointerDown={(e) => startPress(e, { kind: "layer", id: layer.id, index })}

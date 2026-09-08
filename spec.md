@@ -2371,6 +2371,20 @@ front of every pan.
 
 - Click to select, `Cmd`/`Ctrl`-click to add or remove from the selection. A
   modifier click is a selection edit and never the start of a move.
+- **`Cmd`/`Ctrl`-`D` drops the selection** (M47): the objects and the region
+  together, since both are "what is selected" and clearing one of them would
+  make the key mean half of what it says. It is a binding in the one table
+  like every other, and the first to carry the command key — which was a
+  disqualifier until then, on the grounds that such a chord belongs to the
+  window's menus. A chord carrying it still spells differently from the bare
+  key, so nothing bound before answers to a menu key now.
+- **Choosing a layer drops any selection outside it** (M47). An object
+  selected in another layer is one the panel is no longer showing and the
+  tools no longer act on: the next edit goes to the layer just chosen while
+  the handles and the inspector still describe something elsewhere, and
+  whichever of the two the user follows, the other is wrong. Clicking an
+  *object* is not that case — it makes the object's own layer active and
+  selects it in the same gesture.
 - **Object selection and region selection are mutually exclusive.** Selecting
   an object — a click, a marquee, a panel row — drops the region; drawing or
   keying a region drops the objects. Each is a way of pointing, and a gesture

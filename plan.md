@@ -3008,6 +3008,31 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M47 — The selection follows the layer, and a key drops it
+
+**The reports (4 and 5):** choosing a layer should drop a selection that
+is in a different one, and `Cmd`-`D` should deselect.
+
+**Choosing a layer.** A selected object in another layer is a selection
+the panel is no longer showing and the tools no longer act on: the next
+edit goes to the layer just chosen while the handles and the inspector
+still describe something elsewhere. Whichever of the two the user
+follows, the other is wrong. Clicking an *object* is the exception, since
+that activates the object's own layer and selects it in one gesture, so
+it goes through `onActivateLayer` directly rather than the new path.
+
+**Deselect.** `Cmd`-`D` is what a hand reaches for, and it is the first
+binding in the table to carry the command key. That key was a
+*disqualifier* in `chordOf` — a chord carrying one belonged to the
+window's menus and to nothing here — so the table gained an `accel`
+modifier spelled ahead of the others in the same fixed order both sides
+already use. A chord carrying it spells differently from the bare key, so
+nothing bound before now answers to a menu key; the test says exactly
+that rather than only that the new chord works.
+
+It drops the objects and the rubber band together. Both are "what is
+selected", and clearing one would make the key mean half of what it says.
+
 ### M46 — The option bar gives the keyboard back
 
 **The report (3):** after changing a setting in the tools, the first map

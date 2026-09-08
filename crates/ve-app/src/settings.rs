@@ -56,6 +56,8 @@ pub enum ShortcutAction {
     NudgeUp,
     /// Down.
     NudgeDown,
+    /// Drop the selection (spec.md 8.2, M47).
+    Deselect,
     /// Select a tool. The payload is the tool's wire name.
     Tool,
 }
@@ -83,15 +85,27 @@ pub struct Shortcut {
     /// stays one table with one collision rule.
     #[serde(default)]
     pub alt: bool,
+    /// Whether the binding wants the command key held — `Cmd` on a Mac,
+    /// `Ctrl` elsewhere (M47).
+    ///
+    /// Added with the deselect, which the drawing applications settled on as
+    /// accel-D long enough ago that it is what a hand reaches for. Absent
+    /// from a settings file written before it, which then reads as false —
+    /// exactly the bindings that file already had.
+    #[serde(default)]
+    pub accel: bool,
 }
 
 impl Shortcut {
     /// The chord, for comparing two bindings and for showing one.
     ///
-    /// Modifiers in a fixed order — `alt+shift+key` — so a chord spelled by
-    /// the frontend and one spelled here compare equal.
+    /// Modifiers in a fixed order — `accel+alt+shift+key` — so a chord
+    /// spelled by the frontend and one spelled here compare equal.
     pub fn chord(&self) -> String {
         let mut chord = String::new();
+        if self.accel {
+            chord.push_str("accel+");
+        }
         if self.alt {
             chord.push_str("alt+");
         }
@@ -113,6 +127,12 @@ impl Shortcut {
             other => other.to_uppercase(),
         };
         let mut label = String::new();
+        if self.accel {
+            // The symbol on a Mac and the word elsewhere would need the
+            // platform here; the frontend already labels chords for display,
+            // so this stays the neutral spelling.
+            label.push_str("Cmd-");
+        }
         if self.alt {
             label.push_str("Alt-");
         }
@@ -168,6 +188,7 @@ pub fn default_shortcuts() -> Vec<Shortcut> {
         key: key.to_owned(),
         shift: false,
         alt: false,
+        accel: false,
     };
     let plain = |action: ShortcutAction, key: &str| Shortcut {
         action,
@@ -175,6 +196,7 @@ pub fn default_shortcuts() -> Vec<Shortcut> {
         key: key.to_owned(),
         shift: false,
         alt: false,
+        accel: false,
     };
     let shifted = |action: ShortcutAction, key: &str| Shortcut {
         action,
@@ -182,6 +204,7 @@ pub fn default_shortcuts() -> Vec<Shortcut> {
         key: key.to_owned(),
         shift: true,
         alt: false,
+        accel: false,
     };
     let alted = |action: ShortcutAction, key: &str| Shortcut {
         action,
@@ -189,6 +212,7 @@ pub fn default_shortcuts() -> Vec<Shortcut> {
         key: key.to_owned(),
         shift: false,
         alt: true,
+        accel: false,
     };
     vec![
         plain(ShortcutAction::PlayPause, " "),
@@ -206,6 +230,16 @@ pub fn default_shortcuts() -> Vec<Shortcut> {
         alted(ShortcutAction::PanDown, "arrowdown"),
         plain(ShortcutAction::ZoomIn, "="),
         plain(ShortcutAction::ZoomOut, "-"),
+        // Accel-D, the shape the drawing applications settled on for
+        // "deselect" long enough ago that it is what a hand reaches for.
+        Shortcut {
+            action: ShortcutAction::Deselect,
+            tool: String::new(),
+            key: "d".to_owned(),
+            shift: false,
+            alt: false,
+            accel: true,
+        },
         tool("hand", "v"),
         tool("select", "m"),
         tool("brush", "p"),
@@ -391,6 +425,7 @@ impl AppSettings {
 
 fn describe(binding: &Shortcut) -> String {
     match binding.action {
+        ShortcutAction::Deselect => "deselect".to_owned(),
         ShortcutAction::Tool => format!("the {} tool", binding.tool.replace('_', " ")),
         ShortcutAction::PlayPause => "play/pause".to_owned(),
         ShortcutAction::StepBack => "step back".to_owned(),
@@ -723,6 +758,7 @@ mod tests {
             key: "p".to_owned(),
             shift: false,
             alt: false,
+            accel: false,
         };
         let refused = settings.rebind(clash).expect_err("a collision");
         assert!(format!("{refused}").contains("brush"), "{refused}");
@@ -746,6 +782,7 @@ mod tests {
                         key: key.to_owned(),
                         shift: false,
                         alt: false,
+                        accel: false,
                     })
                     .is_err(),
                 "{key} should be reserved"
@@ -763,6 +800,7 @@ mod tests {
                 key: "q".to_owned(),
                 shift: false,
                 alt: false,
+                accel: false,
             })
             .expect("q is free");
         assert_eq!(
@@ -779,6 +817,7 @@ mod tests {
                 key: "p".to_owned(),
                 shift: false,
                 alt: false,
+                accel: false,
             })
             .expect("p is free now");
     }
@@ -869,6 +908,7 @@ mod tests {
             key: "escape".to_owned(),
             shift: false,
             alt: false,
+            accel: false,
         });
         settings.default_wind_scale_knots = -5.0;
         let fixed = settings.normalised();

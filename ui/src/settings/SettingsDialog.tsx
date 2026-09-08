@@ -119,6 +119,7 @@ export default function SettingsDialog({
         key: event.key.toLowerCase(),
         shift: event.shiftKey,
         alt: event.altKey,
+        accel: event.metaKey || event.ctrlKey,
       })
       .then(onSettings)
       .catch(report);
