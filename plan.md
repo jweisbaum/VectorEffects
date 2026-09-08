@@ -316,9 +316,10 @@ tool paints a single vector, a click takes the speed and direction from the
 field itself. Declared in the schema like everything else a tool offers, so the
 option bar renders it from a description rather than from a case per tool, and
 it is inert wherever either property it writes is — in a gradient mode, or on a
-curve aiming relative to its own path. That last mode's `absolute` is now
-`constant`, the name every other tool uses for the same thing. **Not verified by
-hand**: none of this has been used in the running app.
+curve aiming relative to its own path. That last mode's `absolute` was
+renamed `constant` here to match the name every other tool uses, and renamed
+back in M48 once the bar had been read in the running app. **Not verified by
+hand**: none of this had been used in the running app when it was written.
 
 **Unplanned, after M7: the field modifiers** (spec §6.3, D45). Four tools that
 change the field beneath them instead of adding one — intensify/reduce,
@@ -3007,6 +3008,31 @@ one-in-flight rule and the same coalescing key as a corner drag, so a move
 is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
+
+### M48 — Two small ones from the list
+
+**The export dialog closes when the export finishes (13).** It was what
+the dialog was opened to do; leaving the result behind a modal makes the
+user dismiss a box to get back to the map they were already looking at.
+What was written goes to the status bar instead, which is where
+everything else the application has to say goes. A cancelled or failed
+export keeps the dialog open, because the next thing the user wants there
+is another attempt.
+
+**The curve's `constant` direction mode is `absolute` again (18).** It has
+been called both. `absolute` first, then `constant` in M7 to match the
+name every other tool gives a fixed bearing, and now `absolute` on the
+user's reading of the bar in the running app.
+
+The earlier argument was about consistency *across* two option bars; the
+one that wins is about the contrast *within* this one. Here the choice is
+against `relative_to_path`, and the opposite of relative is absolute —
+while "constant" reads as unchanging over time, which is what a keyframe
+decides and not what the mode means. Recorded rather than quietly
+reversed, since the first rename carried its own reasoning.
+
+The variant is renamed in place and never reordered: the stored value is
+the index, so moving one would change what every existing curve aims at.
 
 ### M47 — The selection follows the layer, and a key drops it
 

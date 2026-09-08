@@ -562,10 +562,18 @@ pub const RESAMPLE_MODES: &[&str] = &["hold", "interpolate"];
 pub const CURVE_KINDS: &[&str] = &["polyline", "bezier"];
 /// Variants of [`PropId::OffsetMode`].
 pub const OFFSET_MODES: &[&str] = &["aligned", "fixed"];
-/// Variants of [`PropId::CurveDirectionMode`]. Renamed in place, not reordered:
-/// index 0 was called `absolute` and is the same fixed bearing every other tool
-/// calls `constant`, which is what a reader of two option bars expects.
-pub const CURVE_DIRECTION_MODES: &[&str] = &["constant", "relative_to_path"];
+/// Variants of [`PropId::CurveDirectionMode`]. Renamed in place, never
+/// reordered: the stored value is the index.
+///
+/// Index 0 has been called both things. It was `absolute`, then `constant` to
+/// match the name every other tool gives a fixed bearing, and it is
+/// `absolute` again on the user's reading of the option bar in the running
+/// app (M48). The earlier argument was about consistency across two bars; the
+/// one that wins is about the contrast *within* this one. Here the choice is
+/// against `relative_to_path`, and the opposite of relative is absolute —
+/// while "constant" reads as unchanging over time, which is what a keyframe
+/// decides and not what this mode means.
+pub const CURVE_DIRECTION_MODES: &[&str] = &["absolute", "relative_to_path"];
 /// Variants of [`PropId::TurnSense`] (M29). Index 0 is clockwise, which is
 /// the positive sense the evaluator's `Modifier::Turn` turns for.
 pub const TURN_SENSES: &[&str] = &["clockwise", "counterclockwise"];

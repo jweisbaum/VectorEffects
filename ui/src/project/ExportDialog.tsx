@@ -4,6 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { KIND_LABELS, kindOf } from "../kind";
 import NumberField from "../NumberField";
 import { startDraftFrom } from "../timeline/Timeline";
+import { setHint } from "../hint";
 import { api, IpcError } from "../ipc";
 import type { ExportEstimate } from "../generated/ExportEstimate";
 import type { ExportProgress } from "../generated/ExportProgress";
@@ -70,10 +71,19 @@ export default function ExportDialog({
     setProgress(null);
     try {
       const result = await api.exportGrib({ path, year, month, day, hour, centre, bits });
-      setDone(
-        `Wrote ${result.messages} messages, ${formatBytes(result.bytes)}, ` +
+      // The export is what the dialog was opened to do, so finishing it
+      // closes the dialog (M48). What it wrote goes to the status bar, which
+      // is where everything else the application has to say goes: leaving the
+      // result behind a modal makes the user dismiss a box to get back to the
+      // map they were already looking at.
+      setHint(
+        `Exported ${result.messages} messages, ${formatBytes(result.bytes)}, ` +
           `in ${(result.elapsed_ms / 1000).toFixed(1)} s`,
       );
+      setRunning(false);
+      setProgress(null);
+      onClose();
+      return;
     } catch (err) {
       // Cancelling is a choice, not a failure.
       const message = err instanceof IpcError ? err.message : String(err);
