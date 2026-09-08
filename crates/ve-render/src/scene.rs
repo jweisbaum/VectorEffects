@@ -1126,6 +1126,16 @@ pub fn flatten_without(project: &Project, step: u32, layer: ve_core::Id) -> Scen
     flatten_where(project, step, |l| l.id != layer)
 }
 
+/// The scene of one layer at `step`, by itself (M45).
+///
+/// What a clone stamp reads its source from. The commit samples the field
+/// beneath the stamp *in the layer the stamp is in* (spec.md 6.2), so a
+/// preview that read the whole composited stack showed a different field
+/// arriving under the brush from the one that would land.
+pub fn flatten_only(project: &Project, step: u32, layer: ve_core::Id) -> Scene {
+    flatten_where(project, step, |l| l.id == layer)
+}
+
 /// The scene of one **kind** of field at `step` (M29): the visible layers
 /// whose parameter is `kind`, in stack order. What the export bakes to that
 /// kind's message pair, and what a capture of that kind reads.

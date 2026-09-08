@@ -3008,6 +3008,30 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M45 — A clone's preview reads the layer it will sample
+
+**The report (2):** the clone stamp drew from the top layer while its
+commit sampled the layer it is in.
+
+Both halves were right about their own rules and wrong about each other.
+`sample_upto` reads the field beneath the stamp *within its layer*, which
+is what lands; the preview drew the source from the composited tile,
+which is the top layer wherever one covers the source. On a project with
+a history layer over a painted one — now the ordinary case — those are
+never the same field.
+
+The fix is a third scene sharing the tile grid: the edited layer alone.
+`flatten_only` is one line against the predicate `flatten_where` already
+takes, and the address is `only/<layer>/…` beside M40's `without/…`. The
+two prefixes became one `TileScope` rather than a second boolean, since a
+third of anything is where booleans stop reading; the scene cache holds
+three frames now, because a clone in progress draws from all three on
+every frame and fewer slots would re-flatten at pointer rate.
+
+Only the tools that read a source ask for it — the clone stamp and a
+warp's push, by their declared preview kind — so nothing else pays for
+fetching a scene it will not draw.
+
 ### M44 — Every live edit acts on one layer
 
 **The report (1 of the list of 2026-09-08):** every edit tool showed its

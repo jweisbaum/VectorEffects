@@ -163,7 +163,7 @@ import {
 import { MapRenderer, type OperatorPreview, type RenderState } from "./renderer";
 import { uniqueTiles } from "../timeline/playback";
 import { TileCache } from "./tiles";
-import { beneathToken, frameToken, parseFrameToken } from "./frameToken";
+import { beneathToken, frameToken, onlyToken, parseFrameToken } from "./frameToken";
 import { knownGradients, loadGradients, stopsOf } from "../gradients";
 
 interface Readout {
@@ -890,6 +890,17 @@ export default function MapView({
    */
   const beneathOf = (step: number, layer: number): string =>
     beneathToken(frameRevision(), step, layer);
+  /**
+   * The layer alone (spec.md 6.2, M45).
+   *
+   * What a clone stamp reads its source from. The commit samples the field
+   * beneath the stamp *in the layer the stamp is in*, so a preview drawn from
+   * the whole composited stack showed a different field arriving under the
+   * brush from the one that would land — the top layer's, wherever a layer
+   * above covered the source.
+   */
+  const onlyOf = (step: number, layer: number): string =>
+    onlyToken(frameRevision(), step, layer);
   /** Whether movement is recorded by the *next* capture. */
   const [recordMovement, setRecordMovement] = useState(false);
   /** The macro library, for the insert tool's bar. */
@@ -1038,8 +1049,15 @@ export default function MapView({
    * The eraser has no schema of its own and is named.
    */
   const editsFieldRef = useRef(false);
+  /**
+   * Whether the tool in hand reads the field from somewhere else and brings
+   * it in — the clone stamp, and a warp's push (M45). Only those need the
+   * edited layer on its own, so only those pay for fetching it.
+   */
+  const clonesFieldRef = useRef(false);
   const schema = palette.find((entry) => entry.tool === schemaTool) ?? null;
   editsFieldRef.current = tool === ERASE || (schema !== null && schema.preview !== "field");
+  clonesFieldRef.current = schema?.preview === "clone" || schema?.preview === "warp";
 
   /**
    * What the active tool is set to.
@@ -1312,6 +1330,12 @@ export default function MapView({
         editsFieldRef.current && activeLayerRef.current !== null
           ? beneathOf(stepRef.current, activeLayerRef.current)
           : null,
+      // Where a clone's source is read from (M45): the edited layer alone,
+      // which is what its commit samples.
+      sourceFrame:
+        clonesFieldRef.current && activeLayerRef.current !== null
+          ? onlyOf(stepRef.current, activeLayerRef.current)
+          : null,
       // Georeferenced images, above the land and below the field (M18). The
       // revision is part of the texture's address, so an import or a reopen
       // makes the old one unreachable rather than stale.
@@ -1340,9 +1364,11 @@ export default function MapView({
     // eraser is merely in hand, so the round trip happens in the pause
     // between choosing the tool and using it. `get` is a lookup once the
     // tile is resident, so repeating it per frame costs nothing.
-    if (state.belowFrame && !state.operator) {
+    if (!state.operator) {
       const cache = tilesRef.current;
-      if (cache) for (const tile of unique) cache.get(state.belowFrame, tile.z, tile.x, tile.y);
+      for (const warm of [state.belowFrame, state.sourceFrame]) {
+        if (cache && warm) for (const tile of unique) cache.get(warm, tile.z, tile.x, tile.y);
+      }
     }
 
     try {
@@ -1512,7 +1538,8 @@ export default function MapView({
         tiles.resolver = (frame, wanted) => {
           const at = parseFrameToken(frame);
           if (!at) return Promise.resolve(wanted.map(() => ""));
-          return api.tileKeys(at.revision, at.step, [...wanted], at.without);
+          const layer = at.scope.kind === "whole" ? null : at.scope.layer;
+          return api.tileKeys(at.revision, at.step, [...wanted], at.scope.kind, layer);
         };
         pictures = new ImageCache(gl, baseUrl);
         pictures.onChange = () => requestDraw();

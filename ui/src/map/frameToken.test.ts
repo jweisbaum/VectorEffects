@@ -8,13 +8,13 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { beneathToken, frameToken, parseFrameToken } from "./frameToken";
+import { beneathToken, frameToken, onlyToken, parseFrameToken } from "./frameToken";
 
 describe("the frame token", () => {
   it("round trips the whole stack", () => {
     const token = frameToken(1788, 7);
     expect(token).toBe("1788/7");
-    expect(parseFrameToken(token)).toEqual({ revision: 1788, step: 7, without: null });
+    expect(parseFrameToken(token)).toEqual({ revision: 1788, step: 7, scope: { kind: "whole" } });
   });
 
   /**
@@ -24,13 +24,32 @@ describe("the frame token", () => {
   it("round trips a stack with a layer left out", () => {
     const token = beneathToken(1788, 7, 42);
     expect(token).toBe("without/42/1788/7");
-    expect(parseFrameToken(token)).toEqual({ revision: 1788, step: 7, without: 42 });
+    expect(parseFrameToken(token)).toEqual({
+      revision: 1788,
+      step: 7,
+      scope: { kind: "without", layer: 42 },
+    });
   });
 
-  /** The two are different addresses, or one would serve the other's tiles. */
-  it("keeps the two shapes apart", () => {
-    expect(beneathToken(1788, 7, 42)).not.toBe(frameToken(1788, 7));
-    expect(parseFrameToken(frameToken(1788, 7))?.without).toBeNull();
+  /**
+   * A clone reads its source from the edited layer alone (M45), which is a
+   * different scene again.
+   */
+  it("round trips one layer by itself", () => {
+    const token = onlyToken(1788, 7, 42);
+    expect(token).toBe("only/42/1788/7");
+    expect(parseFrameToken(token)).toEqual({
+      revision: 1788,
+      step: 7,
+      scope: { kind: "only", layer: 42 },
+    });
+  });
+
+  /** All three are different addresses, or one would serve another's tiles. */
+  it("keeps the three shapes apart", () => {
+    const three = [frameToken(1788, 7), beneathToken(1788, 7, 42), onlyToken(1788, 7, 42)];
+    expect(new Set(three).size).toBe(3);
+    expect(parseFrameToken(frameToken(1788, 7))?.scope).toEqual({ kind: "whole" });
   });
 
   /**
@@ -43,7 +62,7 @@ describe("the frame token", () => {
     expect(parseFrameToken(beneathToken(revision, 3, 9))).toEqual({
       revision,
       step: 3,
-      without: 9,
+      scope: { kind: "without", layer: 9 },
     });
   });
 
@@ -53,7 +72,7 @@ describe("the frame token", () => {
    * forever.
    */
   it("refuses anything that is not a token", () => {
-    for (const bad of ["", "1788", "1788/7/2", "without/1788/7", "without/x/1788/7", "a/b"]) {
+    for (const bad of ["", "1788", "1788/7/2", "without/1788/7", "without/x/1788/7", "only/x/1/2", "a/b"]) {
       expect(parseFrameToken(bad), bad).toBeNull();
     }
   });

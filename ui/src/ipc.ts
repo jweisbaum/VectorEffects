@@ -322,10 +322,13 @@ export const api = {
     revision: number,
     step: number,
     tiles: TileAddress[],
-    /** A layer to leave out of the scene, for the field beneath an erase (M40). */
-    without: number | null = null,
-  ) =>
-    call<string[]>("tile_keys", { revision, step, tiles, without }),
+    /**
+     * Which layers the frame holds — `"whole"`, `"without"` or `"only"` —
+     * and the layer the last two are about (spec 6.2, M40, M44, M45).
+     */
+    scope: "whole" | "without" | "only" = "whole",
+    layer: number | null = null,
+  ) => call<string[]>("tile_keys", { revision, step, tiles, scope, layer }),
 
   endGesture: () => call<void>("end_gesture"),
 

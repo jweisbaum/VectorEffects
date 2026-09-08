@@ -190,6 +190,15 @@ export interface RenderState {
    */
   belowFrame?: string | null;
   /**
+   * The layer being edited, by itself, or null (M45).
+   *
+   * Where a clone stamp reads its source from. Its commit samples the field
+   * beneath the stamp in the layer the stamp is in, so a preview drawn from
+   * the whole composited stack showed the wrong field arriving under the
+   * brush — the top layer's, wherever a layer above covered the source.
+   */
+  sourceFrame?: string | null;
+  /**
    * The colour ramp of each kind (M31). One tile holds both kinds, each cell
    * saying which it is, and the shader picks the ramp per cell: wind and
    * current are an order of magnitude apart.
@@ -970,7 +979,12 @@ export class MapRenderer {
     // edited layer is not on top the two frames hold the same texel and
     // drawing one over the other changes nothing.
     if (stage === "remove" && below) this.drawRaster(state, state.camera, tiles, "keep", below);
-    if (source) this.drawRaster(state, source, sourceTiles, "keep");
+    // The source is the edited layer alone (M45), not the whole stack: that
+    // is what the commit samples. Unscoped, because the source pass draws
+    // only where the gesture covers and there is nothing there to compare.
+    if (source) {
+      this.drawRaster(state, source, sourceTiles, "keep", state.sourceFrame ?? undefined);
+    }
     if (smearing && this.fieldTarget) {
       gl.useProgram(this.smearProgram);
       gl.bindVertexArray(this.quadVao);
@@ -1023,7 +1037,9 @@ export class MapRenderer {
       if (stage === "remove" && below) {
         this.drawGlyphs(state, state.camera, tiles, "keep", below);
       }
-      if (source) this.drawGlyphs(state, source, sourceTiles, "keep");
+      if (source) {
+        this.drawGlyphs(state, source, sourceTiles, "keep", state.sourceFrame ?? undefined);
+      }
     }
 
     gl.bindVertexArray(null);

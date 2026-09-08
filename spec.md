@@ -1734,10 +1734,19 @@ eraser or a mask fills the hole from the frame beneath, which is what taking
 that layer away leaves. The glyphs are scoped the same way, or a modifier
 would turn arrows belonging to layers it does not touch.
 
-It is addressed as an ordinary frame of tiles and warmed while a
-field-editing tool is merely in hand, so the stroke does not wait for it;
-until it lands the preview acts unscoped, which is a smaller wrong than
-acting nowhere. **The liquify is the exception**: it displaces a field
+**A clone reads its source from that layer alone** (M45). Its commit samples
+the field beneath the stamp *in the layer the stamp is in*, so a preview drawn
+from the whole composited stack showed a different field arriving under the
+brush from the one that would land — the top layer's, wherever a layer above
+covered the source. That is a third scene sharing the tile grid, and the three
+are separate addresses: the same tile coordinates hold different fields in
+each.
+
+Both extra scenes are addressed as ordinary frames of tiles and warmed while
+the tool is merely in hand, so the stroke does not wait for them; until they
+land the preview acts unscoped, which is a smaller wrong than acting nowhere.
+The layer alone is fetched only for the tools that read a source, since only
+those need it. **The liquify is the exception**: it displaces a field
 already rendered to a texture rather than reading tiles, so it has nothing
 to compare against and is still previewed over the whole stack.
 

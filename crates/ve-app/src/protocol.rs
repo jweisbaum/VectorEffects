@@ -84,31 +84,32 @@ pub struct SceneCache(Mutex<Vec<CachedFrame>>);
 struct CachedFrame {
     revision: u64,
     step: u32,
-    without: Option<u64>,
+    scope: TileScope,
     frame: Arc<Frame>,
 }
 
 /// How many frames are held at once.
 ///
-/// Two, because an erase in progress draws from two of them on every frame:
-/// the whole stack, and the stack without the layer being erased (M40). One
-/// slot would re-flatten the project twice per redraw, at pointer rate.
-const FRAMES_HELD: usize = 2;
+/// Three, because a clone in progress draws from three of them on every
+/// frame: the whole stack, the stack without the layer being edited, and that
+/// layer by itself (M40, M44, M45). Fewer slots would re-flatten the project
+/// several times per redraw, at pointer rate.
+const FRAMES_HELD: usize = 3;
 
 impl SceneCache {
     /// Returns the frame for an address, flattening it if it is not held.
     ///
-    /// `without` names a layer to leave out, for the scene beneath the one an
-    /// eraser is working on (M40).
+    /// `scope` says which layers it holds: all of them, all but one, or one
+    /// alone (see [`TileScope`]).
     pub fn frame_for(
         &self,
         state: &AppState,
         revision: u64,
         step: u32,
-        without: Option<u64>,
+        scope: TileScope,
     ) -> Option<Arc<Frame>> {
         let matches = |held: &CachedFrame| {
-            held.revision == revision && held.step == step && held.without == without
+            held.revision == revision && held.step == step && held.scope == scope
         };
         if let Ok(mut cached) = self.0.lock()
             && let Some(at) = cached.iter().position(matches)
@@ -126,11 +127,14 @@ impl SceneCache {
         // what the map draws (M31) — or the macro preview at its own revision
         // (D71): a one-object project the session holds while a capture is
         // being looked at before it is kept.
-        let flatten_at = |project: &ve_core::project::Project| match without {
-            Some(raw) => {
+        let flatten_at = |project: &ve_core::project::Project| match scope {
+            TileScope::Whole => flatten(project, step),
+            TileScope::Without(raw) => {
                 ve_render::scene::flatten_without(project, step, crate::document::object_id(raw))
             }
-            None => flatten(project, step),
+            TileScope::Only(raw) => {
+                ve_render::scene::flatten_only(project, step, crate::document::object_id(raw))
+            }
         };
         let scene = match session.open.as_ref() {
             Some(open) if open.revision == revision => flatten_at(&open.project),
@@ -149,7 +153,7 @@ impl SceneCache {
                 CachedFrame {
                     revision,
                     step,
-                    without,
+                    scope,
                     frame: Arc::clone(&frame),
                 },
             );
@@ -171,6 +175,34 @@ pub fn base_url() -> String {
     }
 }
 
+/// Which layers a tile holds (spec.md 6.2).
+///
+/// A live edit acts on one layer while a tile is the whole visible stack, so
+/// the map asks for two more scenes than it draws: the stack without the
+/// edited layer, which says where that layer is what the composite is showing
+/// (M40, M44), and the layer by itself, which is what a clone reads its
+/// source from (M45).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TileScope {
+    /// Every visible layer, which is what the map draws.
+    Whole,
+    /// Every visible layer but this one.
+    Without(u64),
+    /// This layer and no other.
+    Only(u64),
+}
+
+impl TileScope {
+    /// The scope a path segment names, over the layer that follows it.
+    fn named(word: &str, layer: u64) -> Option<Self> {
+        match word {
+            "without" => Some(Self::Without(layer)),
+            "only" => Some(Self::Only(layer)),
+            _ => None,
+        }
+    }
+}
+
 /// What a request is for.
 #[derive(Debug, PartialEq, Eq)]
 enum Served {
@@ -178,10 +210,8 @@ enum Served {
     Tile {
         revision: u64,
         step: u32,
-        /// A layer to leave out of the scene, if this is a "beneath" tile
-        /// (M40): what the map draws under the layer an eraser is working
-        /// on, so the live remove takes that layer away and not the stack.
-        without: Option<u64>,
+        /// Which layers of the scene this tile holds.
+        scope: TileScope,
         id: tile::TileId,
     },
     /// An image layer's picture (spec.md 4.9, M18). The first segment is the
@@ -203,9 +233,9 @@ enum Served {
 fn parse(path: &str) -> Option<Served> {
     let mut parts = path.trim_start_matches('/').split('/');
     let mut first = parts.next()?;
-    let mut without = None;
-    if first == "without" {
-        without = Some(parts.next()?.parse().ok()?);
+    let mut scope = TileScope::Whole;
+    if first == "without" || first == "only" {
+        scope = TileScope::named(first, parts.next()?.parse().ok()?)?;
         first = parts.next()?;
     }
     if first == "image" {
@@ -233,7 +263,7 @@ fn parse(path: &str) -> Option<Served> {
     Some(Served::Tile {
         revision,
         step,
-        without,
+        scope,
         id: tile::TileId::new(z, x, y).ok()?,
     })
 }
@@ -271,12 +301,12 @@ pub fn handle(app: &tauri::AppHandle, request: &Request<Vec<u8>>) -> Response<Ve
         Served::Tile {
             revision,
             step,
-            without,
+            scope,
             id,
         } => TileRequest {
             revision,
             step,
-            without,
+            scope,
             id,
         },
     };
@@ -284,7 +314,7 @@ pub fn handle(app: &tauri::AppHandle, request: &Request<Vec<u8>>) -> Response<Ve
     let state = app.state::<AppState>();
     let Some(frame) =
         app.state::<SceneCache>()
-            .frame_for(&state, parsed.revision, parsed.step, parsed.without)
+            .frame_for(&state, parsed.revision, parsed.step, parsed.scope)
     else {
         // The document moved on, or nothing is open. Refusing beats answering
         // with current data under a URL that names an older revision.
@@ -310,7 +340,7 @@ pub fn handle(app: &tauri::AppHandle, request: &Request<Vec<u8>>) -> Response<Ve
 struct TileRequest {
     revision: u64,
     step: u32,
-    without: Option<u64>,
+    scope: TileScope,
     id: tile::TileId,
 }
 
@@ -422,12 +452,31 @@ pub fn tile_keys(
     revision: u64,
     step: u32,
     tiles: Vec<crate::render_pool::TileAddress>,
-    without: Option<u64>,
+    // `scope` is "whole", "without" or "only"; `layer` is what the last two
+    // are about. Two plain arguments rather than one enum, since this is the
+    // IPC boundary and the frontend builds them from a frame token.
+    scope: Option<String>,
+    layer: Option<u64>,
 ) -> crate::error::Result<Vec<String>> {
+    let scope = match (scope.as_deref(), layer) {
+        (None | Some("whole"), _) => TileScope::Whole,
+        (Some(word), Some(raw)) => {
+            TileScope::named(word, raw).ok_or_else(|| crate::error::AppError::BadOption {
+                field: "scope",
+                value: format!("{word} is not a way of scoping a frame"),
+            })?
+        }
+        (Some(word), None) => {
+            return Err(crate::error::AppError::BadOption {
+                field: "layer",
+                value: format!("{word} needs a layer to be about"),
+            });
+        }
+    };
     let state = app.state::<AppState>();
     let frame = app
         .state::<SceneCache>()
-        .frame_for(&state, revision, step, without)
+        .frame_for(&state, revision, step, scope)
         .ok_or_else(|| {
             crate::error::AppError::Internal(format!("revision {revision} is not the one open"))
         })?;
@@ -480,10 +529,10 @@ mod tests {
         }
     }
 
-    /// The layer a "beneath" address leaves out (M40).
-    fn without_of(path: &str) -> Option<u64> {
+    /// Which layers an address asks for (M40, M45).
+    fn scope_of(path: &str) -> TileScope {
         match parse(path).expect("should parse") {
-            Served::Tile { without, .. } => without,
+            Served::Tile { scope, .. } => scope,
             other => panic!("{path:?} parsed as {other:?}"),
         }
     }
@@ -491,27 +540,29 @@ mod tests {
     /// A "beneath" tile is the same address behind `without/<layer>/`
     /// (M40), and it must not be confused with an ordinary one: the two
     /// carry different scenes under otherwise identical `z/x/y`.
+    /// Three scenes share the tile grid, and they must not share addresses:
+    /// the same `z/x/y` holds different fields in each.
     #[test]
-    fn a_beneath_address_names_the_layer_it_leaves_out() {
-        assert_eq!(without_of("/without/42/7/3/2/5/1"), Some(42));
+    fn an_address_names_which_layers_it_holds() {
+        assert_eq!(scope_of("/7/3/2/5/1"), TileScope::Whole);
+        assert_eq!(scope_of("/without/42/7/3/2/5/1"), TileScope::Without(42));
+        assert_eq!(scope_of("/only/42/7/3/2/5/1"), TileScope::Only(42));
+        // And the rest of the address is the same one in every case.
         assert_eq!(tile_of("/without/42/7/3/2/5/1"), tile_of("/7/3/2/5/1"));
-        assert_eq!(
-            without_of("/7/3/2/5/1"),
-            None,
-            "an ordinary tile leaves none out"
-        );
+        assert_eq!(tile_of("/only/42/7/3/2/5/1"), tile_of("/7/3/2/5/1"));
     }
 
     /// The prefix is a real segment, not a revision that happens to read as
     /// a word: a layer id that failed to parse must refuse the address
     /// rather than fall through to the ordinary shape.
     #[test]
-    fn a_beneath_address_without_a_layer_is_refused() {
+    fn a_scoped_address_without_a_layer_is_refused() {
         assert!(parse("/without/7/3/2/5/1").is_none(), "too few segments");
         assert!(
             parse("/without/x/7/3/2/5/1").is_none(),
             "layer is not a number"
         );
+        assert!(parse("/only/x/7/3/2/5/1").is_none());
     }
 
     #[test]
