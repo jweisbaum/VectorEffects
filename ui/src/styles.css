@@ -37,6 +37,12 @@ body {
   --dock-left: 0px;
   --dock-right: 0px;
   --dock-bottom: 0px;
+  /* The map's chrome sits in rows above the bottom dock. The readout and the
+     legend share the first; anything else takes the second, so nothing lands
+     on top of them (spec.md 5.5, "chrome does not overlap chrome"). One pair
+     of values, so the rules cannot drift apart. */
+  --map-chrome-gap: 12px;
+  --map-chrome-row: 42px;
 }
 .workspace {
   display: flex;
@@ -207,7 +213,7 @@ body {
 .map-legend {
   position: absolute;
   right: calc(var(--dock-right, 0px) + 12px);
-  bottom: calc(var(--dock-bottom, 0px) + 12px);
+  bottom: calc(var(--dock-bottom, 0px) + var(--map-chrome-gap));
   width: 190px;
   padding: 8px 10px;
   background: var(--panel);
@@ -234,7 +240,7 @@ body {
 .map-readout {
   position: absolute;
   left: calc(var(--dock-left, 0px) + 12px);
-  bottom: calc(var(--dock-bottom, 0px) + 12px);
+  bottom: calc(var(--dock-bottom, 0px) + var(--map-chrome-gap));
   display: flex;
   gap: 14px;
   padding: 6px 12px;
@@ -1226,11 +1232,15 @@ body {
 }
 /* The preview badge, bottom centre of the visible map, between the readout
    and the legend, which it used to sit over (spec.md 8.7, M26, M27). */
+/* A row above the readout and the legend (M52). Centred on the visible map,
+   it landed on the same line as both and was drawn under the readout on any
+   window narrow enough for the two to meet — which is most of them once a
+   dock is open. */
 .map-preview-badge {
   position: absolute;
   left: calc(50% + (var(--dock-left, 0px) - var(--dock-right, 0px)) / 2);
   transform: translateX(-50%);
-  bottom: calc(var(--dock-bottom, 0px) + 12px);
+  bottom: calc(var(--dock-bottom, 0px) + var(--map-chrome-gap) + var(--map-chrome-row));
   padding: 4px 10px;
   border: 1px solid #3fbf7f;
   border-radius: 6px;

@@ -68,3 +68,34 @@ describe("the history list", () => {
     expect(block(".history")).toMatch(/max-height:\s*min\([^)]*vh/);
   });
 });
+
+describe("the map's chrome", () => {
+  /**
+   * The readout, the legend and the preview badge are all positioned from the
+   * bottom of the map. The badge was on the same line as the other two and was
+   * drawn under the readout on any window narrow enough for a centred box and
+   * a left-hand one to meet — which is most of them once a dock is open
+   * (spec.md 5.5, "chrome does not overlap chrome", M52).
+   *
+   * The rows are shared values rather than repeated numbers, so what is
+   * checked is that each rule uses them: two literals that happened to agree
+   * today would drift the first time one was tuned.
+   */
+  it("puts the readout and the legend on the same row", () => {
+    for (const selector of [".map-readout", ".map-legend"]) {
+      expect(block(selector), selector).toMatch(
+        /bottom:\s*calc\(var\(--dock-bottom, 0px\) \+ var\(--map-chrome-gap\)\)/,
+      );
+    }
+  });
+
+  it("puts the macro preview badge on the row above them", () => {
+    expect(block(".map-preview-badge")).toMatch(/var\(--map-chrome-row\)/);
+  });
+
+  it("defines the rows once, where the map is laid out", () => {
+    const rule = block(".stage");
+    expect(rule).toMatch(/--map-chrome-gap:/);
+    expect(rule).toMatch(/--map-chrome-row:/);
+  });
+});

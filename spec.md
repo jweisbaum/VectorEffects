@@ -1241,7 +1241,15 @@ changing a setting did nothing. Only the controls that finish in one action
 give focus up: a menu, a checkbox, a button. A text field is still being typed
 into and keeps it until it is left.
 
-**Chrome does not overlap chrome.** The legend sits bottom right, the readout
+**Chrome does not overlap chrome.** It is laid out in *rows* above the bottom
+dock (M52): the readout and the legend share the first, and anything else —
+the macro preview's badge — takes the second. One pair of values decides where
+the rows are, so two rules cannot drift onto each other. The badge was on the
+same line as both, and on any window narrow enough for a centred box and a
+left-hand one to meet, which is most of them once a dock is open, it was drawn
+underneath the readout.
+
+The legend sits bottom right, the readout
 bottom left, the option bar along the top; each is placed so that another
 growing cannot cover it. A panel that appears over a control is indistinguishable
 from a broken one.

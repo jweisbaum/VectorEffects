@@ -3009,6 +3009,26 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M52 — The macro preview's badge gets a row of its own
+
+**The report (10):** in macro preview mode the badge sat under the
+lower-left coordinate readout.
+
+Both were positioned twelve pixels above the bottom dock — the readout
+from the left, the badge centred on the visible map. On a wide window
+they miss each other; with a dock open, or on a laptop, they meet, and
+the badge lost.
+
+"Chrome does not overlap chrome" was already the rule (spec 5.5); what it
+lacked was somewhere for a third box to go. The map's chrome is laid out
+in rows now: the readout and the legend share the first, the badge takes
+the second, and one pair of custom properties decides where the rows are
+so two rules cannot drift onto each other.
+
+Asserted against the stylesheet, and against the *shared values* rather
+than the numbers: two literals that happened to agree today would come
+apart the first time one was tuned.
+
 ### M51 — A tool that will not work says so before the click
 
 **The report (9):** on a GRIB, zarr or image layer, a forbidden tool
