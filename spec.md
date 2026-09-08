@@ -1586,18 +1586,28 @@ Hover: yes — the disc a click would place, in the speed colour with its glyph.
 #### Shape fill
 
 Draw a polygon (click vertices, click the first one again to close), or place a
-preset (square, rectangle, circle) **by dragging out from its centre**.
+preset (square, rectangle, circle) **by dragging it out between two points on
+its perimeter** (M56): the press and the release are opposite corners of a
+rectangle, or the two ends of a circle's diameter.
 
 **All three presets are one press-drag-release gesture**, not three
 interactions. They differ only in how the drag is read into a footprint, which
 is what `shape_source` decides — so a preset cannot acquire an interaction of
 its own by accident.
 
-Centre-out rather than corner-to-corner so that all three presets have the same
-anchor as the shape they produce — the pivot their handles turn them about
-(§8.2). A
-square takes the larger of the drag's two reaches, so a drag that is mostly
-sideways produces the square it looks like it is producing.
+It was centre-out until M56, on the grounds that all three presets should have
+the same anchor as the shape they produce — the pivot their handles turn them
+about (§8.2). That reason still holds and is still met: the anchor is the
+middle of the finished shape, found from the drag rather than taken from the
+press. What changed is only where the *gesture* starts, and it changed because
+centre-out made a shape impossible to aim — the click landed in the middle of
+the result, and where the edge would fall was a guess. A square takes the
+larger of the drag's two reaches, so a drag that is mostly sideways produces
+the square it looks like it is producing, with the press still on a corner of
+it.
+
+The extents are measured in the **anchor's** frame and not the press's. The two
+differ across the shape, and the geometry is read in the anchor's (§7.2).
 
 A press and release **at one point** commits nothing: it describes a shape of no
 size, and a press with a pixel of hand tremor describes an object the user

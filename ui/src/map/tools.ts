@@ -464,28 +464,32 @@ export function footprintOf(
         };
       }
 
-      // Shape source 1 square, 2 rectangle, 3 circle.
-      switch (choiceOf(state.values, "ShapeSource")) {
-        case 1: {
-          const half = Math.max(halfWidthKm, halfHeightKm);
-          return {
-            kind: "rect",
-            centre: [lon, lat],
-            halfWidthKm: half,
-            halfHeightKm: half,
-            space,
-          };
-        }
-        case 3:
-          return {
-            kind: "disc",
-            centre: [lon, lat],
-            radiusKm: Math.hypot(halfWidthKm, halfHeightKm),
-            space,
-          };
-        default:
-          return { kind: "rect", centre: [lon, lat], halfWidthKm, halfHeightKm, space };
+      // Shape source 1 square, 2 rectangle, 3 circle. The press lands on the
+      // perimeter (M56), so the shape is between the two points rather than
+      // grown from the first — the same arithmetic `shape_fill_geometry`
+      // makes, since the preview has to say what the object will be.
+      const source = choiceOf(state.values, "ShapeSource");
+      const drawn = perimeterExtent(
+        [lon, lat],
+        gesture.rim,
+        source === 1 ? "square" : source === 3 ? "circle" : "rect",
+        space,
+      );
+      if (source === 3) {
+        return {
+          kind: "disc",
+          centre: drawn.centre,
+          radiusKm: Math.hypot(drawn.halfWidthKm, drawn.halfHeightKm),
+          space,
+        };
       }
+      return {
+        kind: "rect",
+        centre: drawn.centre,
+        halfWidthKm: drawn.halfWidthKm,
+        halfHeightKm: drawn.halfHeightKm,
+        space,
+      };
     }
 
     case "ring":
@@ -530,6 +534,57 @@ export function extentOf(
   return {
     halfWidthKm: Math.abs(dLon) * KM_PER_DEGREE * scale,
     halfHeightKm: Math.abs(dLat) * KM_PER_DEGREE,
+  };
+}
+
+/**
+ * A preset shape dragged out between two points (M56).
+ *
+ * The press is on the perimeter and the release is opposite it: two corners
+ * of a rectangle, or the two ends of a circle's diameter. So the shape sits
+ * *between* the pointer's two positions rather than growing from the first,
+ * which is what dragging a shape out means everywhere else and what makes it
+ * possible to aim one — a circle grown from its centre put the click in the
+ * middle of the result, and where its edge would land was a guess.
+ *
+ * A square takes the larger reach of the two axes, so a drag that is mostly
+ * sideways makes the square it looks like it is making rather than collapsing
+ * to the shorter axis; the press stays on a corner of it.
+ *
+ * The mirror of `shape_fill_geometry` in `create.rs`, which is what the object
+ * will actually be (invariant 3).
+ */
+export function perimeterExtent(
+  press: readonly [number, number],
+  release: readonly [number, number],
+  source: "square" | "rect" | "circle",
+  space: StampSpace,
+): { centre: [number, number]; halfWidthKm: number; halfHeightKm: number } {
+  const dLat = release[1] - press[1];
+  // The shorter way round, so a drag across the dateline stays a drag.
+  const dLon = ((release[0] - press[0] + 540) % 360) - 180;
+  const scale = space === "projected" ? 1 : cosLat(press[1]);
+  const acrossKm = Math.abs(dLon) * KM_PER_DEGREE * scale;
+  const downKm = Math.abs(dLat) * KM_PER_DEGREE;
+
+  if (source === "square") {
+    const side = Math.max(acrossKm, downKm);
+    // The far corner of the square, in the direction the drag went.
+    const lonSide = scale === 0 ? 0 : side / (KM_PER_DEGREE * scale);
+    const latSide = side / KM_PER_DEGREE;
+    return {
+      centre: [
+        press[0] + (Math.sign(dLon) || 1) * (lonSide / 2),
+        press[1] + (Math.sign(dLat) || 1) * (latSide / 2),
+      ],
+      halfWidthKm: side / 2,
+      halfHeightKm: side / 2,
+    };
+  }
+  return {
+    centre: [press[0] + dLon / 2, press[1] + dLat / 2],
+    halfWidthKm: acrossKm / 2,
+    halfHeightKm: downKm / 2,
   };
 }
 

@@ -3009,6 +3009,35 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M56 — A preset shape is dragged out between two points on its edge
+
+**The report (15):** the shape fill's circle and rectangle should leave
+the click on the perimeter after the drag.
+
+They were dragged out from the centre, which spec 6.2 recorded a reason
+for: all three presets should have the same anchor as the shape they
+produce, the pivot their handles turn them about, and corner-to-corner
+would have put that anchor on a corner.
+
+**That reason still holds, and is still met.** The anchor is the middle
+of the finished shape — found from the drag rather than taken from the
+press. What changed is only where the gesture *starts*. Centre-out made a
+shape impossible to aim: the click landed in the middle of the result,
+and where its edge would fall was a guess, which is no way to put a
+circle over a low.
+
+The press and the release are now opposite corners of a rectangle and the
+two ends of a circle's diameter. A square still takes the larger of the
+two reaches, with the press on a corner of it rather than in the middle
+of a side.
+
+Both kernels changed together, as invariant 3 requires: `perimeterExtent`
+in the frontend is the mirror of `shape_fill_geometry`, and the tests are
+the boundaries — each direction of drag, the seam, and the square's
+larger reach. The half-extents are measured in the **anchor's** frame and
+not the press's, since the two differ across the shape and the geometry is
+read in the anchor's.
+
 ### M55 — The properties panel says what a layer holds
 
 **The report (11):** clicking a layer should show its properties.

@@ -624,32 +624,59 @@ fn shape_fill_geometry(
         // whichever corner happened to be clicked first.
         (0, Gesture::Ring { points: raw }) => ring_geometry(raw, props, tool),
 
+        // **The press lands on the perimeter** (M56). The gesture's two points
+        // are where the pointer went down and where it came up, and for a
+        // preset shape they are opposite corners of the rectangle and the two
+        // ends of the circle's diameter — the shape is dragged out the way a
+        // marquee is. Growing it from the press as a centre put the click in
+        // the middle of the result, which is not where the user was pointing:
+        // aiming a circle at a low meant guessing where its edge would land.
         (1..=3, Gesture::Extent { centre, rim }) => {
-            let anchor = point(*centre)?;
-            let edge = point(*rim)?;
-            let frame = frame_at(anchor, props, tool);
-            let [dx, dy] = frame.to_local(edge);
+            let press = point(*centre)?;
+            let release = point(*rim)?;
+            let pressed = frame_at(press, props, tool);
+            let [dx, dy] = pressed.to_local(release);
 
-            let geometry = match source {
+            // The anchor is the middle of the shape, so it turns and scales
+            // about its own centre like every other object. Found in the
+            // press's frame, then the extents are re-measured in the anchor's
+            // own — the two frames differ across the shape, and the geometry
+            // is read in the anchor's.
+            let diagonal = match source {
                 // A square takes the larger reach, so a drag that is mostly
                 // sideways still produces the square it looks like it is
-                // producing rather than collapsing to the smaller axis.
+                // producing rather than collapsing to the smaller axis. The
+                // press stays on a corner of it.
                 1 => {
-                    let half = dx.abs().max(dy.abs());
+                    let side = dx.abs().max(dy.abs());
+                    [
+                        if dx < 0.0 { -side } else { side },
+                        if dy < 0.0 { -side } else { side },
+                    ]
+                }
+                _ => [dx, dy],
+            };
+            let anchor = pressed.to_global([diagonal[0] / 2.0, diagonal[1] / 2.0]);
+            let frame = frame_at(anchor, props, tool);
+            let [ax, ay] = frame.to_local(press);
+
+            let geometry = match source {
+                1 => {
+                    let half = ax.abs().max(ay.abs());
                     Geometry::Rect {
                         half_width_m: half,
                         half_height_m: half,
                     }
                 }
                 2 => Geometry::Rect {
-                    half_width_m: dx.abs(),
-                    half_height_m: dy.abs(),
+                    half_width_m: ax.abs(),
+                    half_height_m: ay.abs(),
                 },
                 _ => Geometry::Disc {
-                    radius_m: Some(dx.hypot(dy)),
+                    radius_m: Some(ax.hypot(ay)),
                 },
             };
-            Ok((anchor, geometry, vec![anchor, edge]))
+            Ok((anchor, geometry, vec![anchor, release]))
         }
 
         (0, other) => Err(AppError::BadOption {
@@ -960,6 +987,11 @@ mod tests {
 
     /// The three presets are one gesture with three readings, and each has to
     /// produce the geometry its name promises.
+    ///
+    /// The anchor is checked as a *property* rather than against a second copy
+    /// of the arithmetic: the press has to land on the shape's perimeter (M56)
+    /// and the anchor in its middle, measured in the anchor's own frame, which
+    /// is the frame the geometry is read in.
     #[test]
     fn each_preset_reads_the_same_drag_as_its_own_shape() {
         let drag = Gesture::Extent {
@@ -976,7 +1008,42 @@ mod tests {
             let (anchor, geometry, _) =
                 geometry_of(ToolKind::ShapeFill, &drag, &props).expect("a preset drag");
 
-            assert_eq!(anchor.lon, 0.0, "{check}: the drag begins at the centre");
+            // The press is where the pointer went down; it has to be on the
+            // finished shape's edge, not in the middle of it.
+            let frame = frame_at(anchor, &props, ToolKind::ShapeFill);
+            let [px, py] = frame.to_local(point([0.0, 0.0]).expect("a real point"));
+            match &geometry {
+                Geometry::Rect {
+                    half_width_m,
+                    half_height_m,
+                } => {
+                    // Within a tenth of a percent, not exactly: a square takes
+                    // the larger of the two reaches, and the frame it is
+                    // measured in is not the one the diagonal was made
+                    // symmetric in, so the shorter side lands just inside.
+                    let slack = half_width_m.max(*half_height_m) * 1e-3;
+                    assert!(
+                        (px.abs() - half_width_m).abs() < slack
+                            && (py.abs() - half_height_m).abs() < slack,
+                        "{check}: the press is not on a corner: {px}, {py}"
+                    );
+                }
+                Geometry::Disc { radius_m } => {
+                    let radius = radius_m.expect("a dragged circle carries its radius");
+                    assert!(
+                        (px.hypot(py) - radius).abs() < radius * 1e-3,
+                        "{check}: the press is not on the rim"
+                    );
+                }
+                other => panic!("{check}: got {other:?}"),
+            }
+            // And the anchor is between the two points of the drag, not on one
+            // of them, so the shape turns about its own middle.
+            assert!(
+                anchor.lon > 0.0 && anchor.lon < 3.0,
+                "{check}: the anchor is not inside the drag: {anchor:?}"
+            );
+
             match (source, &geometry) {
                 (
                     1,

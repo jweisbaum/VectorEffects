@@ -29,6 +29,7 @@ import {
   offersUnit,
   operatorOf,
   sampled,
+  perimeterExtent,
   shownAngle,
   sizeKm,
   spaceFor,
@@ -876,5 +877,58 @@ describe("sampled", () => {
       defined: true,
     });
     expect(calm).not.toBe(state);
+  });
+});
+
+describe("perimeterExtent", () => {
+  /**
+   * The press is on the perimeter and the release opposite it (M56), so the
+   * shape sits between the pointer's two positions. Growing it from the press
+   * as a centre put the click in the middle of the result, and where its edge
+   * would land was a guess.
+   */
+  it("puts the press on the perimeter and the shape between the two points", () => {
+    const drawn = perimeterExtent([0, 0], [4, -2], "rect", "projected");
+    expect(drawn.centre[0]).toBeCloseTo(2, 12);
+    expect(drawn.centre[1]).toBeCloseTo(-1, 12);
+    // Half the drag each way, so the press is a corner and the release the
+    // opposite one.
+    expect(drawn.halfWidthKm).toBeCloseTo(2 * KM_PER_DEGREE, 6);
+    expect(drawn.halfHeightKm).toBeCloseTo(1 * KM_PER_DEGREE, 6);
+  });
+
+  /** A circle's drag is a diameter: the centre is halfway along it. */
+  it("makes the drag a diameter for a circle", () => {
+    const drawn = perimeterExtent([0, 0], [0, -6], "circle", "projected");
+    expect(drawn.centre).toEqual([0, -3]);
+    expect(drawn.halfHeightKm).toBeCloseTo(3 * KM_PER_DEGREE, 6);
+  });
+
+  /**
+   * A square takes the larger reach, so a mostly sideways drag makes the
+   * square it looks like it is making — with the press still on a corner.
+   */
+  it("squares to the larger reach, keeping the press on a corner", () => {
+    const drawn = perimeterExtent([0, 0], [6, -1], "square", "projected");
+    expect(drawn.halfWidthKm).toBeCloseTo(drawn.halfHeightKm, 9);
+    expect(drawn.halfWidthKm).toBeCloseTo(3 * KM_PER_DEGREE, 6);
+    // The centre is half a side from the press, in the direction dragged.
+    expect(drawn.centre[0]).toBeCloseTo(3, 6);
+    expect(drawn.centre[1]).toBeCloseTo(-3, 6);
+  });
+
+  /** Dragged the other way, the shape goes the other way. */
+  it("follows the direction of the drag", () => {
+    const up = perimeterExtent([0, 0], [-4, 2], "rect", "projected");
+    expect(up.centre[0]).toBeCloseTo(-2, 12);
+    expect(up.centre[1]).toBeCloseTo(1, 12);
+    expect(up.halfWidthKm).toBeGreaterThan(0);
+  });
+
+  /** A drag across the dateline is a drag, not a trip round the world. */
+  it("takes the shorter way round the seam", () => {
+    const across = perimeterExtent([179, 0], [-179, 0], "rect", "projected");
+    expect(across.halfWidthKm).toBeCloseTo(KM_PER_DEGREE, 6);
+    expect(across.centre[0]).toBeCloseTo(180, 9);
   });
 });
