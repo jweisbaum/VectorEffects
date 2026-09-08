@@ -21,6 +21,7 @@ import type { ToolOptionSpec } from "../generated/ToolOptionSpec";
 import type { ToolSchema } from "../generated/ToolSchema";
 import { knotsFromMps, mpsFromKnots } from "../project/format";
 import type { Camera } from "./camera";
+import { releaseFocus } from "./focus";
 import { EYEDROPPER_ICON, IconSvg } from "./ToolIcon";
 import {
   convertSizes,
@@ -137,7 +138,14 @@ function ToolOptions({
       {unitIsLive && firstSize === undefined && (
         <label>
           Size in
-          <select value={state.unit} onChange={(e) => setUnit(unitOf(e.target.value))} title={UNIT_TITLE}>
+          <select
+            value={state.unit}
+            onChange={(e) => {
+              setUnit(unitOf(e.target.value));
+              releaseFocus(e);
+            }}
+            title={UNIT_TITLE}
+          >
             <option value="km">km (on the ground)</option>
             <option value="px">px (on the map)</option>
           </select>
@@ -191,7 +199,10 @@ function Option({
           {spec.label}
           <select
             value={value.index}
-            onChange={(e) => onValue({ kind: "choice", index: Number(e.target.value) })}
+            onChange={(e) => {
+              onValue({ kind: "choice", index: Number(e.target.value) });
+              releaseFocus(e);
+            }}
           >
             {spec.variants.map((name, index) => (
               <option key={name} value={index}>
@@ -208,7 +219,10 @@ function Option({
           <input
             type="checkbox"
             checked={value.value}
-            onChange={(e) => onValue({ kind: "bool", value: e.target.checked })}
+            onChange={(e) => {
+              onValue({ kind: "bool", value: e.target.checked });
+              releaseFocus(e);
+            }}
           />
           {spec.label}
         </label>
@@ -351,7 +365,10 @@ function Option({
           {size && showUnit && (
             <select
               value={state.unit}
-              onChange={(e) => onUnit(unitOf(e.target.value))}
+              onChange={(e) => {
+              onUnit(unitOf(e.target.value));
+              releaseFocus(e);
+            }}
               title={UNIT_TITLE}
             >
               <option value="km">km</option>

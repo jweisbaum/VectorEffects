@@ -1199,6 +1199,15 @@ where they cannot be reached or even seen. Wrapping to a second row is the cost
 of that, and it is the right cost: a control the user cannot reach is worse than
 one a row lower. Nothing else occupies the map's top edge.
 
+**An option control hands the keyboard back once it has been used** (M46). The
+bar sits over the map, and a control that keeps focus keeps the keyboard with
+it: the arrows that nudge a selection go to the menu, the tool shortcuts type
+into it, and on WebKit the click that dismisses a native menu's popup is
+swallowed before it reaches the canvas — which is why the first map click after
+changing a setting did nothing. Only the controls that finish in one action
+give focus up: a menu, a checkbox, a button. A text field is still being typed
+into and keeps it until it is left.
+
 **Chrome does not overlap chrome.** The legend sits bottom right, the readout
 bottom left, the option bar along the top; each is placed so that another
 growing cannot cover it. A panel that appears over a control is indistinguishable

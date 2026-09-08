@@ -164,6 +164,7 @@ import { MapRenderer, type OperatorPreview, type RenderState } from "./renderer"
 import { uniqueTiles } from "../timeline/playback";
 import { TileCache } from "./tiles";
 import { beneathToken, frameToken, onlyToken, parseFrameToken } from "./frameToken";
+import { releaseFocus } from "./focus";
 import { knownGradients, loadGradients, stopsOf } from "../gradients";
 
 interface Readout {
@@ -5144,7 +5145,10 @@ export default function MapView({
               Shape
               <select
                 value={regionMode}
-                onChange={(event) => setRegionMode(event.target.value as RegionMode)}
+                onChange={(event) => {
+                  setRegionMode(event.target.value as RegionMode);
+                  releaseFocus(event);
+                }}
                 title="Rectangle and lasso are drawn corner to corner and freehand; a circle is dragged out from its centre"
               >
                 <option value="rect">Rectangle</option>
@@ -5178,7 +5182,10 @@ export default function MapView({
                   Shape
                   <select
                     value={regionMode}
-                    onChange={(event) => setRegionMode(event.target.value as RegionMode)}
+                    onChange={(event) => {
+                  setRegionMode(event.target.value as RegionMode);
+                  releaseFocus(event);
+                }}
                     title="The select tool's own gestures: rectangle and lasso are drawn corner to corner and freehand, a circle from its centre"
                   >
                     <option value="rect">Rectangle</option>
@@ -5333,7 +5340,10 @@ export default function MapView({
               />
               <select
                 value={eraser.unit}
-                onChange={(e) => setEraser({ ...eraser, unit: e.target.value === "px" ? "px" : "km" })}
+                onChange={(e) => {
+                  setEraser({ ...eraser, unit: e.target.value === "px" ? "px" : "km" });
+                  releaseFocus(e);
+                }}
                 title="A size in pixels is the same size on screen at any latitude; it becomes kilometres where the stroke begins."
               >
                 <option value="km">km</option>
@@ -5344,9 +5354,10 @@ export default function MapView({
               Brush shape
               <select
                 value={eraser.shape}
-                onChange={(e) =>
-                  setEraser({ ...eraser, shape: e.target.value === "square" ? "square" : "circle" })
-                }
+                onChange={(e) => {
+                  setEraser({ ...eraser, shape: e.target.value === "square" ? "square" : "circle" });
+                  releaseFocus(e);
+                }}
               >
                 <option value="circle">circle</option>
                 <option value="square">square</option>
@@ -5372,7 +5383,10 @@ export default function MapView({
               <select
                 value={macroId ?? ""}
                 disabled={(library?.entries.length ?? 0) === 0}
-                onChange={(event) => setMacroId(event.target.value)}
+                onChange={(event) => {
+                  setMacroId(event.target.value);
+                  releaseFocus(event);
+                }}
               >
                 {library?.entries.map((entry) => (
                   <option key={entry.id} value={entry.id}>
@@ -5403,6 +5417,7 @@ export default function MapView({
                 onChange={(event) => {
                   endMeasuring();
                   setMeasureKind(event.target.value as MeasurementKind);
+                  releaseFocus(event);
                 }}
                 title="Dividers measure a chain leg by leg; a passage draws both ways of sailing between two points; range rings are geodesic circles about a centre"
               >

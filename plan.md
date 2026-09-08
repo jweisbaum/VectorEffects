@@ -3008,6 +3008,30 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M46 — The option bar gives the keyboard back
+
+**The report (3):** after changing a setting in the tools, the first map
+click does nothing.
+
+The option bar sits over the map, and its controls kept focus after they
+had been used. On WebKit a native menu's popup swallows the next
+mousedown as it dismisses, so the click that should have started a stroke
+went to closing a menu that was already closed. The same focus is why the
+arrows and the tool shortcuts sometimes went to a menu rather than to the
+map.
+
+`releaseFocus` is the fix, on the controls that finish in one action — a
+menu, a checkbox — and not on the text fields, which are still being
+typed into. Tested by rendering the bar, focusing a control, changing it,
+and asserting focus has gone: what matters is that it has actually gone
+by the time the change is handled, which a check against the source could
+not say.
+
+**Honestly:** the popup behaviour is not reproducible headlessly, so this
+is the cause the evidence best supports rather than one observed in a
+debugger. What is certain either way is that a bar over the map must not
+hold the keyboard, which is worth fixing on its own.
+
 ### M45 — A clone's preview reads the layer it will sample
 
 **The report (2):** the clone stamp drew from the top layer while its
