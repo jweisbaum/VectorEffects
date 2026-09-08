@@ -850,4 +850,31 @@ describe("sampled", () => {
     const state: ToolState = { values: {}, unit: "px" };
     expect(sampled(state, shapeFill, { speed_mps: 9, azimuth_toward_deg: 90 })).toBe(state);
   });
+
+  /**
+   * Pointing where nothing is written takes nothing (M53). An undefined
+   * sample arrives as zero, and writing it would set the tool to a dead calm
+   * due north — a number the user did not point at, and would have to notice
+   * before undoing.
+   */
+  it("takes nothing from a point with no field", () => {
+    const schema: ToolSchema = {
+      ...shapeFill,
+      eyedropper: { speed: "Speed", direction: "Direction", depends_on: [] },
+    };
+    const state: ToolState = { values: {}, unit: "km" };
+    const empty = sampled(state, schema, {
+      speed_mps: 0,
+      azimuth_toward_deg: 0,
+      defined: false,
+    });
+    expect(empty).toBe(state);
+    // And a defined sample of a genuine calm is still taken: zero is a value.
+    const calm = sampled(state, schema, {
+      speed_mps: 0,
+      azimuth_toward_deg: 0,
+      defined: true,
+    });
+    expect(calm).not.toBe(state);
+  });
 });

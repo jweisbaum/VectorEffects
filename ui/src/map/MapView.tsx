@@ -3860,7 +3860,14 @@ export default function MapView({
       if (schema && showsMagnifier({ eyedropper, building })) {
         setEyedropper(false);
         void api
-          .sampleField(geo.lon, geo.lat, stepRef.current, activeKindRef.current)
+          // Whatever is on top here, not whatever matches the layer being
+          // painted into (M53). The eyedropper is a pointing gesture: it takes
+          // the vector the user can *see*, and what they see at a point is the
+          // topmost visible layer with coverage there. Restricting it to the
+          // active layer's kind meant pointing at a current and being handed a
+          // wind from further down the stack — a number from a layer the
+          // pointer was never over.
+          .sampleField(geo.lon, geo.lat, stepRef.current, null)
           .then((sample) => setToolState(sampled(toolStateRef.current, schema, sample)))
           .catch(() => undefined);
         return;

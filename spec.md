@@ -1478,10 +1478,23 @@ built differently. A new tool gets them all, and the checklist below is what
 
 **The eyedropper samples what is visible.** The value it takes is the composite
 the evaluator produces at that point (§7.6) — every visible layer beneath the
-pointer, and no hidden one, which is exactly what the map is drawing. It is
-sampled through the evaluator and not read back from the tile under the cursor:
-a tile carries the 16-bit quantisation the map draws with (§7.7), and this
-number goes into the document. It is written in stored units, m/s and an
+pointer, and no hidden one, which is exactly what the map is drawing. **Of
+either kind** (M53): what a click takes is the topmost visible layer with
+coverage there, not the topmost of the kind being painted into, because the
+gesture is a pointing one. Restricting it to the active layer's kind handed
+back a wind from under a current the pointer was actually over. The number is
+a speed and a bearing either way; which layer it came from is what the user
+chose by pointing.
+
+**A point with no field gives nothing**, rather than the zero an undefined
+sample arrives as: writing that would set the tool to a dead calm due north,
+a value nobody pointed at and which has to be noticed before it can be undone.
+A written calm is still taken — zero is a value, and §7.6's whole distinction
+is that it is not the same as nothing.
+
+It is sampled through the evaluator and not read back from the tile under the
+cursor: a tile carries the 16-bit quantisation the map draws with (§7.7), and
+this number goes into the document. It is written in stored units, m/s and an
 azimuth-toward, and converted for display like any other value (§3.3).
 
 The one rule that is genuinely per tool is **whether a hover indicator exists**;

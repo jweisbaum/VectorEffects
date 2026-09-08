@@ -3009,6 +3009,24 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M53 — The eyedropper takes what the pointer is over
+
+**The report (14):** the eyedropper should select from the first visible
+layer.
+
+It sampled the composite of the *active layer's kind*, so pointing at a
+current while a wind layer was selected handed back a wind from further
+down the stack — a number from a layer the pointer was never over. It now
+samples the whole composite, which is the topmost visible layer with
+coverage at that point: what the user is looking at, which is what a
+pointing gesture means. The value is a speed and a bearing either way.
+
+While there: a point with **no** field gives nothing rather than the zero
+an undefined sample arrives as. Writing that set the tool to a dead calm
+due north — a value nobody pointed at, and one that has to be noticed
+before it can be undone. A written calm is still taken, since zero is a
+value and D58's whole distinction is that it is not the same as nothing.
+
 ### M52 — The macro preview's badge gets a row of its own
 
 **The report (10):** in macro preview mode the badge sat under the

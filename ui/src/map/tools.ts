@@ -217,10 +217,15 @@ export function offersEyedropper(schema: ToolSchema, values: ToolValues): boolea
 export function sampled(
   state: ToolState,
   schema: ToolSchema,
-  sample: { speed_mps: number; azimuth_toward_deg: number },
+  sample: { speed_mps: number; azimuth_toward_deg: number; defined?: boolean },
 ): ToolState {
   const eyedropper = schema.eyedropper;
   if (!eyedropper) return state;
+  // Nothing was written at that point, so there is nothing to take (M53). An
+  // undefined sample comes back as zero, and writing it would set the tool to
+  // a dead calm due north — a number the user did not point at and would have
+  // to notice and undo.
+  if (sample.defined === false) return state;
   return {
     ...state,
     values: {
