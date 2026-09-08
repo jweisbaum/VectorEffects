@@ -824,38 +824,82 @@ body {
   overflow-y: auto;
 }
 
-/* Choosing a gradient (M42). A list rather than a dropdown, because the one
-   thing worth showing about a gradient is the gradient, and a native select
-   renders nothing but text. */
-.gradient-choice {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 4px 10px 8px;
-  margin: 0 0 1rem;
-}
-.gradient-choice legend { color: var(--muted); padding: 0 6px; font-size: 12px; }
-.gradient-option {
+/* Choosing a gradient (M42). A dropdown of its own rather than a native
+   select, which renders nothing but text in its options — and what is worth
+   showing about a gradient is the gradient. */
+.gradient-picker {
   display: flex;
-  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 6px 0;
+}
+.gradient-picker-label { flex: 1; }
+/* The anchor the open list hangs from. */
+.gradient-picker-control { position: relative; flex: none; }
+
+.gradient-trigger {
+  display: flex;
   align-items: center;
   gap: 8px;
-  padding: 3px 4px;
+  width: 220px;
+  background: #0f1a2c;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 4px 7px;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.gradient-trigger:hover { background: #16233a; }
+.gradient-caret { flex: none; color: var(--muted); font-size: 10px; }
+
+.gradient-list {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 20;
+  width: 220px;
+  max-height: 260px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: #16233a;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+.gradient-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 5px;
   border-radius: 5px;
   cursor: pointer;
   font-size: 12px;
   color: var(--text);
 }
-.gradient-option:hover { background: #16233a; }
-.gradient-option.on { background: #1d2d49; }
-.gradient-option input { width: auto; flex: none; margin: 0; }
-.gradient-option .gradient-bar {
+.gradient-option:hover { background: #1d2d49; }
+.gradient-option.on { background: #1d5a7a; }
+.gradient-option[aria-disabled="true"] { color: var(--muted); cursor: default; }
+
+/* Shared by the trigger and the rows, so the colours a row shows are the
+   colours the trigger shows once it is chosen. */
+.gradient-bar {
   flex: none;
-  width: 84px;
+  width: 76px;
   height: 12px;
   border-radius: 3px;
   border: 1px solid var(--border);
 }
-.gradient-option .gradient-name { flex: 1; }
+.gradient-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* The visibility toggle is an eye, shown rather than said. */
 .layer-panel .eye {

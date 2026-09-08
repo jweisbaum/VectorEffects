@@ -3050,12 +3050,15 @@ go home intact. And `ProjectSettings` is no longer `Copy` — a gradient
 is named by a `String`, and the alternative, an enumeration of the ones
 this build happens to have, could not carry that name back out.
 
-**The list shows the gradients.** A native `select` renders nothing but
+**The picker shows the gradients.** A native `select` renders nothing but
 text in its options, so the first version could only name them — which
 asks the reader to remember what "Haxby" looks like, the very thing they
-opened the settings to find out. It is a radio group now, one row per
-gradient carrying its own colours, with the unknown-gradient case as a
-row that says so and cannot be picked.
+opened the settings to find out. A flat radio group was tried and was
+wrong for the panel: nine rows always open, laid out across the width,
+pushed the rest of the settings away. `GradientPicker` is a dropdown of
+the application's own — closed it shows the colours in use, open it shows
+them all — with Escape, click-away and the arrow keys, and the
+unknown-gradient case listed but unpickable.
 
 **Not done.** There is no application-level default for new projects, as
 there is for the scale; a new project takes the built-in pair. Adding

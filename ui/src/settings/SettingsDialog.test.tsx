@@ -178,63 +178,101 @@ async function click(el: HTMLElement) {
 /**
  * Choosing a gradient (M42).
  *
- * The point of the list is that it *shows* the gradients: a column of names
- * would be asking the reader to remember what each one looks like, which is
- * what they opened the settings to find out. So what is asserted is that
- * every gradient has a row, that the row carries its own colours, and that
- * the two kinds are chosen independently.
+ * The point of the picker is that it *shows* the gradients: a column of names
+ * would ask the reader to remember what each one looks like, which is what
+ * they opened the settings to find out. So what is asserted is that opening
+ * it lists them with their own colours, that the closed control shows the
+ * chosen one, and that the two kinds are chosen independently.
  */
-describe("the colour gradient list", () => {
-  const rows = (kind: string) =>
-    [...container.querySelectorAll<HTMLInputElement>(`input[name="gradient-${kind}"]`)];
+describe("the colour gradient picker", () => {
+  /** The trigger for one kind, by the label beside it. */
+  function trigger(kind: "wind" | "current"): HTMLButtonElement {
+    const word = kind === "wind" ? "for wind" : "for currents";
+    const found = [...container.querySelectorAll(".gradient-picker")].find((picker) =>
+      (picker.querySelector(".gradient-picker-label")?.textContent ?? "").includes(word),
+    );
+    const button = found?.querySelector("button");
+    if (!button) throw new Error(`no gradient picker for ${kind}`);
+    return button as HTMLButtonElement;
+  }
 
-  it("offers a row per gradient, each showing its own colours", async () => {
+  /** The open list's options, or none when it is closed. */
+  const options = () => [...container.querySelectorAll<HTMLElement>('[role="option"]')];
+
+  it("is closed until it is opened, and then lists every gradient", async () => {
     await renderWithProject();
-    expect(rows("wind").map((input) => input.value)).toEqual(["vector", "viridis"]);
+    expect(options(), "closed to begin with").toHaveLength(0);
+    expect(trigger("wind").getAttribute("aria-expanded")).toBe("false");
 
-    const bars = [...container.querySelectorAll<HTMLElement>(".gradient-option .gradient-bar")];
-    // Two kinds, two gradients each.
-    expect(bars).toHaveLength(4);
-    // The colours are the gradient's own, not one fixed run for all of them.
+    await click(trigger("wind"));
+    expect(options().map((row) => row.textContent)).toEqual(["VectorEffects", "Viridis"]);
+    expect(trigger("wind").getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("shows each gradient's own colours, not one run for all of them", async () => {
+    await renderWithProject();
+    await click(trigger("wind"));
+    const bars = options().map((row) => row.querySelector<HTMLElement>(".gradient-bar"));
     expect(bars[0]?.style.background).toContain("#000000");
     expect(bars[0]?.style.background).toContain("#ffffff");
     expect(bars[1]?.style.background).toContain("#808080");
     expect(bars[0]?.style.background).not.toBe(bars[1]?.style.background);
   });
 
-  it("marks the one the project uses, per kind", async () => {
+  /** Closed, the control still says which gradient is in use, and shows it. */
+  it("shows the chosen gradient when it is closed", async () => {
     await renderWithProject();
-    expect(rows("wind").filter((input) => input.checked).map((i) => i.value)).toEqual(["vector"]);
-    expect(rows("current").filter((input) => input.checked).map((i) => i.value)).toEqual([
-      "viridis",
-    ]);
+    expect(trigger("wind").textContent).toContain("VectorEffects");
+    expect(trigger("current").textContent).toContain("Viridis");
+    expect(
+      trigger("current").querySelector<HTMLElement>(".gradient-bar")?.style.background,
+    ).toContain("#808080");
   });
 
-  it("writes the one that is chosen, for that kind alone", async () => {
+  it("marks the one in use as selected", async () => {
     await renderWithProject();
-    const viridis = rows("wind").find((input) => input.value === "viridis");
+    await click(trigger("current"));
+    const selected = options().filter((row) => row.getAttribute("aria-selected") === "true");
+    expect(selected.map((row) => row.textContent)).toEqual(["Viridis"]);
+  });
+
+  it("writes the one that is chosen, for that kind alone, and closes", async () => {
+    await renderWithProject();
+    await click(trigger("wind"));
+    const viridis = options().find((row) => row.textContent === "Viridis");
     expect(viridis).toBeDefined();
-    // `click()` and not a synthesised `change`: React listens for the click
-    // on a radio and derives the change from it, so a bare change event
-    // reaches nothing.
-    await act(async () => {
-      viridis!.click();
-    });
+    await click(viridis as HTMLElement);
     expect(held.chosen).toEqual([["wind", "viridis"]]);
+    expect(options(), "and the list closes behind it").toHaveLength(0);
   });
 
   /**
    * A project written by a later version names a gradient this build does not
-   * have. The row says so rather than the list quietly reading as something
-   * else, and it cannot be chosen — there is nothing to choose.
+   * have. It is listed, because that is what the file says, and it cannot be
+   * picked, because there is nothing to pick.
    */
   it("shows a gradient it does not have, and refuses to pick it", async () => {
     await renderWithProject({ wind_gradient: "from-a-later-version" });
-    const unknown = rows("wind").find((input) => input.value === "from-a-later-version");
-    expect(unknown).toBeDefined();
-    expect(unknown?.checked).toBe(true);
-    expect(unknown?.disabled).toBe(true);
-    expect(rows("wind")).toHaveLength(3);
+    expect(trigger("wind").textContent).toContain("from-a-later-version");
+    await click(trigger("wind"));
+    const unknown = options().find((row) =>
+      (row.textContent ?? "").startsWith("from-a-later-version"),
+    );
+    expect(unknown?.getAttribute("aria-disabled")).toBe("true");
+    expect(unknown?.getAttribute("aria-selected")).toBe("true");
+    await click(unknown as HTMLElement);
+    expect(held.chosen, "clicking it writes nothing").toEqual([]);
+  });
+
+  it("closes on Escape without choosing anything", async () => {
+    await renderWithProject();
+    await click(trigger("wind"));
+    expect(options().length).toBeGreaterThan(0);
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+    expect(options()).toHaveLength(0);
+    expect(held.chosen).toEqual([]);
   });
 });
 
