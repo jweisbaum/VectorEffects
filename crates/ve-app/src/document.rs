@@ -37,6 +37,44 @@ pub struct ObjectNode {
     pub end_step: u32,
 }
 
+/// A history layer's origin, if that is what this layer is.
+fn history_origin(source: &ve_core::document::LayerSource) -> Option<HistoryOrigin> {
+    let ve_core::document::LayerSource::Zarr {
+        archive,
+        start_unix_s,
+        end_unix_s,
+        ..
+    } = source
+    else {
+        return None;
+    };
+    Some(HistoryOrigin {
+        // A project may name an archive a later version added; the identifier
+        // is what the file holds and is shown when nothing here knows it.
+        label: ve_zarr::Archive::parse(archive)
+            .map_or_else(|| archive.clone(), |found| found.label().to_owned()),
+        archive: archive.clone(),
+        start_unix_s: *start_unix_s,
+        end_unix_s: *end_unix_s,
+    })
+}
+
+/// Where a history layer's hours came from (spec.md 4.10, M55).
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export, export_to = "HistoryOrigin.ts")]
+pub struct HistoryOrigin {
+    /// The archive's identifier, as `ve_zarr::Archive::id` spells it.
+    pub archive: String,
+    /// And what it is called, or the identifier itself if this build has
+    /// never heard of it — a project may name an archive a later version
+    /// added.
+    pub label: String,
+    /// First hour asked for, in Unix seconds.
+    pub start_unix_s: i64,
+    /// Last hour asked for.
+    pub end_unix_s: i64,
+}
+
 /// One layer, with its objects in z-order.
 #[derive(Debug, Clone, Serialize, TS)]
 #[ts(export, export_to = "LayerNode.ts")]
@@ -92,6 +130,14 @@ pub struct GribStepView {
 pub struct GribLayerInfo {
     /// The file the field is read from.
     pub path: String,
+    /// Where the hours came from, for a history layer (spec.md 4.10, M55).
+    ///
+    /// A history layer keeps its provenance so it can say what it is, and
+    /// until now nothing asked it: the file's name carried the archive and
+    /// the range, and reading a layer's origin out of a path is not the same
+    /// as the layer telling you. `None` for an imported forecast, whose
+    /// origin is the file the user chose and nothing more.
+    pub history: Option<HistoryOrigin>,
     /// `"wind"` or `"current"`.
     pub field_kind: String,
     /// Whether the file was read; false when it is missing or unreadable,
@@ -328,6 +374,7 @@ fn tree_of(project: &Project, step: u32) -> DocumentTree {
                     .raster_file()
                     .map(|(path, field)| GribLayerInfo {
                         path: path.to_string_lossy().into_owned(),
+                        history: history_origin(&layer.source),
                         field_kind: match field {
                             ve_core::FieldKind::Wind => "wind".to_owned(),
                             ve_core::FieldKind::Current => "current".to_owned(),

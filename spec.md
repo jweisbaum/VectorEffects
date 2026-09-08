@@ -1225,6 +1225,17 @@ the right panel, properties and history fold separately; each layer's object
 list folds under its header. What is open is a viewer's convenience, kept in
 `localStorage`, never a project's fact.
 
+**The properties panel describes the active layer when no object is selected**
+(M55). It was the one panel with nothing to say in that state, while the facts
+about a layer that are editable nowhere had no home: what file an imported
+field is read from, how much of the timeline it covers, and — for a history
+layer — which archive and which hours, which those layers have carried since
+§4.10 with nothing to display them.
+
+Facts, not controls. A layer's name, its eye, its lock, its speed filter and
+an image's opacity are edited on the layer's own row, beside the layer they
+belong to; a second copy in the panel would be two places to change one thing.
+
 **The tool option bar spans the map view and wraps within it.** It is the width
 of the map, not of its contents. A tool's options grow as the tool gains them,
 and a bar that sizes to its contents puts the last ones past the right-hand edge

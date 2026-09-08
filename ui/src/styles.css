@@ -1101,6 +1101,24 @@ body {
   color: #ffd678;
 }
 
+/* What a layer holds, when the panel has no object to describe (M55). Facts,
+   not controls: the controls live on the layer's own row. */
+.layer-facts { padding: 8px 12px 12px; font-size: 12px; }
+.layer-fact {
+  display: flex;
+  gap: 10px;
+  padding: 3px 0;
+  align-items: baseline;
+}
+.layer-fact > .muted { flex: 0 0 92px; }
+.layer-fact-value {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* --- History ----------------------------------------------------------- */
 
 .history-panel { border-top: 1px solid var(--border); margin-top: 6px; min-height: 0; }

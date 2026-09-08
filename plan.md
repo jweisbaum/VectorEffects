@@ -3009,6 +3009,31 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M55 — The properties panel says what a layer holds
+
+**The report (11):** clicking a layer should show its properties.
+
+The panel showed an object's properties or nothing, and after M47 —
+which drops a selection that is not in the layer just chosen — clicking a
+layer reliably produced the nothing. Meanwhile the facts about a layer
+that are editable nowhere had no home at all: a history layer has carried
+its archive and its hours since M38 and the interface has never shown
+them, so the only way to tell one apart from another was to read the file
+name out of the panel.
+
+The panel now describes the active layer: what it holds, its field, the
+file behind an imported one, how many of the project's steps it covers,
+an image's size, and a history layer's archive and range as dates. The
+provenance had to be added to the wire for that — `GribLayerInfo` gains
+an optional origin, with the archive's *label* resolved server-side and
+falling back to the identifier for an archive this build has not heard
+of.
+
+**Facts and not controls.** The name, the eye, the lock, the speed filter
+and an image's opacity are edited on the layer's own row, beside the
+layer they belong to. A second copy in the panel would be two places to
+change one thing, which is the arrangement that drifts.
+
 ### M54 — Diverge/converge bends the flow without driving it
 
 **The report (17):** the convergence tool seemed to increase speed

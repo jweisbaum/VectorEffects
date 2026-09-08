@@ -567,6 +567,7 @@ export default function App() {
                     project={project}
                     selection={selection}
                     step={step}
+                    activeLayer={activeLayer}
                     autoKey={autoKey}
                     picking={picking}
                     onPick={setPicking}

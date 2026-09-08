@@ -21,7 +21,8 @@ const f32Mps = (knots: number) => Math.fround(mpsFromKnots(knots));
 /** A loaded wind layer filtered to `[lowKt, highKt]`, with a 30 kt ceiling. */
 function grib(lowKt: number, highKt: number): GribLayerInfo {
   return {
-    path: "/forecast.grib2",
+    history: null,
+  path: "/forecast.grib2",
     field_kind: "wind",
     loaded: true,
     frame_count: 1,

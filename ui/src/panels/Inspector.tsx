@@ -5,12 +5,101 @@ import NumberField from "../NumberField";
 
 import { reportError } from "../hint";
 import { api } from "../ipc";
+import type { LayerNode } from "../generated/LayerNode";
 import type { ProjectSummary } from "../generated/ProjectSummary";
 import type { PropertyValue } from "../generated/PropertyValue";
 import type { PropertyView } from "../generated/PropertyView";
+import { KIND_LABELS, kindOf } from "../kind";
+import { formatUtcHour } from "./historyRange";
 import { knotsFromMps, mpsFromKnots } from "../project/format";
 import type { PositionPick } from "../picking";
 import { toShownAngle } from "./inspectorAngle";
+
+/**
+ * What a layer is, for the panel to say when no object is selected (M55).
+ *
+ * Facts and not controls. The things a layer's row already edits — its name,
+ * its eye, its lock, its speed filter, its opacity — stay in the layer panel,
+ * where they sit beside the layer they belong to; putting a second copy here
+ * would be two places to change one thing. What this adds is what nothing
+ * showed: where an imported field came from, how much of the timeline it
+ * covers, and, for a history layer, which archive and which hours — the
+ * provenance those layers have carried since M38 with nowhere to display it.
+ */
+function LayerFacts({ layer }: { layer: LayerNode | null }) {
+  if (layer === null) {
+    return (
+      <div className="panel-empty muted">
+        Select an object to edit its properties, or a layer to see what it holds.
+      </div>
+    );
+  }
+  const rows: [string, string][] = [];
+  const kindOfLayer =
+    layer.source === "painted"
+      ? "Painted"
+      : layer.source === "image"
+        ? "Image"
+        : layer.source === "zarr"
+          ? "History"
+          : "Imported field";
+  rows.push(["Layer", layer.name]);
+  rows.push(["Holds", kindOfLayer]);
+  if (layer.source !== "image") rows.push(["Field", KIND_LABELS[kindOf(layer.parameter)]]);
+  if (!layer.visible) rows.push(["Shown", "hidden"]);
+  if (layer.locked) rows.push(["Locked", "yes"]);
+
+  const grib = layer.grib;
+  if (grib) {
+    if (grib.history) {
+      rows.push(["Archive", grib.history.label]);
+      rows.push([
+        "Hours",
+        `${formatUtcHour(grib.history.start_unix_s).replace("T", " ")} to ` +
+          `${formatUtcHour(grib.history.end_unix_s).replace("T", " ")} UTC`,
+      ]);
+    }
+    rows.push(["File", grib.path]);
+    rows.push([
+      "Frames",
+      grib.loaded
+        ? `${grib.frame_count} over ${grib.span_hours} h`
+        : "not read — the file is missing or unreadable",
+    ]);
+    const covered = grib.covered_steps.filter(Boolean).length;
+    rows.push(["Steps covered", `${covered} of ${grib.covered_steps.length}`]);
+    if (grib.speed_min_mps !== null || grib.speed_max_mps !== null) {
+      rows.push(["Speed filter", "on — see the layer panel"]);
+    }
+  }
+
+  const image = layer.image;
+  if (image) {
+    rows.push(["File", image.path]);
+    rows.push([
+      "Size",
+      image.loaded ? `${image.width} × ${image.height} px` : "not read — missing or unreadable",
+    ]);
+    rows.push(["Opacity", `${Math.round(image.opacity * 100)}%`]);
+  }
+
+  if (layer.source === "painted") {
+    rows.push(["Objects", String(layer.objects.length)]);
+  }
+
+  return (
+    <div className="layer-facts">
+      {rows.map(([label, value]) => (
+        <div className="layer-fact" key={label}>
+          <span className="muted">{label}</span>
+          <span className="layer-fact-value" title={value}>
+            {value}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 /** Suffix shown after a property's editor. */
 function unitLabel(unit: string): string {
@@ -55,6 +144,7 @@ export default function Inspector({
   project,
   selection,
   step,
+  activeLayer,
   autoKey,
   picking,
   onPick,
@@ -63,6 +153,8 @@ export default function Inspector({
   project: ProjectSummary;
   selection: number[];
   step: number;
+  /** The layer the panel describes when no object is selected (M55). */
+  activeLayer: number | null;
   /** Whether an edit keys the current step rather than the base (spec.md 9.3). */
   autoKey: boolean;
   picking: PositionPick | null;
@@ -74,6 +166,26 @@ export default function Inspector({
   // though they applied to all of them would be a lie.
   const object = selection.length === 1 ? (selection[0] ?? null) : null;
   const [properties, setProperties] = useState<PropertyView[] | null>(null);
+  // The active layer, for the panel to describe when no object is selected.
+  // Read here rather than passed down: the tree is the one place that knows
+  // what a layer holds, and the panel already refetches on every revision.
+  const [layer, setLayer] = useState<LayerNode | null>(null);
+  useEffect(() => {
+    if (object !== null || activeLayer === null) {
+      setLayer(null);
+      return;
+    }
+    let live = true;
+    api
+      .documentTree(step)
+      .then((tree) => {
+        if (live) setLayer(tree.layers.find((node) => node.id === activeLayer) ?? null);
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [object, activeLayer, project.revision, step]);
   // Errors go to the status bar's hint area (M25), not a line of their own.
   const setError = reportError;
 
@@ -89,13 +201,21 @@ export default function Inspector({
   }, [object, project.revision, step]);
 
   if (object === null) {
-    return (
-      <div className="panel-empty muted">
-        {selection.length > 1
-          ? `${selection.length} objects selected. Drag the handles to transform them, or select one to edit its properties.`
-          : "Select an object to edit its properties."}
-      </div>
-    );
+    // More than one selected is a transform, not an edit: showing one
+    // member's numbers as though they applied to all of them would be a lie.
+    if (selection.length > 1) {
+      return (
+        <div className="panel-empty muted">
+          {selection.length} objects selected. Drag the handles to transform them, or select one
+          to edit its properties.
+        </div>
+      );
+    }
+    // With nothing selected the panel describes the layer instead (M55).
+    // Empty, it was the one panel that never had anything to say — while the
+    // facts about a layer that are not editable anywhere, a history layer's
+    // archive and hours above all, had nowhere to be seen at all.
+    return <LayerFacts layer={layer} />;
   }
   if (!properties) {
     return <div className="panel-empty muted">Loading…</div>;
