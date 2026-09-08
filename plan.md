@@ -3009,6 +3009,33 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M51 — A tool that will not work says so before the click
+
+**The report (9):** on a GRIB, zarr or image layer, a forbidden tool
+should show a cross on hover — the brush, the shapes, the curve and the
+macro placement among them.
+
+The refusal was never missing; it arrived late. `creation_layer` turns
+away a field object aimed at an imported layer and the eraser turns away
+an image, but on *release* — so a stroke was drawn, previewed live, and
+then thrown away with a line in the status bar.
+
+`layerTakes` is the rule restated on the frontend, and the comment says
+what it is: the frontend half of one decision, not a second decision. A
+tool refused here and taken there would be a stroke that cannot be drawn.
+The test asserts the whole table — every layer against every kind of work
+— because a gap in it is a tool that draws and then refuses, which is the
+thing being fixed.
+
+The cursor is drawn rather than the platform's `not-allowed`, which is a
+circle-and-slash reading as "the whole map is dead". This is about one
+tool and one layer, so it keeps the crosshair, crossed out, with the
+hotspot still at the centre.
+
+The layer sources are kept as a table rather than the active layer's own
+answer: the active layer changes without the document tree being
+refetched, so one remembered answer would be the previous layer's.
+
 ### M50 — Edges and rotation for a placed picture
 
 **The report (8):** more sophisticated image adjustment — rotation, edge

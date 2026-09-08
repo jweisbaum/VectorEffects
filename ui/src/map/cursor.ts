@@ -29,6 +29,13 @@ export interface CursorContext {
   /** The pointer is over the active image layer's picture, which a drag moves (M36). */
   onImage: boolean;
   /**
+   * The tool in hand cannot work on the layer in hand (spec.md 6.1, M51).
+   *
+   * The backend has always refused these, but on release — after the stroke
+   * had been drawn and previewed. The cursor says it on hover instead.
+   */
+  forbidden: boolean;
+  /**
    * The picture grip under the pointer, if any (M50).
    *
    * A grip takes the drag ahead of every tool, so it takes the cursor too:
@@ -51,6 +58,26 @@ const BUCKET_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="2
 /** The bucket as a CSS cursor, with a crosshair to fall back on. */
 export const BUCKET_CURSOR = `url("data:image/svg+xml;utf8,${encodeURIComponent(BUCKET_SVG)}") 4 20, crosshair`;
 
+/**
+ * A crosshair with a cross through it: the tool in hand will not work on the
+ * layer in hand (M51).
+ *
+ * Drawn rather than taken from the platform's `not-allowed`, which is a
+ * circle-and-slash that reads as "the whole map is dead" — this is about one
+ * tool and one layer, and it keeps the crosshair so it still says where the
+ * click would land if the layer were a different one. The hotspot stays at
+ * the centre for the same reason.
+ */
+const FORBIDDEN_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+<path d="M12 2v6M12 16v6M2 12h6M16 12h6" stroke="#141c2c" stroke-width="3.4" stroke-linecap="round"/>
+<path d="M12 2v6M12 16v6M2 12h6M16 12h6" stroke="#ffffff" stroke-width="1.6" stroke-linecap="round"/>
+<path d="M8 8l8 8M16 8l-8 8" stroke="#141c2c" stroke-width="4" stroke-linecap="round"/>
+<path d="M8 8l8 8M16 8l-8 8" stroke="#ff8fa0" stroke-width="2.2" stroke-linecap="round"/>
+</svg>`;
+
+/** The refusal as a CSS cursor, with the platform's own to fall back on. */
+export const FORBIDDEN_CURSOR = `url("data:image/svg+xml;utf8,${encodeURIComponent(FORBIDDEN_SVG)}") 12 12, not-allowed`;
+
 /** The CSS `cursor` value for a context. */
 export function cursorFor(context: CursorContext): string {
   // A pick takes the click ahead of every tool, so its cursor comes first.
@@ -63,9 +90,14 @@ export function cursorFor(context: CursorContext): string {
   if (context.recording) return "default";
   // A picture's grip takes the drag ahead of every tool (M50), so it takes
   // the cursor: `crosshair` here would promise a stroke that will not happen.
+  // Ahead of the refusal below, since a grip works whatever the tool is —
+  // that is what makes it a handle.
   if (context.grip === "corner") return "nwse-resize";
   if (context.grip === "edge") return "move";
   if (context.grip === "rotate") return "grab";
+  // The tool will not work on this layer (M51). After the handles and before
+  // the tools, which is exactly where the refusal sits in the click.
+  if (context.forbidden) return FORBIDDEN_CURSOR;
   if (context.insideRegion) return BUCKET_CURSOR;
   switch (context.tool) {
     case HAND:

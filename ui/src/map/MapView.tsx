@@ -169,6 +169,7 @@ import { TileCache } from "./tiles";
 import { beneathToken, frameToken, onlyToken, parseFrameToken } from "./frameToken";
 import { releaseFocus } from "./focus";
 import { imagesOverField } from "./imageStack";
+import { layerTakes, type LayerSourceName, type ToolKindOfWork } from "./allowed";
 import { knownGradients, loadGradients, stopsOf } from "../gradients";
 
 interface Readout {
@@ -570,6 +571,14 @@ export default function MapView({
   const imageLayersRef = useRef<ImageLayerView[]>([]);
   /** The image layers that sit above every visible field layer (M49). */
   const imagesOverRef = useRef<ReadonlySet<number>>(new Set());
+  /**
+   * What each layer holds, for the tools it will take (M51).
+   *
+   * The whole table rather than the active layer's own answer: the active
+   * layer changes without the tree being refetched, so a single remembered
+   * answer would be the previous layer's.
+   */
+  const layerSourcesRef = useRef<ReadonlyMap<number, LayerSourceName>>(new Map());
   /**
    * The last frame whose tiles were all on screen. A frame that is not yet
    * draws its missing tiles from this one, dimmed, rather than blank.
@@ -1056,6 +1065,8 @@ export default function MapView({
    * The eraser has no schema of its own and is named.
    */
   const editsFieldRef = useRef(false);
+  /** The active tool's schema, for the cursor's own callback (M51). */
+  const schemaRef = useRef<ToolSchema | null>(null);
   /**
    * Whether the tool in hand reads the field from somewhere else and brings
    * it in — the clone stamp, and a warp's push (M45). Only those need the
@@ -1063,6 +1074,7 @@ export default function MapView({
    */
   const clonesFieldRef = useRef(false);
   const schema = palette.find((entry) => entry.tool === schemaTool) ?? null;
+  schemaRef.current = schema;
   editsFieldRef.current = tool === ERASE || (schema !== null && schema.preview !== "field");
   clonesFieldRef.current = schema?.preview === "clone" || schema?.preview === "warp";
 
@@ -1843,6 +1855,9 @@ export default function MapView({
         imageLayersRef.current = tree.layers
           .filter((layer) => layer.visible)
           .flatMap((layer) => (layer.image ? [layer.image] : []));
+        layerSourcesRef.current = new Map(
+          tree.layers.map((layer) => [layer.id, layer.source as LayerSourceName]),
+        );
         // And which of them draw over the field rather than under it.
         imagesOverRef.current = imagesOverField(
           tree.layers.map((layer) => ({
@@ -3541,6 +3556,17 @@ export default function MapView({
     ) => {
       const canvas = canvasRef.current;
       if (!canvas) return;
+      // What the tool would do to a layer, and whether this layer takes it
+      // (M51). The eraser is an edit and has no schema of its own; a tool
+      // that draws nothing is nobody's business.
+      const work: ToolKindOfWork =
+        tool === ERASE
+          ? "edits"
+          : !drawsObjects(tool)
+            ? "neither"
+            : schemaRef.current?.preview === "field" || schemaRef.current === null
+              ? "adds"
+              : "edits";
       const wanted = cursorFor({
         tool,
         eyedropper,
@@ -3549,6 +3575,10 @@ export default function MapView({
         panning,
         recording: recording !== null,
         onImage,
+        forbidden: !layerTakes(
+          layerSourcesRef.current.get(activeLayerRef.current ?? -1) ?? "painted",
+          work,
+        ),
         grip,
       });
       if (canvas.style.cursor !== wanted) canvas.style.cursor = wanted;

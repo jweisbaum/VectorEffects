@@ -1339,8 +1339,19 @@ All tools produce **objects**. Common rules:
   (D66, M31): a modifier, a mask, a clone or the eraser aimed at a GRIB layer
   edits the file's field in place, which is what they are for, while a
   stroke, a shape, a patch or a macro aimed at one is refused with a hint
-  naming the layer rather than quietly landing somewhere else. A paste is
-  taken only if every object in it is an edit. **A layer is
+  naming the layer rather than quietly landing somewhere else. An image layer
+  takes neither: it reaches no scene and no export, so there is no field there
+  to add to or to change. A paste is taken only if every object in it is an
+  edit.
+
+  **The cursor says so on hover** (M51). The refusal was always there, but it
+  arrived on release — after the stroke had been drawn, previewed and
+  abandoned. Over a layer that will not take the tool in hand the pointer
+  becomes a crossed-out crosshair: crossed out because the click will do
+  nothing, and still a crosshair because it would be a click if the layer
+  were another one. It is the *backend's* rule restated, not a second one; a
+  tool refused by the cursor and taken by the command would be a stroke that
+  cannot be drawn. **A layer is
   dragged above or below any other** (M29): the drop lands on whichever
   half of the target row the pointer let go on, a line on that edge says so
   beforehand, and each row carries a grip to pick it up by. **The reorder is

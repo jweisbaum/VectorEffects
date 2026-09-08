@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { BUCKET_CURSOR, type CursorContext, cursorFor } from "./cursor";
+import { BUCKET_CURSOR, FORBIDDEN_CURSOR, type CursorContext, cursorFor } from "./cursor";
 import { CAPTURE, ERASE, HAND, INSERT, MEASURE, SELECT } from "./tools";
 
 const base: CursorContext = {
@@ -11,6 +11,7 @@ const base: CursorContext = {
   panning: false,
   recording: false,
   onImage: false,
+  forbidden: false,
   grip: null,
 };
 
@@ -91,5 +92,25 @@ describe("a picture's grips (M50)", () => {
   /** But an armed pick still comes first: the user asked for that one place. */
   it("does not outrank a pick", () => {
     expect(cursorFor({ ...base, grip: "rotate", picking: true })).toBe("crosshair");
+  });
+});
+
+describe("a tool the layer will not take (M51)", () => {
+  /**
+   * The refusal was always there, but it arrived on release — after the
+   * stroke had been drawn and previewed. The cursor says it on hover.
+   */
+  it("says so before the click", () => {
+    expect(cursorFor({ ...base, tool: ERASE, forbidden: true })).toBe(FORBIDDEN_CURSOR);
+  });
+
+  /** A picture's handle works whatever the tool is: that is what a handle is. */
+  it("does not outrank a grip", () => {
+    expect(cursorFor({ ...base, forbidden: true, grip: "corner" })).toBe("nwse-resize");
+  });
+
+  /** Nor an armed pick, which the user asked for by name. */
+  it("does not outrank a pick", () => {
+    expect(cursorFor({ ...base, forbidden: true, picking: true })).toBe("crosshair");
   });
 });
