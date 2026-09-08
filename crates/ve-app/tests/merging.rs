@@ -161,19 +161,30 @@ fn a_divergence_radiates_from_its_own_centreline() {
     );
 
     diverge(&state, vec![[0.0, 0.0], [20.0, 0.0]]);
-    // 1° north of the stroke near its east end: the added component is
-    // northward, so v grows by about the local speed and u is untouched.
+    // 1° north of the stroke near its east end: the outward direction there
+    // is north, so the eastward flow bends northward — and, since M54, keeps
+    // the speed it had while doing it. Radiating from the *anchor* at the
+    // near end would have pointed along the line and bent it hardly at all.
     let (u, v) = field(&state, 18.0, 1.0);
     assert!(
-        (u - u0).abs() < 0.5,
-        "outward is across the line, not along it: u went {u0} -> {u}"
+        v > 0.0 && u > 0.0,
+        "bent toward the north-east, not reversed: ({u}, {v})"
     );
-    assert!(v > u0 * 0.8, "and northward on the north side: v = {v}");
-    // South of it, southward.
-    let (_, v_south) = field(&state, 18.0, -1.0);
     assert!(
-        v_south < -u0 * 0.8,
-        "southward on the south side: v = {v_south}"
+        (u.hypot(v) - u0).abs() < 0.5,
+        "and at the speed it came in at: {} vs {u0}",
+        u.hypot(v)
+    );
+    assert!(
+        (v - u).abs() < u0 * 0.2,
+        "a full divergence across the flow is a half-right turn: ({u}, {v})"
+    );
+    // South of it, southward, and by the same amount.
+    let (u_south, v_south) = field(&state, 18.0, -1.0);
+    assert!(v_south < 0.0, "southward on the south side: v = {v_south}");
+    assert!(
+        (v_south + v).abs() < u0 * 0.2 && (u_south - u).abs() < u0 * 0.2,
+        "and the mirror of the north side: ({u_south}, {v_south})"
     );
 }
 

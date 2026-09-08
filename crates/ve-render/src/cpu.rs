@@ -668,9 +668,29 @@ fn modified_vector(modifier: Modifier, object: &FlatObject, position: LonLat, be
                 None => (object.frame.radial_bearing(position), 1.0),
             };
             let radial = uv_from_speed_azimuth(speed * fraction * weight, bearing);
-            Uv {
+            let sum = Uv {
                 u: beneath.u + radial.u,
                 v: beneath.v + radial.v,
+            };
+            // Back to the speed it had (M54). A divergence bends the flow
+            // outward and a convergence bends it in; neither is a throttle.
+            // Leaving the sum as it stood made the new speed the hypotenuse
+            // of the old one and the radial component, so *both* directions
+            // of the tool sped the field up — a converge most of all, since
+            // it is the same arithmetic with the sign turned round.
+            //
+            // A sum of nothing keeps nothing: a full convergence against a
+            // purely outward flow cancels it exactly, and scaling that back
+            // up would be inventing a direction for a vector that has none.
+            let magnitude = f64::from(sum.u.hypot(sum.v));
+            if magnitude <= 1e-9 {
+                sum
+            } else {
+                let scale = (speed / magnitude) as f32;
+                Uv {
+                    u: sum.u * scale,
+                    v: sum.v * scale,
+                }
             }
         }
         // Turning an azimuth by `d` is a rotation of (u, v) by `d` clockwise:

@@ -350,8 +350,10 @@ fn every_modifier_changes_the_field_beneath_it() {
             Tool::Divergence,
             vec![number(PropId::Radial, 100.0)],
             // Sampled due north of the anchor, where "outward" is 0°: 20 m/s
-            // east plus 20 m/s north is 28.28 m/s on 45°.
-            (800.0f64.sqrt(), 45.0),
+            // east bent by 20 m/s north is a bearing of 45° — at the 20 m/s
+            // it came in at, since a divergence bends the flow and does not
+            // drive it (M54).
+            (20.0, 45.0),
         ),
     ] {
         let (_root, state) = project("modifies");

@@ -1129,13 +1129,18 @@ fn a_modifier_over_calm_water_leaves_calm_water() {
     assert!(speed_at(&scene_of(vec![warp]), anchor) < 1e-6);
 }
 
-/// Spec 6.3: diverging adds a component pointing away from the anchor, at a
-/// fraction of the local speed; converging adds the same component inward.
+/// Spec 6.3: diverging bends the flow away from the anchor and converging
+/// bends it in, **at the speed it already had** (M54).
 ///
-/// Hand-computed: a 10 m/s northward flow, sampled due east of the anchor where
-/// "outward" is a bearing of 90°, plus 100% of 10 m/s outward is (10, 10) —
-/// 14.142 m/s on a bearing of 45°. Converging by the same amount gives
-/// (-10, 10): the same speed, 45° the other side of north.
+/// Hand-computed: a 10 m/s northward flow, sampled due east of the anchor
+/// where "outward" is a bearing of 90°. Adding 100% of 10 m/s outward gives
+/// (10, 10) — a bearing of 45° — and the result is taken back to 10 m/s.
+/// Converging by the same amount gives (-10, 10): 315°, and 10 m/s again.
+///
+/// The speed is the half of this that changed. The tool used to leave the sum
+/// as it stood, which made the new speed the hypotenuse — so a *converge*
+/// sped the field up by 41%, which is not what either direction of the tool
+/// is for.
 #[test]
 fn diverging_bends_the_flow_outward_and_converging_bends_it_in() {
     let anchor = ll(0.0, 0.0);
@@ -1150,15 +1155,30 @@ fn diverging_bends_the_flow_outward_and_converging_bends_it_in() {
         let speed = speed_at(&scene, east);
         let azimuth = azimuth_at(&scene, east);
         assert!(
-            (speed - 200.0f64.sqrt()).abs() < 0.05,
-            "{percent}%: speed {speed}, expected {}",
-            200.0f64.sqrt()
+            (speed - 10.0).abs() < 0.05,
+            "{percent}%: speed {speed}, expected the 10 m/s it came in at"
         );
         assert!(
             (azimuth - expected_azimuth).abs() < 0.5,
             "{percent}%: azimuth {azimuth}, expected {expected_azimuth}"
         );
     }
+
+    // Half a turn of divergence bends it half as far and still leaves the
+    // speed alone, so the amount is a *bearing* control and nothing else.
+    let background = brush(anchor, vec![[0.0, 0.0]], 4000.0, 10.0, 0.0);
+    let mut half = modifier(ToolKind::Divergence, anchor, 2000.0);
+    set_num(&mut half, PropId::Radial, 50.0);
+    let scene = scene_of(vec![background, half]);
+    assert!(
+        (speed_at(&scene, east) - 10.0).abs() < 0.05,
+        "a half divergence leaves the speed alone too"
+    );
+    let azimuth = azimuth_at(&scene, east);
+    assert!(
+        azimuth > 20.0 && azimuth < 45.0,
+        "and bends it less far than a full one: {azimuth}"
+    );
 }
 
 /// Spec 8.1 (M29): an erasure takes away what it covers and nothing else.

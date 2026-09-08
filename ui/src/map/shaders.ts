@@ -254,8 +254,15 @@ void opApply(vec2 p, float coverage, inout float speed, inout float azimuth) {
     // East is +x and north is +y here, as the point is.
     vec2 v = speed * vec2(sin(az), cos(az));
     v += speed * uOpAmount * coverage * opOutward(p);
-    speed = length(v);
-    if (speed > 1.0e-6) azimuth = atan(v.x, v.y) / 0.017453292519943295;
+    // The direction turns and the speed does not (M54): a divergence bends
+    // the flow rather than driving it. The kernels do the same, and the
+    // preview has to agree with them (invariant 3).
+    float turned = length(v);
+    if (turned > 1.0e-6) {
+      azimuth = atan(v.x, v.y) / 0.017453292519943295;
+    } else {
+      speed = 0.0;
+    }
   }
 }
 `;

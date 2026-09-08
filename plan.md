@@ -3009,6 +3009,31 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M54 — Diverge/converge bends the flow without driving it
+
+**The report (17):** the convergence tool seemed to increase speed
+rather than only converge.
+
+It did, and so did divergence. The modifier added an outward component
+of `speed × amount` to the vector beneath and left the sum as it stood,
+so the new speed was the hypotenuse of the two: a 100% divergence on
+10 m/s gave 14.1, and a 100% *convergence* gave the same 14.1, since it
+is the same arithmetic with the sign turned round. The tool is named for
+what it does to the direction, and it was doing something else to the
+speed on top.
+
+The sum is taken back to the speed it came in at now, in all three
+places the field is computed — the CPU kernel, the WGSL, and the map's
+live preview, which invariant 3 requires to agree. A sum of nothing keeps
+nothing: a full convergence against an exactly outward flow cancels it,
+and scaling a vector of no length back up would be inventing a direction
+it does not have.
+
+**The existing test encoded the bug**, asserting the hypotenuse to two
+decimal places, which is why nothing caught it. It now asserts the speed
+is unchanged and adds a half-strength case, so the amount is pinned as a
+bearing control and nothing else.
+
 ### M53 — The eyedropper takes what the pointer is over
 
 **The report (14):** the eyedropper should select from the first visible

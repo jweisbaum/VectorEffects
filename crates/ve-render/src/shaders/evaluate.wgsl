@@ -550,7 +550,16 @@ fn modified_vector(object: Object, position: vec2<f32>, beneath: vec2<f32>) -> v
             origin = to_global(object, q);
         }
         let radial = initial_bearing(origin, position);
-        return beneath + uv_from(speed * object.mod_a * weight, radial);
+        let sum = beneath + uv_from(speed * object.mod_a * weight, radial);
+        // Back to the speed it had (M54): a divergence bends the flow, it does
+        // not drive it. The CPU's arm, decision for decision — including the
+        // sum of nothing, which keeps nothing rather than acquiring a
+        // direction it does not have.
+        let magnitude = length(sum);
+        if (magnitude <= 1e-9) {
+            return sum;
+        }
+        return sum * (speed / magnitude);
     }
     if (object.mod_kind == 3u) {
         let theta = object.mod_a * DEG;
