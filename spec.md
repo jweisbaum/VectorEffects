@@ -1718,19 +1718,28 @@ screen-space proxy of the kernels' answer, the way every preview is (§7.9):
 a twist has none, and a push is previewed as a clone of the field under the
 start.
 
-**A preview that takes the field away takes one layer's, not the stack's**
-(M40). The map draws the composite of every visible layer as a single tile,
-so a remove applied to it took the layers *above* the one being erased as
-well: a stroke on a lower layer blanked everything over it until the button
-came up, and then the release put it all back. What fills the hole now is
-the same frame with that one layer left out — the field the map would draw
-if the layer were not there, which is exactly what the erase leaves behind.
-Where a layer above covers the stroke, nothing changes, which is what
-erasing underneath it does. It is addressed as an ordinary frame of tiles
-and warmed while the eraser is merely in hand, so the stroke does not wait
-for it. The modifiers are not scoped this way: they change the field in
-place rather than taking it away, and two stacks blended by a mask cannot
-express that.
+**Every live preview acts on the layer being edited and no other** (M40,
+M44). The map draws the composite of every visible layer as a single tile,
+so a preview applied to that tile applied to all of them at once: a stroke
+on a lower layer changed everything above it until the button came up, and
+then the release put it back.
+
+What scopes it is the same frame with that one layer left out. Where the two
+tiles differ, the edited layer is what the composite is showing at that pixel
+and the gesture belongs; where they are equal, the layer contributes nothing
+visible there and the gesture must not either. That also settles what a
+modifier applies *to*: wherever the gesture belongs, the composite's value is
+the edited layer's value, so the modifier acts on the tile as it stands. An
+eraser or a mask fills the hole from the frame beneath, which is what taking
+that layer away leaves. The glyphs are scoped the same way, or a modifier
+would turn arrows belonging to layers it does not touch.
+
+It is addressed as an ordinary frame of tiles and warmed while a
+field-editing tool is merely in hand, so the stroke does not wait for it;
+until it lands the preview acts unscoped, which is a smaller wrong than
+acting nowhere. **The liquify is the exception**: it displaces a field
+already rendered to a texture rather than reading tiles, so it has nothing
+to compare against and is still previewed over the whole stack.
 
 A swathe of field is therefore intensified
 or turned in one gesture, and **two strokes of one modifier with identical

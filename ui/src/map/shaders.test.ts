@@ -183,6 +183,55 @@ describe("uniforms declared in both stages of a program", () => {
   });
 });
 
+describe("scoping a live edit to one layer (M44)", () => {
+  /**
+   * An edit acts on one layer, but a tile is the whole visible stack in one
+   * texel. A program that applies an operator without the means to tell which
+   * pixels belong to the edited layer applies it to every layer at once —
+   * which is what a stroke on a lower layer used to do, changing the layers
+   * above it until the button came up.
+   *
+   * So: whatever applies an operator must also be able to scope it. Stated as
+   * a property of the sources rather than of one program, because the way
+   * this comes back is a *new* program that reads `uOpKind` and stops there.
+   */
+  it("gives every program that applies an operator the tile to compare against", () => {
+    for (const [name, sources] of Object.entries(PROGRAMS)) {
+      const uniforms = sources.flatMap((source) => [...declared(source)]);
+      if (!uniforms.includes("uOpKind")) continue;
+      // The smear program is the exception, and a known one: it displaces a
+      // field already rendered to a texture rather than reading tiles, so it
+      // has nothing to compare. Recorded in plan.md as not done.
+      if (name === "smear") continue;
+      expect(uniforms, `${name} applies an operator`).toContain("uBelow");
+      expect(uniforms, `${name} applies an operator`).toContain("uEditScoped");
+    }
+  });
+
+  /**
+   * And the gate has to be *used*. Declaring the uniforms and then applying
+   * the operator unconditionally would pass the check above and change
+   * nothing on screen.
+   */
+  it("guards the raster's operator on it", () => {
+    expect(RASTER_FRAG).toMatch(/bool mine = editedHere\(/);
+    expect(RASTER_FRAG, "the modifier").toMatch(/if \(mine && uOpKind >= 3\)/);
+    expect(RASTER_FRAG, "the mask and the eraser").toMatch(/mine \? maskFactor\(\) : 1\.0/);
+  });
+
+  it("guards the glyphs on it too", () => {
+    // A glyph outside the edited layer keeps its direction and its opacity:
+    // no coverage for a modifier to act on, and no fade from a mask.
+    expect(GLYPH_VERT).toMatch(/uEditScoped == 1 && word == texelWordFrom\(uBelow, texel\)/);
+    expect(GLYPH_VERT).toMatch(/if \(mine && uOpKind >= 3\)|covered = 0\.0;/);
+  });
+
+  /** Unbound, the pass falls back to acting everywhere rather than nowhere. */
+  it("acts unscoped when no comparison tile is bound", () => {
+    expect(RASTER_FRAG).toMatch(/if \(uEditScoped == 0\) return true;/);
+  });
+});
+
 describe("the renderer's uniform lookups", () => {
   /**
    * Every uniform the shader declares should be one the renderer knows how to
@@ -200,6 +249,7 @@ describe("the renderer's uniform lookups", () => {
       "uField",
       "uTileGeo", "uTile", "uSpeedScale", "uRampWind", "uRampCurrent", "uDim",
       "uRampStopsWind", "uRampStopsCurrent", "uRampCountWind", "uRampCountCurrent",
+      "uBelow", "uEditScoped",
       "uGlyphOrigin", "uGlyphStep", "uGrid", "uSpacing",
       "uSizeScaleArrow", "uSizeScaleBarb", "uColor", "uPixelRatio",
     ]);

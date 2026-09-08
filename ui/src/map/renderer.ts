@@ -46,6 +46,13 @@ export const SPEED_SCALE_MPS = 100.0;
  * its own rather than a bind between draws.
  */
 const MASK_UNIT = 1;
+/**
+ * Texture unit the tile-without-the-edited-layer is bound to (M44).
+ *
+ * Its own unit for the same reason the mask has one: it is read alongside the
+ * tile on unit 0 in the same pass, so the two cannot share.
+ */
+const BELOW_UNIT = 2;
 /** Vertices per glyph instance; see the glyph vertex shader. */
 const GLYPH_VERTICES = 54;
 
@@ -322,6 +329,7 @@ export class MapRenderer {
       // An array's location is asked for by its first element, which is what
       // `getUniformLocation` accepts; `uniform3fv` then writes the whole run.
       "uRampStopsWind[0]", "uRampStopsCurrent[0]", "uRampCountWind", "uRampCountCurrent",
+      "uBelow", "uEditScoped",
     ]);
     this.imageUniforms = uniforms(gl, this.imageProgram, [
       ...shared, "uPlaceLon", "uPlaceLat", "uImage", "uOpacity",
@@ -329,6 +337,7 @@ export class MapRenderer {
     this.glyphUniforms = uniforms(gl, this.glyphProgram, [
       ...shared, ...mask, "uTileGeo", "uGlyphOrigin", "uGlyphStep", "uGrid", "uSpacing",
       "uTile", "uSpeedScale", "uSizeScaleArrow", "uSizeScaleBarb", "uColor", "uPixelRatio",
+      "uBelow", "uEditScoped",
     ]);
 
     for (const lod of basemap.lods) {
@@ -576,6 +585,7 @@ export class MapRenderer {
     tiles: readonly VisibleTile[],
     stage: OpStage,
     frame?: string,
+    scope?: string,
   ): void {
     const gl = this.gl;
     gl.useProgram(this.rasterProgram);
@@ -590,13 +600,15 @@ export class MapRenderer {
     );
     this.setGradients(state);
     this.setOperator(this.rasterUniforms, state.view, state.operator ?? null, stage);
-    gl.activeTexture(gl.TEXTURE0);
+    gl.uniform1i(this.rasterUniforms.uBelow ?? null, BELOW_UNIT);
 
     for (const tile of tiles) {
       const shown = this.textureFor(state, tile, frame);
       if (!shown.texture) continue;
       const { texture, held } = shown;
       this.noteRange(shown.frame, tile);
+      this.bindScope(this.rasterUniforms, scope, tile);
+      gl.activeTexture(gl.TEXTURE0);
       const b = tileBounds(tile.z, tile.x, tile.y);
       this.setShared(this.rasterUniforms, camera, state.view, tile.lonOffset);
       gl.uniform1f(this.rasterUniforms.uDim ?? null, held ? HELD_DIM : 1.0);
@@ -607,6 +619,29 @@ export class MapRenderer {
       gl.bindTexture(gl.TEXTURE_2D, texture);
       gl.drawArrays(gl.TRIANGLES, 0, 6);
     }
+  }
+
+  /**
+   * Binds the tile-without-the-edited-layer for this tile, and says whether
+   * it is there (M44).
+   *
+   * A live edit acts on one layer, but a tile is the whole visible stack in
+   * one texel, so the shader needs something to compare against to know which
+   * pixels the edited layer is what you are looking at. That is this frame:
+   * the same tile with that layer left out.
+   *
+   * Unbound — no scope asked for, or its tile not resident yet — the pass
+   * falls back to the unscoped behaviour rather than to nothing. Drawing the
+   * gesture over every layer for a frame or two is a smaller wrong than
+   * drawing it over none.
+   */
+  private bindScope(u: Uniforms, scope: string | undefined, tile: VisibleTile): void {
+    const gl = this.gl;
+    const texture = scope ? this.tiles.peek(scope, tile.z, tile.x, tile.y) : null;
+    gl.uniform1i(u.uEditScoped ?? null, texture ? 1 : 0);
+    if (!texture) return;
+    gl.activeTexture(gl.TEXTURE0 + BELOW_UNIT);
+    gl.bindTexture(gl.TEXTURE_2D, texture);
   }
 
   /**
@@ -744,6 +779,7 @@ export class MapRenderer {
     tiles: readonly VisibleTile[],
     stage: OpStage,
     frame?: string,
+    scope?: string,
   ): void {
     const gl = this.gl;
     // Spacing is resolved to a whole-degree lattice step so the grid is
@@ -767,7 +803,7 @@ export class MapRenderer {
     gl.uniform1f(this.glyphUniforms.uPixelRatio ?? null, state.pixelRatio);
     gl.uniform4f(this.glyphUniforms.uColor ?? null, ...GLYPH);
     this.setOperator(this.glyphUniforms, state.view, state.operator ?? null, stage);
-    gl.activeTexture(gl.TEXTURE0);
+    gl.uniform1i(this.glyphUniforms.uBelow ?? null, BELOW_UNIT);
 
     const projection = projectionFor(camera);
     const centreY = projection.yOf(camera.centerLat);
@@ -775,6 +811,8 @@ export class MapRenderer {
     for (const tile of tiles) {
       const { texture } = this.textureFor(state, tile, frame);
       if (!texture) continue;
+      this.bindScope(this.glyphUniforms, scope, tile);
+      gl.activeTexture(gl.TEXTURE0);
       const b = tileBounds(tile.z, tile.x, tile.y);
       const originX =
         (b.west + tile.lonOffset - camera.centerLon) * camera.pxPerDeg + state.view.width / 2;
@@ -921,13 +959,16 @@ export class MapRenderer {
     // --- Speed raster ---
     // The basemap is never masked: a mask takes away the field, not the
     // coastline underneath it.
-    this.drawRaster(state, state.camera, tiles, stage);
+    // The main pass carries the scope, so every operator — a remove, a
+    // modifier, a clone's hole — applies only where the pixel is showing the
+    // layer being edited (M44).
+    this.drawRaster(state, state.camera, tiles, stage, undefined, below ?? undefined);
     // What the erase leaves behind, drawn into the hole the remove opened
     // (M40). An eraser takes one layer away and the mask acts on the whole
     // composite, so without this a stroke on a lower layer blanked every
-    // layer above it until the button came up. Only for `remove`: a modifier
-    // changes the field in place rather than taking it away, and blending
-    // two stacks would not express that.
+    // layer above it until the button came up. Unscoped, because where the
+    // edited layer is not on top the two frames hold the same texel and
+    // drawing one over the other changes nothing.
     if (stage === "remove" && below) this.drawRaster(state, state.camera, tiles, "keep", below);
     if (source) this.drawRaster(state, source, sourceTiles, "keep");
     if (smearing && this.fieldTarget) {
@@ -971,7 +1012,14 @@ export class MapRenderer {
     // A liquify's glyphs read the field from where it was moved from, so
     // they are the apply stage rather than the remove one.
     if (state.showGlyphs) {
-      this.drawGlyphs(state, state.camera, tiles, smearing ? "apply" : stage);
+      this.drawGlyphs(
+        state,
+        state.camera,
+        tiles,
+        smearing ? "apply" : stage,
+        undefined,
+        below ?? undefined,
+      );
       if (stage === "remove" && below) {
         this.drawGlyphs(state, state.camera, tiles, "keep", below);
       }

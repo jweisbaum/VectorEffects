@@ -1027,7 +1027,19 @@ export default function MapView({
 
   /** The active tool's description, or null while a non-drawing tool is chosen. */
   const schemaTool: Tool | null = drawsObjects(tool) ? tool : null;
+  /**
+   * Whether the tool in hand edits the field that is already there, rather
+   * than adding one of its own (spec.md 6.2). Those are the tools whose live
+   * preview has to be scoped to the layer being edited (M44), so it is what
+   * decides whether the map fetches the frame to compare against.
+   *
+   * Read off the tool's declared preview kind, so a tool added later is
+   * covered by having declared what it is rather than by being listed here.
+   * The eraser has no schema of its own and is named.
+   */
+  const editsFieldRef = useRef(false);
   const schema = palette.find((entry) => entry.tool === schemaTool) ?? null;
+  editsFieldRef.current = tool === ERASE || (schema !== null && schema.preview !== "field");
 
   /**
    * What the active tool is set to.
@@ -1286,14 +1298,18 @@ export default function MapView({
       // The gesture's own operation while it is being drawn, and the one it
       // committed while its tiles are still on their way.
       operator: operatorRef.current ?? heldOperator(settling.current),
-      // What the erase leaves behind (M40). Named whenever the eraser has a
-      // layer in hand rather than only while the button is down, so the
-      // frame is warmed in the pause before the first stroke rather than
-      // during it. A tile the layer does not reach hashes the same with the
-      // layer left out as with it, so those are already resident and only
-      // the tiles the layer actually covers are rendered.
+      // The stack without the layer being edited (M40, M44). It is what the
+      // erase leaves behind, and it is also what tells every other live edit
+      // which pixels belong to the layer it is aimed at.
+      //
+      // Named whenever a field-editing tool has a layer in hand rather than
+      // only while the button is down, so the frame is warmed in the pause
+      // before the first stroke rather than during it. A tile the layer does
+      // not reach hashes the same with the layer left out as with it, so
+      // those are already resident and only the tiles the layer covers are
+      // rendered.
       belowFrame:
-        toolRef.current === ERASE && activeLayerRef.current !== null
+        editsFieldRef.current && activeLayerRef.current !== null
           ? beneathOf(stepRef.current, activeLayerRef.current)
           : null,
       // Georeferenced images, above the land and below the field (M18). The

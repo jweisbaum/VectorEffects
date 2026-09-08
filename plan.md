@@ -3008,6 +3008,43 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M44 — Every live edit acts on one layer
+
+**The report (1 of the list of 2026-09-08):** every edit tool showed its
+effect on the layers beneath the selected one while the mouse was down,
+and corrected itself on release.
+
+M40 fixed this for the eraser and the mask by filling the hole from the
+stack without the edited layer. The modifiers were left, and were noted
+as not done, because "blend two stacks by a mask" does not express what a
+modifier does. That framing was the mistake. The two frames do not have
+to be *blended* — they only have to be *compared*.
+
+Where the tile and the tile-without-the-layer hold a different word, the
+edited layer is what the composite is showing at that pixel; where they
+hold the same word, it contributes nothing visible there. So one test
+scopes every operator at once, and it settles what a modifier applies to
+as well: wherever the gesture belongs, the composite's value *is* the
+edited layer's value, so the modifier acts on the tile as it stands.
+
+`editedHere` is that test, in the raster shader and again in the glyph
+vertex shader — a modifier that turned arrows belonging to other layers
+would be the same bug wearing a different hat. The comparison tile rides
+on a texture unit of its own beside the mask, and the map now names the
+frame whenever *any* field-editing tool is in hand rather than only the
+eraser, read off the tool's declared `PreviewKind` so a tool added later
+is covered by having said what it is.
+
+Unbound — the tile not resident yet — the pass acts unscoped. Drawing the
+gesture over every layer for a frame is a smaller wrong than drawing it
+over none, and the frame is warmed while the tool is merely in hand.
+
+**Not done: the liquify.** It renders the field to a texture and displaces
+that, rather than reading tiles, so it has no second tile to compare
+against. Scoping it needs the smear pass to carry the comparison through
+the intermediate texture, which is a change to how that pass works rather
+than a use of what is already there.
+
 ### M43 — Panels that do not overlap, and a gradient renamed
 
 **The overlap.** The right sidebar is a flex column and each panel is one

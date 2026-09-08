@@ -266,6 +266,37 @@ float opCoverage() { return opCoverageAt(gl_FragCoord.xy); }
 float maskFactor() { return maskFactorAt(gl_FragCoord.xy); }
 `;
 
+/**
+ * Whether the pixel shows the layer the gesture is editing (M44).
+ *
+ * An edit acts on one layer, but a tile is the whole visible stack
+ * composited into one texel, so a preview applied to the tile applied to
+ * every layer at once: a stroke on a lower layer visibly changed the layers
+ * above it until the button came up, and then the commit put them back.
+ *
+ * The test is the tile against the same tile with the edited layer left out
+ * (spec.md 6.2). Where the two words differ, that layer is what the composite
+ * is showing here and the gesture belongs; where they are equal, the layer
+ * contributes nothing visible and the gesture must not either. Which also
+ * means the composite's value *is* that layer's value wherever the gesture
+ * applies, so a modifier can be applied to the tile as it stands.
+ *
+ * The nearest texel rather than the blend: a word is not a quantity to
+ * interpolate, and the answer is only ever wrong within half a texel of an
+ * edge, which is far below a pixel at the zooms a tile is drawn at.
+ *
+ * Expects the program to declare `uTile`, `uBelow` and `uEditScoped`, and to
+ * include the texel block first.
+ */
+const EDIT_SCOPE = `
+bool editedHere(vec2 uv) {
+  if (uEditScoped == 0) return true;
+  vec2 size = vec2(textureSize(uTile, 0));
+  ivec2 at = ivec2(clamp(floor(uv * size), vec2(0.0), size - 1.0));
+  return texelWordFrom(uTile, at) != texelWordFrom(uBelow, at);
+}
+`;
+
 export const RASTER_VERT = `#version 300 es
 precision highp float;
 in vec2 aCorner;            // 0..1 across the tile
@@ -293,10 +324,11 @@ void main() {
  * "uSpeedScale" first.
  */
 const TEXEL = `
-uint texelWord(ivec2 texel) {
-  uvec4 b = uvec4(texelFetch(uTile, texel, 0) * 255.0 + 0.5);
+uint texelWordFrom(highp sampler2D tex, ivec2 texel) {
+  uvec4 b = uvec4(texelFetch(tex, texel, 0) * 255.0 + 0.5);
   return b.r | (b.g << 8u) | (b.b << 16u) | (b.a << 24u);
 }
+uint texelWord(ivec2 texel) { return texelWordFrom(uTile, texel); }
 float wordSpeed(uint w) { return float(w & 16383u) / 16383.0 * uSpeedScale; }
 float wordAzimuth(uint w) { return float((w >> 14u) & 4095u) / 4096.0 * 360.0; }
 float wordCoverage(uint w) { return float((w >> 26u) & 31u) / 31.0; }
@@ -338,9 +370,14 @@ uniform vec3 uRampStopsCurrent[${RAMP_MAX_STOPS}];
 uniform highp int uRampCountWind;
 uniform highp int uRampCountCurrent;
 uniform float uDim;         // 1.0 normally, lower while a frame is stale
+// The same tile with the layer being edited left out, and whether it is
+// bound (M44). What scopes a live edit to one layer.
+uniform sampler2D uBelow;
+uniform highp int uEditScoped;
 ${OPERATOR}
 ${OPERATOR_FRAG}
 ${TEXEL}
+${EDIT_SCOPE}
 out vec4 fragColor;
 
 // The decoded speed, coverage and kind at the four texels about a point,
@@ -410,9 +447,13 @@ vec2 tileUV() {
 }
 
 void main() {
-  Field field = sampleField(tileUV());
+  vec2 uv = tileUV();
+  Field field = sampleField(uv);
+  // Only where the pixel is showing the layer being edited (M44). Elsewhere
+  // the gesture is over a layer it does not touch, and the map must not move.
+  bool mine = editedHere(uv);
   // A modifier in progress changes the speed here, live (M32).
-  if (uOpKind >= 3) opApply(gl_FragCoord.xy, opCoverage(), field.speed, field.azimuth);
+  if (mine && uOpKind >= 3) opApply(gl_FragCoord.xy, opCoverage(), field.speed, field.azimuth);
   // Each kind on its own scale: wind and current are an order of magnitude
   // apart, and the cell says which it is (M31).
   vec2 rampEnds = field.wind ? uRampWind : uRampCurrent;
@@ -421,7 +462,7 @@ void main() {
   // any other written cell, and only where nothing wrote does the map show
   // through (M31, D58). A feathered edge fades with its coverage.
   float alpha = field.coverage * ${FIELD_OPACITY.toFixed(2)};
-  fragColor = vec4(colour * uDim, alpha * maskFactor());
+  fragColor = vec4(colour * uDim, alpha * (mine ? maskFactor() : 1.0));
 }
 `;
 
@@ -447,6 +488,11 @@ uniform float uGlyphStep;   // lattice spacing, degrees
 uniform vec2 uGrid;         // columns, rows
 uniform float uSpacing;     // lattice spacing, screen px (step * pxPerDeg)
 uniform sampler2D uTile;
+// The same tile without the layer being edited, and whether it is bound
+// (M44): a glyph belonging to another layer must not turn under a modifier
+// aimed at this one.
+uniform sampler2D uBelow;
+uniform highp int uEditScoped;
 uniform float uSpeedScale;
 uniform float uSizeScaleArrow; // glyph length as a fraction of spacing, by style
 uniform float uSizeScaleBarb;
@@ -506,6 +552,14 @@ void main() {
   ivec2 size = textureSize(uTile, 0);
   ivec2 texel = clamp(ivec2(uv * vec2(size)), ivec2(0), size - 1);
   uint word = texelWord(texel);
+  // Whether this glyph belongs to the layer being edited (M44). Read at the
+  // station's own texel, which is the one the glyph is drawn from. A glyph
+  // that is not the edited layer's is left exactly as it was: neither turned
+  // by a modifier nor faded by a mask.
+  if (uEditScoped == 1 && word == texelWordFrom(uBelow, texel)) {
+    covered = 0.0;
+    vFade = 1.0;
+  }
   // Nothing wrote here: no glyph, whatever the calm beneath would draw as.
   if (wordCoverage(word) <= 0.0) {
     gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
