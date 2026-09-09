@@ -408,6 +408,21 @@ pub struct RasterErasure {
     /// A square stamp rather than a disc.
     #[serde(default)]
     pub square: bool,
+    /// Whether the stamp is a circle on the *map* rather than on the ground
+    /// (spec.md 3.5, M67).
+    ///
+    /// The eraser's own stamp space, which its size in px or km chooses, the
+    /// same as any painted stamp's. It is kept here rather than taken from
+    /// what is beneath because there is nothing beneath to take it from: an
+    /// imported layer is a lattice, not an object, and has no frame of its
+    /// own for the stamp to live in.
+    ///
+    /// A `bool` and not an enum because `ve-core` has none — `Space` lives in
+    /// `ve-render`, which depends on this crate and not the other way round —
+    /// and because `square` beside it makes the same choice the same way.
+    /// Defaulting to false is what every erasure written before M67 meant.
+    #[serde(default)]
+    pub projected: bool,
     /// Edge falloff, 0 to 1, as a fraction of the radius.
     #[serde(default)]
     pub feather: f32,

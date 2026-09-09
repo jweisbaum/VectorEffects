@@ -54,7 +54,6 @@ import {
   buildStrokePath,
   footprintOfOutline,
   extendStrokePath,
-  kmFromPixels,
   footprintHead,
   footprintRadii,
   freshSweptPath,
@@ -130,7 +129,9 @@ import {
   SELECT,
   positionOf,
   previewField,
+  eraserStamp,
   sampled,
+  spaceFor,
   type ToolState,
 } from "./tools";
 import {
@@ -3023,16 +3024,18 @@ export default function MapView({
         drag?.points ?? (at ? [[at.lon, at.lat]] : []);
       const first = points[0];
       if (first !== undefined) {
-        const radiusKm =
-          drag?.radiusKm ??
-          (brush.unit === "px" ? kmFromPixels(camera, first[1], brush.size) : brush.size) / 2;
+        // px chooses a space here as it does on every other tool (M67): a
+        // circle on the map, not a ground circle that flattens going north.
+        const { radiusKm: fresh, space } = eraserStamp(brush, camera, first[1]);
+        // Frozen at the press once a stroke is under way, as every px size is.
+        const radiusKm = drag?.radiusKm ?? fresh;
         context.save();
         // The nib: one stamp, whose outline is its own silhouette and so may
         // be stroked. At the pointer while it is over the map, and at the
         // head of the stroke otherwise.
         const nib = at ?? { lon: first[0], lat: first[1] };
         const stamp = new Path2D();
-        addFootprint(stamp, camera, view, nib.lon, nib.lat, radiusKm, brush.shape, "geodesic");
+        addFootprint(stamp, camera, view, nib.lon, nib.lat, radiusKm, brush.shape, space);
         context.strokeStyle = "rgba(255, 110, 190, 0.95)";
         context.lineWidth = Math.max(1, dpr);
         context.setLineDash([5 * dpr, 4 * dpr]);
@@ -3379,7 +3382,7 @@ export default function MapView({
       drag.points,
       drag.radiusKm,
       eraserRef.current.shape,
-      "geodesic",
+      spaceFor(eraserRef.current.unit),
     );
     context.fillStyle = "#fff";
     context.fill(path);
@@ -3701,12 +3704,10 @@ export default function MapView({
     if (tool === ERASE) {
       const geo = unproject(cameraRef.current, viewRef.current, point);
       const brush = eraserRef.current;
-      const diameterKm =
-        brush.unit === "px" ? kmFromPixels(cameraRef.current, geo.lat, brush.size) : brush.size;
       eraseDrag.current = {
         points: [[geo.lon, geo.lat]],
         step: event.shiftKey ? stepRef.current : null,
-        radiusKm: diameterKm / 2,
+        radiusKm: eraserStamp(brush, cameraRef.current, geo.lat).radiusKm,
       };
       if (refreshEraser()) requestDraw();
       requestOverlay();
@@ -4687,7 +4688,7 @@ export default function MapView({
               points: drag.points,
               radiusKm: drag.radiusKm,
               shape: brush.shape,
-              space: "geodesic",
+              space: spaceFor(brush.unit),
             },
             paint: "transparent",
             knots: 0,
@@ -4706,6 +4707,7 @@ export default function MapView({
           points: drag.points,
           radius_km: drag.radiusKm,
           square: brush.shape === "square",
+          space: spaceFor(brush.unit),
           feather: brush.feather,
           step: drag.step,
           at_step: stepRef.current,
@@ -5457,7 +5459,7 @@ export default function MapView({
                   setEraser({ ...eraser, unit: e.target.value === "px" ? "px" : "km" });
                   releaseFocus(e);
                 }}
-                title="A size in pixels is the same size on screen at any latitude; it becomes kilometres where the stroke begins."
+                title="px cuts a stamp on the map — the same size on screen at any latitude; km cuts one on the ground. The choice is made where the stroke begins and holds for the whole stroke."
               >
                 <option value="km">km</option>
                 <option value="px">px</option>

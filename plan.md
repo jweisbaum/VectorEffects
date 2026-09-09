@@ -3009,6 +3009,54 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M67 — The eraser's px chooses a space, as every other tool's does
+
+**The report:** the eraser brush and the paint brush distort
+geographically when px is selected, and shouldn't.
+
+Measured first. An 80 px stamp, as actually drawn:
+
+```
+equirectangular     0°        30°       45°       60°       70°
+  brush  px      80x80     80x80     80x80     80x80     80x80
+  eraser px      80x80     80x69     80x57     80x40     80x27
+```
+
+**The eraser had no stamp space at all.** `EraseStroke` carried no such
+field, every one of its footprints — the nib, the live removal, the held
+preview — said `"geodesic"` outright, and its size went through
+`kmFromPixels` with the space left to default. So px was a bare unit
+conversion, which spec 3.5 says in as many words that the unit is not,
+and the nib flattened towards the pole like the ground circle it secretly
+was.
+
+It carries one now, from the same `spaceFor(unit)` every other tool uses.
+`eraserStamp` in `tools.ts` is where the rule lives, because the eraser
+has no schema — it makes no object for one to describe — so the thing
+`frozenOptions` does for every other tool was being written out three
+times in the map view, and three copies is how the nib and the stroke
+come to disagree.
+
+`RasterErasure` gained the space too: an imported layer is a lattice and
+has no frame of its own for the stamp to live in, so without it a px
+eraser cut a hole `1/cos(lat)` too wide over a GRIB layer. `raster_erased`
+builds its frame in the stamp's space. The GPU declines any scene holding
+an erasure, so there is no shader to keep in step.
+
+**Not done, and it cannot be:** an erasure on a *painted* object is kept
+in that object's frame, so that it travels with the object. Where the
+eraser's space and the object's differ, the stamp takes the right height
+and the object's own width — an erasure carries one radius in one frame,
+and a circle in one space is not a circle in the other. Matched cases (px
+over px, km over km) are exact, and they are the common ones.
+
+**The brush was not touched.** Its px is exact under equirectangular and
+stretches under Mercator, because `Space::Projected` is a circle in degree
+space and Mercator is conformal — so which space looks undistorted depends
+on the projection, and no fixed choice is right for both. Put to the user
+as a decision, since spec 3.5 states flatly that px selects `projected`;
+the answer was to keep the rule and fix the eraser to match it.
+
 ### M66 — A selection box starts from any press over the grid
 
 **The report (20.3):** click and drag for multi-keyframe selection.

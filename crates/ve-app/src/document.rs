@@ -14,6 +14,7 @@ use ve_core::value::PropKind;
 use ve_core::{LonLat, PropValue};
 
 use crate::commands::AppState;
+use crate::edit::StampSpace;
 use crate::error::{AppError, Result};
 use crate::projects::{ProjectSummary, with_session};
 
@@ -1135,11 +1136,20 @@ pub fn objects_remove(state: &AppState, objects: &[u64]) -> Result<ProjectSummar
 pub struct EraseStroke {
     /// Pointer positions as `[lon, lat]`, in the order they were drawn.
     pub points: Vec<[f64; 2]>,
-    /// The stamp's radius on the ground, in kilometres. A size in pixels
-    /// has already become kilometres at the latitude the stroke began.
+    /// The stamp's radius in kilometres, **measured north-south**, as every
+    /// size is (spec.md 3.5). A size in pixels has already become kilometres
+    /// at the latitude the stroke began, in the space below.
     pub radius_km: f64,
     /// A square stamp rather than a disc.
     pub square: bool,
+    /// Which space the stamp is a circle in (M67).
+    ///
+    /// The eraser is a brush that takes away, so its size chooses a space the
+    /// way a brush's does: px a circle on the map, km one on the ground. It
+    /// had none, which made px a bare unit conversion — the one thing
+    /// spec.md 3.5 says the unit is not.
+    #[serde(default)]
+    pub space: StampSpace,
     /// Edge falloff, 0 to 1.
     pub feather: f32,
     /// The one step to erase from, or every step.
@@ -1195,6 +1205,8 @@ pub fn stroke_erase(state: &AppState, stroke: EraseStroke) -> Result<ProjectSumm
         });
     }
     let feather = stroke.feather.clamp(0.0, 1.0);
+    // The eraser's own space, which its px/km choice made (M67).
+    let projected = stroke.space == StampSpace::Projected;
 
     /// Whether anything of the object is left: its footprint, sampled on a
     /// lattice over its bounding radius, has no point the erasures leave
@@ -1259,6 +1271,7 @@ pub fn stroke_erase(state: &AppState, stroke: EraseStroke) -> Result<ProjectSumm
                     chains: vec![points.clone()],
                     radius_m,
                     square: stroke.square,
+                    projected,
                     feather,
                     step: stroke.step,
                 });
@@ -1268,10 +1281,11 @@ pub fn stroke_erase(state: &AppState, stroke: EraseStroke) -> Result<ProjectSumm
                     after,
                 });
             } else if !matches!(layer.source, LayerSource::Image { .. }) {
-                let on_ground = FlatRasterErasure {
+                let stamp = FlatRasterErasure {
                     chains: vec![points.clone()],
                     radius_m,
                     square: stroke.square,
+                    projected,
                     feather: f64::from(feather),
                 };
                 for (index, object) in layer.objects.iter().enumerate() {
@@ -1307,7 +1321,7 @@ pub fn stroke_erase(state: &AppState, stroke: EraseStroke) -> Result<ProjectSumm
                                                 * M_PER_DEGREE,
                                         ];
                                         let here = flat.frame.to_global(local);
-                                        if raster_erased(std::slice::from_ref(&on_ground), here)
+                                        if raster_erased(std::slice::from_ref(&stamp), here)
                                             && !uv[0].is_nan()
                                         {
                                             *uv = UNDEFINED;

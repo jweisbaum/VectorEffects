@@ -1716,6 +1716,23 @@ mod tests {
         };
         project.layers[0].objects.push(circle);
 
+        // A layer's own erasures reach the file as well: an imported field's
+        // are the only ones with no object to hang on (M29), and the space
+        // one is cut in is part of what it is (M67).
+        project.layers[0]
+            .erased
+            .push(crate::document::RasterErasure {
+                chains: vec![vec![LonLat {
+                    lon: HOSTILE[2],
+                    lat: 45.123_456_789_012_34,
+                }]],
+                radius_m: HOSTILE[1],
+                square: false,
+                projected: true,
+                feather: 0.75,
+                step: None,
+            });
+
         // One cycle canonicalises; every later cycle must be a fixed point.
         let first = to_canonical_json(&project).unwrap();
         let once = from_json(&first).unwrap();
@@ -1725,6 +1742,12 @@ mod tests {
 
         assert_eq!(second, third, "json drifted on a second round trip");
         assert_eq!(once, twice, "document drifted on a second round trip");
+        // Named rather than left to the comparison above: a field that
+        // defaulted back to false would still round-trip as a fixed point.
+        assert!(
+            once.layers[0].erased[0].projected,
+            "the erasure's space did not survive the file"
+        );
     }
 
     #[test]

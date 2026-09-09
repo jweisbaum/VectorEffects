@@ -248,6 +248,31 @@ export function spaceFor(unit: SizeUnit): StampSpace {
 }
 
 /**
+ * The stamp an eraser stroke cuts, from the eraser's own options (M67).
+ *
+ * The eraser has no schema — it makes no object for one to describe — so the
+ * rule every other tool gets from `frozenOptions` has to be written once here
+ * instead of three times over in the map view: the nib, the live removal and
+ * the stroke that is sent all have to be the same stamp, or the preview shows
+ * one shape and the field loses another.
+ *
+ * **px chooses a space, exactly as it does everywhere else** (spec.md 3.5).
+ * Without that the eraser's px was a bare unit conversion — the one thing the
+ * unit is not — and its nib flattened towards the pole like the ground circle
+ * it secretly was.
+ */
+export function eraserStamp(
+  brush: { size: number; unit: SizeUnit },
+  camera: Camera,
+  lat: number,
+): { radiusKm: number; space: StampSpace } {
+  const space = spaceFor(brush.unit);
+  const diameterKm =
+    brush.unit === "px" ? kmFromPixels(camera, lat, brush.size, space) : brush.size;
+  return { radiusKm: diameterKm / 2, space };
+}
+
+/**
  * A size option in kilometres, resolved against where the gesture is.
  *
  * A number entered in px is a number of pixels *now*, at *this* latitude, and

@@ -527,6 +527,7 @@ fn the_eraser_sets_a_patch_undefined_where_it_falls() {
             points: vec![[100.0, 0.0]],
             radius_km: 200.0,
             square: false,
+            space: edit::StampSpace::Geodesic,
             feather: 0.0,
             step: None,
             at_step: 0,

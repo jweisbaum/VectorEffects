@@ -10,7 +10,7 @@ use ve_core::project::FieldKind;
 use ve_core::vector::{Uv, uv_from_speed_azimuth};
 use ve_core::{LonLat, geo};
 
-use crate::aeqd::{Frame, Local, M_PER_DEGREE};
+use crate::aeqd::{Frame, Local, M_PER_DEGREE, Space};
 use crate::error::Result;
 use crate::evaluator::{FieldEvaluator, Sample, SamplePoint};
 use crate::scene::{
@@ -218,16 +218,28 @@ pub fn erased_factor(erased: &[crate::scene::FlatErasure], local: Local) -> f64 
     })
 }
 
-/// Whether a raster erasure covers a position: the stroke measured on the
-/// ground in a frame at its first point, which for a stamp of a few
-/// hundred kilometres is the same answer to the metre. A feathered rim
-/// reads as undefined from halfway out, since a lattice node is or is not.
+/// Whether a raster erasure covers a position: the stroke measured in a frame
+/// at its first point, which for a stamp of a few hundred kilometres is the
+/// same answer to the metre. A feathered rim reads as undefined from halfway
+/// out, since a lattice node is or is not.
+///
+/// **In the stamp's own space** (M67). The eraser's size in px or km chooses
+/// it exactly as a painted stamp's does: a projected stamp is a circle on the
+/// map and a geodesic one a circle on the ground, and reading a projected
+/// erasure in a ground frame took a stamp `1/cos(lat)` too wide — a px eraser
+/// over an imported field cut a wider hole the further north it was used,
+/// which is the very distortion px exists to avoid.
 pub fn raster_erased(erased: &[crate::scene::FlatRasterErasure], position: LonLat) -> bool {
     erased.iter().any(|erasure| {
         let Some(origin) = erasure.chains.iter().flatten().next().copied() else {
             return false;
         };
-        let frame = Frame::new(origin, 0.0, 100.0);
+        let space = if erasure.projected {
+            Space::Projected
+        } else {
+            Space::Geodesic
+        };
+        let frame = Frame::in_space(origin, 0.0, 100.0, space);
         let chains: Vec<Vec<Local>> = erasure
             .chains
             .iter()
@@ -775,6 +787,72 @@ fn smear_source_position(object: &FlatObject, position: LonLat) -> LonLat {
         }
     }
     object.frame.to_global(moved)
+}
+
+#[cfg(test)]
+mod erasure_tests {
+    use super::*;
+    use crate::scene::FlatRasterErasure;
+    use ve_core::angle::Angle;
+
+    /// A one-stamp erasure over an imported layer, in one space or the other.
+    fn stamp(at: LonLat, radius_m: f64, projected: bool) -> FlatRasterErasure {
+        FlatRasterErasure {
+            chains: vec![vec![at]],
+            radius_m,
+            square: false,
+            projected,
+            feather: 0.0,
+        }
+    }
+
+    /// The report (M67): a px eraser cut a wider hole the further north it was
+    /// used, because a projected stamp was read in a ground frame.
+    ///
+    /// The two spaces are told apart by what a metre east is worth. A ground
+    /// stamp reaches the same distance in every direction. A map stamp reaches
+    /// the same number of *degrees*, so at 60N — where a degree of longitude is
+    /// half a degree of latitude on the ground — it reaches half as far east as
+    /// north. Asserted as that ratio, on the globe, rather than against a
+    /// second copy of the frame's arithmetic.
+    #[test]
+    fn a_raster_erasure_is_cut_in_the_space_its_unit_chose() {
+        let at = LonLat::new(0.0, 60.0).expect("a real place");
+        let reach = 100_000.0;
+        let away = |bearing: f64, metres: f64| at.destination(Angle::new(bearing), metres);
+
+        let ground = [stamp(at, reach, false)];
+        assert!(raster_erased(&ground, away(0.0, 90_000.0)), "north");
+        assert!(raster_erased(&ground, away(90.0, 90_000.0)), "east");
+        assert!(!raster_erased(&ground, away(90.0, 110_000.0)), "past it");
+
+        // The same stamp on the map: as far north, half as far east.
+        let map = [stamp(at, reach, true)];
+        assert!(raster_erased(&map, away(0.0, 90_000.0)), "north");
+        assert!(raster_erased(&map, away(90.0, 40_000.0)), "east, inside");
+        assert!(
+            !raster_erased(&map, away(90.0, 90_000.0)),
+            "a map stamp reached as far east as a ground one"
+        );
+    }
+
+    /// And at the equator the two are the same stamp, which is the check that
+    /// the difference above is the cosine and not a transposition.
+    #[test]
+    fn the_two_spaces_agree_on_the_equator() {
+        let at = LonLat::new(0.0, 0.0).expect("a real place");
+        let away = |bearing: f64, metres: f64| at.destination(Angle::new(bearing), metres);
+        for bearing in [0.0, 90.0, 180.0, 270.0] {
+            for metres in [40_000.0, 90_000.0, 110_000.0] {
+                let position = away(bearing, metres);
+                assert_eq!(
+                    raster_erased(&[stamp(at, 100_000.0, true)], position),
+                    raster_erased(&[stamp(at, 100_000.0, false)], position),
+                    "{bearing} at {metres} m"
+                );
+            }
+        }
+    }
 }
 
 #[cfg(test)]

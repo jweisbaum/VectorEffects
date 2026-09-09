@@ -2605,7 +2605,23 @@ selected does not turn every stroke into a region.
 **The eraser** (M28, reworked M29) is a brush that takes away. It has the
 brush's options — size in km or px, disc or square, feather — and makes
 **no object**: nothing in the panel, the timeline or the file lists what it
-did, only the part of each thing that is no longer there. A drag erases what
+did, only the part of each thing that is no longer there.
+
+**Its size chooses a stamp space, as every other tool's does** (§3.5, M67).
+It had none until M67, which made px a bare unit conversion — the one thing
+the unit is not — and the nib flattened towards the pole like the ground
+circle it secretly was. px is a circle on the map now, km one on the ground,
+and the nib, the live removal and the stroke that is written are all that same
+stamp.
+
+The **stamp is measured north-south**, as every size is, and an *erasure* is
+kept in the frame of the thing it cuts, so where the two spaces differ the
+east-west reach is the frame's and not the eraser's. Erasing a px-painted
+object with a px eraser is exact, and so is km over km; a px eraser over a
+km-drawn object takes a stamp of the right height and the object's own width,
+because an erasure carries one radius in one frame and a circle in one space
+is not a circle in the other. An imported layer has no frame of its own, so
+its erasure carries the eraser's space and is exact either way. A drag erases what
 the brush covers in the **active layer**, from every frame; with **`Shift`**
 held it erases from the current frame alone. What it does depends on what is
 under it:

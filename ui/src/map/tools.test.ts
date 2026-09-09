@@ -11,13 +11,14 @@ import { describe, expect, it } from "vitest";
 import type { ToolOptionSpec } from "../generated/ToolOptionSpec";
 import type { ToolSchema } from "../generated/ToolSchema";
 import type { Camera } from "./camera";
-import { KM_PER_DEGREE } from "./footprint";
+import { footprintRadii, KM_PER_DEGREE } from "./footprint";
 import { OP_POINTS } from "./renderer";
 import {
   choiceOf,
   cloneSourceCamera,
   convertSizes,
   defaultState,
+  eraserStamp,
   extentOf,
   flattenPath,
   footprintOf,
@@ -275,6 +276,42 @@ describe("offersUnit", () => {
     for (const shape of [0, 1, 2, 3]) {
       expect(offersUnit(shapeFill, source(shape))).toBe(true);
     }
+  });
+});
+
+describe("the eraser's stamp", () => {
+  /**
+   * The report (M67): the eraser's px distorted going north. It had no stamp
+   * space at all — every one of its footprints said "geodesic" and its size
+   * converted through `cos(lat)` — so px was a bare unit conversion, which is
+   * the one thing spec 3.5 says the unit is not.
+   *
+   * Checked in the pixels it actually draws, not in the kilometres it stores:
+   * a stamp asked for in pixels has to *be* that many pixels, both ways,
+   * wherever it is used.
+   */
+  it("draws the pixels it was asked for, at every latitude", () => {
+    for (const lat of [0, 30, 45, 60, 70, -55]) {
+      const { radiusKm, space } = eraserStamp({ size: 80, unit: "px" }, camera, lat);
+      const { rx, ry } = footprintRadii(camera, lat, radiusKm, space);
+      expect(rx * 2, `${lat} wide`).toBeCloseTo(80, 6);
+      expect(ry * 2, `${lat} tall`).toBeCloseTo(80, 6);
+    }
+  });
+
+  /** And km is still a ground size: the same kilometres wherever it is used. */
+  it("keeps a size in km on the ground", () => {
+    for (const lat of [0, 45, 70]) {
+      const { radiusKm, space } = eraserStamp({ size: 600, unit: "km" }, camera, lat);
+      expect(radiusKm).toBe(300);
+      expect(space).toBe("geodesic");
+    }
+  });
+
+  /** The unit is the space, here as everywhere else. */
+  it("takes its space from its unit", () => {
+    expect(eraserStamp({ size: 80, unit: "px" }, camera, 40).space).toBe("projected");
+    expect(eraserStamp({ size: 80, unit: "km" }, camera, 40).space).toBe("geodesic");
   });
 });
 

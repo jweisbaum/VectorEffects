@@ -279,10 +279,13 @@ pub struct FlatErasure {
 pub struct FlatRasterErasure {
     /// The stroke's centreline on the globe.
     pub chains: Vec<Vec<LonLat>>,
-    /// The stamp's radius on the ground.
+    /// The stamp's radius, measured north-south, as every size is.
     pub radius_m: f64,
     /// A square stamp rather than a disc.
     pub square: bool,
+    /// Whether the stamp is a circle on the map rather than on the ground
+    /// (spec.md 3.5, M67).
+    pub projected: bool,
     /// Edge falloff, 0 to 1.
     pub feather: f64,
 }
@@ -1172,6 +1175,7 @@ fn flatten_where(project: &Project, step: u32, wanted: impl Fn(&Layer) -> bool) 
                         chains: erasure.chains.clone(),
                         radius_m: erasure.radius_m,
                         square: erasure.square,
+                        projected: erasure.projected,
                         feather: f64::from(erasure.feather).clamp(0.0, 1.0),
                     })
                     .collect(),

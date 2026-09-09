@@ -474,6 +474,7 @@ mod tests {
             chains: vec![vec![LonLat::new(lon, lat).expect("valid")]],
             radius_m: 100_000.0,
             square: false,
+            projected: false,
             feather: 0.5,
         };
         let mut raster = raster_of(-11.0, 50.0, &[5.0, 9.0], None);
