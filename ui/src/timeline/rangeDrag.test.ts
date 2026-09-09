@@ -3,13 +3,20 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { commitRangeDrag, committedRange, draggedRange, type RangeGrab } from "./rangeDrag";
+import {
+  commitRangeDrag,
+  committedRange,
+  draggedRange,
+  type RangeGrab,
+  unchanged,
+} from "./rangeDrag";
 
 const grab = (over: Partial<RangeGrab> = {}): RangeGrab => ({
   object: 7,
   grip: "whole",
   other: 4,
   offset: 0,
+  from: [0, 4],
   ...over,
 });
 
@@ -45,6 +52,21 @@ describe("dragging a lifetime window", () => {
     const held = grab({ other: 4, offset: 3 });
     expect(draggedRange(held, 12, 23).step).toBe(9);
     expect(draggedRange(held, 5, 23).step).toBe(2);
+  });
+
+  /**
+   * A nudge that stays inside the step it began in asks for the window it
+   * already had, and writing that would put an entry in the history that
+   * undoes nothing.
+   */
+  it("knows when a drag is asking for the window it already had", () => {
+    const held = grab({ other: 4, offset: 2, from: [6, 10] });
+    expect(unchanged(held, draggedRange(held, 8, 23))).toBe(true);
+    expect(unchanged(held, draggedRange(held, 9, 23))).toBe(false);
+
+    const end = grab({ grip: "end", other: 6, from: [6, 12] });
+    expect(unchanged(end, draggedRange(end, 12, 23))).toBe(true);
+    expect(unchanged(end, draggedRange(end, 13, 23))).toBe(false);
   });
 
   /** A window as long as the timeline has nowhere to go. */

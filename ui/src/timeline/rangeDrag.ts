@@ -26,6 +26,8 @@ export interface RangeGrab {
   other: number;
   /** For `whole`: how far into the window the pointer took hold, in steps. */
   offset: number;
+  /** The window as it stood when it was taken hold of, inclusive. */
+  from: readonly [number, number];
 }
 
 /**
@@ -52,6 +54,18 @@ export function committedRange(grab: RangeGrab, drag: RangeDrag): [number, numbe
   if (grab.grip === "whole") return [drag.step, drag.step + grab.other];
   const [a, b] = grab.grip === "start" ? [drag.step, grab.other] : [grab.other, drag.step];
   return [Math.min(a, b), Math.max(a, b)];
+}
+
+/**
+ * Whether a finished drag is asking for the window it already had.
+ *
+ * A pointer that moved a few pixels without leaving the step it started in
+ * lands back where it began. Writing that would put an entry in the history
+ * that undoes nothing — the same guard the property writes carry.
+ */
+export function unchanged(grab: RangeGrab, drag: RangeDrag): boolean {
+  const [start, end] = committedRange(grab, drag);
+  return start === grab.from[0] && end === grab.from[1];
 }
 
 /**

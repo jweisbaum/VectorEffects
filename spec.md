@@ -2985,7 +2985,9 @@ the window to nothing on the way. It holds the step it was grabbed by under
 the pointer, rather than centring itself on the press, and it stops at the ends
 of the timeline instead of sliding off and coming back shorter. Pressing the
 bar and releasing without moving **selects the object**, the way clicking its
-name does. The cursor says which of the two is under the pointer before
+name does — as does a nudge that never leaves the step it began in, which asks
+for the window it already had and must not put an entry in the history that
+undoes nothing. The cursor says which of the two is under the pointer before
 anything is pressed: `grab` on the body, `ew-resize` on the ends.
 
 **A GRIB layer's row marks the steps its file has a message for** (§4.8). A step

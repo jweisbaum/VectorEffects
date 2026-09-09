@@ -50,6 +50,7 @@ import {
   draggedRange,
   type RangeDrag,
   type RangeGrab,
+  unchanged,
 } from "./rangeDrag";
 import {
   classify,
@@ -865,6 +866,13 @@ export default function Timeline({
         onSelect([range.object]);
         return;
       }
+      if (unchanged(range, rangeDrag)) {
+        // A nudge that never left the step it began in: the same as a click,
+        // and no entry in the history that undoes nothing.
+        setRangeDrag(null);
+        onSelect([range.object]);
+        return;
+      }
       const [start, end] = committedRange(range, rangeDrag);
       setError(null);
       // The preview stands until the document has caught up. Clearing it here
@@ -1367,6 +1375,7 @@ export default function Timeline({
                             object: object.id,
                             grip: "whole",
                             other: span,
+                            from: [object.start_step, object.end_step],
                             // Where in the window it was grabbed, so it does
                             // not jump to centre itself under the pointer.
                             offset: Math.min(
@@ -1387,6 +1396,7 @@ export default function Timeline({
                               grip: "start",
                               other: object.end_step,
                               offset: 0,
+                              from: [object.start_step, object.end_step],
                             })
                           }
                         />
@@ -1398,6 +1408,7 @@ export default function Timeline({
                               grip: "end",
                               other: object.start_step,
                               offset: 0,
+                              from: [object.start_step, object.end_step],
                             })
                           }
                         />

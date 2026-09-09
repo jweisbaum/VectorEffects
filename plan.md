@@ -3116,6 +3116,12 @@ The cursor says which grip is under the pointer before anything is
 pressed — `grab` on the body, `ew-resize` on the ends — since the two do
 different things to the same bar and nothing else would distinguish them.
 
+A drag that lands back where it started writes nothing. The whole bar
+being grabbable makes that easy to do by accident — a few pixels inside
+one step — and the write path has no no-op guard of its own, so it would
+have left an undo entry that undoes nothing. It counts as a click and
+selects the object instead.
+
 ### M62 — A drag's preview stands until the document catches up
 
 **The report (20.5):** when a lifetime window's end is moved, it flashes
