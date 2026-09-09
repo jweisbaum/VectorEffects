@@ -3009,6 +3009,33 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M57 — A freehand polygon is drawn in a space too
+
+**The report (12):** the shape fill needs a px option for custom polygon
+shapes.
+
+It had none. `stamp_space` was hidden in polygon mode on the grounds
+that a polygon has no size to measure — its vertices are clicked out one
+by one — and the unit is the stamp-space control, so hiding one hid the
+other.
+
+That reasoning treated the unit as a unit. It is not: px and km choose
+**which plane the shape is in**. A polygon in map space has edges that
+stay straight on the chart at any latitude; one on the ground bends with
+the projection and stays over the sea it was drawn around. At 60N a
+lon/lat square is half as wide as it is tall on the ground and square on
+the map — the same shape read two ways, and both are shapes people draw.
+
+So the dependency is gone and the unit is offered in all four modes. No
+other code changed: `ring_geometry` already went through `frame_at`, and
+the option bar already sent the space whether or not it was shown. The
+test asserts the ratio the two spaces differ by rather than a second copy
+of the frame's arithmetic.
+
+The rule that a frozen property may be hidden by another frozen one is
+kept with no case left under it, so that the next one has to be argued
+for rather than added.
+
 ### M56 — A preset shape is dragged out between two points on its edge
 
 **The report (15):** the shape fill's circle and rectangle should leave

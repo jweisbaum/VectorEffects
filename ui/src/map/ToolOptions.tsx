@@ -109,9 +109,10 @@ function ToolOptions({
 
       {/*
         A tool that measures but types no number: the shape fill, whose presets
-        are dragged out on the map. The unit is still the question of whether
-        what was dragged is a shape on the ground or one on the map (spec.md
-        3.5), so it is asked here rather than nowhere.
+        are dragged out on the map and whose polygon is clicked out vertex by
+        vertex. The unit is still the question of whether what was drawn is a
+        shape on the ground or one on the map (spec.md 3.5), so it is asked
+        here rather than nowhere.
       */}
       {/*
         The eyedropper: take the speed and direction from the field itself.
@@ -137,14 +138,14 @@ function ToolOptions({
 
       {unitIsLive && firstSize === undefined && (
         <label>
-          Size in
+          Shape in
           <select
             value={state.unit}
             onChange={(e) => {
               setUnit(unitOf(e.target.value));
               releaseFocus(e);
             }}
-            title={UNIT_TITLE}
+            title={DRAWN_UNIT_TITLE}
           >
             <option value="km">km (on the ground)</option>
             <option value="px">px (on the map)</option>
@@ -170,6 +171,18 @@ const UNIT_TITLE =
   "A size in pixels paints a shape on the map — the same size on screen at any latitude. " +
   "It resolves to kilometres when the object is created and never changes afterwards. " +
   "One unit for the whole tool, because the space it selects is one property of the object.";
+
+/**
+ * The same question, for a tool whose shape is drawn rather than typed.
+ *
+ * The shape fill has no number to attach a unit to: its presets are dragged out
+ * and its polygon is clicked out vertex by vertex. What the control still
+ * chooses is the plane the shape lives in — on the chart or on the sea (M57).
+ */
+const DRAWN_UNIT_TITLE =
+  "px draws the shape on the map: straight edges stay straight on the chart, at any latitude. " +
+  "km draws it on the ground, so it keeps its real proportions and bends with the projection. " +
+  "Fixed when the object is created and never changes afterwards.";
 
 function Option({
   spec,

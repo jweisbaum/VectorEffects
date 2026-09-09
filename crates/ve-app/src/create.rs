@@ -1107,6 +1107,51 @@ mod tests {
         assert!(x.abs() < 1.0 && y.abs() < 1.0, "corners are not balanced");
     }
 
+    /// A freehand polygon is defined in a space like every other shape (M57).
+    ///
+    /// The two are told apart by what a degree of longitude is worth: on the
+    /// ground it is `cos(lat)` of a degree of latitude, so a lon/lat square at
+    /// 60N is half as wide as it is tall; on the map the two are equal, which
+    /// is what "the shape on the chart" means. Checked as that ratio rather
+    /// than against a second copy of the frame's arithmetic.
+    #[test]
+    fn a_polygon_is_drawn_in_the_space_the_unit_chose() {
+        let ring = Gesture::Ring {
+            points: vec![[-2.0, 58.0], [2.0, 58.0], [2.0, 62.0], [-2.0, 62.0]],
+        };
+
+        let extent = |space: u8| {
+            let mut props = PropertyMap::for_tool(ToolKind::ShapeFill);
+            props
+                .get_mut(PropId::ShapeSource)
+                .expect("present")
+                .set_base(PropValue::Enum(0));
+            props
+                .get_mut(PropId::StampSpace)
+                .expect("present")
+                .set_base(PropValue::Enum(space));
+            let (_, geometry, _) = geometry_of(ToolKind::ShapeFill, &ring, &props).expect("a ring");
+            let Geometry::Polygon { points } = geometry else {
+                panic!("a ring makes a polygon");
+            };
+            let width = points.iter().fold(0.0_f64, |most, p| most.max(p.x.abs()));
+            let height = points.iter().fold(0.0_f64, |most, p| most.max(p.y.abs()));
+            width / height
+        };
+
+        // Map space, where a degree east and a degree north are the same
+        // length by definition.
+        assert!((extent(1) - 1.0).abs() < 0.01, "{}", extent(1));
+        // Ground space, where a degree east is `cos(lat)` of a degree north —
+        // so the ratio is the cosine of the latitude the widest corners sit
+        // at, which is 58N and 62N rather than the anchor's 60.
+        let ratio = extent(0);
+        assert!(
+            ratio > 63.0_f64.to_radians().cos() && ratio < 57.0_f64.to_radians().cos(),
+            "{ratio}"
+        );
+    }
+
     #[test]
     fn a_polygon_needs_three_vertices() {
         let props = PropertyMap::for_tool(ToolKind::ShapeFill);

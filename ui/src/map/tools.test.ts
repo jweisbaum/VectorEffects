@@ -65,9 +65,10 @@ const shapeFill: ToolSchema = {
     on: "ShapeSource",
     gestures: ["ring", "extent", "extent", "extent"],
   },
-  // Presets are measured; a freehand polygon is not, so the unit is inert for
-  // it — the same rule `stamp_space` carries, which the unit stands in for.
-  sizing: { depends_on: [{ on: "ShapeSource", live_for: [1, 2, 3] }] },
+  // Every shape it draws is drawn in a space, the freehand polygon included
+  // (M57), so the unit is live in all four modes — the same rule
+  // `stamp_space` carries, which the unit stands in for.
+  sizing: { depends_on: [] },
   eyedropper: null,
   options: [
     option({
@@ -265,15 +266,14 @@ describe("offersUnit", () => {
   });
 
   /**
-   * A freehand polygon places its vertices geographically, one by one, so it
-   * has no size — and no unit to measure one in. The presets do, so the same
-   * tool offers the unit in three of its four modes.
+   * The shape fill offers it in all four of its modes, the freehand polygon
+   * included (M57): the space is the plane the shape is drawn in, not only a
+   * unit for a typed number, and a polygon has a plane like anything else.
    */
   it("follows the same rule the space it selects follows", () => {
     const source = (index: number) => ({ ShapeSource: { kind: "choice" as const, index } });
-    expect(offersUnit(shapeFill, source(0))).toBe(false);
-    for (const preset of [1, 2, 3]) {
-      expect(offersUnit(shapeFill, source(preset))).toBe(true);
+    for (const shape of [0, 1, 2, 3]) {
+      expect(offersUnit(shapeFill, source(shape))).toBe(true);
     }
   });
 });

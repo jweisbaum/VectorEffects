@@ -718,14 +718,15 @@ mod tests {
 
     /// The unit stands in for `stamp_space`, so it must be live in exactly the
     /// modes the property is read in. The shape fill is the case that matters:
-    /// a freehand polygon has no size, so it must not be offered a unit.
+    /// every one of its four shapes is defined in a space, the freehand
+    /// polygon included (M57), so the unit is offered in all four.
     #[test]
     fn the_unit_is_live_exactly_where_the_stamp_space_is() {
         let fill = palette()
             .into_iter()
             .find(|d| d.tool == Tool::ShapeFill)
             .expect("the shape fill is in the palette");
-        let sizing = fill.sizing.expect("the shape fill measures its presets");
+        let sizing = fill.sizing.expect("the shape fill measures its shapes");
 
         let live_for = |index: u8| {
             sizing
@@ -734,12 +735,8 @@ mod tests {
                 .all(|rule| rule.live_for.contains(&index))
         };
         // Shape source 0 is the freehand polygon; 1 to 3 are the presets.
-        assert!(
-            !live_for(0),
-            "a polygon was offered a unit it has no size for"
-        );
-        for preset in 1..=3 {
-            assert!(live_for(preset), "preset {preset} was not offered a unit");
+        for source in 0..=3 {
+            assert!(live_for(source), "shape {source} was not offered a unit");
         }
     }
 }

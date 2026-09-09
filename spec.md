@@ -256,12 +256,14 @@ one that did nothing, since it is the unit the gesture freezes. So the bar shows
 them is the whole of the rule.
 
 It follows that a tool has a unit exactly when it has a `stamp_space`, and that
-the unit inherits that property's dependencies: the shape fill's freehand
-polygon places its vertices geographically one by one, so it has no size, and
-is offered no unit to measure one in. A tool whose sizes are *dragged out*
-rather than typed — the shape fill's presets — still has the unit, because a
-drag is still a measurement and is still made either on the ground or on the
-map; it simply has no number beside it.
+the unit inherits that property's dependencies. A tool whose sizes are *drawn*
+rather than typed — the shape fill, whose presets are dragged out and whose
+polygon is clicked out vertex by vertex — still has the unit, because the
+question the unit asks is not only "what number is this". It is **which plane
+the shape is in**: on the chart, where its edges stay straight at any latitude,
+or on the ground, where they bend with the projection and stay over the sea
+they were drawn around. A polygon has that as much as a rectangle does, so it
+is offered the unit too (M57). It simply has no number beside it.
 
 **A projected object's local frame is map space, not AEQD** (§7.2). That is the
 one exception to the frame rule, and it is a definitional one rather than a
@@ -1624,7 +1626,7 @@ carries an optional radius to say which of the two a given disc is.
 | Option | Type | Notes |
 |---|---|---|
 | `shape_source` | enum `Polygon` \| `Square` \| `Rectangle` \| `Circle` | **Fixed at creation**: it decides which geometry the object *is*. |
-| `stamp_space` | enum `Geodesic` \| `Projected` | **Fixed at creation**, and set by the tool's unit rather than by a control of its own. Applies to the dragged-out presets: px gives a shape that keeps its proportions on the map, km one that keeps them on the ground. The presets type no number, so the unit stands alone — a drag is still a measurement. A freehand polygon has no size at all, its vertices being placed geographically one by one, so the question does not arise, the property is inert for it, and the unit is not offered (§6.1). |
+| `stamp_space` | enum `Geodesic` \| `Projected` | **Fixed at creation**, and set by the tool's unit rather than by a control of its own. px gives a shape that keeps its proportions on the map, km one that keeps them on the ground. Read in all four modes, the freehand polygon included (M57): the space is the plane the shape is drawn in, which a ring of clicked vertices has as much as a dragged-out rectangle. Nothing here types a number, so the unit stands alone, labelled "Shape in" (§3.5). |
 | `vector_mode` | enum `Constant` \| `Gradient` | |
 | `speed` | f32 | `Constant`. |
 | `speed_start`, `speed_end` | f32 | `Gradient`. |

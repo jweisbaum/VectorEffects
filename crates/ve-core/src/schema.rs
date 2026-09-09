@@ -809,9 +809,9 @@ const SHAPE_FILL: &[PropSpec] = &[
     // stamp is: a polygon's vertices and a dragged-out rectangle's extents are
     // not convertible into one another.
     frozen(choice(PropId::ShapeSource, "Shape", 0, SHAPE_SOURCES)),
-    // Applies to the presets, which have a size dragged out on the map. A
-    // freehand polygon's vertices are placed geographically one by one, so
-    // there is no size for a space to interpret and `DEPENDENCIES` hides it.
+    // Read in every mode, presets and freehand polygon alike (M57): the space
+    // is the plane the shape is defined in, which a polygon has as much as a
+    // dragged-out rectangle does.
     frozen(choice(PropId::StampSpace, "Stamp space", 0, STAMP_SPACES)),
     choice(PropId::VectorMode, "Vector mode", 0, VECTOR_MODES),
     num(PropId::Speed, "Speed", 10.0, 0.0, 120.0, Unit::Speed),
@@ -1007,9 +1007,13 @@ const SHAPE_FILL_DEPENDENCIES: &[Dependency] = &[
     // ...and inside the constant branch, the same rule the brush has.
     dep(PropId::Direction, PropId::DirectionMode, &[0]),
     dep(PropId::Target, PropId::DirectionMode, &[1, 2]),
-    // Shape source 0 is the freehand polygon, whose vertices are placed
-    // geographically one at a time. It has no size, so no space to size it in.
-    dep(PropId::StampSpace, PropId::ShapeSource, &[1, 2, 3]),
+    // No rule on `stamp_space`. A freehand polygon was hidden from it until
+    // M57, on the grounds that it has no size to measure — but the space is
+    // not only a unit for a number. It is which plane the shape is *in*: a
+    // polygon in map space has straight edges on the chart and keeps them
+    // there, and one on the ground bends across the projection and stays put
+    // over the sea it was drawn around. Both are shapes people draw, so the
+    // question arises for the polygon too and the unit is offered for it.
 ];
 
 /// The dependencies among `tool`'s properties.
@@ -1347,9 +1351,10 @@ mod tests {
 
     /// A creation-only property is set once and never edited, so a rule that
     /// hides it would hide a value nothing can change anyway — and, worse, one
-    /// that the tool's own option bar has to keep offering. The one exception
-    /// is a property whose *whole* meaning depends on what the object is: the
-    /// shape fill's stamp space, which a freehand polygon has no size for.
+    /// that the tool's own option bar has to keep offering. Nothing does this
+    /// now: the shape fill's stamp space was the one case, and M57 gave the
+    /// freehand polygon the space too. The rule is kept so that the next one
+    /// has to be argued for rather than added.
     #[test]
     fn a_hidden_creation_only_property_depends_on_another_creation_only_one() {
         for tool in ToolKind::ALL {
