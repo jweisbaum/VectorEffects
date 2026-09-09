@@ -3009,6 +3009,32 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M63 — A lifetime window slides as well as stretches
+
+**The report (20.6):** enablement windows should be clickable and
+drawable up and down the timeline.
+
+The bar had two grips, one at each end, and an inert body. Moving a
+window without changing its length meant two drags in the right order —
+drag the start past the old end first and the window shortens to nothing
+on the way — and "this object happens ten steps later" is one thought,
+not two.
+
+The body is a third grip now. It keeps the window's length, holds the
+step it was grabbed by under the pointer rather than centring itself on
+the press, and stops at the ends of the timeline instead of sliding off
+and coming back shorter. Pressed and released without moving, it selects
+the object, the way clicking its name does.
+
+The maths is `draggedRange`/`committedRange` in `rangeDrag.ts`, beside
+M62's ordering and tested the same way: the length is asserted as a
+*property* over a sweep of pointer positions including ones far off both
+ends, rather than against a second copy of the clamp.
+
+The cursor says which grip is under the pointer before anything is
+pressed — `grab` on the body, `ew-resize` on the ends — since the two do
+different things to the same bar and nothing else would distinguish them.
+
 ### M62 — A drag's preview stands until the document catches up
 
 **The report (20.5):** when a lifetime window's end is moved, it flashes

@@ -1,10 +1,58 @@
 /**
  * Dragging an object's lifetime window on the timeline (spec.md 9.4).
  *
- * The ordering, out of the component so it can be tested: the bug this exists
- * to prevent is a frame of the wrong thing on screen, which no type checker
- * sees and which is over before anyone can point at it.
+ * The maths and the ordering, out of the component so both can be tested: the
+ * bug this exists to prevent is a frame of the wrong thing on screen, which no
+ * type checker sees and which is over before anyone can point at it.
  */
+
+/** Which part of the window the pointer took hold of. */
+export type RangeGrip = "start" | "end" | "whole";
+
+/** A window being dragged, as the bar draws it. */
+export interface RangeDrag {
+  /** The object whose window it is. */
+  object: number;
+  grip: RangeGrip;
+  /** The step under the pointer, or — for `whole` — the window's new start. */
+  step: number;
+}
+
+/** What the drag needs to remember from the press. */
+export interface RangeGrab {
+  object: number;
+  grip: RangeGrip;
+  /** The end that is not moving; for `whole`, the window's length in steps. */
+  other: number;
+  /** For `whole`: how far into the window the pointer took hold, in steps. */
+  offset: number;
+}
+
+/**
+ * Where the window sits while the pointer is at `at`.
+ *
+ * An end grip follows the pointer and the window may turn inside out, which
+ * [`committedRange`] sorts out on release. The **whole** window keeps its
+ * length and slides: it holds the step the pointer took hold of under the
+ * pointer, so the bar does not jump to centre itself on the press, and it
+ * stops at the ends of the timeline rather than sliding off and coming back
+ * shorter (M63).
+ */
+export function draggedRange(grab: RangeGrab, at: number, last: number): RangeDrag {
+  if (grab.grip !== "whole") {
+    return { object: grab.object, grip: grab.grip, step: at };
+  }
+  const span = grab.other;
+  const start = Math.min(Math.max(at - grab.offset, 0), Math.max(0, last - span));
+  return { object: grab.object, grip: "whole", step: start };
+}
+
+/** The window a finished drag asks for, as an inclusive `[start, end]`. */
+export function committedRange(grab: RangeGrab, drag: RangeDrag): [number, number] {
+  if (grab.grip === "whole") return [drag.step, drag.step + grab.other];
+  const [a, b] = grab.grip === "start" ? [drag.step, grab.other] : [grab.other, drag.step];
+  return [Math.min(a, b), Math.max(a, b)];
+}
 
 /**
  * Commits a drag, holding the preview until the document has caught up (M62).

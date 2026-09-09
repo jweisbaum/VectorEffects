@@ -1436,6 +1436,8 @@ body {
 }
 .tl-object-name { cursor: pointer; overflow: hidden; text-overflow: ellipsis; }
 /* The lifetime bar (spec.md 9.2): objects have one, layers do not. */
+/* The lifetime window. The body slides it, the ends resize it (M63), so the
+   cursor says which is under the pointer before anything is pressed. */
 .tl-range {
   position: absolute;
   top: 5px;
@@ -1443,7 +1445,9 @@ body {
   background: rgba(111, 217, 255, 0.28);
   border: 1px solid rgba(111, 217, 255, 0.6);
   border-radius: 3px;
+  cursor: grab;
 }
+.tl-range:active { cursor: grabbing; }
 .tl-range-end {
   position: absolute;
   top: -1px;

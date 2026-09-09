@@ -2978,6 +2978,16 @@ Each object row shows a bar spanning its `active_range`, draggable at either end
 to change start and end. Layers have **no** bars — the range is an object-level
 concept per the requirements.
 
+**The body of the bar slides the whole window** (M63), keeping its length, so
+"this happens later" is one drag rather than two resizes that have to be done
+in the right order — dragging the start past the old end first would shorten
+the window to nothing on the way. It holds the step it was grabbed by under
+the pointer, rather than centring itself on the press, and it stops at the ends
+of the timeline instead of sliding off and coming back shorter. Pressing the
+bar and releasing without moving **selects the object**, the way clicking its
+name does. The cursor says which of the two is under the pointer before
+anything is pressed: `grab` on the body, `ew-resize` on the ends.
+
 **A GRIB layer's row marks the steps its file has a message for** (§4.8). A step
 the file says nothing about shows no imported field at all, so without this the
 user is left to infer which times a file covers from a field that appears and

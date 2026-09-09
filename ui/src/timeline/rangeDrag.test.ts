@@ -1,9 +1,59 @@
 /**
- * The lifetime window's drag: when the preview stands down.
+ * The lifetime window's drag: where it lands, and when the preview stands down.
  */
 import { describe, expect, it } from "vitest";
 
-import { commitRangeDrag } from "./rangeDrag";
+import { commitRangeDrag, committedRange, draggedRange, type RangeGrab } from "./rangeDrag";
+
+const grab = (over: Partial<RangeGrab> = {}): RangeGrab => ({
+  object: 7,
+  grip: "whole",
+  other: 4,
+  offset: 0,
+  ...over,
+});
+
+describe("dragging a lifetime window", () => {
+  /** An end follows the pointer, and may cross the other end. */
+  it("lets an end grip pass its partner and sorts it out on release", () => {
+    const held = grab({ grip: "start", other: 6 });
+    expect(draggedRange(held, 9, 23).step).toBe(9);
+    expect(committedRange(held, draggedRange(held, 9, 23))).toEqual([6, 9]);
+    expect(committedRange(held, draggedRange(held, 2, 23))).toEqual([2, 6]);
+  });
+
+  /**
+   * The whole window keeps its length. Checked as that property rather than
+   * against the arithmetic: whatever the pointer does, the window is exactly as
+   * long as it was.
+   */
+  it("keeps a whole window's length wherever it is dragged", () => {
+    const held = grab({ other: 4, offset: 2 });
+    for (const at of [-30, 0, 3, 11, 23, 200]) {
+      const [start, end] = committedRange(held, draggedRange(held, at, 23));
+      expect(end - start, `at ${at}`).toBe(4);
+      expect(start, `at ${at}`).toBeGreaterThanOrEqual(0);
+      expect(end, `at ${at}`).toBeLessThanOrEqual(23);
+    }
+  });
+
+  /**
+   * And it holds the step it was grabbed by under the pointer, so the bar does
+   * not leap sideways the moment it is picked up.
+   */
+  it("keeps the grabbed step under the pointer", () => {
+    const held = grab({ other: 4, offset: 3 });
+    expect(draggedRange(held, 12, 23).step).toBe(9);
+    expect(draggedRange(held, 5, 23).step).toBe(2);
+  });
+
+  /** A window as long as the timeline has nowhere to go. */
+  it("has nowhere to slide a window that fills the timeline", () => {
+    const held = grab({ other: 23, offset: 5 });
+    expect(draggedRange(held, 0, 23).step).toBe(0);
+    expect(draggedRange(held, 23, 23).step).toBe(0);
+  });
+});
 
 describe("committing a drag", () => {
   /**

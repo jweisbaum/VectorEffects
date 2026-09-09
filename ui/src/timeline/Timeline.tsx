@@ -43,7 +43,13 @@ import {
   polyline,
 } from "./graph";
 import { markKind, runBetween } from "./frames";
-import { commitRangeDrag } from "./rangeDrag";
+import {
+  commitRangeDrag,
+  committedRange,
+  draggedRange,
+  type RangeDrag,
+  type RangeGrab,
+} from "./rangeDrag";
 import {
   classify,
   draggedStep,
@@ -578,13 +584,15 @@ export default function Timeline({
   /** A key drag in progress: which keys, and how far, in steps. */
   const [keyDrag, setKeyDrag] = useState<{ ids: string[]; delta: number } | null>(null);
   const keyDragRef = useRef<{ ids: string[]; startX: number; delta: number } | null>(null);
-  /** A range-end drag in progress. */
-  const [rangeDrag, setRangeDrag] = useState<{
-    object: number;
-    end: "start" | "end";
-    step: number;
-  } | null>(null);
-  const rangeDragRef = useRef<{ object: number; end: "start" | "end"; other: number } | null>(null);
+  /**
+   * A lifetime-window drag in progress: an end, or the whole window (M62/M63).
+   *
+   * It outlives the pointer by a round trip. The preview is what the user is
+   * looking at, so it stands until the document has caught up rather than
+   * being cleared on release — see `commitRangeDrag`.
+   */
+  const [rangeDrag, setRangeDrag] = useState<RangeDrag | null>(null);
+  const rangeDragRef = useRef<RangeGrab | null>(null);
   /** A box selection in progress, in grid pixels. */
   const [box, setBox] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const boxRef = useRef<{ x0: number; y0: number } | null>(null);
@@ -783,8 +791,7 @@ export default function Timeline({
     }
     const range = rangeDragRef.current;
     if (range) {
-      const at = stepAt(gridX(event), pxPerStep, last);
-      setRangeDrag({ object: range.object, end: range.end, step: at });
+      setRangeDrag(draggedRange(range, stepAt(gridX(event), pxPerStep, last), last));
       return;
     }
     const start = boxRef.current;
@@ -846,19 +853,20 @@ export default function Timeline({
     const range = rangeDragRef.current;
     if (range) {
       rangeDragRef.current = null;
-      const at = rangeDrag?.step;
-      if (at === undefined) {
-        setRangeDrag(null);
+      if (!rangeDrag) {
+        // Pressed and released without moving: a click on the window, which
+        // selects the object and changes nothing (M63).
+        onSelect([range.object]);
         return;
       }
-      const [a, b] = range.end === "start" ? [at, range.other] : [range.other, at];
+      const [start, end] = committedRange(range, rangeDrag);
       setError(null);
       // The preview stands until the document has caught up. Clearing it here
       // and asking afterwards drew the window from the old numbers for the
       // length of the round trip: it snapped back to where it started and then
       // jumped to where it was dropped (M62).
       void commitRangeDrag(
-        () => api.setActiveRange(range.object, Math.min(a, b), Math.max(a, b)),
+        () => api.setActiveRange(range.object, start, end),
         onChanged,
         (why) => setError(String(why)),
         () => setRangeDrag(null),
@@ -1264,10 +1272,25 @@ export default function Timeline({
               const open = expanded.has(object.id);
               const entry = tracks.get(object.id);
               const drag = rangeDrag?.object === object.id ? rangeDrag : null;
-              const start = drag?.end === "start" ? drag.step : object.start_step;
-              const end = drag?.end === "end" ? drag.step : object.end_step;
+              const span = object.end_step - object.start_step;
+              const start =
+                drag?.grip === "start" || drag?.grip === "whole" ? drag.step : object.start_step;
+              const end =
+                drag?.grip === "end"
+                  ? drag.step
+                  : drag?.grip === "whole"
+                    ? drag.step + span
+                    : object.end_step;
               const lo = Math.min(start, end);
               const hi = Math.max(start, end);
+              // Every grip takes hold the same way: capture the pointer, note
+              // what is not moving, and let the move handler do the maths.
+              const takeHold = (event: React.PointerEvent, grab: RangeGrab) => {
+                event.stopPropagation();
+                (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
+                rangeDragRef.current = grab;
+                setRangeDrag(null);
+              };
               return (
                 <div key={object.id} className="tl-object">
                   <div
@@ -1302,41 +1325,53 @@ export default function Timeline({
                         (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
                       }}
                     >
-                      {/* The lifetime bar, draggable at either end (spec.md 9.2). */}
+                      {/* The lifetime bar: either end resizes it, and the
+                          body slides the whole window along the timeline
+                          without changing its length (spec.md 9.4, M63).
+                          Pressing it and letting go without moving selects
+                          the object, the way its name does. */}
                       <div
                         className="tl-range"
                         style={{ left: lo * pxPerStep, width: (hi - lo + 1) * pxPerStep }}
-                        title={`Active steps ${lo}–${hi}`}
+                        title={`Active steps ${lo}–${hi} — drag to move, drag an end to resize`}
+                        onPointerDown={(event) =>
+                          takeHold(event, {
+                            object: object.id,
+                            grip: "whole",
+                            other: span,
+                            // Where in the window it was grabbed, so it does
+                            // not jump to centre itself under the pointer.
+                            offset: Math.min(
+                              Math.max(
+                                stepAt(gridX(event), pxPerStep, last) - object.start_step,
+                                0,
+                              ),
+                              span,
+                            ),
+                          })
+                        }
                       >
                         <span
                           className="tl-range-end"
-                          onPointerDown={(event) => {
-                            event.stopPropagation();
-                            (event.currentTarget as HTMLElement).setPointerCapture?.(
-                              event.pointerId,
-                            );
-                            rangeDragRef.current = {
+                          onPointerDown={(event) =>
+                            takeHold(event, {
                               object: object.id,
-                              end: "start",
+                              grip: "start",
                               other: object.end_step,
-                            };
-                            setRangeDrag({ object: object.id, end: "start", step: object.start_step });
-                          }}
+                              offset: 0,
+                            })
+                          }
                         />
                         <span
                           className="tl-range-end right"
-                          onPointerDown={(event) => {
-                            event.stopPropagation();
-                            (event.currentTarget as HTMLElement).setPointerCapture?.(
-                              event.pointerId,
-                            );
-                            rangeDragRef.current = {
+                          onPointerDown={(event) =>
+                            takeHold(event, {
                               object: object.id,
-                              end: "end",
+                              grip: "end",
                               other: object.start_step,
-                            };
-                            setRangeDrag({ object: object.id, end: "end", step: object.end_step });
-                          }}
+                              offset: 0,
+                            })
+                          }
                         />
                       </div>
                     </div>
