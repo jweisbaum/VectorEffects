@@ -21,6 +21,8 @@ function recorder(): PathSink & { calls: string[] } {
   return {
     calls,
     moveTo: () => calls.push("moveTo"),
+    lineTo: () => calls.push("lineTo"),
+    closePath: () => calls.push("closePath"),
     ellipse: () => calls.push("ellipse"),
     rect: () => calls.push("rect"),
   };
@@ -104,6 +106,8 @@ describe("path construction", () => {
     const positions: Array<{ x: number; y: number }> = [];
     const sink: PathSink = {
       moveTo: (x, y) => positions.push({ x, y }),
+      lineTo: () => {},
+      closePath: () => {},
       ellipse: (x, y, rx) => positions.push({ x: x + rx, y }),
       rect: () => {},
     };
@@ -156,6 +160,8 @@ describe("stroke interpolation", () => {
     const longitudes: number[] = [];
     const sink: PathSink = {
       moveTo: () => {},
+      lineTo: () => {},
+      closePath: () => {},
       ellipse: () => {},
       rect: () => {},
     };
@@ -164,6 +170,8 @@ describe("stroke interpolation", () => {
     buildStrokePath(
       {
         moveTo: () => {},
+        lineTo: () => {},
+        closePath: () => {},
         ellipse: () => longitudes.push(0),
         rect: () => {},
       },
@@ -272,15 +280,62 @@ describe("pixel sizes in map space", () => {
 
 describe("square footprints", () => {
   /**
-   * `rect` opens its own subpath, so unlike `ellipse` it needs no `moveTo` —
-   * and adding one anyway would leave a stray point in the path.
+   * `rect` opens its own subpath, so unlike `ellipse` a lone stamp needs no
+   * `moveTo` — and adding one anyway would leave a stray point in the path.
    */
-  it("draws one rect per stamp and no moveTo", () => {
+  it("draws one rect and nothing else for a single stamp", () => {
+    const sink = recorder();
+    buildStrokePath(sink, camera, view, [[0, 0]], 300, "square");
+    expect(sink.calls).toEqual(["rect"]);
+  });
+
+  it("never reaches for an ellipse", () => {
     const sink = recorder();
     buildStrokePath(sink, camera, view, [[0, 0], [5, 5]], 300, "square");
-    expect(sink.calls).not.toContain("moveTo");
     expect(sink.calls).not.toContain("ellipse");
     expect(sink.calls.filter((c) => c === "rect").length).toBeGreaterThan(1);
+  });
+
+  /**
+   * The zig-zag (M58).
+   *
+   * A square stamp's union along a diagonal is a staircase: two axis-aligned
+   * squares a few pixels apart meet only near their corners, so the edge is
+   * serrated by the whole spacing rather than by the spacing squared. The
+   * field has never had that edge — `swept_square_distance` measures to the
+   * *segment* — so the preview was showing something the object was not.
+   *
+   * Checked against that definition rather than against the join's own
+   * arithmetic: the swept region between two stamps is the convex hull of the
+   * two squares, so every convex combination of a point in one and a point in
+   * the other has to be covered by something the path drew.
+   */
+  it("covers the whole region the stamp sweeps between two samples", () => {
+    const pieces = shapeRecorder();
+    buildStrokePath(pieces.sink, camera, view, [[0, 0], [6, 5]], 300, "square");
+
+    expect(pieces.rects.length).toBeGreaterThan(2);
+    let checked = 0;
+    let missedWithoutJoins = 0;
+    for (let i = 1; i < pieces.rects.length; i++) {
+      const a = pieces.rects[i - 1]!;
+      const b = pieces.rects[i]!;
+      for (const [ax, ay] of corners(a)) {
+        for (const [bx, by] of corners(b)) {
+          for (const s of [0.25, 0.5, 0.75]) {
+            const x = ax + (bx - ax) * s;
+            const y = ay + (by - ay) * s;
+            checked += 1;
+            expect(pieces.covers(x, y)).toBe(true);
+            if (!pieces.rects.some((r) => inRect(r, x, y))) missedWithoutJoins += 1;
+          }
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(100);
+    // And the join is doing the work: the stamps alone leave those points out,
+    // which is exactly the staircase that was on screen.
+    expect(missedWithoutJoins).toBeGreaterThan(0);
   });
 
   /** The square is the bounding box of the circle of the same size. */
@@ -288,6 +343,8 @@ describe("square footprints", () => {
     const boxes: Array<{ x: number; y: number; w: number; h: number }> = [];
     const sink: PathSink = {
       moveTo: () => {},
+      lineTo: () => {},
+      closePath: () => {},
       ellipse: () => {},
       rect: (x, y, w, h) => boxes.push({ x, y, w, h }),
     };
@@ -382,3 +439,78 @@ describe("footprintOfOutline", () => {
     ]);
   });
 });
+
+/** A rectangle as the sink reports it. */
+interface Box {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+function inRect(box: Box, x: number, y: number): boolean {
+  return (
+    x >= box.x - 1e-9 &&
+    x <= box.x + box.w + 1e-9 &&
+    y >= box.y - 1e-9 &&
+    y <= box.y + box.h + 1e-9
+  );
+}
+
+/** A box's four corners, pulled a hair inside so a shared edge is not the test. */
+function corners(box: Box): Array<[number, number]> {
+  const inset = 1e-6;
+  const x0 = box.x + inset;
+  const x1 = box.x + box.w - inset;
+  const y0 = box.y + inset;
+  const y1 = box.y + box.h - inset;
+  return [
+    [x0, y0],
+    [x1, y0],
+    [x1, y1],
+    [x0, y1],
+  ];
+}
+
+/** Whether a point is inside a ring, by crossing number. */
+function inPolygon(ring: ReadonlyArray<readonly [number, number]>, x: number, y: number): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i]!;
+    const [xj, yj] = ring[j]!;
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+/**
+ * A sink that keeps the shapes rather than the call names, so a test can ask
+ * what the path actually covers.
+ */
+function shapeRecorder(): {
+  sink: PathSink;
+  rects: Box[];
+  rings: Array<Array<[number, number]>>;
+  covers(x: number, y: number): boolean;
+} {
+  const rects: Box[] = [];
+  const rings: Array<Array<[number, number]>> = [];
+  let open: Array<[number, number]> = [];
+  const sink: PathSink = {
+    moveTo: (x, y) => {
+      open = [[x, y]];
+      rings.push(open);
+    },
+    lineTo: (x, y) => open.push([x, y]),
+    closePath: () => {},
+    ellipse: () => {},
+    rect: (x, y, w, h) => rects.push({ x, y, w, h }),
+  };
+  return {
+    sink,
+    rects,
+    rings,
+    covers: (x, y) =>
+      rects.some((box) => inRect(box, x, y)) || rings.some((ring) => inPolygon(ring, x, y)),
+  };
+}

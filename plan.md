@@ -3009,6 +3009,46 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M58 — The square brush's preview sweeps instead of stamping
+
+**The report (16):** the square brush draws zig-zags during the drag,
+seemingly at the tool's refresh rate. Why can it not be continuous?
+
+It can, and the *object* always was: `swept_square_distance` measures the
+Chebyshev distance to each **segment**, whose unit ball is the stamp, so
+a square stroke's field has a straight edge at any sampling rate. Only
+the preview was serrated, and it is the preview the user watches for the
+whole length of a drag.
+
+The preview drew a union of squares along the stroke, spaced by a rule
+derived for the round stamp: the scallop between two overlapping discs
+shrinks as the *square* of the spacing, so stamping every
+`2*sqrt(2rs - s^2)` pixels keeps it under half a pixel. Two axis-aligned
+squares that far apart on a diagonal meet only near their corners, and
+the notch left between them is the whole spacing — 8 px for a middling
+brush, 18 for a large one. Sampling it away would need a stamp every
+half pixel.
+
+So the gap is filled rather than sampled away. The region a rectangle
+sweeps along a segment is the convex hull of the rectangle at each end, a
+hexagon, and that is drawn between consecutive samples. The edge is now
+exact between samples rather than merely dense, and the preview says what
+the field has always said.
+
+The join is wound to match `rect`, measured by its own shoelace sum
+rather than reasoned about from the direction of travel: subpaths are
+filled together under the non-zero rule, and one traced the other way
+round would cancel against the stamps it overlaps and punch a hole
+through the stroke.
+
+Committed outlines take the same path (`footprintOfOutline`), so the
+serration in a selected square stroke's edge band is gone with it.
+
+The test asserts against the definition and not against the join: every
+convex combination of a point in one stamp and a point in the next has to
+be covered, and it records that the stamps alone leave some of them out —
+so a regression that dropped the join fails rather than passing quietly.
+
 ### M57 — A freehand polygon is drawn in a space too
 
 **The report (12):** the shape fill needs a px option for custom polygon

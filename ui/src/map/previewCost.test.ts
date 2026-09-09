@@ -37,6 +37,12 @@ class Counter implements PathSink {
   rect() {
     this.n += 1;
   }
+  lineTo() {
+    this.n += 1;
+  }
+  closePath() {
+    this.n += 1;
+  }
 }
 
 function wander(n: number): Array<[number, number]> {

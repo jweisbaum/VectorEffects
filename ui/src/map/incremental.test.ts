@@ -37,6 +37,12 @@ class Recorder implements PathSink {
   rect(x: number, y: number, w: number, h: number) {
     this.ops.push(`R${x},${y},${w},${h}`);
   }
+  lineTo(x: number, y: number) {
+    this.ops.push(`L${x},${y}`);
+  }
+  closePath() {
+    this.ops.push("Z");
+  }
 }
 
 /** A deterministic wandering stroke of `n` points, optionally over the dateline. */

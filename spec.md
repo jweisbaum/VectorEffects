@@ -1711,6 +1711,17 @@ covered, or that a click landed on it.
   grown by half the band's width and knocking out a copy shrunk by the same,
   which is the union's boundary exactly — for a swept chain, a square stamp or
   a ring alike — and centred on it, where a stroke of that width would be.
+- **A square stamp is joined to the one before it, not merely stamped near
+  it** (M58). A round stamp's union is scalloped between samples and the
+  scallop shrinks as the *square* of the spacing, so sampling densely enough
+  is a cheap way to hide it. A square's does not: two axis-aligned squares a
+  few pixels apart on a diagonal meet only near their corners, and the edge
+  comes out serrated by the whole spacing — the zig-zag the tool showed while
+  a stroke was being dragged. The region a rectangle sweeps along a segment is
+  the convex hull of the rectangle at each end, so that hexagon is drawn
+  between consecutive samples and the edge is exact rather than dense. This is
+  what §7.5 has always evaluated — the Chebyshev distance is to the *segment* —
+  so the fix brings the preview to the object rather than the other way round.
 - An **inverted** mask is drawn with a wide, faint band on top of its edge, since
   an outline alone cannot say which side is covered.
 - **An edge follows what the eraser has taken** (M33). The eraser takes

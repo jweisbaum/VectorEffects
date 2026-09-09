@@ -13,7 +13,7 @@ import {
   type Footprint,
   footprintHead,
   KM_PER_DEGREE,
-  type PolygonSink,
+  type PathSink,
 } from "./footprint";
 import { latticeUnder } from "./glyph";
 
@@ -21,7 +21,7 @@ const camera: Camera = { centerLon: 0, centerLat: 0, pxPerDeg: 4 };
 const view: Viewport = { width: 1440, height: 720 };
 
 /** Records the calls a path would receive. */
-class Recorder implements PolygonSink {
+class Recorder implements PathSink {
   readonly calls: string[] = [];
   readonly ellipses: Array<{ x: number; y: number; rx: number; ry: number }> = [];
   readonly rects: Array<{ x: number; y: number; w: number; h: number }> = [];

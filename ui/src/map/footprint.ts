@@ -37,9 +37,17 @@ export function cosLat(lat: number): number {
   return Math.max(Math.cos((lat * Math.PI) / 180), MIN_COS_LAT);
 }
 
-/** The part of `CanvasRenderingContext2D` this module needs. */
+/**
+ * The part of `CanvasRenderingContext2D` this module needs.
+ *
+ * `lineTo` and `closePath` are here rather than in a second interface because a
+ * swept *square* needs them (M58): the connector between two stamps is a
+ * hexagon, so every footprint this module builds may draw a polyline.
+ */
 export interface PathSink {
   moveTo(x: number, y: number): void;
+  lineTo(x: number, y: number): void;
+  closePath(): void;
   ellipse(
     x: number,
     y: number,
@@ -142,20 +150,100 @@ export function addFootprint(
   space: StampSpace = "geodesic",
   insetPx = 0,
 ): void {
+  const { x, y, rx, ry } = stampBox(camera, view, lon, lat, radiusKm, space, insetPx);
+  if (shape === "square") {
+    sink.rect(x - rx, y - ry, rx * 2, ry * 2);
+    return;
+  }
+  sink.moveTo(x + rx, y);
+  sink.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2);
+}
+
+/** One stamp's box on screen: where its centre is and how far it reaches. */
+interface StampBox {
+  x: number;
+  y: number;
+  rx: number;
+  ry: number;
+}
+
+/** Where a stamp sits on screen, and how far it reaches from there. */
+function stampBox(
+  camera: Camera,
+  view: Viewport,
+  lon: number,
+  lat: number,
+  radiusKm: number,
+  space: StampSpace,
+  insetPx: number,
+): StampBox {
   const point = project(camera, view, { lon, lat });
   const full = footprintRadii(camera, lat, radiusKm, space);
   // Inset in *screen* pixels, not in kilometres: it exists to draw a band of a
   // constant width along a footprint's edge, and a band is a screen measure.
   // Never past nothing — a stamp smaller than the inset shrinks to a point
   // rather than turning inside out.
-  const rx = Math.max(0, full.rx - insetPx);
-  const ry = Math.max(0, full.ry - insetPx);
-  if (shape === "square") {
-    sink.rect(point.x - rx, point.y - ry, rx * 2, ry * 2);
-    return;
+  return {
+    x: point.x,
+    y: point.y,
+    rx: Math.max(0, full.rx - insetPx),
+    ry: Math.max(0, full.ry - insetPx),
+  };
+}
+
+/**
+ * Joins two square stamps with the region the stamp sweeps between them (M58).
+ *
+ * A round stamp's union along a stroke is scalloped, and the scallop shrinks as
+ * the square of the spacing — which is what {@link SCALLOP_PX} bounds. A
+ * *square* stamp's union is not: two axis-aligned squares a few pixels apart on
+ * a diagonal overlap only near their corners, so the edge comes out as a
+ * staircase whose step is the whole spacing. Stamping thickly enough to hide it
+ * would need a stamp every half pixel.
+ *
+ * So the gap is filled rather than sampled away. The region a rectangle sweeps
+ * along a segment is the convex hull of the rectangle at each end — a hexagon —
+ * and drawing that makes the preview's edge exact between the samples instead
+ * of merely dense. It is also what the field itself does: `swept_square_distance`
+ * measures the Chebyshev distance to the *segment*, whose unit ball is the
+ * stamp, so the object has always had the straight edge the preview lacked.
+ *
+ * The two end stamps are drawn as well, so a hull that clips a corner when the
+ * two boxes differ in size — they do, slightly, since a geodesic stamp is wider
+ * further from the equator — cannot uncover any part of either square.
+ */
+function addSquareJoin(sink: PathSink, from: StampBox, to: StampBox): void {
+  const sx = to.x >= from.x ? 1 : -1;
+  const sy = to.y >= from.y ? 1 : -1;
+  const corners: Array<[number, number]> = [
+    [from.x - sx * from.rx, from.y - sy * from.ry],
+    [from.x + sx * from.rx, from.y - sy * from.ry],
+    [to.x + sx * to.rx, to.y - sy * to.ry],
+    [to.x + sx * to.rx, to.y + sy * to.ry],
+    [to.x - sx * to.rx, to.y + sy * to.ry],
+    [from.x - sx * from.rx, from.y + sy * from.ry],
+  ];
+
+  // Wound the way `rect` winds, always. The subpaths of one footprint are
+  // filled together under the non-zero rule, so a piece traced the other way
+  // round would cancel against the stamps it overlaps and punch a hole through
+  // the stroke. Whether this order comes out clockwise depends on which way the
+  // segment runs, so it is measured rather than reasoned about: the shoelace
+  // sum is positive for a clockwise ring in screen coordinates, where y grows
+  // downward.
+  let area = 0;
+  for (let i = 0; i < corners.length; i++) {
+    const [ax, ay] = corners[i]!;
+    const [bx, by] = corners[(i + 1) % corners.length]!;
+    area += ax * by - bx * ay;
   }
-  sink.moveTo(point.x + rx, point.y);
-  sink.ellipse(point.x, point.y, rx, ry, 0, 0, Math.PI * 2);
+  if (area < 0) corners.reverse();
+
+  const [first, ...rest] = corners;
+  if (first === undefined) return;
+  sink.moveTo(first[0], first[1]);
+  for (const [x, y] of rest) sink.lineTo(x, y);
+  sink.closePath();
 }
 
 /** Most footprints one stroke preview will draw. */
@@ -250,8 +338,19 @@ export function extendStrokePath(
   space: StampSpace = "geodesic",
   insetPx = 0,
 ): void {
-  const stamp = (lon: number, lat: number) => {
+  // A square stamp is joined to the one before it rather than relying on the
+  // two overlapping (M58); a round one needs no join, its scallop being what
+  // the spacing already bounds.
+  const joins = shape === "square";
+  const stamp = (lon: number, lat: number, previous?: readonly [number, number]) => {
     if (progress.drawn >= MAX_FOOTPRINTS) return;
+    if (joins && previous !== undefined) {
+      addSquareJoin(
+        sink,
+        stampBox(camera, view, previous[0], previous[1], radiusKm, space, insetPx),
+        stampBox(camera, view, lon, lat, radiusKm, space, insetPx),
+      );
+    }
     addFootprint(sink, camera, view, lon, lat, radiusKm, shape, space, insetPx);
     progress.drawn += 1;
   };
@@ -278,14 +377,25 @@ export function extendStrokePath(
     // the edge of a large one: the arcs the user could see along a stroke.
     // The spacing that bounds the sagitta at `s` is 2*sqrt(2rs - s^2), so it
     // grows with the square root of the radius rather than with the radius.
+    //
+    // A square stamp needs none of this — its samples are joined exactly
+    // (M58) — but it keeps the same walk, since the spacing also bounds how
+    // far the interpolated polyline departs from the projected curve, which
+    // both stamps care about.
     const { ry } = footprintRadii(camera, from[1], radiusKm);
     const spanPx = Math.hypot(dLon * camera.pxPerDeg, dLat * camera.pxPerDeg);
     const stride = Math.max(1, 2 * Math.sqrt(Math.max(2 * ry * SCALLOP_PX - SCALLOP_PX ** 2, 0)));
     const steps = Math.max(1, Math.ceil(spanPx / stride));
 
+    let previous = from;
     for (let step = 1; step <= steps; step++) {
       const t = step / steps;
-      stamp(normalizeLon(from[0] + dLon * t), from[1] + dLat * t);
+      const at: readonly [number, number] = [
+        normalizeLon(from[0] + dLon * t),
+        from[1] + dLat * t,
+      ];
+      stamp(at[0], at[1], previous);
+      previous = at;
     }
     progress.done = i + 1;
   }
@@ -387,12 +497,6 @@ export type ObjectOutlineShape =
     }
   | { kind: "ring"; points: ReadonlyArray<readonly [number, number]> };
 
-/** The part of `Path2D` a polygon needs beyond {@link PathSink}. */
-export interface PolygonSink extends PathSink {
-  lineTo(x: number, y: number): void;
-  closePath(): void;
-}
-
 /**
  * Traces a footprint onto a path.
  *
@@ -410,7 +514,7 @@ export interface PolygonSink extends PathSink {
  * nothing inside it (spec.md 6.1).
  */
 export function buildFootprintPath(
-  sink: PolygonSink,
+  sink: PathSink,
   camera: Camera,
   view: Viewport,
   footprint: Footprint,
