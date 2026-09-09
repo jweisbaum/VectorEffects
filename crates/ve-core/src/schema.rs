@@ -1068,7 +1068,20 @@ pub fn dependencies(tool: ToolKind) -> &'static [Dependency] {
 /// the same shape on paper, and keying `fill_mode` from a filled disc to a
 /// ring is a working, tested thing to do. The report named this one; taking
 /// the others away would be removing behaviour nobody asked about.
-const NEVER_KEYED: &[(ToolKind, PropId)] = &[(ToolKind::ShapeFill, PropId::VectorMode)];
+///
+/// **`macro.scale_pct`.** A macro is a *recording*, and its frames are its
+/// animation (spec.md 8.7): it advances through what was captured as the
+/// timeline advances. Its scale says how large that recording was placed —
+/// chosen once, when it is placed. Keying it stretches the recording while the
+/// recording is itself advancing, so what plays back is neither what was
+/// recorded nor a clean resize; and because §9.3's motion reads the rate of
+/// change of the scale, the object would also paint a flow of its own on top
+/// of the flow it is a recording of. The `patch` is the same kind of object
+/// and is left alone until someone says the same of it.
+const NEVER_KEYED: &[(ToolKind, PropId)] = &[
+    (ToolKind::ShapeFill, PropId::VectorMode),
+    (ToolKind::Macro, PropId::ScalePct),
+];
 
 /// Whether `id` can carry keyframes on `tool` (M60).
 ///
@@ -1468,6 +1481,24 @@ mod tests {
                 "{:?} is common to every tool, so no tool's option bar owns it",
                 spec.id
             );
+        }
+    }
+
+    /// A macro's scale is set when it is placed and never keyed (M64), while
+    /// the things about it that are not the recording still are.
+    #[test]
+    fn a_macros_size_is_chosen_once_and_never_keyed() {
+        assert!(!animatable(ToolKind::Macro, PropId::ScalePct));
+        for id in [PropId::Position, PropId::RotationDeg, PropId::Enabled] {
+            assert!(animatable(ToolKind::Macro, id), "{id:?}");
+        }
+        // It is a rule about the macro and not about the property: everything
+        // else that carries a scale still animates it.
+        for tool in ToolKind::ALL {
+            if tool == ToolKind::Macro || spec_for(tool, PropId::ScalePct).is_none() {
+                continue;
+            }
+            assert!(animatable(tool, PropId::ScalePct), "{tool:?}");
         }
     }
 

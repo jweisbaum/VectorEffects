@@ -3023,14 +3023,19 @@ which is why it is not a bar.
   an edit spread over time — and the two general answers are rules: a
   creation-only property admits no edit at all (§6.1), and everything else may
   be keyed. `schema::NEVER_KEYED` is the short list of the exceptions, each
-  with its reason. The shape fill's `vector_mode` is the one that is on it: it
+  with its reason. The shape fill's `vector_mode` is one: it
   chooses between one vector everywhere and a ramp across the shape, and the
   two are read from *different properties*, so a key on it would make the
   object a different thing half way along the timeline — the inspector offering
   one set before the key and another after, with the keys placed under the
-  first sitting on properties that are inert after it. It is still edited like
-  anything else; what it cannot be is animated. The refusal is at the write
-  path and not only in what is listed.
+  first sitting on properties that are inert after it. A **macro's
+  `scale_pct`** is the other (M64): a macro is a recording and its frames are
+  its animation (§8.7), so its scale says how large that recording was placed
+  and is chosen once, when it is placed — keying it stretches the recording
+  while the recording is itself advancing, and §9.3's motion would have the
+  object painting a flow of its own on top of the flow it is a recording of.
+  Both are still edited like anything else; what they cannot be is animated.
+  The refusal is at the write path and not only in what is listed.
 - A property row indicates when the current step's value is interpolated rather
   than keyed.
 - **The steps a segment animates through are dotted.** Between two keys, every

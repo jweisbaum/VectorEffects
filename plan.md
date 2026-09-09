@@ -3009,6 +3009,29 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M64 — A macro's size is chosen when it is placed
+
+**The report (20.7):** macro objects should not have animatable size.
+
+A macro is a *recording*, and its frames are its animation: it advances
+through what was captured as the timeline advances (spec 8.7). Its scale
+says how large that recording was placed — one decision, made when it is
+placed. Keying it stretches the recording while the recording is itself
+advancing, so what plays back is neither what was recorded nor a clean
+resize. And 9.3's motion reads the rate of change of the scale, so a
+keyed one would have the object painting a flow of its own on top of the
+flow it is a recording of.
+
+Second entry in `NEVER_KEYED`, using M60's mechanism, so it is gone from
+the timeline's track list, from the inspector's diamond and from the
+write path together. The macro's position, rotation and visibility still
+animate: they are about where the recording is, not about the recording.
+
+**Not done:** the `patch` is the same kind of object — a placed capture —
+and the same argument applies word for word. It is left alone: the report
+named the macro, and taking a working thing away from a tool nobody
+complained about is not mine to do. Say the word and it is one line.
+
 ### M63 — A lifetime window slides as well as stretches
 
 **The report (20.6):** enablement windows should be clickable and
