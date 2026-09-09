@@ -3009,6 +3009,16 @@ which is why it is not a bar.
   two alone. An edit at a keyed step replaces that key's value and keeps its
   interpolation; a new key takes the kind's default (linear where allowed).
 - Select, move, delete, and box-select keys. Move constrained to integer steps.
+- **A selection box starts from any press over the grid** (M66) — a layer row,
+  the gap between objects, the empty space below the tree — and not only from a
+  press that happens to land on a row that has a handler of its own. A drag
+  that does nothing reads as a feature that is not there. Everything that wants
+  a press for itself takes it first: a key, a lifetime grip, a GRIB frame mark,
+  the ruler's scrub. A press that catches nothing clears the selection, which
+  is how a selection is let go of. The box is a rectangle and not a direction:
+  dragged up and to the left it takes exactly what it takes dragged down and to
+  the right, and a row is a band rather than a line, so a box crossing a track
+  takes its keys without having to pass through their centres.
 - **A drag's preview stands until the document has caught up** (M62). Clearing
   it on release and asking the backend afterwards draws the thing from the old
   numbers for the length of the round trip: a lifetime window snapped back to

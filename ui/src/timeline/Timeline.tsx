@@ -42,6 +42,7 @@ import {
   pointsOf,
   polyline,
 } from "./graph";
+import { boxTakes } from "./boxSelect";
 import { markKind, runBetween } from "./frames";
 import {
   commitRangeDrag,
@@ -68,6 +69,11 @@ import {
 
 /** Width of the labels column, in CSS pixels. Sticky, so it never scrolls. */
 const LABELS_PX = 200;
+/**
+ * Half a track row's height, in CSS pixels: how far either side of a row's
+ * middle a selection box still catches its keys (`.tl-track` in `styles.css`).
+ */
+const HALF_ROW_PX = 11;
 /** The narrowest a step may be drawn, in CSS pixels. */
 const MIN_STEP_PX = 6;
 /** The widest. Past this the ruler stops stretching to fill the dock. */
@@ -876,23 +882,54 @@ export default function Timeline({
     if (boxRef.current && box) {
       boxRef.current = null;
       const chosen = new Set<string>();
-      const x0 = Math.min(box.x0, box.x1);
-      const x1 = Math.max(box.x0, box.x1);
-      const y0 = Math.min(box.y0, box.y1);
-      const y1 = Math.max(box.y0, box.y1);
       for (const [object, entry] of tracks) {
         entry.tracks.forEach((track, row) => {
+          // A following track's diamonds belong to the object it follows and
+          // are edited on that row (M65), so a box over them takes nothing.
+          if (track.follows !== null) return;
           const top = rowTop(object, row);
-          if (top === null || top + 11 < y0 || top - 11 > y1) return;
+          if (top === null) return;
           for (const key of track.keys) {
-            const x = (key.step + 0.5) * pxPerStep;
-            if (x >= x0 && x <= x1) chosen.add(keyId(object, track.property, key.step));
+            if (boxTakes(box, key.step, pxPerStep, top, HALF_ROW_PX)) {
+              chosen.add(keyId(object, track.property, key.step));
+            }
           }
         });
       }
       setSelectedKeys(chosen);
       setBox(null);
     }
+  };
+
+  /**
+   * Starts a selection box from a press the timeline has not otherwise
+   * claimed (M66).
+   *
+   * On the container rather than on each row, so a drag begun anywhere over
+   * the grid selects keys: a layer row, the gap between objects, the empty
+   * space below the tree. It used to be on the object and track rows alone,
+   * which meant the gesture worked only if it happened to start on a row that
+   * had one — and a drag that does nothing reads as a feature that is not
+   * there.
+   *
+   * Everything that wants a press for itself stops it before it arrives here:
+   * a key, a lifetime grip, a GRIB frame mark, the ruler's scrub. The label
+   * column is excluded by position — it is sticky, so its pixels are not the
+   * grid's — and interactive elements by tag, since pressing a toggle should
+   * not clear a selection.
+   */
+  const beginBox = (event: React.PointerEvent) => {
+    if (event.button !== 0) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    if (event.clientX - rect.left < LABELS_PX) return;
+    if ((event.target as HTMLElement | null)?.closest("button, input, select, a")) return;
+    const x = gridX(event);
+    const y = event.clientY - rect.top + el.scrollTop;
+    boxRef.current = { x0: x, y0: y };
+    setBox({ x0: x, y0: y, x1: x, y1: y });
+    el.setPointerCapture?.(event.pointerId);
   };
 
   /**
@@ -1072,6 +1109,7 @@ export default function Timeline({
       <div
         className="tl-scroll"
         ref={scrollRef}
+        onPointerDown={beginBox}
         onPointerMove={onGridPointerMove}
         onPointerUp={onGridPointerUp}
         onPointerCancel={onGridPointerUp}
@@ -1118,6 +1156,8 @@ export default function Timeline({
             className="tl-grid"
             style={{ width: gridWidth }}
             onPointerDown={(event) => {
+              // The ruler scrubs; it is not a place to select keys from.
+              event.stopPropagation();
               setPlaying(false);
               onStepChange(clampStep(stepAt(gridX(event), pxPerStep, last)));
               const scrub = (move: PointerEvent) =>
@@ -1312,19 +1352,7 @@ export default function Timeline({
                         {object.name}
                       </span>
                     </div>
-                    <div
-                      className="tl-grid"
-                      style={{ width: gridWidth }}
-                      onPointerDown={(event) => {
-                        // Empty grid: begin a box selection.
-                        const el = scrollRef.current;
-                        const rect = el?.getBoundingClientRect();
-                        const y = rect ? event.clientY - rect.top + (el?.scrollTop ?? 0) : 0;
-                        boxRef.current = { x0: gridX(event), y0: y };
-                        setBox({ x0: gridX(event), y0: y, x1: gridX(event), y1: y });
-                        (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
-                      }}
-                    >
+                    <div className="tl-grid" style={{ width: gridWidth }}>
                       {/* The lifetime bar: either end resizes it, and the
                           body slides the whole window along the timeline
                           without changing its length (spec.md 9.4, M63).
@@ -1546,18 +1574,7 @@ export default function Timeline({
                               ◆
                             </button>
                           </div>
-                          <div
-                            className="tl-grid"
-                            style={{ width: gridWidth }}
-                            onPointerDown={(event) => {
-                              const el = scrollRef.current;
-                              const rect = el?.getBoundingClientRect();
-                              const y = rect ? event.clientY - rect.top + (el?.scrollTop ?? 0) : 0;
-                              boxRef.current = { x0: gridX(event), y0: y };
-                              setBox({ x0: gridX(event), y0: y, x1: gridX(event), y1: y });
-                              (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
-                            }}
-                          >
+                          <div className="tl-grid" style={{ width: gridWidth }}>
                             {/* One dot per interpolated step, so a blended
                                 segment reads as animated and a held one does
                                 not (spec.md 9.3). */}

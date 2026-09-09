@@ -3009,6 +3009,39 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M66 — A selection box starts from any press over the grid
+
+**The report (20.3):** click and drag for multi-keyframe selection.
+
+It was there, and it was there in two places only: the object row's grid
+and the track row's grid each carried their own `onPointerDown` that
+began a box. A drag started on a layer row, in the gap between objects,
+or in the empty space below the tree did nothing at all — and a gesture
+that works depending on which pixel it began on is, from the outside, a
+gesture that does not work.
+
+One handler on the scroll container now. Everything that wants a press
+for itself takes it first and always did: a key, a lifetime grip, a GRIB
+frame mark. The ruler gained an explicit `stopPropagation` — a press
+there scrubs the playhead and is not a place to select keys from. The
+label column is excluded by position rather than by tag, since it is
+sticky and its pixels are not the grid's, and buttons and inputs by tag,
+so pressing a toggle does not clear a selection.
+
+A press that catches nothing now clears the selection, which is how a
+selection is let go of and was not previously possible without finding a
+row.
+
+The hit test came out into `boxSelect.ts` because it is the part with
+corners in it. The property pinned there is that the box is a rectangle
+and not a direction: all four orderings of the same two corners take the
+same keys, which is the failure that would otherwise be silent — one
+drag direction quietly taking nothing.
+
+Also fixed on the way past: a following track's diamonds are its
+primary's (M65) and are edited on that row, so a box over them takes
+nothing rather than selecting keys that belong to another object.
+
 ### M65 — A following track shows the keys that move it
 
 **The report (20.4):** when an object's properties are attached to
