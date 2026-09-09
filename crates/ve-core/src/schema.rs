@@ -150,7 +150,13 @@ pub enum PropId {
     ScalePct,
     /// True-bearing rotation about the anchor.
     RotationDeg,
-    /// Per-step on/off switch.
+    /// Per-step on/off switch, labelled **Visible** (M61).
+    ///
+    /// The identifier stays `Enabled` because it is written into every project
+    /// file that has one; only the word shown changed. "Enabled" said nothing
+    /// about what turning it off does, and what it does is take the object off
+    /// the map for that step — the same thing hiding a layer does, and now the
+    /// same word.
     Enabled,
     /// Whether a feathered edge blends with what is beneath it (decision D12).
     EdgeMode,
@@ -595,7 +601,7 @@ pub const COMMON: &[PropSpec] = &[
         Unit::Percent,
     ),
     ang(PropId::RotationDeg, "Rotation", 0.0),
-    flag(PropId::Enabled, "Enabled", true),
+    flag(PropId::Enabled, "Visible", true),
     choice(PropId::EdgeMode, "Edge", 0, EDGE_MODES),
 ];
 
@@ -616,7 +622,7 @@ const COMMON_MODIFIER: &[PropSpec] = &[
         Unit::Percent,
     ),
     ang(PropId::RotationDeg, "Rotation", 0.0),
-    flag(PropId::Enabled, "Enabled", true),
+    flag(PropId::Enabled, "Visible", true),
 ];
 
 /// The size and space every modifier shares.

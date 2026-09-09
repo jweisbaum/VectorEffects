@@ -396,7 +396,7 @@ tool-specific ones:
 | `position` | `LonLat` | creation point | The AEQD anchor. |
 | `scale_pct` | `f32` | 100.0 | Scales geometry radii in metres. |
 | `rotation_deg` | `Angle` | 0.0 | True bearing rotation about the anchor. |
-| `enabled` | `bool` | true | Step interpolation only. |
+| `enabled` | `bool` | true | Step interpolation only. **Shown as "Visible"** (M61): the stored name says nothing about what turning it off does, and what it does is take the object off the map for that step — the same thing hiding a layer does, so the same word. The identifier stays `enabled`, being written into every project file that has one. |
 
 `edge_mode` (§7.4) is carried alongside these by every tool that paints a
 field. A **modifier** (§6.3) does not carry it: its output is whatever was

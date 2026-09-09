@@ -39,7 +39,7 @@ const SCHEMA = {
     },
     {
       property: "Enabled",
-      label: "Enabled",
+      label: "Visible",
       unit: "none",
       variants: [],
       default: { kind: "bool", value: true },

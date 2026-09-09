@@ -3009,6 +3009,20 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M61 — The per-step switch is called Visible
+
+**The report (20.2):** "Enabled" should read "Visible".
+
+It should. The switch takes an object off the map for one step, which is
+exactly what hiding a layer does, and the application already has a word
+for that. "Enabled" named a state rather than an effect and left the
+reader to work out which.
+
+A label, not an identifier. `PropId::Enabled` is written into every
+project file that has one and stays as it is; renaming it would be a
+migration for a word nobody reads. The inspector and the timeline both
+take their text from `spec.label`, so one string covers both.
+
 ### M60 — The shape fill's vector mode is edited, never keyed
 
 **The report (20.1):** vector mode is not animatable — remove it from
