@@ -170,7 +170,12 @@ import { TileCache } from "./tiles";
 import { beneathToken, frameToken, onlyToken, parseFrameToken } from "./frameToken";
 import { releaseFocus } from "./focus";
 import { imagesOverField } from "./imageStack";
-import { layerTakes, type LayerSourceName, type ToolKindOfWork } from "./allowed";
+import {
+  aimedOffTheMap,
+  layerTakes,
+  type LayerSourceName,
+  type ToolKindOfWork,
+} from "./allowed";
 import { knownGradients, loadGradients, stopsOf } from "../gradients";
 
 interface Readout {
@@ -580,6 +585,21 @@ export default function MapView({
    * answer would be the previous layer's.
    */
   const layerSourcesRef = useRef<ReadonlyMap<number, LayerSourceName>>(new Map());
+  /**
+   * The stack, bottom first, as far as a gesture needs to know it (M68).
+   *
+   * A gesture aimed at a hidden layer is refused by the backend, but the
+   * refusal arrives on release: the preview would run for the whole stroke
+   * first, showing the edit happening to the layers that *are* visible. So
+   * the map has to know before the pointer goes down.
+   */
+  const layerStackRef = useRef<ReadonlyArray<{ id: number; visible: boolean }>>([]);
+
+  /** Whether a gesture now would land off the map (`allowed.ts`, M68). */
+  const activeLayerHidden = useCallback(
+    (): boolean => aimedOffTheMap(activeLayerRef.current, layerStackRef.current),
+    [],
+  );
   /**
    * The last frame whose tiles were all on screen. A frame that is not yet
    * draws its missing tiles from this one, dimmed, rather than blank.
@@ -1859,6 +1879,10 @@ export default function MapView({
         layerSourcesRef.current = new Map(
           tree.layers.map((layer) => [layer.id, layer.source as LayerSourceName]),
         );
+        layerStackRef.current = tree.layers.map((layer) => ({
+          id: layer.id,
+          visible: layer.visible,
+        }));
         // And which of them draw over the field rather than under it.
         imagesOverRef.current = imagesOverField(
           tree.layers.map((layer) => ({
@@ -3578,15 +3602,24 @@ export default function MapView({
         panning,
         recording: recording !== null,
         onImage,
-        forbidden: !layerTakes(
-          layerSourcesRef.current.get(activeLayerRef.current ?? -1) ?? "painted",
-          work,
-        ),
+        // What the layer will not take, and what is not on the map at all
+        // (M51, M68). Both are refusals the cursor can say on hover rather
+        // than leaving the user to discover on release — which is the whole
+        // point of `allowed.ts`. A tool that touches no field is exempt from
+        // both: the hand and the selection work over a hidden layer as they
+        // work over anything.
+        forbidden:
+          work !== "neither" &&
+          (!layerTakes(
+            layerSourcesRef.current.get(activeLayerRef.current ?? -1) ?? "painted",
+            work,
+          ) ||
+            activeLayerHidden()),
         grip,
       });
       if (canvas.style.cursor !== wanted) canvas.style.cursor = wanted;
     },
-    [eyedropper, picking, recording, tool, toolPick],
+    [activeLayerHidden, eyedropper, picking, recording, tool, toolPick],
   );
   useEffect(() => {
     applyCursor(false, dragging.current !== null);
@@ -4615,6 +4648,16 @@ export default function MapView({
   const startGesture = useCallback(
     (geo: { lon: number; lat: number }, event: React.PointerEvent<HTMLCanvasElement>) => {
       if (!schema || tool === HAND) return;
+      // A stroke aimed at a hidden layer does nothing, and must be seen to do
+      // nothing (M68). The backend refuses it, but only on release — and for
+      // the whole drag before that the preview would show the edit happening
+      // to the layers that *are* visible, a liquify's most of all, since its
+      // preview displaces the rendered field itself and has no layer of its
+      // own to displace.
+      if (activeLayerHidden()) {
+        setHint("That layer is hidden. Show it before drawing on it.");
+        return;
+      }
       const kind = gestureKind(schema, toolState.values);
       const at: [number, number] = [geo.lon, geo.lat];
       const current = gestureRef.current;
@@ -4646,7 +4689,17 @@ export default function MapView({
       if (refreshOperator(gestureRef.current)) requestDraw();
       drawOverlay();
     },
-    [commitGesture, finishGesture, near, refreshOperator, requestDraw, schema, tool, toolState],
+    [
+      activeLayerHidden,
+      commitGesture,
+      finishGesture,
+      near,
+      refreshOperator,
+      requestDraw,
+      schema,
+      tool,
+      toolState,
+    ],
   );
 
   const endDrag = (event: React.PointerEvent<HTMLCanvasElement>) => {

@@ -49,3 +49,41 @@ export function layerTakes(source: LayerSourceName, work: ToolKindOfWork): boole
       return false;
   }
 }
+
+/**
+ * Which layer a gesture aimed at the map would land on (M68).
+ *
+ * `null` means nothing is chosen, which is the top of the stack — the rule
+ * `document::creation_layer` follows — so the two cannot come to disagree
+ * about where a stroke goes. The list is bottom-first, as the document is, so
+ * the top is the last of it.
+ */
+export function targetLayer(
+  active: number | null,
+  layers: ReadonlyArray<{ id: number }>,
+): number | null {
+  if (active !== null) return active;
+  return layers[layers.length - 1]?.id ?? null;
+}
+
+/**
+ * Whether a gesture aimed at the map would land somewhere off it (M68).
+ *
+ * A hidden layer is not on the map, so a stroke over it was aimed at whatever
+ * *is* — and while the pointer is down the map shows the edit happening to the
+ * layers that are visible, because a preview drawn over the composite has no
+ * layer of its own. The liquify is the plainest case: its preview displaces
+ * the rendered field itself.
+ *
+ * **A layer nobody has heard of counts as visible.** The tree arrives a moment
+ * after the project does, and refusing every gesture in that window would be a
+ * worse lie than allowing one — the backend refuses it on release either way.
+ */
+export function aimedOffTheMap(
+  active: number | null,
+  layers: ReadonlyArray<{ id: number; visible: boolean }>,
+): boolean {
+  const target = targetLayer(active, layers);
+  if (target === null) return false;
+  return layers.some((layer) => layer.id === target && !layer.visible);
+}

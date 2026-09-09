@@ -717,12 +717,15 @@ pub fn create(state: &AppState, new: NewObject) -> Result<Created> {
 
         // A new object joins the layer that was selected when it was created
         // (spec.md 6.1); with no selection that is the top of the stack. An
-        // imported layer refuses it (D66).
+        // imported layer refuses it (D66), and so does a hidden one: the
+        // gesture was aimed at the map, and the layer it would land on is not
+        // on the map (M68).
         let layer = crate::document::creation_layer(
             &open.project,
             new.layer,
             crate::document::Placing::of(tool),
         )?;
+        crate::document::pointed_at(layer)?;
 
         let mut object = Object::new(tool, name_for(&open.project, new.tool), step_count);
         object.geometry = geometry;

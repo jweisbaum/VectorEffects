@@ -1694,14 +1694,31 @@ same stamp along the same kind of polyline. Like the clone stamp, and unlike
 every tool that paints a field, it keeps that outline *through* the drag and
 draws nothing else while masking (§6.1).
 
-**Erasing needs the layer to be visible.** A hidden layer is not on the map,
-so a stroke over it was aimed at whatever is; taking a piece out of something
-the user cannot see is an edit they cannot check, cannot see the result of,
-and would find later without knowing what made it. The stroke is refused, and
-the refusal says so, rather than being silently dropped: the pointer went
-down on purpose. The live preview shows nothing either way, since what fills
-the hole is the stack without that layer (§6.2) and a hidden layer is already
-not in it.
+**Every gesture aimed at the map needs its layer to be visible** (M68). A
+hidden layer is not on the map, so a stroke over it was aimed at whatever is;
+drawing into something the user cannot see is an edit they cannot check,
+cannot see the result of, and would find later without knowing what made it.
+The gesture is refused, and the refusal says so, rather than being silently
+dropped: the pointer went down on purpose.
+
+The eraser had this rule first, for the plainest case — a hole taken out of
+something invisible — and it holds for every tool that draws. **The liquify is
+why it had to be general.** Its preview displaces the *rendered* field itself,
+so it has no layer of its own to displace: aimed at a hidden layer it showed
+the field being liquified for the whole of the drag, on the layers that *are*
+visible, and then snapped back on release. Scoping that preview to one layer
+is not possible — there is no second frame to compare against, which is how
+every other tool's preview is scoped (§6.2) — but the case that made it
+visible is a gesture that should never have started.
+
+So it does not start. The map refuses the press rather than waiting for the
+backend's refusal on release, and the cursor says so on **hover**, with the
+same mark a tool a layer will not take shows (§6.1) — the answer before the
+gesture rather than after it. The hand, the selection and the measurements are
+exempt: they touch no field, and work over a hidden layer as they work over
+anything. A layer named in a **panel** — an object dragged onto it, a
+duplicate of one already there — is not aimed at the map and means what it
+says, so it is unaffected.
 
 **A mask's edge is drawn on the map**, because a mask paints calm and is
 otherwise invisible: there is nothing to say where one is, which side of it is

@@ -6,6 +6,7 @@
 //! The editing commands behind the layer panel and the inspector.
 
 use ve_app::commands::AppState;
+use ve_app::create::{self, Gesture, NewObject, Tool};
 use ve_app::document::{self, PropertyValue};
 use ve_app::edit::{self, BrushStroke};
 use ve_app::paths::AppPaths;
@@ -322,6 +323,67 @@ fn erasing_from_a_hidden_layer_does_nothing() {
         None,
         "and the field is gone where it fell"
     );
+}
+
+/// The same rule for a gesture that *draws*, not only for the one that takes
+/// away (M68).
+///
+/// A liquify aimed at a hidden layer was the report: the object landed where
+/// nobody could see it, and for the whole of the drag the map showed the
+/// field being liquified — because a preview drawn over the composite has no
+/// layer of its own to displace, so it displaced what was visible. Refused
+/// now, and the refusal names the layer.
+#[test]
+fn drawing_on_a_hidden_layer_does_nothing() {
+    let (_root, state) = painted("draw-hidden");
+    let layer = document::tree(&state, 0).expect("tree").layers[0].id;
+    let objects = |state: &AppState| {
+        document::tree(state, 0).expect("tree").layers[0]
+            .objects
+            .len()
+    };
+    let before = objects(&state);
+
+    document::layer_visibility(&state, layer, false).expect("hide");
+
+    // Every tool that draws, not the one that happened to be reported: they
+    // all arrive through the same door and must all find it shut.
+    for tool in [Tool::Liquify, Tool::Brush, Tool::Mask, Tool::Turn] {
+        let refused = create::create(
+            &state,
+            NewObject {
+                tool,
+                gesture: Gesture::Stroke {
+                    points: vec![[0.0, 0.0], [4.0, 2.0]],
+                },
+                options: Vec::new(),
+                layer: Some(layer),
+            },
+        )
+        .expect_err("a hidden layer is refused");
+        assert!(
+            format!("{refused}").contains("hidden"),
+            "{tool:?}: the refusal says why: {refused}"
+        );
+    }
+    assert_eq!(objects(&state), before, "and nothing was added");
+
+    // Shown again, the identical gesture lands — so the refusal was about the
+    // layer being hidden and not about the stroke.
+    document::layer_visibility(&state, layer, true).expect("show");
+    create::create(
+        &state,
+        NewObject {
+            tool: Tool::Liquify,
+            gesture: Gesture::Stroke {
+                points: vec![[0.0, 0.0], [4.0, 2.0]],
+            },
+            options: Vec::new(),
+            layer: Some(layer),
+        },
+    )
+    .expect("a visible layer takes it");
+    assert_eq!(objects(&state), before + 1, "the object landed");
 }
 
 // --- The tree ---------------------------------------------------------------

@@ -725,6 +725,31 @@ pub(crate) fn creation_layer(
     Ok(found)
 }
 
+/// Refuses a layer that is not on the map, for a gesture aimed by pointing
+/// at it (M68).
+///
+/// A hidden layer is not on the map, so a stroke over it was aimed at
+/// whatever *is*. Drawing into something the user cannot see is an edit they
+/// cannot check, cannot see the result of, and would find later without
+/// knowing what made it — and while the pointer is down the map shows the
+/// edit happening to the layers that *are* visible, because a preview drawn
+/// over the composite has nothing else to draw on. The liquify is the plainest
+/// case, its preview being a displacement of the rendered field itself.
+///
+/// The refusal is here rather than in [`creation_layer`] because it belongs to
+/// gestures and not to every path that adds an object: dragging an object onto
+/// a hidden layer in the panel, or duplicating one that is already there,
+/// names its target rather than pointing at it, and means what it says.
+pub(crate) fn pointed_at(layer: &Layer) -> Result<()> {
+    if layer.visible {
+        return Ok(());
+    }
+    Err(AppError::BadOption {
+        field: "layer",
+        value: format!("\"{}\" is hidden; show it before editing it", layer.name),
+    })
+}
+
 /// What a path puts into a layer (M31): a field of its own, or an edit of
 /// the field already there. An imported layer takes the second and refuses
 /// the first (D66).
@@ -1247,18 +1272,11 @@ pub fn stroke_erase(state: &AppState, stroke: EraseStroke) -> Result<ProjectSumm
                     value: format!("{} is locked", layer.name),
                 });
             }
-            // A hidden layer is not on the map, so a stroke over it was aimed
-            // at whatever *is* — and taking a piece out of something the user
-            // cannot see is an edit they cannot check, cannot see the result
-            // of, and would find later without knowing what made it. Refused
-            // rather than silently ignored: the pointer went down on purpose,
-            // and the status bar should say why nothing happened.
-            if !layer.visible {
-                return Err(AppError::BadOption {
-                    field: "layer",
-                    value: format!("{} is hidden; show it to erase from it", layer.name),
-                });
-            }
+            // Refused rather than silently ignored: the pointer went down on
+            // purpose, and the status bar should say why nothing happened
+            // (M68). The eraser had this rule first and now shares it with
+            // every other gesture aimed at the map.
+            pointed_at(layer)?;
             let mut commands = Vec::new();
             let mut removals: Vec<(usize, Command)> = Vec::new();
             let mut new_captures: Vec<std::sync::Arc<Capture>> = Vec::new();

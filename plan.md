@@ -3009,6 +3009,55 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M68 — A gesture aimed at a hidden layer does not start
+
+**The report:** with a hidden top layer selected, the liquify tool
+liquifies the lower visible layers until the mouse is released.
+
+It did. Two faults met.
+
+The first is one this plan already recorded as unfixable, and it stays
+unfixable: **the liquify preview cannot be scoped to a layer.** Every
+other edit tool's preview is scoped by comparing two rendered frames —
+the stack with the layer and the stack without it — and taking the
+difference. A liquify has nothing to compare: it displaces the rendered
+field itself, so what it displaces is whatever is on screen. Aimed at a
+hidden layer it showed the visible field being liquified for the whole
+drag, then snapped back.
+
+The second is the one that matters, and it is not about the liquify at
+all: **the gesture should never have started.** The eraser has refused a
+hidden layer since M29, with a reason that was always general — a stroke
+over a hidden layer was aimed at whatever *is* on the map, and an edit
+into something invisible is one the user cannot check and would find
+later without knowing what made it. Nothing extended that to the tools
+that draw, so a liquify, a brush or a mask aimed at a hidden layer
+created an object nobody could see, after a drag that lied about where it
+was going.
+
+`document::pointed_at` is that rule, once, and the eraser's inline copy
+now calls it. `create::create` calls it too, so every tool that draws is
+refused with the layer's name — a rule the document does not enforce is
+decorative, and this one had been decorative for every tool but one.
+
+The frontend refuses the press rather than waiting for the release, since
+waiting is precisely what let the preview run, and the cursor says it on
+**hover** with the mark a forbidden tool already shows (M51) — which is
+what `allowed.ts` exists for: the answer before the gesture rather than
+after it. `aimedOffTheMap` lives there beside `layerTakes`, and resolves
+"nothing chosen" to the top of the stack the same way `creation_layer`
+does, so the two cannot come to disagree about where a stroke goes. A
+layer the tree has not described yet counts as visible: it arrives a
+moment after the project, and refusing every gesture in that window would
+be a worse lie than allowing one.
+
+**Deliberately not extended** to the paths that name a layer in a panel —
+an object dragged onto a hidden layer, a duplicate of one already there,
+a paste. Those say their target rather than pointing at it, and mean it.
+The tools that touch no field — the hand, the selection, the
+measurements, the eyedropper — are exempt for the same reason: there is
+nothing for a hidden layer to refuse.
+
 ### M67 — The eraser's px chooses a space, as every other tool's does
 
 **The report:** the eraser brush and the paint brush distort
