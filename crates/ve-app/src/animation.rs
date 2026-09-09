@@ -356,7 +356,10 @@ pub fn tracks_of(state: &AppState, object: u64, step: u32) -> Result<ObjectTrack
                 .unwrap_or(0)
         };
         let tracks = schema::all_specs(target.tool)
-            .filter(|spec| !spec.creation_only)
+            // Not merely editable: keyable (M60). A mode that decides which
+            // other properties are live cannot be animated, because keying it
+            // changes what the object has half way along the timeline.
+            .filter(|spec| schema::animatable(target.tool, spec.id))
             .filter(|spec| schema::is_live(target.tool, spec.id, choice_of))
             .filter_map(|spec| {
                 target.props.get(spec.id).and_then(|anim| {
@@ -638,12 +641,19 @@ fn rewrite(
                 field: "property",
                 value: property.to_owned(),
             })?;
-        // A key is an edit spread over time, and a creation-only property
-        // admits no edit at all (spec.md 6.1).
-        if schema::spec_for(target.tool, prop).is_some_and(|spec| spec.creation_only) {
+        // A key is an edit spread over time, so the property has to admit an
+        // edit and has to be one whose value does not change what else the
+        // object has (spec.md 6.1, 9.3, M60).
+        if !schema::animatable(target.tool, prop) {
+            let why = if schema::spec_for(target.tool, prop).is_some_and(|s| s.creation_only) {
+                "is fixed when the object is created"
+            } else {
+                "decides which other properties the object has, so it cannot change part way \
+                 along the timeline"
+            };
             return Err(AppError::BadOption {
                 field: "property",
-                value: format!("{property} is fixed when the object is created"),
+                value: format!("{property} {why}"),
             });
         }
         let before = target

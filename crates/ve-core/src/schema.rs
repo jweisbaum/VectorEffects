@@ -1041,6 +1041,40 @@ pub fn dependencies(tool: ToolKind) -> &'static [Dependency] {
     }
 }
 
+/// Properties that exist, are edited, and cannot carry keyframes (M60).
+///
+/// Short and expected to stay short. Editable and animatable are nearly the
+/// same question — a key is an edit spread over time — and the two general
+/// answers are already rules: a creation-only property admits no edit at all
+/// (spec.md 6.1), and everything else may be keyed. This is the list of the
+/// places where that is wrong for a reason particular to the property.
+///
+/// **`shape_fill.vector_mode`.** It chooses between one vector everywhere and
+/// a ramp across the shape, and those are read from *different properties* —
+/// `speed` and `direction` against the four `*_start`/`*_end` ones. Keying it
+/// makes the object a different thing half way along the timeline: the
+/// inspector offers one set of properties at step 4 and another at step 5, and
+/// keys placed under the first sit on properties that are inert at the second,
+/// doing nothing and saying nothing about why.
+///
+/// Deliberately *not* extended to every mode that decides whether another
+/// property is live — `fill_mode`, `direction_mode`, `warp_mode`. Those have
+/// the same shape on paper, and keying `fill_mode` from a filled disc to a
+/// ring is a working, tested thing to do. The report named this one; taking
+/// the others away would be removing behaviour nobody asked about.
+const NEVER_KEYED: &[(ToolKind, PropId)] = &[(ToolKind::ShapeFill, PropId::VectorMode)];
+
+/// Whether `id` can carry keyframes on `tool` (M60).
+///
+/// A key is an edit spread over time, so the property has to admit an edit:
+/// a creation-only one describes what the object *is* rather than a parameter
+/// of it (spec.md 6.1). Beyond that, [`NEVER_KEYED`] carries the handful of
+/// properties that are edited freely and animated by nothing, each for its own
+/// stated reason.
+pub fn animatable(tool: ToolKind, id: PropId) -> bool {
+    spec_for(tool, id).is_some_and(|spec| !spec.creation_only) && !NEVER_KEYED.contains(&(tool, id))
+}
+
 /// Whether `id` is read at all, given how `choice_of` resolves the mode it
 /// depends on. Properties with no dependency are always live.
 pub fn is_live(tool: ToolKind, id: PropId, choice_of: impl Fn(PropId) -> u8) -> bool {
@@ -1427,6 +1461,33 @@ mod tests {
                 !spec.creation_only,
                 "{:?} is common to every tool, so no tool's option bar owns it",
                 spec.id
+            );
+        }
+    }
+
+    /// The shape fill's vector mode is edited and never keyed (M60), and the
+    /// numbers it chooses between are keyed like anything else.
+    #[test]
+    fn the_shape_fills_vector_mode_is_edited_but_never_keyed() {
+        assert!(!animatable(ToolKind::ShapeFill, PropId::VectorMode));
+        assert!(spec_for(ToolKind::ShapeFill, PropId::VectorMode).is_some());
+        for id in [PropId::Speed, PropId::SpeedStart, PropId::SpeedEnd] {
+            assert!(animatable(ToolKind::ShapeFill, id), "{id:?}");
+        }
+    }
+
+    /// Every entry in the list has to be a property the tool actually has, and
+    /// one the general rule would otherwise have allowed. An entry naming a
+    /// property that is already frozen, or one the tool does not carry, says
+    /// nothing and would sit there unnoticed.
+    #[test]
+    fn nothing_in_the_never_keyed_list_is_already_covered() {
+        for &(tool, id) in NEVER_KEYED {
+            let spec =
+                spec_for(tool, id).unwrap_or_else(|| panic!("{tool:?} does not carry {id:?}"));
+            assert!(
+                !spec.creation_only,
+                "{tool:?}/{id:?} is creation-only already"
             );
         }
     }

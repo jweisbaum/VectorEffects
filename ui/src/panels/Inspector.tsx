@@ -257,24 +257,31 @@ export default function Inspector({
                 {property.label}
                 {/* The diamond: filled when this step is keyed, hollow when the
                     value is interpolated, dim otherwise. Clicking keys or
-                    unkeys this step (spec.md 9.3). */}
-                <button
-                  type="button"
-                  className={`key-here${property.keyed_here ? " on" : property.interpolated_here ? " between" : ""}`}
-                  title={
-                    property.keyed_here
-                      ? "Keyed at this step — click to remove the key"
-                      : property.interpolated_here
-                        ? "Interpolated at this step — click to key it here"
-                        : "Click to key this property at this step"
-                  }
-                  onClick={(event) => {
-                    event.preventDefault();
-                    toggleKey(property.id, property.keyed_here);
-                  }}
-                >
-                  ◆
-                </button>
+                    unkeys this step (spec.md 9.3).
+
+                    Absent where the property cannot be keyed at all (M60): a
+                    mode that decides which other properties the object has is
+                    edited like anything else and animated by nothing. A
+                    diamond that refuses is worse than no diamond. */}
+                {property.keyable && (
+                  <button
+                    type="button"
+                    className={`key-here${property.keyed_here ? " on" : property.interpolated_here ? " between" : ""}`}
+                    title={
+                      property.keyed_here
+                        ? "Keyed at this step — click to remove the key"
+                        : property.interpolated_here
+                          ? "Interpolated at this step — click to key it here"
+                          : "Click to key this property at this step"
+                    }
+                    onClick={(event) => {
+                      event.preventDefault();
+                      toggleKey(property.id, property.keyed_here);
+                    }}
+                  >
+                    ◆
+                  </button>
+                )}
               </span>
 
               {property.value.kind === "number" && property.slider && (

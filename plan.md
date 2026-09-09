@@ -3009,6 +3009,36 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M60 — The shape fill's vector mode is edited, never keyed
+
+**The report (20.1):** vector mode is not animatable — remove it from
+the list.
+
+It was on the timeline's list of tracks and carried a key diamond in the
+inspector, and neither should have offered it. The mode chooses between
+one vector everywhere and a ramp across the shape, and the two are read
+from **different properties**: `speed` and `direction` against the four
+`*_start`/`*_end` ones. A key on it makes the object a different thing
+half way along the timeline — the inspector offers one set of properties
+before the key and another after, and the keys placed under the first sit
+on properties that are inert after it, doing nothing and saying nothing
+about why.
+
+`schema::animatable` is the question asked now, in three places: the
+timeline's track list, the inspector's diamond, and the keyframe write
+path — because a rule the document does not enforce is decorative and the
+timeline walks straight through it.
+
+**Deliberately narrow.** The first cut of this derived the rule from the
+dependency table: any mode that decides whether another property is live
+cannot be keyed. That is the same defect on paper for `fill_mode`,
+`direction_mode` and `warp_mode` — and keying `fill_mode` from a filled
+disc to a ring is a working thing to do that the suite already covers. So
+the exception is a short named list with a reason against each entry
+rather than a rule that would have taken away behaviour the report did
+not ask about. If the others turn out to be wrong too, they get added
+with their own reasons.
+
 ### M59 — An error message says what failed, on what, and why
 
 **The report (19):** error messages need to be more descriptive.

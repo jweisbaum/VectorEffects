@@ -51,6 +51,14 @@ keyed_here: boolean,
  */
 interpolated_here: boolean, 
 /**
+ * Whether the property can carry keyframes at all (M60).
+ *
+ * Editable and animatable are different questions: a mode that decides
+ * which other properties are live is edited like anything else and cannot
+ * be keyed, so its row has no diamond rather than a diamond that refuses.
+ */
+keyable: boolean, 
+/**
  * Edited by a centred slider rather than a typed number (M29).
  */
 slider: SliderView | null, };

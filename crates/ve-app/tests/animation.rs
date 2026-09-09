@@ -737,6 +737,61 @@ fn a_creation_only_property_cannot_be_keyed() {
     );
 }
 
+/// The shape fill's vector mode is edited freely and keyed by nothing (M60).
+///
+/// It chooses between one vector everywhere and a ramp across the shape, and
+/// the two are read from different properties. A key on it would make the
+/// object a different thing half way along the timeline — one set of
+/// properties before the key and another after, with the keys placed under the
+/// first sitting on properties that are inert after it.
+#[test]
+fn the_shape_fills_vector_mode_is_not_on_the_timeline() {
+    let (_root, state) = project("vector-mode");
+    create::create(
+        &state,
+        NewObject {
+            tool: Tool::ShapeFill,
+            gesture: Gesture::Ring {
+                points: vec![[-4.0, -4.0], [4.0, -4.0], [4.0, 4.0], [-4.0, 4.0]],
+            },
+            options: vec![ToolOption {
+                property: "Speed".to_owned(),
+                value: PropertyValue::Number { value: 12.0 },
+            }],
+            layer: None,
+        },
+    )
+    .expect("a filled polygon");
+    let id = newest_object(&state);
+
+    let tracks = animation::tracks_of(&state, id, 0).expect("tracks");
+    assert!(
+        tracks.tracks.iter().all(|t| t.property != "VectorMode"),
+        "the timeline offers a track for the vector mode"
+    );
+    // And the refusal is at the write path, not only in what is listed: a rule
+    // the document does not enforce is decorative.
+    let err =
+        animation::key_at(&state, id, "VectorMode", 3, None).expect_err("a key on the vector mode");
+    assert!(err.to_string().contains("VectorMode"), "{err}");
+
+    // The property is still there to edit, and the numbers it chooses between
+    // are keyed like anything else.
+    let shown = document::properties(&state, id, 0).expect("properties");
+    let mode = shown
+        .iter()
+        .find(|p| p.id == "VectorMode")
+        .expect("the inspector still offers the vector mode");
+    assert!(!mode.keyable, "it is offered a key diamond");
+    assert!(
+        shown
+            .iter()
+            .find(|p| p.id == "Speed")
+            .is_some_and(|p| p.keyable),
+        "the speed lost its diamond too"
+    );
+}
+
 // --- Step count (spec 4.1, decision D13) ----------------------------------------
 
 /// The confirmation states the exact count and names the objects, and the

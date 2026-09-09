@@ -3001,6 +3001,19 @@ which is why it is not a bar.
 - Select, move, delete, and box-select keys. Move constrained to integer steps.
 - Right-click a key to set the interpolation of the segment leaving it.
 - Properties with no keys show `base` and no diamonds.
+- **A property that cannot be keyed has no diamond at all** (M60), and no track
+  on the timeline. Editable and keyable are nearly the same question — a key is
+  an edit spread over time — and the two general answers are rules: a
+  creation-only property admits no edit at all (§6.1), and everything else may
+  be keyed. `schema::NEVER_KEYED` is the short list of the exceptions, each
+  with its reason. The shape fill's `vector_mode` is the one that is on it: it
+  chooses between one vector everywhere and a ramp across the shape, and the
+  two are read from *different properties*, so a key on it would make the
+  object a different thing half way along the timeline — the inspector offering
+  one set before the key and another after, with the keys placed under the
+  first sitting on properties that are inert after it. It is still edited like
+  anything else; what it cannot be is animated. The refusal is at the write
+  path and not only in what is listed.
 - A property row indicates when the current step's value is interpolated rather
   than keyed.
 - **The steps a segment animates through are dotted.** Between two keys, every

@@ -285,6 +285,12 @@ pub struct PropertyView {
     /// Whether the value shown is interpolated between keys rather than keyed
     /// or held (spec.md 9.3).
     pub interpolated_here: bool,
+    /// Whether the property can carry keyframes at all (M60).
+    ///
+    /// Editable and animatable are different questions: a mode that decides
+    /// which other properties are live is edited like anything else and cannot
+    /// be keyed, so its row has no diamond rather than a diamond that refuses.
+    pub keyable: bool,
     /// Edited by a centred slider rather than a typed number (M29).
     pub slider: Option<SliderView>,
 }
@@ -503,6 +509,7 @@ pub fn properties(state: &AppState, object: u64, step: u32) -> Result<Vec<Proper
                             .keys()
                             .last()
                             .is_some_and(|last| last.step > step),
+                    keyable: ve_core::schema::animatable(object.tool, spec.id),
                     slider: spec.slider.map(SliderView::of),
                 })
             })
