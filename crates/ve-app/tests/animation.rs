@@ -1432,6 +1432,70 @@ fn unlinking_holds_the_follower_where_it_stood() {
     );
 }
 
+/// A following track shows the keys it is actually moved by (M65).
+///
+/// A follower's own keys go dormant under the link, so its track had none to
+/// draw while the object plainly moved: the timeline said "still" about
+/// something travelling across the map. What moves it is the primary's keys,
+/// and a chain of links is walked to whichever object still owns them.
+#[test]
+fn a_following_track_shows_the_keys_that_move_it() {
+    let (_root, app) = project("inherit");
+    let primary = circle(&app, 0.0, 45.0);
+    let middle = circle(&app, 4.0, 45.0);
+    let follower = circle(&app, 8.0, 45.0);
+
+    for (step, lon) in [(0u32, 0.0), (10, 30.0)] {
+        animation::key_at(
+            &app,
+            primary,
+            "Position",
+            step,
+            Some(PropertyValue::Position { lon, lat: 45.0 }),
+        )
+        .expect("key");
+    }
+    animation::follow_set(&app, middle, "Position", Some(primary), 0).expect("link");
+    animation::follow_set(&app, follower, "Position", Some(middle), 0).expect("link");
+
+    let position = |object: u64| {
+        animation::tracks_of(&app, object, 0)
+            .expect("tracks")
+            .tracks
+            .into_iter()
+            .find(|track| track.property == "Position")
+            .expect("a position track")
+    };
+
+    // The one that owns them shows them as its own and borrows nothing.
+    let owner = position(primary);
+    assert_eq!(owner.keys.len(), 2);
+    assert!(owner.inherited.is_empty());
+
+    // The follower's own keys are dormant and it borrows the primary's...
+    let carried = position(middle);
+    assert!(carried.keys.is_empty(), "{:?}", carried.keys);
+    assert_eq!(
+        carried.inherited.iter().map(|k| k.step).collect::<Vec<_>>(),
+        vec![0, 10]
+    );
+
+    // ...and so does one that follows a follower, since the middle object's
+    // own keys are dormant too and it is not what moves anything.
+    assert_eq!(
+        position(follower)
+            .inherited
+            .iter()
+            .map(|k| k.step)
+            .collect::<Vec<_>>(),
+        vec![0, 10]
+    );
+
+    // Unlinked, it stops borrowing: it moves by its own keys or not at all.
+    animation::follow_set(&app, middle, "Position", None, 5).expect("unlink");
+    assert!(position(middle).inherited.is_empty());
+}
+
 /// Deleting the primary frees its followers where they stand, in one history
 /// entry, and one undo puts the whole arrangement back.
 #[test]

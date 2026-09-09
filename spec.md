@@ -3038,6 +3038,14 @@ which is why it is not a bar.
   The refusal is at the write path and not only in what is listed.
 - A property row indicates when the current step's value is interpolated rather
   than keyed.
+- **A following track shows the keys it is moved by** (M65). A follower's own
+  keys go dormant under the link (D42), so its row had none to draw while the
+  object plainly travelled: the timeline said "still" about something crossing
+  the map. It borrows the primary's — walking the chain to whichever object
+  still owns them, since a middle link's keys are dormant too — and draws them
+  dimmed and inert, with a tooltip naming the object whose row they are edited
+  on. Borrowed keys are not selectable, not draggable and not right-clickable:
+  a diamond that looked editable and was not would be worse than none.
 - **The steps a segment animates through are dotted.** Between two keys, every
   step whose value is interpolated carries a small dot on the track, so a
   segment that moves is distinguishable at a glance from one that does not. A

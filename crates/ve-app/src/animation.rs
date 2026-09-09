@@ -170,6 +170,14 @@ pub struct TrackView {
     pub follows: Option<u64>,
     /// That object's name, for the row.
     pub follows_name: Option<String>,
+    /// The keys this track actually moves by, when it follows another (M65).
+    ///
+    /// A follower's own keys go dormant under the link, so its track has none
+    /// to draw and the object moves anyway. What moves it is the primary's —
+    /// or the primary's primary's, if the link is a chain — so those are shown
+    /// here, to be drawn as borrowed and edited on the row that owns them.
+    /// Empty for a track that follows nothing.
+    pub inherited: Vec<KeyframeView>,
 }
 
 /// An object's tracks, for the timeline's tree.
@@ -289,6 +297,10 @@ fn track_of(
             .follow()
             .and_then(|f| project.object(f.primary))
             .map(|primary| primary.name.clone()),
+        inherited: anim
+            .follow()
+            .map(|link| inherited_keys(project, link.primary, id))
+            .unwrap_or_default(),
         motion_available: motion_track(tool, id).is_some(),
         motion: match motion_track(tool, id) {
             Some(MotionTrack::Position) => motion.position,
@@ -375,6 +387,51 @@ pub fn tracks_of(state: &AppState, object: u64, step: u32) -> Result<ObjectTrack
             tracks,
         })
     })
+}
+
+/// The keys a following property is actually moved by (M65).
+///
+/// Walks up the chain from `primary`: an object whose own link is set has
+/// dormant keys of its own, so what moves it is *its* primary's, and so on
+/// until an object that follows nothing. The visited set is the same guard
+/// `ve_core::follow` uses — a chain built into a ring must end the walk rather
+/// than run forever.
+///
+/// Empty where there is nothing to show: a primary that has been deleted, or
+/// one whose property has no keys, in which case the follower is rigid and
+/// does not move.
+fn inherited_keys(
+    project: &ve_core::project::Project,
+    primary: ve_core::Id,
+    id: PropId,
+) -> Vec<KeyframeView> {
+    let mut at = primary;
+    let mut seen = std::collections::BTreeSet::new();
+    loop {
+        if !seen.insert(at) {
+            return Vec::new();
+        }
+        let Some(object) = project.object(at) else {
+            return Vec::new();
+        };
+        let Some(anim) = object.props.get(id) else {
+            return Vec::new();
+        };
+        match anim.follow() {
+            Some(link) => at = link.primary,
+            None => {
+                return anim
+                    .keys()
+                    .iter()
+                    .map(|key| KeyframeView {
+                        step: key.step,
+                        value: PropertyValue::of(key.value),
+                        interp: InterpolationView::of(key.interp),
+                    })
+                    .collect();
+            }
+        }
+    }
 }
 
 /// Turns one of an object's own movements into the field it paints

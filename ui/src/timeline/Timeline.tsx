@@ -1385,9 +1385,18 @@ export default function Timeline({
                       const plot = plots.get(graphId) ?? null;
                       // The keys as drawn: a drag moves the selected ones, and
                       // the dots between them have to move with them.
-                      const drawn = track.keys.map((key) => ({
+                      //
+                      // A following track draws the keys it is *moved by*
+                      // rather than its own dormant ones (M65), so a follower
+                      // reads as animated — which it is — instead of as a
+                      // still object with a link glyph beside it.
+                      const borrowed = track.follows !== null;
+                      const shownKeys = borrowed ? track.inherited : track.keys;
+                      const drawn = shownKeys.map((key) => ({
                         step:
-                          keyDrag && selectedKeys.has(keyId(object.id, track.property, key.step))
+                          !borrowed &&
+                          keyDrag &&
+                          selectedKeys.has(keyId(object.id, track.property, key.step))
                             ? draggedStep(key.step, keyDrag.delta * pxPerStep, pxPerStep, last)
                             : key.step,
                         hold: key.interp.kind === "step",
@@ -1559,26 +1568,43 @@ export default function Timeline({
                                 style={{ left: (tween + 0.5) * pxPerStep }}
                               />
                             ))}
-                            {track.keys.map((key) => {
+                            {shownKeys.map((key) => {
                               const id = keyId(object.id, track.property, key.step);
-                              const selected = selectedKeys.has(id);
+                              const selected = !borrowed && selectedKeys.has(id);
                               const shown =
-                                keyDrag && selected
+                                !borrowed && keyDrag && selected
                                   ? draggedStep(key.step, keyDrag.delta * pxPerStep, pxPerStep, last)
                                   : key.step;
+                              // A borrowed key belongs to the object this one
+                              // follows, and is edited on that object's row.
+                              // Drawn hollow, and inert: dragging it here
+                              // would look like an edit and be none.
                               return (
                                 <span
                                   key={key.step}
-                                  className={`tl-key${selected ? " selected" : ""}${key.interp.kind === "step" ? " hold" : ""}`}
+                                  className={`tl-key${selected ? " selected" : ""}${key.interp.kind === "step" ? " hold" : ""}${borrowed ? " borrowed" : ""}`}
                                   style={{ left: (shown + 0.5) * pxPerStep }}
-                                  title={`${track.label} at step ${key.step} · ${easingName(key.interp)}`}
-                                  onPointerDown={(event) => beginKeyDrag(event, id)}
-                                  onContextMenu={(event) =>
-                                    openMenu(
-                                      event,
-                                      { object: object.id, property: track.property, step: key.step },
-                                      track.interpolations,
-                                    )
+                                  title={
+                                    borrowed
+                                      ? `${track.label} follows ${track.follows_name ?? "another object"}, which is keyed at step ${key.step} — edit it there`
+                                      : `${track.label} at step ${key.step} · ${easingName(key.interp)}`
+                                  }
+                                  onPointerDown={
+                                    borrowed ? undefined : (event) => beginKeyDrag(event, id)
+                                  }
+                                  onContextMenu={
+                                    borrowed
+                                      ? undefined
+                                      : (event) =>
+                                          openMenu(
+                                            event,
+                                            {
+                                              object: object.id,
+                                              property: track.property,
+                                              step: key.step,
+                                            },
+                                            track.interpolations,
+                                          )
                                   }
                                 />
                               );

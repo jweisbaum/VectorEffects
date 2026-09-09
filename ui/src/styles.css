@@ -1492,6 +1492,15 @@ body {
 .tl-key.hold { background: transparent; border-color: var(--accent); }
 .tl-key.selected { background: #ffd678; border-color: #ffd678; }
 .tl-key.hold.selected { background: transparent; }
+/* A key borrowed from the object this track follows (M65). Dimmed and inert:
+   it says the follower moves, and says where the key that moves it lives. */
+.tl-key.borrowed {
+  background: rgba(111, 217, 255, 0.3);
+  border-color: rgba(111, 217, 255, 0.5);
+  cursor: default;
+  pointer-events: none;
+}
+.tl-key.borrowed.hold { background: transparent; }
 /* One dot per interpolated step: the steps a blended segment animates through
    (spec.md 9.3). Not interactive — the diamonds are what a pointer grabs. */
 .tl-tween {

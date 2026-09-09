@@ -3009,6 +3009,31 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M65 — A following track shows the keys that move it
+
+**The report (20.4):** when an object's properties are attached to
+another object's animated properties, the copier should also show
+keyframes.
+
+It showed none. A follower's own keys go dormant under the link (D42, so
+that unlinking holds it where it stands rather than snapping it back), so
+its track had nothing of its own to draw — and the timeline said "still"
+about an object visibly travelling across the map. The only sign it was
+moving at all was the link glyph beside its name.
+
+It borrows the primary's keys now, walking the chain to whichever object
+still owns them: a middle link's keys are dormant too, so following a
+follower has to look past it. The walk carries the visited set
+`ve_core::follow` uses, because a chain built into a ring must end rather
+than run forever, and it comes back empty where there is nothing to
+show — a deleted primary, or one that does not move.
+
+Drawn dimmed and inert, with a tooltip naming the object whose row they
+are edited on. Not selectable, not draggable, not right-clickable: a
+diamond that looked editable and was not would be worse than none. The
+interpolated-step dots follow them, so a follower now reads as animated
+between its borrowed keys, which is what it is.
+
 ### M64 — A macro's size is chosen when it is placed
 
 **The report (20.7):** macro objects should not have animatable size.

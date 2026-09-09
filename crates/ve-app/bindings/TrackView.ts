@@ -65,4 +65,14 @@ follows: bigint | null,
 /**
  * That object's name, for the row.
  */
-follows_name: string | null, };
+follows_name: string | null, 
+/**
+ * The keys this track actually moves by, when it follows another (M65).
+ *
+ * A follower's own keys go dormant under the link, so its track has none
+ * to draw and the object moves anyway. What moves it is the primary's —
+ * or the primary's primary's, if the link is a chain — so those are shown
+ * here, to be drawn as borrowed and edited on the row that owns them.
+ * Empty for a track that follows nothing.
+ */
+inherited: Array<KeyframeView>, };
