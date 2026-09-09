@@ -3009,6 +3009,29 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M62 — A drag's preview stands until the document catches up
+
+**The report (20.5):** when a lifetime window's end is moved, it flashes
+back to its old position on release before jumping to where it was
+dropped.
+
+It did, and the reason was the order of two lines. The release cleared
+the local preview and *then* asked the backend to write the new range.
+For the length of that round trip the bar had nothing to draw from but
+the document's old numbers, so it snapped back to where the drag started
+and jumped forward again when the new tree arrived. The pointer had it
+right the whole time; what was wrong was throwing away the only thing
+that knew.
+
+The preview is what the user is looking at, so it stands until there is
+something newer to draw — and on a refusal too, or the bar would be stuck
+mid-drag.
+
+Out of the component as `commitRangeDrag`, because the property worth
+holding is an *ordering* and nothing in a 1,700-line component asserts
+orderings. The test spies on the sequence: asked, applied, cleared, in
+that order, with the write held open to prove the preview outlives it.
+
 ### M61 — The per-step switch is called Visible
 
 **The report (20.2):** "Enabled" should read "Visible".

@@ -43,6 +43,7 @@ import {
   polyline,
 } from "./graph";
 import { markKind, runBetween } from "./frames";
+import { commitRangeDrag } from "./rangeDrag";
 import {
   classify,
   draggedStep,
@@ -846,11 +847,22 @@ export default function Timeline({
     if (range) {
       rangeDragRef.current = null;
       const at = rangeDrag?.step;
-      setRangeDrag(null);
-      if (at !== undefined) {
-        const [start, end] = range.end === "start" ? [at, range.other] : [range.other, at];
-        run(api.setActiveRange(range.object, Math.min(start, end), Math.max(start, end)));
+      if (at === undefined) {
+        setRangeDrag(null);
+        return;
       }
+      const [a, b] = range.end === "start" ? [at, range.other] : [range.other, at];
+      setError(null);
+      // The preview stands until the document has caught up. Clearing it here
+      // and asking afterwards drew the window from the old numbers for the
+      // length of the round trip: it snapped back to where it started and then
+      // jumped to where it was dropped (M62).
+      void commitRangeDrag(
+        () => api.setActiveRange(range.object, Math.min(a, b), Math.max(a, b)),
+        onChanged,
+        (why) => setError(String(why)),
+        () => setRangeDrag(null),
+      );
       return;
     }
     if (boxRef.current && box) {

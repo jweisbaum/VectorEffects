@@ -2999,6 +2999,13 @@ which is why it is not a bar.
   two alone. An edit at a keyed step replaces that key's value and keeps its
   interpolation; a new key takes the kind's default (linear where allowed).
 - Select, move, delete, and box-select keys. Move constrained to integer steps.
+- **A drag's preview stands until the document has caught up** (M62). Clearing
+  it on release and asking the backend afterwards draws the thing from the old
+  numbers for the length of the round trip: a lifetime window snapped back to
+  where it started and then jumped to where it was dropped, which reads as the
+  drop having failed and been retried. The preview is what the user is looking
+  at; it stands down when there is something newer to draw, and on a refusal
+  too, or the bar would be stuck mid-drag.
 - Right-click a key to set the interpolation of the segment leaving it.
 - Properties with no keys show `base` and no diamonds.
 - **A property that cannot be keyed has no diamond at all** (M60), and no track
