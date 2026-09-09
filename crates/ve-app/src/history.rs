@@ -44,7 +44,7 @@ use ve_grib::writer::{GridSpec, MessageSpec, Parameter, ReferenceTime, message_m
 use ve_zarr::{Archive, Field, Utc, Variable};
 
 use crate::commands::AppState;
-use crate::error::{AppError, Result};
+use crate::error::{AppError, Context, Result};
 use crate::projects::{ProjectSummary, with_session};
 
 /// The grid every archive hands its fields back on: ERA5's 0.25 degree global
@@ -178,7 +178,13 @@ pub fn import_history(
         })
     })
     .join()
-    .map_err(|_| AppError::Internal("the history import panicked".to_owned()))?;
+    .map_err(|_| {
+        AppError::Internal(
+            "The history import stopped unexpectedly. Nothing was added to the project; \
+             the log has the details."
+                .to_owned(),
+        )
+    })?;
     // Logged here as well as returned. An import is minutes long and the only
     // report of a failure is a line in the status bar that the next hint
     // replaces; without this the log says an import started and then nothing
@@ -216,7 +222,10 @@ pub fn history_import(
     );
 
     let directory = state.paths.history_dir.clone();
-    std::fs::create_dir_all(&directory)?;
+    std::fs::create_dir_all(&directory).doing(
+        "make the folder history is written to at",
+        directory.display(),
+    )?;
 
     // Fetched and written first, outside the session lock: this takes
     // minutes, and the document has to stay readable while it runs.
@@ -414,7 +423,11 @@ fn fetch_to_file(
     use std::sync::atomic::{AtomicBool, Ordering};
 
     let started = std::time::Instant::now();
-    let source = Arc::<dyn ve_zarr::FieldSource>::from(archive.open().map_err(zarr_failed)?);
+    let source = Arc::<dyn ve_zarr::FieldSource>::from(
+        archive
+            .open()
+            .doing("reach the archive", format!("\"{}\"", archive.label()))?,
+    );
     // Opening reads the whole time axis, which is seconds on a cold start and
     // is silent; saying so is the difference between a slow start and an
     // apparent hang.
@@ -429,7 +442,7 @@ fn fetch_to_file(
     // which is the message worth showing when a range is out of reach.
     let held: std::collections::BTreeMap<i64, ve_zarr::Step> = source
         .steps_in_range(at_hour(request.start_unix_s), at_hour(request.end_unix_s))
-        .map_err(zarr_failed)?
+        .doing("read the times held by", format!("\"{}\"", archive.label()))?
         .into_iter()
         .map(|step| (step.valid_time.hours_since_unix_epoch(), step))
         .collect();
@@ -470,7 +483,10 @@ fn fetch_to_file(
         request.start_unix_s,
         request.end_unix_s
     ));
-    let mut out = BufWriter::with_capacity(1 << 20, std::fs::File::create(&path)?);
+    let mut out = BufWriter::with_capacity(
+        1 << 20,
+        std::fs::File::create(&path).doing("create the history file", path.display())?,
+    );
 
     let next = std::sync::atomic::AtomicUsize::new(0);
     let stop = AtomicBool::new(false);
@@ -478,6 +494,7 @@ fn fetch_to_file(
     let workers = FETCHES_AT_ONCE.min(plan.len());
     let mut bytes_written = 0usize;
 
+    let label = archive.label();
     let outcome = std::thread::scope(|scope| -> Result<()> {
         for _ in 0..workers {
             let tx = tx.clone();
@@ -493,7 +510,13 @@ fn fetch_to_file(
                     };
                     let built = source
                         .read_step(step)
-                        .map_err(zarr_failed)
+                        .doing(
+                            "read",
+                            format!(
+                                "{} from \"{label}\"",
+                                spelled(step.valid_time.hours_since_unix_epoch() * HOUR)
+                            ),
+                        )
                         .and_then(|fields| encode_hour(GRID, reference, *forecast_hour, &fields));
                     let failed = built.is_err();
                     if tx.send((position, built)).is_err() {
@@ -631,7 +654,11 @@ fn history_layer(archive: Archive, path: &Path, request: &HistoryRequest) -> Res
         .sequences
         .into_iter()
         .next()
-        .ok_or_else(|| AppError::Internal(format!("{} produced no field", archive.label())))?;
+        .ok_or_else(|| AppError::Doing {
+            doing: "find a wind or current field in what",
+            what: format!("\"{}\" sent back", archive.label()),
+            why: "the file it wrote holds no message this build can read".to_owned(),
+        })?;
     Ok(Layer::from_history(
         archive.label(),
         path.to_path_buf(),
@@ -643,6 +670,18 @@ fn history_layer(archive: Archive, path: &Path, request: &HistoryRequest) -> Res
 }
 
 /// The hour a Unix time falls in.
+/// A Unix instant as a plain UTC hour, for a message someone has to act on.
+///
+/// `1758240000` says nothing about which hour failed; `2025-09-19 00Z` says
+/// which one to try again for.
+fn spelled(unix_s: i64) -> String {
+    let utc = at_hour(unix_s);
+    format!(
+        "{:04}-{:02}-{:02} {:02}Z",
+        utc.year, utc.month, utc.day, utc.hour
+    )
+}
+
 fn at_hour(unix_s: i64) -> Utc {
     Utc::from_hours_since_unix_epoch(unix_s.div_euclid(HOUR))
 }
@@ -666,10 +705,6 @@ fn bad_range(why: &str) -> AppError {
         field: "range",
         value: why.to_owned(),
     }
-}
-
-fn zarr_failed(error: ve_zarr::ZarrError) -> AppError {
-    AppError::Internal(error.to_string())
 }
 
 #[cfg(test)]

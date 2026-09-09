@@ -200,8 +200,14 @@ export default function App() {
     })();
   }, []);
 
-  const report = (err: unknown) =>
-    reportError(err instanceof IpcError ? `[${err.kind}] ${err.message}` : String(err));
+  // The message alone (M59). The `kind` is a discriminant for code, not a word
+  // for a person — `[bad-option]` in front of a sentence reads as machine
+  // trouble whatever the sentence says — so it goes in the line's tooltip,
+  // where a bug report can still find it.
+  const report = (err: unknown) => {
+    if (err instanceof IpcError) reportError(err.message, err.kind);
+    else reportError(String(err));
+  };
 
   const flash = (message: string) => {
     setStatus(message);
@@ -840,7 +846,10 @@ function StatusHint({ status }: { status: string | null }) {
   }
   if (line === null) return <span className="hint">{activity}</span>;
   return (
-    <span className={line.kind === "error" ? "hint error" : "hint muted"}>
+    <span
+      className={line.kind === "error" ? "hint error" : "hint muted"}
+      title={line.detail ?? undefined}
+    >
       {activity}
       {activity && " · "}
       {line.text}

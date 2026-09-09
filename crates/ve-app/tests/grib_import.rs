@@ -484,7 +484,12 @@ fn a_file_without_vector_fields_is_refused_by_name() {
     let path = root.0.join("notes.grib2");
     std::fs::write(&path, b"not a grib").expect("write");
     let err = import::grib_import(&app, path.to_string_lossy().into_owned()).unwrap_err();
-    assert_eq!(err.kind(), "grib", "{err}");
+    // The message names the file and what was being attempted, not only what
+    // the decoder objected to (M59): "not a GRIB2 file" over an import of five
+    // files says nothing about which one to look at.
+    let message = err.to_string();
+    assert!(message.contains("notes.grib2"), "{message}");
+    assert!(message.contains("import"), "{message}");
     let summary = projects::current(&app).expect("current").expect("open");
     assert_eq!(summary.layer_count, 1, "nothing was added");
     assert!(!summary.can_undo, "nothing to undo");

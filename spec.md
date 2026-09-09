@@ -1213,7 +1213,19 @@ the tool, the glyphs and the graticule stay the map's state.
 **The status bar's middle is one line**: the tool's hint, or the last error,
 whichever is newer, from a store every panel and the map write to. No panel
 keeps an error line of its own, and no bar carries help text beside its
-controls. **Its left end is a spinner**, before the version number, turning
+controls.
+
+**An error message names three things** (M59): what the application was
+trying to do, what it was doing it to, and what went wrong. A library error
+knows only the third — `No such file or directory (os error 2)` is true and
+useless — so the first two are attached where they are known, at the call
+site, by `error::Context::doing`. What reaches the line reads as a sentence:
+*Could not save the project to /Users/…/Passage.veproj: permission denied.*
+The error's `kind` is a discriminant for code and not a word for a person, so
+it is the line's tooltip rather than a `[bad-option]` prefix in front of the
+sentence — a prefix reads as machine trouble whatever follows it. A refusal
+that has something the user can do about it says what that is, rather than
+only what was refused. **Its left end is a spinner**, before the version number, turning
 while a long task runs — a GRIB or image import, a project opening or saving,
 an export, a capture's bake or paste, a macro's insert — and invisible
 otherwise; its tooltip names what is running. The ipc layer decides which

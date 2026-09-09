@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use directories::ProjectDirs;
 
-use crate::error::{AppError, Result};
+use crate::error::{AppError, Context, Result};
 
 /// Resolved locations for everything the app writes outside a project file.
 #[derive(Debug, Clone)]
@@ -72,7 +72,7 @@ impl AppPaths {
             &self.log_dir,
             &self.history_dir,
         ] {
-            std::fs::create_dir_all(dir)?;
+            std::fs::create_dir_all(dir).doing("make the application folder at", dir.display())?;
         }
         Ok(())
     }

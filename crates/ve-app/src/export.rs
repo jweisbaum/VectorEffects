@@ -24,7 +24,7 @@ use ve_render::evaluator::FieldEvaluator;
 use ve_render::scene::flatten_kind;
 
 use crate::commands::AppState;
-use crate::error::{AppError, Result};
+use crate::error::{AppError, Context, Result};
 
 /// Set to ask a running export to stop.
 #[derive(Debug, Default)]
@@ -240,7 +240,8 @@ pub fn run(
     let mut messages = 0u32;
 
     let outcome = (|| -> Result<()> {
-        let file = std::fs::File::create(&temporary)?;
+        let file = std::fs::File::create(&temporary)
+            .doing("create the export file", temporary.display())?;
         let mut out = BufWriter::new(file);
 
         let mut u = vec![0f32; points.len()];
@@ -281,7 +282,7 @@ pub fn run(
             });
         }
 
-        out.flush()?;
+        out.flush().doing("finish writing", path.display())?;
         Ok(())
     })();
 
@@ -291,9 +292,11 @@ pub fn run(
         return Err(err);
     }
 
-    std::fs::rename(&temporary, &path).inspect_err(|_| {
-        let _ = std::fs::remove_file(&temporary);
-    })?;
+    std::fs::rename(&temporary, &path)
+        .inspect_err(|_| {
+            let _ = std::fs::remove_file(&temporary);
+        })
+        .doing("put the finished file in place at", path.display())?;
 
     Ok(ExportResult {
         path: path.to_string_lossy().into_owned(),

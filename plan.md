@@ -3009,6 +3009,42 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M59 — An error message says what failed, on what, and why
+
+**The report (19):** error messages need to be more descriptive.
+
+They named one thing out of three. A library error knows what went
+wrong and nothing else: `[io] i/o failed: No such file or directory (os
+error 2)` is true, unarguable, and tells a user neither which file nor
+what the application was attempting. Only the call site knows those, so
+that is where they are attached — `error::Context::doing`, an extension
+on `Result` that reads as *Could not save the project to
+/Users/…/Passage.veproj: permission denied.*
+
+Applied where a failure actually reaches a person: opening and saving a
+project, the autosave snapshot and its manifest, the export's temporary
+file and the rename that puts it in place, the settings file, the
+application and macro folders, the macro library, the GRIB import, and
+the history fetch — where it now names the archive and, for a failed
+step, the hour in UTC rather than a Unix instant.
+
+The messages the user reads are sentences now, and the ones with
+something to do about them say it: a project that was never saved points
+at Save As, an unsaved project names itself, a too-new file says which
+version wrote it and which this build reads. `no object with id #17`
+became a sentence about an object that is no longer in the project and
+why it might not be.
+
+The `[kind]` prefix is gone from the status line. It is a discriminant
+for code, not a word for a person: reading `[bad-option]` in front of a
+sentence makes it machine trouble whatever the sentence says. It is the
+line's tooltip, so a bug report can still find it.
+
+**Not done:** the library crates' internal messages — a bit reader that
+ran short, a WGSL binding that would not compile — were left alone.
+Those reach a log and not a status bar, and rewording them for an
+audience that never sees them would only make the log harder to search.
+
 ### M58 — The square brush's preview sweeps instead of stamping
 
 **The report (16):** the square brush draws zig-zags during the drag,

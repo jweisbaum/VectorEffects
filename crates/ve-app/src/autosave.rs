@@ -30,7 +30,7 @@ use ts_rs::TS;
 use ve_core::io;
 
 use crate::commands::AppState;
-use crate::error::{AppError, Result};
+use crate::error::{AppError, Context, Result};
 use crate::projects::{ProjectSummary, refuse_to_discard, with_session};
 use crate::session::OpenProject;
 use crate::settings::AutosaveMode;
@@ -151,7 +151,7 @@ pub fn snapshot(state: &AppState, force: bool) -> Result<bool> {
         }
     }
 
-    std::fs::create_dir_all(dir)?;
+    std::fs::create_dir_all(dir).doing("make the autosave folder at", dir.display())?;
     // In `Save` mode a project with a path is written in place instead — the
     // same cadence, the file the user chose. The save clears the snapshot,
     // so the manifest is written afterwards to carry the cadence: a manifest
@@ -162,7 +162,10 @@ pub fn snapshot(state: &AppState, force: bool) -> Result<bool> {
         crate::projects::save(state)?;
         tracing::info!(id, "autosaved the project in place");
     } else {
-        io::save(&project, &snapshot_path(dir, id))?;
+        io::save(&project, &snapshot_path(dir, id)).doing(
+            "write a recovery snapshot to",
+            snapshot_path(dir, id).display(),
+        )?;
         tracing::info!(id, "wrote a crash-recovery snapshot");
     }
     let manifest = Manifest {
@@ -175,6 +178,10 @@ pub fn snapshot(state: &AppState, force: bool) -> Result<bool> {
     std::fs::write(
         manifest_path(dir, id),
         serde_json::to_string_pretty(&manifest).map_err(ve_core::CoreError::Json)?,
+    )
+    .doing(
+        "write the autosave record to",
+        manifest_path(dir, id).display(),
     )?;
     Ok(true)
 }
@@ -235,7 +242,10 @@ pub fn recover(state: &AppState, id: u64, discard_unsaved: bool) -> Result<Proje
             field: "autosave",
             value: "no such snapshot".to_owned(),
         })?;
-    let mut project = io::load(&snapshot_path(dir, id))?;
+    let mut project = io::load(&snapshot_path(dir, id)).doing(
+        "reopen the recovery snapshot at",
+        snapshot_path(dir, id).display(),
+    )?;
     crate::import::attach_rasters(&mut project);
 
     with_session(state, |session| {

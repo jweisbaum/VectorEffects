@@ -10,7 +10,7 @@
 use serde::Serialize;
 use ts_rs::TS;
 
-use crate::error::{AppError, Result};
+use crate::error::{AppError, Context, Result};
 use crate::paths::{AppPaths, display_path};
 
 /// Which field evaluator backend is active, and why.
@@ -234,7 +234,7 @@ pub fn save_debug_capture(
         .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
         .collect();
     let path = state.paths.log_dir.join(format!("capture-{safe}.png"));
-    std::fs::write(&path, bytes)?;
+    std::fs::write(&path, bytes).doing("write the capture to", path.display())?;
     tracing::info!(path = %path.display(), "wrote debug capture");
     Ok(display_path(&path))
 }

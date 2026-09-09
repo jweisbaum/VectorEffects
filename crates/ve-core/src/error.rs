@@ -17,7 +17,9 @@ pub enum CoreError {
     NonFiniteCoordinate(&'static str),
 
     /// A project file declared a schema version this build cannot read.
-    #[error("project schema version {found} is newer than supported version {supported}")]
+    #[error(
+        "this project was written by a newer version of VectorEffects (file version {found}, this build reads up to {supported})"
+    )]
     SchemaTooNew { found: u32, supported: u32 },
 
     /// A project declared zero steps, or more than the maximum.
@@ -36,15 +38,15 @@ pub enum CoreError {
     },
 
     /// Reading or writing a project file failed.
-    #[error("project file i/o failed: {0}")]
+    #[error("the project file could not be read or written: {0}")]
     Io(#[from] std::io::Error),
 
     /// The project JSON could not be parsed or written.
-    #[error("project json is malformed: {0}")]
+    #[error("the project file is damaged and could not be read: {0}")]
     Json(#[from] serde_json::Error),
 
     /// The `.veproj` container was not a readable archive.
-    #[error("project archive is malformed: {0}")]
+    #[error("the project file is not a complete project archive: {0}")]
     Archive(String),
 
     /// A migration could not upgrade a document.
@@ -57,11 +59,15 @@ pub enum CoreError {
     },
 
     /// A command referenced a layer that is not in the document.
-    #[error("no layer with id #{0}")]
+    #[error(
+        "that layer is no longer in the project (#{0}); it may have been deleted, or an undo may have taken it back"
+    )]
     MissingLayer(u64),
 
     /// A command referenced an object that is not in the document.
-    #[error("no object with id #{0}")]
+    #[error(
+        "that object is no longer in the project (#{0}); it may have been deleted, or an undo may have taken it back"
+    )]
     MissingObject(u64),
 
     /// A reorder referenced a position outside the collection.

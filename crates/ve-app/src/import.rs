@@ -17,7 +17,7 @@ use ve_core::raster::RasterSequence;
 use ve_grib::import;
 
 use crate::commands::AppState;
-use crate::error::{AppError, Result};
+use crate::error::{AppError, Context, Result};
 use crate::projects::{ProjectSummary, with_session};
 use crate::session::OpenProject;
 
@@ -55,7 +55,8 @@ pub fn grib_import(state: &AppState, path: String) -> Result<ProjectSummary> {
         let open = session.require_open()?;
         // An unstructured file is resampled onto *this* project's grid, so
         // the read cannot happen before the project is in hand.
-        let imported = resample_into(&mut open.project, &path)?;
+        let imported = resample_into(&mut open.project, &path)
+            .doing("import the GRIB file at", path.display())?;
         for skipped in &imported.skipped {
             tracing::warn!(
                 path = %path.display(),
@@ -223,7 +224,8 @@ pub fn grib_project(
     // The grid comes first: an unstructured file states no spacing, so the
     // resolution is derived from its mesh and the file is then resampled onto
     // it. A lat/lon file reaches the same answer from its own increments.
-    let (messages, skipped) = import::read_messages(&path)?;
+    let (messages, skipped) =
+        import::read_messages(&path).doing("read the GRIB file at", path.display())?;
     let resolution = nearest_resolution(import::nominal_spacing(&messages).unwrap_or(1.0));
     let mut cache = std::collections::BTreeMap::new();
     let sequences = {

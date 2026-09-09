@@ -13,7 +13,7 @@ use ve_core::project::{FieldKind, Project, ProjectSettings, Resolution, StepHour
 use ve_core::vector::DirectionConvention;
 
 use crate::commands::AppState;
-use crate::error::{AppError, Result};
+use crate::error::{AppError, Context, Result};
 use crate::session::{OpenProject, Session};
 
 /// What the frontend needs to know about the open project.
@@ -309,7 +309,7 @@ pub fn open_project(
 /// Implementation of [`open_project`], callable without a Tauri handle.
 pub fn open(state: &AppState, path: String, discard_unsaved: bool) -> Result<ProjectSummary> {
     let path = PathBuf::from(path);
-    let mut project = io::load(&path)?;
+    let mut project = io::load(&path).doing("open the project at", path.display())?;
     tracing::info!(path = %path.display(), objects = project.object_count(), "opened project");
     // Imported fields are read back from their files, never from the project
     // (invariant 2). A file that has gone leaves its layer empty rather than

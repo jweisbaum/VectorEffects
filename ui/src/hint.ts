@@ -18,6 +18,11 @@ export interface HintSnapshot {
   /** The last error, until the next hint or a clear. */
   error: string | null;
   /**
+   * What a bug report would want and a reader would not: the error's `kind`
+   * discriminant (M59). Shown as the line's tooltip, never in the line.
+   */
+  errorKind: string | null;
+  /**
    * What the map is busy with — tiles still rendering — shown ahead of the
    * hint (M27). It used to sit in the title bar among the view controls,
    * where a count that comes and goes on every edit pulled the eye; the
@@ -26,13 +31,14 @@ export interface HintSnapshot {
   activity: string | null;
 }
 
-let snapshot: HintSnapshot = { hint: null, error: null, activity: null };
+let snapshot: HintSnapshot = { hint: null, error: null, errorKind: null, activity: null };
 const listeners = new Set<() => void>();
 
 function publish(next: HintSnapshot) {
   if (
     next.hint === snapshot.hint &&
     next.error === snapshot.error &&
+    next.errorKind === snapshot.errorKind &&
     next.activity === snapshot.activity
   ) {
     return;
@@ -47,12 +53,23 @@ function publish(next: HintSnapshot) {
  * not changed has nothing new to say over it.
  */
 export function setHint(hint: string | null): void {
-  publish({ ...snapshot, hint, error: hint === snapshot.hint ? snapshot.error : null });
+  const keep = hint === snapshot.hint;
+  publish({
+    ...snapshot,
+    hint,
+    error: keep ? snapshot.error : null,
+    errorKind: keep ? snapshot.errorKind : null,
+  });
 }
 
-/** Reports an error, which shows in place of the hint until the hint changes. */
-export function reportError(error: string | null): void {
-  publish({ ...snapshot, error });
+/**
+ * Reports an error, which shows in place of the hint until the hint changes.
+ *
+ * `kind` is the backend's discriminant, kept for the tooltip and never for the
+ * line itself (M59).
+ */
+export function reportError(error: string | null, kind: string | null = null): void {
+  publish({ ...snapshot, error, errorKind: error === null ? null : kind });
 }
 
 /** Sets what the map is busy with, or clears it. Independent of the hint and the error. */
@@ -61,9 +78,13 @@ export function setActivity(activity: string | null): void {
 }
 
 /** What the status bar shows: the error if there is one, else the hint. */
-export function shown(state: HintSnapshot): { text: string; kind: "error" | "hint" } | null {
-  if (state.error !== null) return { text: state.error, kind: "error" };
-  if (state.hint !== null) return { text: state.hint, kind: "hint" };
+export function shown(
+  state: HintSnapshot,
+): { text: string; kind: "error" | "hint"; detail: string | null } | null {
+  if (state.error !== null) {
+    return { text: state.error, kind: "error", detail: state.errorKind };
+  }
+  if (state.hint !== null) return { text: state.hint, kind: "hint", detail: null };
   return null;
 }
 

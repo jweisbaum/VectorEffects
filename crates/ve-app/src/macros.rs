@@ -34,7 +34,7 @@ use ve_render::scene::flatten_kind;
 
 use crate::capture::RegionShape;
 use crate::commands::AppState;
-use crate::error::{AppError, Result};
+use crate::error::{AppError, Context, Result};
 use crate::projects::{ProjectSummary, with_session};
 
 /// File extension for a library entry.
@@ -944,12 +944,10 @@ pub fn capture_finish(state: &AppState, name: String, last_step: u32) -> Result<
         Ok((header, capture))
     })?;
 
-    std::fs::create_dir_all(&dir)?;
+    std::fs::create_dir_all(&dir).doing("make the macro folder at", dir.display())?;
     let stem = slug(&header.name, &capture.hash);
-    std::fs::write(
-        dir.join(format!("{stem}.{EXTENSION}")),
-        encode(&header, &capture)?,
-    )?;
+    let file = dir.join(format!("{stem}.{EXTENSION}"));
+    std::fs::write(&file, encode(&header, &capture)?).doing("save the macro to", file.display())?;
     library(state)
 }
 
@@ -1070,7 +1068,8 @@ pub fn macro_insert(
         Ok(session.settings.macro_directory.clone())
     })?;
     let dir = directory(state, &configured);
-    let bytes = std::fs::read(dir.join(format!("{id}.{EXTENSION}")))?;
+    let file = dir.join(format!("{id}.{EXTENSION}"));
+    let bytes = std::fs::read(&file).doing("read the macro at", file.display())?;
     let (_, capture) = decode(&bytes)?;
     let capture = Arc::new(capture);
     let anchor = LonLat::new(wrap180(lon), lat.clamp(-90.0, 90.0))?;

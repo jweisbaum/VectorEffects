@@ -13,7 +13,7 @@ use ve_core::history::History;
 use ve_core::io;
 use ve_core::project::Project;
 
-use crate::error::{AppError, Result};
+use crate::error::{AppError, Context, Result};
 
 /// How many recent projects to remember.
 pub const MAX_RECENT: usize = 10;
@@ -274,9 +274,11 @@ impl Session {
         };
         let json = serde_json::to_string_pretty(&settings)?;
         if let Some(parent) = settings_file.parent() {
-            std::fs::create_dir_all(parent)?;
+            std::fs::create_dir_all(parent)
+                .doing("make the settings folder at", parent.display())?;
         }
-        std::fs::write(settings_file, json)?;
+        std::fs::write(settings_file, json)
+            .doing("write the settings to", settings_file.display())?;
         Ok(())
     }
 
@@ -305,7 +307,7 @@ impl Session {
     /// Saves the open project to `path`, remembering it as recent.
     pub fn save_to(&mut self, path: PathBuf) -> Result<()> {
         let open = self.require_open()?;
-        io::save(&open.project, &path)?;
+        io::save(&open.project, &path).doing("save the project to", path.display())?;
         open.path = Some(path.clone());
         open.dirty = false;
         self.remember(&path);
