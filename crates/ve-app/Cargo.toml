@@ -39,6 +39,27 @@ tauri-plugin-dialog = "2.7.3"
 png = "0.18.1"
 jpeg-decoder = "0.3.2"
 tiff = "0.11.3"
+# End-to-end automation, and **never in a shipped build** — see `[features]`.
+tauri-plugin-webdriver-automation = { version = "0.1.3", optional = true }
+
+[features]
+# WebDriver automation for the end-to-end tests (macOS), off by default.
+#
+# **The plugin binds a TCP listener.** It serves an axum WebDriver endpoint on
+# `127.0.0.1` at a random port, printed to stdout, and that endpoint can click,
+# type, screenshot and read the DOM — the whole interface, to any process on
+# the machine that reads the port. Invariant 5 says nothing is fetched that the
+# user did not ask for, and an inbound socket that drives the application is
+# the same promise from the other side.
+#
+# So it is optional, and `npm run build` does not pass it: a release bundle
+# contains no `axum` and opens no port. `npm run check:offline` cannot enforce
+# that — it reads source URLs, bundle references and the CSP, not listeners —
+# so the enforcement is that the dependency is not compiled in at all.
+#
+#   npm run dev:webdriver     # the app with the endpoint
+#   cargo build -p ve-app --features webdriver
+webdriver = ["dep:tauri-plugin-webdriver-automation"]
 
 [dev-dependencies]
 # Reading a saved project's archive directly, to check what a capture writes.

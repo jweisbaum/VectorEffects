@@ -3009,6 +3009,60 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M69 — WebDriver automation, compiled in only when asked for
+
+**The request:** install `tauri-plugin-webdriver-automation` in the Tauri
+crate.
+
+The crate is real — 0.1.3, MIT/Apache-2.0,
+`github.com/danielraffel/tauri-webdriver` — and it answers a real gap:
+`tauri-driver`, the official end-to-end route, supports Linux and Windows
+and not macOS, which is what this was written to fill.
+
+**What it does, from its own source:** binds `127.0.0.1:0`, prints the
+port to stdout, and serves an `axum` WebDriver router that can click,
+type, screenshot and read the DOM. It also asks `tauri` for
+`dynamic-acl`, which relaxes the capability system at runtime. The build
+script is benign — `tauri_plugin::Builder` generating ACL scaffolding —
+and the `links` key is a Tauri-plugin convention rather than a native
+library, so there is no `-sys` crate and the three-platform rule is
+untouched. `tokio` and `hyper` were already in the tree; `axum` is the
+one new stack.
+
+**Invariant 5 runs both ways.** It reads "nothing is fetched that the
+user did not ask for", and an inbound socket that drives the whole
+interface is that promise broken from the other side. Worse, the
+automated guard would not fire: `check:offline` reads source URLs, remote
+references in the built bundle and the CSP, and none of those sees a
+listener.
+
+So the dependency is **optional**, behind a `webdriver` feature that is
+off by default. `npm run build` does not pass it, and a default build has
+no `axum` in its tree at all — checked, not assumed. What holds it that
+way is `tests/webdriver_optional.rs`, which reads the manifest rather
+than asking `cfg!`: the regression to catch is someone making the
+dependency unconditional or adding it to a default list, and a `cfg!`
+check would compile the other way and pass. A second test tampers with a
+stand-in manifest to prove the first is not vacuous — a pattern that
+matches nothing passes as happily as one that matches the right thing.
+
+There *was* a third, asserting `!cfg!(feature = "webdriver")`. Clippy
+rejected it as an assertion with a constant value and clippy was right:
+it is true in CI and false in an end-to-end run, which is to say it
+tested the invocation rather than the manifest. Removed, with a note in
+the file saying why, so nobody adds it back.
+
+Put to the user as a decision rather than guessed at, since CLAUDE.md
+lists "adding any runtime dependency that reaches the network" under ask,
+don't guess. The alternative offered was a plain dependency with invariant
+5 amended, the way M38's ERA5 exception was; the call was to keep the
+invariant whole and gate the feature.
+
+**Found on the way:** `tauri dev` always passes `--no-default-features`,
+with or without a `--features` flag, so a `default = [...]` list on
+`ve-app` would work under `cargo build` and do nothing under `tauri dev`.
+Recorded as a gotcha; nothing relies on it today.
+
 ### M68 — A gesture aimed at a hidden layer does not start
 
 **The report:** with a hidden top layer selected, the liquify tool

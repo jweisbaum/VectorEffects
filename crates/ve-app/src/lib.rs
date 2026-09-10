@@ -49,8 +49,21 @@ pub fn run() -> anyhow::Result<()> {
     let basemap = ve_render::basemap::inspect(ve_render::basemap::EMBEDDED)?;
     tracing::info!(lods = basemap.lods.len(), "basemap asset validated");
 
-    tauri::Builder::default()
-        .plugin(tauri_plugin_dialog::init())
+    let builder = tauri::Builder::default().plugin(tauri_plugin_dialog::init());
+    // End-to-end automation, compiled in only when asked for (see the crate's
+    // `[features]`). It binds a WebDriver endpoint on loopback, which is a way
+    // into the application rather than out of it — invariant 5 in the other
+    // direction — so a shipped build must not carry it, and the feature being
+    // off by default is what makes sure of that.
+    #[cfg(feature = "webdriver")]
+    let builder = {
+        tracing::warn!(
+            "the WebDriver automation endpoint is compiled in; this build is for \
+             testing and must not be shipped"
+        );
+        builder.plugin(tauri_plugin_webdriver_automation::init())
+    };
+    builder
         .manage(state)
         .manage(protocol::SceneCache::default())
         .manage(export::ExportCancel::default())

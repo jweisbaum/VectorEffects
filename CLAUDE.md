@@ -41,7 +41,7 @@ stop and raise it rather than working around it.
    same commit; only the tolerance is loose.
 4. **Export is deterministic and byte-reproducible** across machines. Export
    uses `CpuEvaluator`, never the GPU, unless the user opts into `fast_export`.
-5. **Nothing is fetched that the user did not ask for.** No CDN fonts, no map
+5. **Nothing is fetched that the user did not ask for, and nothing reaches in.** No CDN fonts, no map
    tiles, no telemetry, no remote schema fetches, and the webview's CSP stays
    `'self'`-only. `npm run check:offline` enforces this statically in CI
    (source URLs, remote references in the built bundle, and CSP strength). A
@@ -51,6 +51,14 @@ stop and raise it rather than working around it.
    when the user asks it to. It lives in `ve-zarr` and nothing else may reach
    the network — the offline check allows those URLs in that crate alone. A
    new fetch anywhere else is still the violation it always was.
+   **The invariant runs both ways** (M69): an *inbound* socket that drives the
+   application is the same promise broken from the other side. `ve-app`'s
+   optional `webdriver` feature compiles in a WebDriver endpoint on loopback
+   for the end-to-end tests; it is off by default, `npm run build` does not
+   pass it, and `tests/webdriver_optional.rs` reads the manifest to hold it
+   that way. `npm run check:offline` **cannot** see a listener — it reads
+   source URLs, remote references in the built bundle and the CSP — so for
+   anything inbound the enforcement is that the dependency is not compiled in.
 6. **Interaction stays fast; export may be slow.** Never trade frame rate for
    export throughput.
 
@@ -110,6 +118,8 @@ npm install                 # root npm workspace; installs ui/ too
 npm run dev                 # tauri dev: builds the app and opens the window
 npm run ui:dev              # frontend only, no Rust backend
 VE_FORCE_CPU=1 npm run dev  # force the CPU evaluator (also how CI runs)
+npm run dev:webdriver       # the app with the WebDriver endpoint (macOS e2e).
+                            # NEVER shipped: see `ve-app`'s [features]
 
 # Checks — all of these before declaring work done
 cargo fmt --all --check
@@ -495,6 +505,13 @@ to the hash input is a correctness bug that shows up as stale frames.
   repo root, not from the config's own directory.
 - `ve-app` ships two binaries, so `default-run = "ve-app"` is required or
   `tauri dev`'s bare `cargo run` cannot choose between them.
+- **The Tauri CLI always passes `--no-default-features`.** `tauri dev` runs
+  `cargo run --no-default-features …`, with or without a `--features` flag of
+  its own, so a `default = [...]` list on `ve-app` would do nothing under
+  `tauri dev` while working under a bare `cargo build` — the two would build
+  different code. Put anything that must always be on in the dependency list,
+  not behind a default feature. Pass extra features the documented way
+  (`tauri dev --features x`), not after a `--` separator.
 - Frontend tests default to the `node` environment. Component tests needing a
   DOM opt in per file with `// @vitest-environment happy-dom`
   (`SpeedFilter.test.tsx` is the pattern: `react-dom/client` and React's own
