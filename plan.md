@@ -3009,6 +3009,39 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M76 — Opening through the application, not around it
+
+**The request:** give the driver a way to open any project, rather than
+only ones already in the recent list.
+
+Found while verifying M75, and worth recording as a mistake rather than a
+feature: M71's `open` invoked `open_project` and stopped there. The
+command is only half of opening. The other half is the frontend's state —
+the summary, the selection, the step, the active layer — so the backend
+held a project the interface never showed, and the application sat on the
+start screen looking as though the open had failed. M71's claim to have
+verified the driver end to end was therefore half right: the capture was
+real, and the cyclone was on screen because an earlier run had opened it,
+not because `open` worked.
+
+`App.openPath` is now the one path that opens by path, used by the file
+dialog and by `window.__veOpen` alike, so the driver goes through exactly
+what a person goes through. Dev-only under `import.meta.env.DEV`, like
+`__veCapture`, and for a sharper reason: it discards unsaved changes
+without asking, which is what a driver wants and precisely why a shipped
+build must not have it.
+
+The two hook waits became one `awaitHook`, since both are React effects
+that land a moment after the thing that owns them mounts, and both failed
+in the same misleading way — "this is not a dev build" — when asked too
+early.
+
+**Verified by opening a project the application had never had open.** The
+driver opened `gyre.veproj` where cyclone was loaded before, and the
+capture came back as the gyre: a ring of circulating current with its
+arrows, not the cyclone. Under the old `open` that picture would have been
+the cyclone again, which is how the fault hid.
+
 ### M75 — A layer is always selected
 
 **The instruction:** there should always be a layer selected; if none is
@@ -3201,10 +3234,15 @@ same, so long work is started and polled for rather than awaited in the
 webview. Both are in CLAUDE.md, since neither is discoverable from the
 crate's documentation.
 
-Verified end to end, not just wired up: the driver opens
-`assets/samples/cyclone.veproj` and captures the cyclone with its ramp
-colours, its wind barbs, the basemap and the graticule — 2880x1590 of
-real WebGL pixels.
+Verified end to end, not just wired up: the driver captures the cyclone
+with its ramp colours, its wind barbs, the basemap and the graticule —
+2880x1590 of real WebGL pixels.
+
+**Corrected in M76:** the *capture* half of that was verified and the
+*open* half was not. `open` invoked `open_project` directly, which moves
+the backend and leaves the interface on the start screen; the cyclone was
+on screen because a previous run had opened it, not because the driver
+had. The claim above overstated what had been shown.
 
 ### M70 — A tile is dimmed when it is stale, not while it is being looked up
 

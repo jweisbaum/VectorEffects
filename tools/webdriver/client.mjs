@@ -215,16 +215,33 @@ export class Driver {
    * the reader looking in entirely the wrong place.
    */
   async awaitCapture({ timeoutMs = 30_000 } = {}) {
+    await this.awaitHook("__veCapture", "capturing", {
+      timeoutMs,
+      why:
+        "a picture is read back from the map's renderer, so a project has to be open",
+    });
+  }
+
+  /**
+   * Waits for one of the application's dev-only hooks to appear.
+   *
+   * They are installed by React effects, so they exist a moment after the
+   * component that owns them mounts rather than the instant a command
+   * returns. Polled rather than assumed, because the failure without it reads
+   * as "this is not a dev build", which sends the reader looking in entirely
+   * the wrong place.
+   */
+  async awaitHook(name, doing, { timeoutMs = 30_000, why = "" } = {}) {
     const deadline = Date.now() + timeoutMs;
     for (;;) {
       const present = await this.evaluate(
-        `var done = arguments[arguments.length - 1]; done(typeof window.__veCapture === "function");`,
+        `var done = arguments[arguments.length - 1]; done(typeof window.${name} === "function");`,
       );
       if (present === true) return;
       if (Date.now() > deadline) {
         throw new Error(
-          "no capture hook appeared: a picture is read back from the map's renderer, " +
-            "so a project has to be open — and the hook exists in dev builds only",
+          `no hook for ${doing} appeared (window.${name})` +
+            `${why ? `: ${why}` : ""} — and it exists in dev builds only`,
         );
       }
       await new Promise((resolve) => setTimeout(resolve, 250));
@@ -254,20 +271,23 @@ export class Driver {
   /**
    * Opens a project, so there is a map to photograph.
    *
-   * A cold start is the start screen, and the capture reads the *renderer's*
-   * framebuffer — of which there is none until a project is open. Done
-   * through the application's own IPC rather than by clicking the start
-   * screen, which is a different thing to test and a worse thing to depend on.
+   * Through the application's own opening (`window.__veOpen`), not by
+   * invoking `open_project` directly. The command is only half of opening:
+   * the other half is the frontend's state, and invoking it alone moved the
+   * backend while the interface stayed on the start screen, holding a project
+   * it would not show (M76). Unsaved changes are discarded without asking,
+   * which is what a driver wants and why the hook is dev-only.
    */
   async open(path) {
+    await this.ready();
+    await this.awaitHook("__veOpen", "opening");
     return this.evaluate(
       `var done = arguments[arguments.length - 1];
-       window.__TAURI_INTERNALS__.invoke("open_project",
-         {path:${JSON.stringify(path)},discardUnsaved:true}).then(function(s){
-           done(s && s.name ? s.name : true);
-         }, function(e){
-           done({error:"OpenFailed",message:String(e),stacktrace:""});
-         });`,
+       window.__veOpen(${JSON.stringify(path)}).then(function(name){
+         done(name || true);
+       }, function(e){
+         done({error:"OpenFailed",message:String(e),stacktrace:""});
+       });`,
     );
   }
 

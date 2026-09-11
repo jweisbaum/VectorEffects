@@ -515,6 +515,14 @@ to the hash input is a correctness bug that shows up as stale frames.
   repo root, not from the config's own directory.
 - `ve-app` ships two binaries, so `default-run = "ve-app"` is required or
   `tauri dev`'s bare `cargo run` cannot choose between them.
+- **The driver's two doors into the application are dev-only hooks**, both
+  installed by React effects and both absent from anything `npm run build`
+  produces: `window.__veCapture` (M71) and `window.__veOpen` (M76). A driver
+  needs `__veOpen` because `open_project` is only half of opening — the other
+  half is the frontend's state, and invoking the command alone moves the
+  backend while the interface stays on the start screen holding a project it
+  will not show. The same is true of any command with frontend state behind
+  it; reach for the application's own path, not the raw `invoke`.
 - **A screenshot comes from the application, not from the endpoint** (M71).
   `tauri-plugin-webdriver-automation`'s `/screenshot` serialises the *DOM*
   into an SVG `foreignObject` and rasterises that, which does not capture a

@@ -303,6 +303,23 @@ export default function App() {
     }
   }, [mayReplace]);
 
+  /**
+   * Opens a path and puts the application into it.
+   *
+   * The command is only half of opening: the rest is this state, and a caller
+   * that invokes `open_project` without it leaves the backend holding a
+   * project the interface never shows (M76).
+   */
+  const openPath = useCallback(async (path: string, discardUnsaved: boolean) => {
+    const opened = await api.openProject(path, discardUnsaved);
+    setSelection([]);
+    setActiveLayer(null);
+    setStep(0);
+    reportError(null);
+    setProject(opened);
+    return opened;
+  }, []);
+
   const openProject = useCallback(async () => {
     // Ask about unsaved changes before the file dialog, not after: a user who
     // has picked a file has already decided, and asking then reads as the app
@@ -313,16 +330,36 @@ export default function App() {
     try {
       const path = await pickProjectToOpen();
       if (path === null) return;
-      const opened = await api.openProject(path, decision.discardUnsaved);
-      setSelection([]);
-      setActiveLayer(null);
-      setStep(0);
-      reportError(null);
-      setProject(opened);
+      await openPath(path, decision.discardUnsaved);
     } catch (err) {
       report(err);
     }
-  }, [mayReplace]);
+  }, [mayReplace, openPath]);
+
+  /**
+   * Opening, reachable from a script injected into the webview (M76).
+   *
+   * The automation driver has no file dialog to drive, and invoking
+   * `open_project` on its own moves the backend and not the interface — the
+   * application sits on the start screen holding a project it will not show,
+   * which reads as the open having failed. This is the same door
+   * `__veCapture` is, for the same reason and under the same guard.
+   *
+   * **Development builds only.** `import.meta.env.DEV` is false in anything
+   * `npm run build` produces, so a shipped bundle carries no such hook. It
+   * discards unsaved changes without asking, which is right for a driver and
+   * is exactly why it must not exist in a shipped one.
+   */
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    const hooks = window as unknown as {
+      __veOpen?: (path: string) => Promise<string>;
+    };
+    hooks.__veOpen = async (path: string) => (await openPath(path, true)).name;
+    return () => {
+      delete hooks.__veOpen;
+    };
+  }, [openPath]);
 
   // Standard shortcuts, so saving does not require reaching for the toolbar.
   const modal = exporting || creating !== null || askUnsaved !== null || recording !== null;
