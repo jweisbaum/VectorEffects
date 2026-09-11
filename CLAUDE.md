@@ -121,6 +121,16 @@ VE_FORCE_CPU=1 npm run dev  # force the CPU evaluator (also how CI runs)
 npm run dev:webdriver       # the app with the WebDriver endpoint (macOS e2e).
                             # NEVER shipped: see `ve-app`'s [features]
 
+# Driving the running application (M71). An MCP server, `ve-driver` in
+# `.mcp.json`, and the same client from a shell. MCP servers load when the
+# client starts, so a session that adds one cannot use it until it restarts.
+node tools/webdriver/cli.mjs shot NAME     # start, capture, stop; prints the path
+node tools/webdriver/cli.mjs eval '<js>'   # run a script, print the result
+node tools/webdriver/cli.mjs serve         # start and hold, printing the port
+VE_DRIVER_OPEN=assets/samples/cyclone.veproj  # open a project before capturing
+VE_DRIVER_PORT=49557                          # talk to a held app instead of starting one
+npm run tools:test                         # the driver's parsing
+
 # Checks — all of these before declaring work done
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
@@ -505,6 +515,29 @@ to the hash input is a correctness bug that shows up as stale frames.
   repo root, not from the config's own directory.
 - `ve-app` ships two binaries, so `default-run = "ve-app"` is required or
   `tauri dev`'s bare `cargo run` cannot choose between them.
+- **A screenshot comes from the application, not from the endpoint** (M71).
+  `tauri-plugin-webdriver-automation`'s `/screenshot` serialises the *DOM*
+  into an SVG `foreignObject` and rasterises that, which does not capture a
+  canvas's contents: the map would come out blank, and the map is the thing
+  worth a picture. `tools/webdriver` asks the app to read its own framebuffer
+  back instead (`window.__veCapture`, installed by `MapView` in dev builds
+  only), which is what the `VE_CAPTURE` suite already does.
+- **A script hands its answer to the callback passed as its last argument.**
+  The endpoint wraps the script and appends `__done` to the arguments, the
+  ordinary executeAsync convention. Calling `window.__WEBDRIVER__.resolve`
+  directly does not work — that id is a uuid the caller never sees — and a
+  wrong id makes the plugin panic inside
+  `.expect("no pending script with that id")` **while holding** its pending
+  table's mutex. The mutex is then poisoned and every later call panics on
+  `lock().expect("lock poisoned")`: one bad script bricks the endpoint for the
+  life of the process. A script that outruns the endpoint's 30 s timeout does
+  the same, since the entry is removed on timeout and the late resolve finds
+  nothing — so long work is *started and polled for*, never awaited in the
+  webview.
+- **Kill the driver's application as a process group.** `npm run
+  dev:webdriver` is a wrapper around the Tauri CLI, which starts Vite as its
+  `beforeDevCommand` and then cargo. Signalling the wrapper alone leaves Vite
+  holding port 5173, and the next run dies with "Port 5173 is already in use".
 - **The Tauri CLI always passes `--no-default-features`.** `tauri dev` runs
   `cargo run --no-default-features …`, with or without a `--features` flag of
   its own, so a `default = [...]` list on `ve-app` would do nothing under

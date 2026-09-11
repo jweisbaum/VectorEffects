@@ -3009,6 +3009,61 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M71 — Driving the running application, with pictures of the map
+
+**The request:** set up Tauri testing via MCP, with screenshots.
+
+`tools/webdriver` is the client, `.mcp.json` registers it as `ve-driver`,
+and the same client runs from a shell — because an MCP server is loaded
+when the client starts, so the session that adds one cannot use it until
+it restarts.
+
+**The screenshot does not come from the endpoint.** Reading
+`tauri-plugin-webdriver-automation`'s `/screenshot` handler first was
+what saved the whole exercise: it serialises the DOM into an SVG
+`foreignObject` and rasterises *that*, which does not capture a canvas's
+contents at all. Every picture of this application would have been a
+blank map. What the driver does instead is ask the app to read its own
+framebuffer back — `window.__veCapture`, the mechanism the `VE_CAPTURE`
+suite already used, installed by `MapView` in dev builds only so a
+shipped bundle carries no such door.
+
+**Three defects found by running it rather than reasoning about it.**
+
+*The capture raced the map.* Its settle condition was `pending === 0`,
+which is satisfied before the map has requested anything, so a capture
+taken just after a project opened photographed the basemap with no field
+on it — indistinguishable from a field that failed to render. It waits
+for tiles to have *landed* now, bounded so a viewport with no tiles still
+captures.
+
+*The capture gave up on the renderer.* It returned null if
+`rendererRef.current` was unset, and the renderer comes up asynchronously
+while the effects that can ask for a capture have already run. It waits.
+
+*Killing the driver's app orphaned Vite.* `npm run dev:webdriver` wraps
+the Tauri CLI, which starts Vite and then cargo; signalling the wrapper
+left port 5173 held and the next run failed to start. The child is
+detached into its own process group and the group is signalled.
+
+**And one of mine, worth recording because the failure was so
+misleading.** Scripts must hand their answer to the callback passed as
+the last argument; I used `window.__WEBDRIVER__.resolve("__CALLBACK_ID__",
+…)`, which is the plugin's convention for its *own* built-in scripts. The
+literal string is not a pending id, so the plugin panicked inside
+`.expect("no pending script with that id")` **while holding** its pending
+table's mutex — poisoning it, so every later call panicked on
+`lock().expect("lock poisoned")`. One bad script bricks the endpoint for
+the life of the process. A script that outruns the 30 s timeout does the
+same, so long work is started and polled for rather than awaited in the
+webview. Both are in CLAUDE.md, since neither is discoverable from the
+crate's documentation.
+
+Verified end to end, not just wired up: the driver opens
+`assets/samples/cyclone.veproj` and captures the cyclone with its ramp
+colours, its wind barbs, the basemap and the graticule — 2880x1590 of
+real WebGL pixels.
+
 ### M70 — A tile is dimmed when it is stale, not while it is being looked up
 
 **The report:** after an edit, tiles all over the map darken and then

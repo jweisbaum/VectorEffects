@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "ve-driver": {
+      "command": "node",
+      "args": ["tools/webdriver/mcp.mjs"],
+      "env": {}
+    }
+  }
+}

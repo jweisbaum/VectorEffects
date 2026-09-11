@@ -4963,24 +4963,46 @@ export default function MapView({
     requestDraw();
   };
 
-  /** Reads the next frame back and writes it beside the logs. */
-  const capture = useCallback(async (name: string) => {
-    const renderer = rendererRef.current;
+  /**
+   * Reads the next frame back and writes it beside the logs, returning where.
+   *
+   * The path is returned as well as logged because automation needs it: a
+   * driver asks for a capture and then reads that file (M71).
+   */
+  const capture = useCallback(async (name: string): Promise<string | null> => {
+    // Waited for, not demanded: the renderer comes up asynchronously — a GL
+    // context, then the basemap — while the effects that can ask for a capture
+    // have already run. Giving up on the first look made an automated capture
+    // a race against the map's own start-up (M71).
+    let renderer = rendererRef.current;
+    for (let attempt = 0; !renderer && attempt < 100; attempt++) {
+      await new Promise((resolve) => window.setTimeout(resolve, 100));
+      renderer = rendererRef.current;
+    }
     if (!renderer) {
       void api.frontendLog("warn", "capture requested before the renderer was ready");
-      return;
+      return null;
     }
     // Wait for the tiles to settle: capturing mid-load photographs a
     // half-drawn map and looks like a rendering bug.
-    for (let attempt = 0; attempt < 40; attempt++) {
-      if ((tilesRef.current?.stats().pending ?? 0) === 0) break;
+    //
+    // **Settled means some arrived and none is outstanding** (M71). Waiting on
+    // `pending === 0` alone was satisfied before the map had asked for
+    // anything at all, so a capture taken just after a project opened
+    // photographed the basemap with no field on it — which looks exactly like
+    // a field that failed to render. A project whose viewport holds no tile
+    // never satisfies it, so the attempts are still bounded and the capture
+    // goes ahead either way.
+    for (let attempt = 0; attempt < 100; attempt++) {
+      const tiles = tilesRef.current?.stats();
+      if (tiles && tiles.pending === 0 && tiles.ready > 0) break;
       await new Promise((resolve) => window.setTimeout(resolve, 100));
     }
 
     const pendingCapture = renderer.captureNextFrame();
     requestDraw();
     const image = await pendingCapture;
-    if (!image) return;
+    if (!image) return null;
 
     const scratch = document.createElement("canvas");
     scratch.width = image.width;
@@ -4989,7 +5011,7 @@ export default function MapView({
     const blob = await new Promise<Blob | null>((resolve) =>
       scratch.toBlob(resolve, "image/png"),
     );
-    if (!blob) return;
+    if (!blob) return null;
 
     const dataUrl = await new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
@@ -5000,7 +5022,34 @@ export default function MapView({
     const base64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
     const path = await api.saveDebugCapture(name, base64);
     void api.frontendLog("info", `capture written to ${path}`);
+    return path;
   }, [requestDraw]);
+
+  /**
+   * The capture, reachable from a script injected into the webview (M71).
+   *
+   * Automation drives the real application, and what it wants a picture of is
+   * the map — which is WebGL. The WebDriver plugin's own `/screenshot`
+   * rasterises the *DOM* through an SVG `foreignObject`, and that does not
+   * capture a canvas's contents at all: the map would come out blank. This
+   * reads the framebuffer back instead, which is what the capture suite
+   * already does, and waits for the tiles to settle first so a driver never
+   * photographs a half-loaded map.
+   *
+   * **Development builds only.** `import.meta.env.DEV` is false in anything
+   * `npm run build` produces, so a shipped bundle carries no such hook. It
+   * writes a PNG beside the logs under a sanitised basename, which is not
+   * dangerous, but a shipped application should not have a door in it that
+   * exists for a test.
+   */
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    const hooks = window as unknown as { __veCapture?: (name: string) => Promise<string | null> };
+    hooks.__veCapture = capture;
+    return () => {
+      delete hooks.__veCapture;
+    };
+  }, [capture]);
 
   /**
    * Development capture suite.

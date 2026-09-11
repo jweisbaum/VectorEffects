@@ -15,9 +15,12 @@
     "ui:test": "npm run test -w ui",
     "ui:build": "npm run build -w ui",
     "bindings": "cargo run -p ve-app --bin export-bindings",
+    "tools:test": "node --test tools/webdriver/client.test.mjs",
     "check:offline": "./tools/check-offline.sh"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.11.4"
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@tauri-apps/cli": "^2.11.4",
+    "zod": "^4.6.2"
   }
 }
