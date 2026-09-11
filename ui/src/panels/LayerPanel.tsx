@@ -6,6 +6,7 @@ import type { DocumentTree } from "../generated/DocumentTree";
 import type { ProjectSummary } from "../generated/ProjectSummary";
 import type { ImageLayerView } from "../generated/ImageLayerView";
 import { pickGribToImport, pickImageToImport } from "../project/dialogs";
+import { layerToActivate } from "./activeLayer";
 import { CalendarIcon } from "./CalendarIcon";
 import { EyeIcon } from "./EyeIcon";
 import HistoryImportDialog, { type HistoryChoice } from "./HistoryImportDialog";
@@ -160,6 +161,20 @@ export default function LayerPanel({
       stale = true;
     };
   }, [project.revision, step]);
+
+  // A layer is always selected while a project is open (M75). A tool picked
+  // up with nothing active had no layer of its own to draw into; it fell
+  // through to "the top of the stack", which is right as a default and wrong
+  // as a thing the user cannot see. Done here rather than on the tool change
+  // that prompted the report: the panel is what knows the layers, and a layer
+  // chosen as soon as the tree lands is already chosen by the time any tool
+  // is picked up. It also covers a layer deleted out from under the
+  // selection, which is the same absence arriving a different way.
+  useEffect(() => {
+    if (!tree) return;
+    const wanted = layerToActivate(activeLayer, tree.layers);
+    if (wanted !== null) onActivateLayer(wanted);
+  }, [activeLayer, onActivateLayer, tree]);
 
   // The map shows the active layer's kind of field (M29): making a current
   // layer active turns the map to the currents, since that is what a stroke

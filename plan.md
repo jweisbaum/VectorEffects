@@ -3009,6 +3009,39 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M75 — A layer is always selected
+
+**The instruction:** there should always be a layer selected; if none is
+when a tool is selected, choose the topmost visible layer.
+
+`null` meant "the top of the stack" everywhere that resolved it —
+`creation_layer` on the Rust side, `targetLayer` on this one — which is a
+fine default and a poor thing to leave invisible: a tool picked up with
+nothing selected drew into a layer the user had not been shown.
+
+Done when the layer tree lands rather than on the tool change that
+prompted the report. The panel is what knows the layers, a layer chosen
+then is already chosen by the time any tool is picked up, and the same
+effect covers a layer deleted out from under the selection — the same
+absence arriving a different way. The implicit fallback stays as the
+safety net for the moment before the tree arrives.
+
+**Topmost visible, not simply topmost.** A gesture aimed at a hidden
+layer is refused (M68), so landing the user there by default would answer
+their first stroke with a refusal about a layer they never picked. And
+only absence is corrected: a hidden layer the user chose deliberately is
+left alone, so that refusal is about something they did and says so. With
+no visible layer there is nothing worth choosing.
+
+A pleasant consequence, since the effect beside it already watches
+`activeLayer`: the map turns to that layer's kind of field on open (M29),
+instead of waiting for the first click in the panel.
+
+**Verified in the running application**, not only by unit test: opening a
+three-layer project through the start screen and reading the panel's DOM
+back through the M71 driver shows `data-layer-index` 2 — the topmost —
+carrying `.layer-header.active`, with nothing clicked.
+
 ### M74 — The spinner starts at the click, not at the command
 
 **The report:** opening a GRIB or downloading history leaves the spinner

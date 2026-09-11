@@ -2549,6 +2549,16 @@ front of every pan.
 - Selection is scoped to the **active layer** — the last layer or object clicked
   in the layer panel — and the cross-layer modifier lifts that. The active layer
   is also the one new objects join (§6.1).
+- **A layer is always active while a project is open** (M75). One is chosen as
+  soon as the layer tree lands, so a tool picked up has somewhere of its own to
+  draw rather than falling through to "the top of the stack" — right as a
+  default, wrong as a thing the user cannot see. The **topmost visible** layer,
+  not simply the topmost: a gesture aimed at a hidden layer is refused (§8.1),
+  and landing there by default would answer the first stroke with a refusal
+  about a layer nobody picked. Only *absence* is corrected — nothing active, or
+  an id whose layer has been deleted. A hidden layer the user chose is left
+  alone, so the refusal that follows is about something they did. With no
+  visible layer there is nothing worth choosing and it stays as it is.
 - A marquee catches an object when its footprint *meets* the rectangle, not only
   when it is wholly inside. The test is the object's bounding cap against the
   rectangle, which errs towards selecting: a band that misses what it visibly
