@@ -7,23 +7,28 @@
  */
 import { open, save } from "@tauri-apps/plugin-dialog";
 
+import { whileChoosing } from "../busy";
 import { EXTENSION } from "./format";
 
 const FILTERS = [{ name: "VectorEffects project", extensions: [EXTENSION] }];
 
 /** Asks for a project to open. Returns null if the user cancelled. */
 export async function pickProjectToOpen(): Promise<string | null> {
-  const chosen = await open({ multiple: false, directory: false, filters: FILTERS });
+  const chosen = await whileChoosing("Choosing a project", () =>
+    open({ multiple: false, directory: false, filters: FILTERS }),
+  );
   return typeof chosen === "string" ? chosen : null;
 }
 
 /** Asks for a GRIB2 file to import as a layer. Returns null if cancelled. */
 export async function pickGribToImport(): Promise<string | null> {
-  const chosen = await open({
-    multiple: false,
-    directory: false,
-    filters: [{ name: "GRIB2", extensions: ["grib2", "grb2", "grib", "grb"] }],
-  });
+  const chosen = await whileChoosing("Choosing a GRIB file", () =>
+    open({
+      multiple: false,
+      directory: false,
+      filters: [{ name: "GRIB2", extensions: ["grib2", "grb2", "grib", "grb"] }],
+    }),
+  );
   return typeof chosen === "string" ? chosen : null;
 }
 
@@ -35,28 +40,34 @@ export async function pickGribToImport(): Promise<string | null> {
  * georeference is something only the file knows.
  */
 export async function pickImageToImport(): Promise<string | null> {
-  const chosen = await open({
-    multiple: false,
-    directory: false,
-    filters: [{ name: "Image", extensions: ["tif", "tiff", "png", "jpg", "jpeg"] }],
-  });
+  const chosen = await whileChoosing("Choosing an image", () =>
+    open({
+      multiple: false,
+      directory: false,
+      filters: [{ name: "Image", extensions: ["tif", "tiff", "png", "jpg", "jpeg"] }],
+    }),
+  );
   return typeof chosen === "string" ? chosen : null;
 }
 
 /** Asks where to write a GRIB2 file. Returns null if the user cancelled. */
 export async function pickGribDestination(projectName: string): Promise<string | null> {
-  const chosen = await save({
-    defaultPath: `${projectName}.grib2`,
-    filters: [{ name: "GRIB2", extensions: ["grib2"] }],
-  });
+  const chosen = await whileChoosing("Choosing where to export", () =>
+    save({
+      defaultPath: `${projectName}.grib2`,
+      filters: [{ name: "GRIB2", extensions: ["grib2"] }],
+    }),
+  );
   return typeof chosen === "string" ? chosen : null;
 }
 
 /** Asks where to save. Returns null if the user cancelled. */
 export async function pickProjectToSave(suggestedName: string): Promise<string | null> {
-  const chosen = await save({
-    defaultPath: `${suggestedName}.${EXTENSION}`,
-    filters: FILTERS,
-  });
+  const chosen = await whileChoosing("Choosing where to save", () =>
+    save({
+      defaultPath: `${suggestedName}.${EXTENSION}`,
+      filters: FILTERS,
+    }),
+  );
   return typeof chosen === "string" ? chosen : null;
 }

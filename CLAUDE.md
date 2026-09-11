@@ -584,8 +584,16 @@ to the hash input is a correctness bug that shows up as stale frames.
   what makes the capture's frames trustworthy.
 - **A long-running command gets a label in `LONG_RUNNING` in `ui/src/ipc.ts`**
   and nothing else: the status bar's spinner counts those by name through
-  `ui/src/busy.ts`. Never start the spinner from a caller — two callers of
+  `ui/src/busy.ts`. Never start the spinner from a *feature* — two callers of
   one command would show two spinners' worth of nothing.
+  **Two boundaries mark it, not one** (M74): `ipc.ts` marks a command by name,
+  and `project/dialogs.ts` marks a native file dialog with `whileChoosing`.
+  Both are chokepoints — there is one `pickProjectToOpen` and every caller
+  goes through it — which is the property that rule protects. The dialog needs
+  its own mark because the command's starts too late to answer the click:
+  opening a project is a decision prompt, then a dialog, and only then
+  `open_project`. A new dialog belongs in `dialogs.ts` and is marked there;
+  a component that calls the plugin directly is the bug.
 - **Hints and errors go to `ui/src/hint.ts`**, an external store the status
   bar's one span subscribes to. No panel renders an error line of its own and
   no tool bar carries help text; `reportError` and `setHint` are the whole

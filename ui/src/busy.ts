@@ -35,6 +35,30 @@ export function beginBusy(label: string): () => void {
   };
 }
 
+/**
+ * Marks the wait while a native file dialog is up (M74).
+ *
+ * The spinner is started at a *boundary*, never by a feature component: the
+ * ipc layer marks a command by name, and this marks a dialog. Both are single
+ * chokepoints — there is one `pickProjectToOpen` and every caller goes through
+ * it — which is the property that keeps two callers of one thing from showing
+ * two spinners' worth of nothing.
+ *
+ * It exists because the command's own marker starts too late to answer the
+ * click. Opening a project is a decision prompt, then a native dialog, and
+ * only then `open_project`: the spinner appeared after all of it, so a click
+ * on Open produced no sign that anything had happened until the file had been
+ * chosen. The dialog is part of the operation and is marked as such.
+ */
+export async function whileChoosing<T>(label: string, choose: () => Promise<T>): Promise<T> {
+  const done = beginBusy(label);
+  try {
+    return await choose();
+  } finally {
+    done();
+  }
+}
+
 /** Whether anything long is running. */
 export function isBusy(state: BusySnapshot): boolean {
   return state.labels.length > 0;

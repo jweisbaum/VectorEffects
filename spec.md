@@ -1228,7 +1228,11 @@ that has something the user can do about it says what that is, rather than
 only what was refused. **Its left end is a spinner**, before the version number, turning
 while a long task runs — a GRIB or image import, a project opening or saving,
 an export, a capture's bake or paste, a macro's insert — and invisible
-otherwise; its tooltip names what is running. The ipc layer decides which
+otherwise; its tooltip names what is running. **It starts at the click, not at
+the command** (M74): opening a project is a decision prompt, then a native
+file dialog, and only then the command, so a spinner that waited for the
+command answered the click only once the file had been chosen. The dialog is
+part of the operation and turns it too. The ipc layer decides which
 commands count by name, so nothing that calls one needs to know. Tile
 rendering is not one of them: it is the map's own activity indicator, and a
 spinner that turned on every edit would say nothing.

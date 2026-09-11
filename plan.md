@@ -3009,6 +3009,42 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M74 — The spinner starts at the click, not at the command
+
+**The report:** opening a GRIB or downloading history leaves the spinner
+a long time coming; start it as soon as Open or Import is clicked.
+
+Measured before changing anything, because three of the four things that
+could cause it were already right: `beginBusy` publishes synchronously
+before `invoke`, the CSS fades in over 150 ms, and every command in
+`LONG_RUNNING` carries `#[tauri::command(async)]`, so none of them blocks
+the webview's own thread.
+
+The gap is *before* the command. Opening a project is `mayReplace()` — a
+prompt, if there are unsaved changes — then `pickProjectToOpen()`, a
+native dialog, and only then `open_project`. The spinner was marked by the
+command, so it answered the click after all of that: from the user's side,
+they clicked Open and nothing happened until they had already chosen a
+file.
+
+So the dialog is marked too. `whileChoosing` in `busy.ts`, used by every
+picker in `project/dialogs.ts` — which is the only place in the
+application that touches the dialog plugin, checked rather than assumed.
+That keeps the rule it looks like it breaks: the spinner is started at a
+*boundary* and never by a feature, and a boundary is a chokepoint, which
+is what stops two callers of one thing showing two spinners.
+
+Each dialog names itself — "Choosing a project", "Choosing a GRIB file" —
+because the tooltip shows the label, and "Opening project" while a file
+dialog is up would be a lie about what the application is doing.
+
+**History was already immediate, and is unchanged.** It has no dialog:
+`api.importHistory(...)` is evaluated as the argument to `run`, so the
+marker fires synchronously on the click. If the wait there still feels
+long it is the progress bar's *first movement*, not the spinner —
+opening an archive costs seconds before a step completes, which M38
+already reports before the first chunk rather than after it.
+
 ### M73 — Nothing is dimmed
 
 **The instruction:** set `HELD_DIM` so there is no greying whatsoever.
