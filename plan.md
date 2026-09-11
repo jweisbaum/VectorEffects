@@ -3009,6 +3009,55 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M70 — A tile is dimmed when it is stale, not while it is being looked up
+
+**The report:** after an edit, tiles all over the map darken and then
+come back in rectangular patches — far from where the edit was.
+
+They did, and the cause was not what it looked like. It looked like
+invalidation: the imported GRIB field being re-rendered because an edit
+touched the layer above it. It was not. The render cache is content
+hashed and the map keeps textures by key rather than by address, so a
+tile the edit does not reach is a hit at both ends and never re-renders.
+Spec 5.4 already promised those tiles stay "untouched and undimmed".
+
+What it actually was: an address carries the revision, so an edit
+re-addresses **every** tile on the map at once. For one round trip after
+every stroke, no tile of the new frame has a key yet. `TileCache.get`
+returns `null` both for "the key is not known" and "the key is known and
+the bytes are on their way", and the renderer dimmed on `null` without
+being able to tell which. So every tile in the viewport fell back to the
+held frame at `HELD_DIM` — a map-wide flash — and then popped back to
+full brightness in batches as the key resolution landed. The rectangles
+were batched resolution, not batched rendering.
+
+The screenshot is what settled it: the dimmed blocks ran from northern
+Canada to West Africa while the warp's footprint was 1500 km near Hudson
+Bay, and large areas were *already* undimmed — tiles whose keys had come
+back unchanged, which is content-hash reuse visibly working. Geographic
+invalidation cannot reach West Africa from Hudson Bay; whole-frame
+re-addressing can.
+
+So the three states are told apart, in `tileSource`: resident, held and
+plain, held and stale. The dim stays where it tells the truth — the key
+is known, it differs, the tile is fetching — and goes where it was only
+reporting a lookup in progress.
+
+`TileCache.unresolved` is the new input, and `tileSource` takes it under
+that name and unnegated. A `keyResolved` of the opposite sense would be
+one stray `!` away from dimming exactly when it should not, and that slip
+would be invisible to a test of the function — so it is made
+unrepresentable rather than tested for. What is tested is the cache's own
+meaning: unknown before the resolution lands, known after, and still
+unknown for a tile the resolution did not cover or for a different frame.
+
+**Not changed:** `HELD_DIM` is still 0.55, which is harsh but now only
+reaches tiles that genuinely are stale — where reading as missing is the
+point. And a tile the edit *does* reach still re-evaluates the whole
+composite, wind under currents included; splitting tiles by kind to avoid
+that would double their number for a saving confined to tiles that
+changed anyway.
+
 ### M69 — WebDriver automation, compiled in only when asked for
 
 **The request:** install `tauri-plugin-webdriver-automation` in the Tauri

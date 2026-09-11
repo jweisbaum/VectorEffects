@@ -3201,10 +3201,25 @@ falls back to the follower's own keys.
   While playing, the map keeps the next two steps' tiles fetched ahead of the
   playhead.
 - **A frame that is not yet on screen draws its missing tiles from the last
-  frame that was, dimmed.** A step change or an edit re-addresses every tile;
-  blanking the map until the new ones land is a flicker on every scrub and a
-  flash on every stroke. The dim says the tile belongs to another frame.
-  Playback never shows a dimmed tile, by the rule above.
+  frame that was.** A step change or an edit re-addresses every tile; blanking
+  the map until the new ones land is a flicker on every scrub and a flash on
+  every stroke.
+- **It is dimmed only once the tile is known to have changed** (M70). A
+  missing texture means two different things and only one of them is stale.
+  Before the frame's *keys* come back (§5.4) nothing says this tile changed,
+  and for the overwhelming majority it has not — the key is about to be
+  confirmed as the one already on screen; the held pixels are drawn plainly.
+  Once the key is known and differs, the tile really is stale while it fetches,
+  and the dim says so.
+
+  The distinction is the difference between a local edit and a map-wide flash.
+  An address carries the revision, so an edit re-addresses every tile at once
+  and *no* tile of the new frame has a key for one round trip. Dimming on that
+  flashed the whole map after every stroke, thousands of kilometres from the
+  edit, resolving back to full brightness in rectangular batches as the keys
+  landed — which is what §5.4's "untouched and undimmed" was always meant to
+  rule out, and did not, because it only held *after* the round trip rather
+  than through it. Playback never shows a dimmed tile, by the rule above.
 - A stall of several intervals — a slow render, a suspended window — resumes
   at the *next* step. Advancing as many steps as the clock says would turn a
   long render into a skip.

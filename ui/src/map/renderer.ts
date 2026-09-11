@@ -34,7 +34,7 @@ import {
   RASTER_FRAG,
   RASTER_VERT,
 } from "./shaders";
-import type { TileCache } from "./tiles";
+import { type TileCache, tileSource } from "./tiles";
 
 /** Full-scale speed of the tile encoding. Mirrors `ve_render::tile`. */
 export const SPEED_SCALE_MPS = 100.0;
@@ -737,11 +737,20 @@ export class MapRenderer {
       return { texture: this.tiles.get(from, tile.z, tile.x, tile.y), held: false, frame: from };
     }
     const texture = this.tiles.get(state.frame, tile.z, tile.x, tile.y);
-    if (texture || !state.heldFrame) return { texture, held: false, frame: state.frame };
+    // Stale and merely unresolved are different things (M70): before a frame's
+    // keys come back nothing says this tile changed, and dimming on that
+    // flashed the whole map after every edit.
+    const source = tileSource({
+      hasTexture: texture !== null,
+      hasHeldFrame: state.heldFrame !== null,
+      unresolved: this.tiles.unresolved(state.frame, tile.z, tile.x, tile.y),
+    });
+    if (source === "frame") return { texture, held: false, frame: state.frame };
+    const heldFrame = state.heldFrame as string;
     return {
-      texture: this.tiles.peek(state.heldFrame, tile.z, tile.x, tile.y),
-      held: true,
-      frame: state.heldFrame,
+      texture: this.tiles.peek(heldFrame, tile.z, tile.x, tile.y),
+      held: source === "held-stale",
+      frame: heldFrame,
     };
   }
 

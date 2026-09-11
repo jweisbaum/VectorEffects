@@ -122,6 +122,19 @@ export class TileCache {
     return null;
   }
 
+  /**
+   * Whether the frame's *key* for this tile is still unknown (M70).
+   *
+   * The difference between a lookup and a fetch, which `get` returning null
+   * cannot express: before a frame is resolved nothing is known about the
+   * tile, and after it is, a missing texture means the content genuinely
+   * changed and is on its way. The caller dims for the second and not the
+   * first — see `tileSource`.
+   */
+  unresolved(frame: string, z: number, x: number, y: number): boolean {
+    return this.keyOf(frame, z, x, y) === undefined;
+  }
+
   /** The texture for a tile if it is resident, fetching nothing. */
   peek(frame: string, z: number, x: number, y: number): WebGLTexture | null {
     const key = this.keyOf(frame, z, x, y);
@@ -313,4 +326,43 @@ export class TileCache {
     this.pending.clear();
     this.resolving.clear();
   }
+}
+
+/** Where a tile on screen is coming from, and whether it is marked stale. */
+export type TileSource = "frame" | "held" | "held-stale";
+
+/**
+ * Which of the three a tile should be drawn from (M70).
+ *
+ * An edit re-addresses every tile on the map — the address carries the
+ * revision — so for one round trip after every stroke *no* tile of the new
+ * frame has a key yet. Dimming on that produced a map-wide flash on every
+ * edit, thousands of kilometres from the edit itself, which then resolved
+ * back to full brightness in rectangular batches as the keys landed.
+ *
+ * The three states are different things and only one of them is stale:
+ *
+ * - the frame's own texture is resident — draw it;
+ * - the key is **not yet known** — draw the held frame plainly. Nothing says
+ *   this tile changed, and for the overwhelming majority it has not: the key
+ *   is about to come back as the one already on screen. Showing the pixels it
+ *   is about to be confirmed as is not a lie, and it is what makes an edit far
+ *   away cost nothing visible;
+ * - the key **is** known and differs, so the tile is fetching — draw the held
+ *   frame dimmed. Here the content really has changed and the dim is telling
+ *   the truth.
+ */
+/**
+ * The field is named for [`TileCache.unresolved`] and taken unnegated, so the
+ * call site reads `unresolved: cache.unresolved(...)`. A `keyResolved` taking
+ * the opposite sense would be one stray `!` away from dimming exactly when it
+ * should not, and that mistake is invisible to a test of this function.
+ */
+export function tileSource(state: {
+  hasTexture: boolean;
+  hasHeldFrame: boolean;
+  unresolved: boolean;
+}): TileSource {
+  if (state.hasTexture || !state.hasHeldFrame) return "frame";
+  return state.unresolved ? "held" : "held-stale";
 }
