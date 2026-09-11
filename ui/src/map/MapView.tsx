@@ -1400,14 +1400,21 @@ export default function MapView({
       onViewportRef.current(unique);
     }
 
-    // The field beneath the erase, warmed before a stroke needs it (M40).
-    // The hole a stroke opens is filled from that frame, and asking for it
-    // only once the button is down would open every stroke with the very
-    // flash of a blanked stack this exists to prevent. Asked for while the
-    // eraser is merely in hand, so the round trip happens in the pause
-    // between choosing the tool and using it. `get` is a lookup once the
-    // tile is resident, so repeating it per frame costs nothing.
-    if (!state.operator) {
+    // The field beneath the edit, warmed before a stroke needs it (M40).
+    // The hole a stroke opens is filled from that frame, and it is also what
+    // tells every live edit which pixels belong to the layer it is aimed at.
+    // Asked for while the tool is merely in hand, so the round trip happens
+    // in the pause between choosing it and using it. `get` is a lookup once
+    // the tile is resident, so repeating it per frame costs nothing.
+    //
+    // **During the stroke as well** (M72). This used to stop the moment the
+    // button went down, on the theory that the frame was already warm by
+    // then. It is not, after the first stroke: every commit moves the
+    // revision, which re-addresses the beneath frame too, so the second
+    // stroke and every one after it asked for a frame nothing had fetched.
+    // The scope was then unavailable for the whole stroke and the edit was
+    // drawn over every layer.
+    {
       const cache = tilesRef.current;
       for (const warm of [state.belowFrame, state.sourceFrame]) {
         if (cache && warm) for (const tile of unique) cache.get(warm, tile.z, tile.x, tile.y);

@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { TileCache, tileSource } from "./tiles";
+import { editScope, TileCache, tileSource } from "./tiles";
 
 describe("where a tile is drawn from", () => {
   /** Resident is resident, held frame or not. */
@@ -82,5 +82,28 @@ describe("knowing a lookup from a fetch", () => {
     // And another frame is its own question entirely — an edit re-addresses
     // every tile, which is what makes the distinction matter at all.
     expect(cache.unresolved("8/0", 2, 1, 1)).toBe(true);
+  });
+});
+
+describe("how far a live edit reaches", () => {
+  /** An unscoped tool is aimed at no layer, so it applies to the whole stack. */
+  it("applies everywhere when nothing asked for a scope", () => {
+    expect(editScope(false, false)).toBe("everywhere");
+    expect(editScope(false, true)).toBe("everywhere");
+  });
+
+  it("applies to the layer's own pixels once the scope is resident", () => {
+    expect(editScope(true, true)).toBe("layer");
+  });
+
+  /**
+   * The regression (M72). This fell back to "everywhere", which meant an
+   * intensity aimed at a current layer intensified the wind beneath it — for
+   * the whole stroke, since nothing fetched the scope once the button was
+   * down. An asked-for scope must never be dropped.
+   */
+  it("applies nowhere while an asked-for scope has not arrived", () => {
+    expect(editScope(true, false)).toBe("nowhere");
+    expect(editScope(true, false)).not.toBe("everywhere");
   });
 });

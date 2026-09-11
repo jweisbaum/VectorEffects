@@ -1871,6 +1871,20 @@ eraser or a mask fills the hole from the frame beneath, which is what taking
 that layer away leaves. The glyphs are scoped the same way, or a modifier
 would turn arrows belonging to layers it does not touch.
 
+**A scope that has been asked for is never dropped** (M72). Until the frame
+without the layer is resident there is no way to tell which pixels belong to
+it, and the gesture applies to **nothing** — the tile is drawn plainly and the
+preview arrives a moment later. It used to fall back to acting on everything,
+reasoning that a gesture over every layer for a frame or two beat a gesture
+over none; that frame or two was the whole stroke, because the frame was
+fetched only while the tool was idle and every commit re-addresses it, so the
+second stroke and each one after asked for a frame nothing had gone to get. An
+intensity aimed at a current layer visibly intensified the wind beneath it for
+the length of every stroke, and put it back on release. Showing nothing for a
+moment is a delay; showing an edit to a layer the user did not aim at is a lie
+about what the tool does. The frame is fetched by the pass that needs it and
+warmed **through** the stroke as well as before it.
+
 **A clone reads its source from that layer alone** (M45). Its commit samples
 the field beneath the stamp *in the layer the stamp is in*, so a preview drawn
 from the whole composited stack showed a different field arriving under the

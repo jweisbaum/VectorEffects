@@ -366,3 +366,31 @@ export function tileSource(state: {
   if (state.hasTexture || !state.hasHeldFrame) return "frame";
   return state.unresolved ? "held" : "held-stale";
 }
+
+/** How far a live edit reaches while it is being drawn. */
+export type EditScope = "everywhere" | "layer" | "nowhere";
+
+/**
+ * How far a gesture in progress should reach (M72).
+ *
+ * - Nothing asked for a scope: the tool is not aimed at one layer, so the
+ *   gesture applies **everywhere**, which is what an unscoped tool means.
+ * - A scope was asked for and its tile is resident: the gesture applies to the
+ *   pixels that **layer** contributed, found by comparing the two tiles.
+ * - A scope was asked for and has not arrived: **nowhere**, until it does.
+ *
+ * The third case is the one that was wrong. It fell back to `everywhere`, on
+ * the grounds that showing the gesture over every layer for a frame or two
+ * beat showing it over none — and the frame or two turned out to be the whole
+ * stroke, because nothing fetched the scope once the button was down. An
+ * intensity aimed at a current layer visibly intensified the wind beneath it
+ * for the length of every stroke.
+ *
+ * Showing nothing briefly is a delay. Showing an edit to a layer the user did
+ * not aim at is a lie about what the tool does, and it is the one thing
+ * scoping exists to prevent — so an asked-for scope is never dropped.
+ */
+export function editScope(asked: boolean, resident: boolean): EditScope {
+  if (!asked) return "everywhere";
+  return resident ? "layer" : "nowhere";
+}

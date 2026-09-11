@@ -3009,6 +3009,55 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M72 — A scope that was asked for is never dropped
+
+**The report:** painting with the intensity tool on a current layer
+intensifies the wind layer beneath it for the whole stroke; on release
+the wind goes back to normal.
+
+M40 scoped every live preview to the layer being edited by comparing two
+tiles — the stack, and the stack without that layer. Where they differ,
+the layer is what the composite is showing and the gesture belongs. That
+machinery was right and was working. What was wrong was what happened
+when the second tile was not there.
+
+Two things together. `bindScope` **peeked** for the beneath tile and,
+finding none, set `uEditScoped = 0` — unscoped, apply to everything — on
+the stated grounds that a gesture over every layer for a frame or two beat
+a gesture over none. And the beneath frame was warmed only
+`if (!state.operator)`, which stops the instant the button goes down.
+
+On the first stroke that is survivable: the frame is warmed while the tool
+sits in hand. After that it is not. Every commit moves the revision, and
+the beneath frame is addressed by revision like everything else, so the
+second stroke and every one after it asked for a frame nothing had gone to
+fetch — and nothing would, because the warm was off for the duration. The
+scope was unavailable for the whole stroke, so the whole stroke was
+unscoped. Hence a symptom that looks like scoping was never implemented,
+in an application where it is, and hence the stack of Intensity 2 through
+7 in the report: by the second one it was broken every time.
+
+The "frame or two" reasoning is now inverted, because it was weighed
+wrongly. A gesture that reaches a layer the user did not aim at is not a
+smaller wrong than one that has not appeared yet: the first is a lie about
+what the tool does, the second is a delay. So an asked-for scope is never
+dropped — until the frame arrives the gesture applies to nothing, which
+is expressed by comparing the tile against *itself* and needs no new
+uniform. And `bindScope` fetches rather than peeking, so the frame comes
+on its own rather than only if something else warmed it; the warm runs
+through the stroke as well as before it.
+
+`editScope` carries the three-way decision so the case that regressed can
+be asserted: asked-for-and-absent is `nowhere`, and explicitly not
+`everywhere`.
+
+**Verified by reading and by unit test, not by reproducing the drag.**
+The driver from M71 can open a project and photograph it, but reproducing
+this wants a two-layer project and a capture taken with the pointer still
+down, which it cannot yet do. The path is unambiguous in the code — the
+gate, the peek, and `activateLayer` setting the layer the report depends
+on — but it is fair to say the picture has not been taken.
+
 ### M71 — Driving the running application, with pictures of the map
 
 **The request:** set up Tauri testing via MCP, with screenshots.

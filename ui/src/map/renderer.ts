@@ -34,7 +34,7 @@ import {
   RASTER_FRAG,
   RASTER_VERT,
 } from "./shaders";
-import { type TileCache, tileSource } from "./tiles";
+import { editScope, type TileCache, tileSource } from "./tiles";
 
 /** Full-scale speed of the tile encoding. Mirrors `ve_render::tile`. */
 export const SPEED_SCALE_MPS = 100.0;
@@ -625,7 +625,7 @@ export class MapRenderer {
       if (!shown.texture) continue;
       const { texture, held } = shown;
       this.noteRange(shown.frame, tile);
-      this.bindScope(this.rasterUniforms, scope, tile);
+      this.bindScope(this.rasterUniforms, scope, tile, texture);
       gl.activeTexture(gl.TEXTURE0);
       const b = tileBounds(tile.z, tile.x, tile.y);
       this.setShared(this.rasterUniforms, camera, state.view, tile.lonOffset);
@@ -673,18 +673,43 @@ export class MapRenderer {
    * pixels the edited layer is what you are looking at. That is this frame:
    * the same tile with that layer left out.
    *
-   * Unbound — no scope asked for, or its tile not resident yet — the pass
-   * falls back to the unscoped behaviour rather than to nothing. Drawing the
-   * gesture over every layer for a frame or two is a smaller wrong than
-   * drawing it over none.
+   * With **no scope asked for** the pass is unscoped and the gesture applies
+   * everywhere, which is right: the tool is not aimed at one layer.
+   *
+   * With a scope asked for but **not yet resident**, this frame's own tile
+   * stands in for it (M72). Comparing a tile against itself finds no pixel
+   * the layer contributed, so the gesture applies to nothing and the tile is
+   * drawn plainly until the real scope lands.
+   *
+   * That is the opposite of what it did, which was to fall back to *unscoped*
+   * on the grounds that showing the gesture over every layer for a frame or
+   * two was a smaller wrong than showing it over none. It is the larger wrong:
+   * an intensity aimed at a current layer visibly intensified the wind
+   * beneath it for the whole of the stroke, which is the thing scoping exists
+   * to prevent. Showing nothing for a moment is a delay; showing an edit to a
+   * layer the user did not aim at is a lie about what the tool does.
+   *
+   * And it *fetches* rather than peeking, so the scope arrives on its own
+   * instead of only if something else happened to warm it.
    */
-  private bindScope(u: Uniforms, scope: string | undefined, tile: VisibleTile): void {
+  private bindScope(
+    u: Uniforms,
+    scope: string | undefined,
+    tile: VisibleTile,
+    fallback: WebGLTexture,
+  ): void {
     const gl = this.gl;
-    const texture = scope ? this.tiles.peek(scope, tile.z, tile.x, tile.y) : null;
-    gl.uniform1i(u.uEditScoped ?? null, texture ? 1 : 0);
-    if (!texture) return;
+    // Fetched, not peeked: the scope then arrives on its own rather than only
+    // if something else happened to warm it.
+    const below = scope ? this.tiles.get(scope, tile.z, tile.x, tile.y) : null;
+    const reach = editScope(scope !== undefined, below !== null);
+    gl.uniform1i(u.uEditScoped ?? null, reach === "everywhere" ? 0 : 1);
+    if (reach === "everywhere") return;
+    // `nowhere` binds this frame's own tile as the thing to compare against:
+    // a tile differs from itself nowhere, so the gesture touches nothing until
+    // the real scope lands.
     gl.activeTexture(gl.TEXTURE0 + BELOW_UNIT);
-    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.bindTexture(gl.TEXTURE_2D, reach === "layer" && below ? below : fallback);
   }
 
   /**
@@ -863,7 +888,7 @@ export class MapRenderer {
     for (const tile of tiles) {
       const { texture } = this.textureFor(state, tile, frame);
       if (!texture) continue;
-      this.bindScope(this.glyphUniforms, scope, tile);
+      this.bindScope(this.glyphUniforms, scope, tile, texture);
       gl.activeTexture(gl.TEXTURE0);
       const b = tileBounds(tile.z, tile.x, tile.y);
       const originX =
