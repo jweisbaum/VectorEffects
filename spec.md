@@ -1204,11 +1204,20 @@ closed; a closed panel is gone, not a strip.
 **What the map is showing lives in the title bar; what is being painted lives
 over the map** (M25, D68). The title bar's centre holds the view controls —
 the capture and measure tools, the glyph switch, the projection menu, the
-graticule switch, undo and redo as icons — beside the project's name, which
-is edited in place by clicking it. The option bar over the map holds the palette and
-the tool in hand's options and nothing about the view; the step is the
-timeline's to say. The controls are rendered by the map through a portal, so
-the tool, the glyphs and the graticule stay the map's state.
+graticule switch, the auto scale, and switches for the **legend** and the
+**cursor readout** (M77), undo and redo as icons — beside the project's name,
+which is edited in place by clicking it. The option bar over the map holds the
+palette and the tool in hand's options and nothing about the view; the step is
+the timeline's to say. The controls are rendered by the map through a portal,
+so the tool, the glyphs, the graticule and the two boxes stay the map's state.
+
+Everything drawn over the map can be put away, for the same reason the panels
+can (§5.5): what is over the map is how one person is looking at it, not a
+fact about the document, so none of it is in the project or the settings file.
+**Hiding the readout stops it sampling**, rather than only hiding the answer —
+it costs a field evaluation at every pointer report. The eyedropper's
+magnifier shares that one stream deliberately (§6.1), so arming the eyedropper
+brings the sampling back whether the readout is shown or not.
 
 **The status bar's middle is one line**: the tool's hint, or the last error,
 whichever is newer, from a store every panel and the map write to. No panel

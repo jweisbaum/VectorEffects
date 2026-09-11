@@ -3009,6 +3009,30 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M77 — The legend and the readout can be put away
+
+**The request:** checkboxes beside Auto scale for the speed scale legend
+and for the hover value indicator.
+
+Two more switches in the title bar's view portal, and the two boxes are
+gated on them. View state in the map, like the glyphs and the graticule
+beside them — not in the project and not in the settings file, since what
+is drawn over the map is how one person is looking at it (spec 5.5).
+
+**Hiding the readout stops it sampling.** It is not only a box: every
+pointer report asks the backend for the field under the pointer, and
+drawing nothing while still paying for the answer would be the wrong half
+of the feature. The eyedropper's magnifier shares that one stream
+deliberately — which is why the guard is "the readout is hidden *and* the
+eyedropper is not armed" rather than the readout alone. Arming the
+eyedropper with the readout hidden brings the sampling back, and the
+magnifier has its numbers.
+
+Verified in the running application through the M76 driver: the two
+controls appear beside Auto scale in the title bar, and clicking each
+removes `.map-legend` and `.map-readout` from the document and clicking
+again brings them back.
+
 ### M76 — Opening through the application, not around it
 
 **The request:** give the driver a way to open any project, rather than

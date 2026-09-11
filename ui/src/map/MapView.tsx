@@ -838,6 +838,17 @@ export default function MapView({
   const glyphStyle: "arrow" | "barb" = glyphStyleOf(activeKind);
   const [showGlyphs, setShowGlyphs] = useState(true);
   const [showGraticule, setShowGraticule] = useState(true);
+  /**
+   * The two boxes over the map: the colour legend and the cursor readout
+   * (M77).
+   *
+   * View state like the glyphs and the graticule, and kept the same way — in
+   * the map, not in the project and not in the settings file. What is drawn
+   * over the map is how one person is looking at it, not a fact about the
+   * document (spec.md 5.2).
+   */
+  const [showLegend, setShowLegend] = useState(true);
+  const [showReadout, setShowReadout] = useState(true);
   const readoutStore = useRef<ReadoutStore | null>(null);
   readoutStore.current ??= createReadoutStore();
   /**
@@ -4493,6 +4504,12 @@ export default function MapView({
    * flight, the newest position waiting behind it.
    */
   const sampleAt = (geo: { lon: number; lat: number }) => {
+    // Nobody is reading the number: the readout is hidden and the eyedropper
+    // is not armed (M77). It costs a field evaluation per pointer report, so
+    // it is not asked for. The magnifier shares this one stream deliberately,
+    // which is why arming the eyedropper brings it back rather than starting
+    // a second.
+    if (!showReadout && !eyedropper) return;
     const state = sampling.current;
     if (state.inFlight) {
       state.queued = geo;
@@ -5852,11 +5869,27 @@ export default function MapView({
           />
           Auto scale
         </label>
+        <label title="The colour legend over the map: the ramp each kind of field is painted with, and the speeds at its ends. A view setting: it changes nothing stored or exported.">
+          <input
+            type="checkbox"
+            checked={showLegend}
+            onChange={(e) => setShowLegend(e.target.checked)}
+          />
+          Legend
+        </label>
+        <label title="The cursor readout over the map: the position under the pointer and the field there. A view setting: it changes nothing stored or exported.">
+          <input
+            type="checkbox"
+            checked={showReadout}
+            onChange={(e) => setShowReadout(e.target.checked)}
+          />
+          Readout
+        </label>
           </div>,
           viewSlot,
         )}
 
-      {kindsShown.length > 0 && (
+      {showLegend && kindsShown.length > 0 && (
         <div className="map-legend">
           {kindsShown.map((kind) => (
             <div key={kind} className="legend-row">
@@ -5895,7 +5928,9 @@ export default function MapView({
         </div>
       )}
 
-      <MapReadout store={readoutStore.current} convention={project.direction_convention} />
+      {showReadout && (
+        <MapReadout store={readoutStore.current} convention={project.direction_convention} />
+      )}
     </div>
   );
 }
