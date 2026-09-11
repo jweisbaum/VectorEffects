@@ -3009,6 +3009,30 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M73 — Nothing is dimmed
+
+**The instruction:** set `HELD_DIM` so there is no greying whatsoever.
+
+`HELD_DIM = 1.0`. A held tile is drawn exactly as it is.
+
+M70 had already narrowed the dim to tiles that are genuinely stale — the
+key is known, it differs, the replacement is fetching — and left the
+constant at 0.55 on the grounds that reading as missing was the point
+there. On a map that is mostly dark ocean it did not read as a status; it
+read as a fault, and an edit over a slow layer flickered through a grey
+stage on its way to the right answer.
+
+The mechanism is kept rather than torn out. `tileSource` still tells a
+stale tile from a plain one and this constant is the single place that
+decides what the difference looks like, so the marking can be restored
+everywhere at once by changing one number.
+
+**What is given up**, stated because it is a real loss: there is now no
+signal at all that a tile is behind the document. A slow render shows the
+previous field at full strength with nothing to say so. The status bar's
+spinner and the timeline's readiness strip are what report it instead,
+and neither is on the tile.
+
 ### M72 — A scope that was asked for is never dropped
 
 **The report:** painting with the intensity tool on a current layer
@@ -3155,9 +3179,9 @@ unrepresentable rather than tested for. What is tested is the cache's own
 meaning: unknown before the resolution lands, known after, and still
 unknown for a tile the resolution did not cover or for a different frame.
 
-**Not changed:** `HELD_DIM` is still 0.55, which is harsh but now only
-reaches tiles that genuinely are stale — where reading as missing is the
-point. And a tile the edit *does* reach still re-evaluates the whole
+**Not changed here:** `HELD_DIM` stays at 0.55, harsh but now only
+reaching tiles that genuinely are stale — where reading as missing is the
+point. (Set to 1.0 in M73.) And a tile the edit *does* reach still re-evaluates the whole
 composite, wind under currents included; splitting tiles by kind to avoid
 that would double their number for a saving confined to tiles that
 changed anyway.

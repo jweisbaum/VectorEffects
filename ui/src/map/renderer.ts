@@ -241,8 +241,27 @@ const COAST: [number, number, number, number] = [0.86, 0.93, 1.0, 0.75];
 const GRATICULE: [number, number, number, number] = [0.55, 0.68, 0.85, 0.16];
 const GLYPH: [number, number, number, number] = [0.94, 0.97, 1.0, 0.9];
 
-/** How much a tile held over from the previous frame is dimmed. */
-const HELD_DIM = 0.55;
+/**
+ * How much a tile held over from the previous frame is dimmed (M73).
+ *
+ * **1.0: not at all.** A held tile is the last good pixels for that patch of
+ * map, and after M70 the only ones still marked held are genuinely stale —
+ * the key is known, it differs, and the replacement is on its way. Dimming
+ * those said "this is not current" at the cost of making every edit over a
+ * slow layer flicker through a grey stage, and on a map that is mostly dark
+ * ocean the grey read as a rendering fault rather than as a status.
+ *
+ * The mechanism stays rather than being torn out: `tileSource` still tells a
+ * stale tile from a plain one, and this constant is the single place that
+ * decides what the difference looks like. Lower it again and the marking
+ * comes back everywhere at once.
+ *
+ * What is given up is the only signal that a tile is behind the document. A
+ * slow render now shows the previous field at full strength with nothing to
+ * say so — the spinner and the readiness strip (§9.5) are what report it
+ * instead.
+ */
+const HELD_DIM = 1.0;
 
 function compile(gl: WebGL2RenderingContext, type: number, source: string): WebGLShader {
   const shader = gl.createShader(type);

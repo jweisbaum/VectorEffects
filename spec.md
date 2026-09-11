@@ -3223,8 +3223,15 @@ falls back to the follower's own keys.
   Before the frame's *keys* come back (§5.4) nothing says this tile changed,
   and for the overwhelming majority it has not — the key is about to be
   confirmed as the one already on screen; the held pixels are drawn plainly.
-  Once the key is known and differs, the tile really is stale while it fetches,
-  and the dim says so.
+  Once the key is known and differs, the tile really is stale while it fetches.
+- **Nothing is dimmed** (M73). A held tile is the last good pixels for that
+  patch of map, and marking it grey made every edit over a slow layer flicker
+  through a grey stage that read, on a mostly dark map, as a rendering fault
+  rather than as a status. The distinction is still drawn — a stale tile is
+  still known to be stale — and one constant decides what it looks like, so the
+  marking can come back everywhere at once. What is given up is the only signal
+  that a tile is behind the document: the spinner and the readiness strip
+  (§9.5) are what report that now.
 
   The distinction is the difference between a local edit and a map-wide flash.
   An address carries the revision, so an edit re-addresses every tile at once
