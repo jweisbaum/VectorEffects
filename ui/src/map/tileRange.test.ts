@@ -66,3 +66,53 @@ describe("tileSpeedRange", () => {
     });
   });
 });
+
+describe("the fade at an edge", () => {
+  /**
+   * The report (M81): the low end of the scale never moved. A cell's vector is
+   * premultiplied by its coverage, so the rim of every feathered object ramps
+   * from the object's speed down to nothing — and a feather is the default, so
+   * whatever was on screen there was always a cell most of the way down one.
+   * The bottom of the ramp was pinned near zero and only the top responded to
+   * the view.
+   */
+  it("is left out, so the scale spans the field and not the feather", () => {
+    const bytes = tile([
+      word(40, 2, "wind"), // the fade at a rim: mostly uncovered
+      word(80, 8, "wind"),
+      word(900, 31, "wind"), // the field itself
+      word(1200, 20, "wind"),
+    ]);
+    expect(tileSpeedRange(bytes).wind).toEqual([900, 1200]);
+  });
+
+  /** Half covered is field; a hair under is the fade. */
+  it("splits at half coverage", () => {
+    expect(tileSpeedRange(tile([word(500, 16, "wind"), word(900, 31, "wind")])).wind).toEqual([
+      500, 900,
+    ]);
+    expect(tileSpeedRange(tile([word(500, 15, "wind"), word(900, 31, "wind")])).wind).toEqual([
+      900, 900,
+    ]);
+  });
+
+  /**
+   * A kind with nothing but fade still gets a scale. A thin rim and no
+   * interior is a real thing to look at, and reporting no range at all would
+   * drop it back to the project's fixed scale.
+   */
+  it("falls back to the faded cells when a kind has no solid one", () => {
+    const bytes = tile([word(40, 2, "current"), word(80, 8, "current")]);
+    expect(tileSpeedRange(bytes).current).toEqual([40, 80]);
+  });
+
+  /** And the two kinds decide separately. */
+  it("decides per kind", () => {
+    const bytes = tile([
+      word(40, 2, "current"),
+      word(900, 31, "wind"),
+      word(1200, 31, "wind"),
+    ]);
+    expect(tileSpeedRange(bytes)).toEqual({ wind: [900, 1200], current: [40, 40] });
+  });
+});

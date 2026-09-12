@@ -3009,6 +3009,37 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M81 — The legend's ends answer the view
+
+**The report:** the legend needs left and right numbers that adjust to
+meet the scale of the view.
+
+Both ends were already meant to. Auto scale runs the ramp from the
+slowest to the fastest speed among the tiles on screen, and the legend
+shows both. In practice only the right-hand one ever moved, for two
+reasons that had nothing to do with each other.
+
+**The low end was pinned near zero.** A cell's vector is premultiplied by
+its coverage, so the rim of every feathered object ramps from the
+object's own speed down to nothing — and a feather is the default, so
+whatever is on screen there is always a cell most of the way down one.
+`tileSpeedRange` counted every cell with any coverage at all, so the
+bottom of the scale was the bottom of a fade rather than the slowest
+field in view. A cell more than half covered is field; one less than half
+is an edge, and its speed says how far down the feather it is rather than
+how fast the field is there. A kind with nothing but fade still gets a
+scale from it, since a thin rim is a real thing to be looking at.
+
+**And the numbers had no resolution.** Rounded to whole knots, a current
+legend read "0 to 1" over a field running from a tenth of a knot to nine
+tenths — the numbers were there and told you nothing. The step now comes
+from the span rather than from the kind, so a slow wind is treated like a
+slow current and a fast current is given no false precision.
+
+`legendKnots` is its own module because the map view cannot be imported
+into a plain test — it wants a WebGL context — and a formatter with three
+branches is exactly the thing to pin.
+
 ### M80 — A preview is held until the map shows the edit, not the document
 
 **The report:** releasing the mouse after an erase flashes the erased

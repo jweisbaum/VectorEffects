@@ -1090,6 +1090,24 @@ anywhere in the UI.
   way of looking, not a fact about the project, and it changes no stored or
   exported value.
 
+  **The fade at an edge is left out too** (M81), and for the same reason one
+  step further on. A cell's vector is premultiplied by its coverage, so the
+  rim of every feathered object ramps from the object's own speed down to
+  nothing — and a feather is the default, so whatever is on screen there is
+  always some cell most of the way down one. The low end was pinned near zero
+  whatever the view held, and only the high end ever answered it. A cell more
+  than half covered is field; one less than half is the fade, and its speed
+  says how far down the feather it is rather than how fast the field is there.
+  A kind with no solid cell at all — a thin rim and nothing else — uses the
+  faded ones rather than falling back to the project's fixed scale.
+
+  **The ends carry the precision their span needs.** Whole knots said nothing
+  about a current: they run at a knot or two, so both ends rounded to the same
+  number and the legend read "0 to 1" over a field with a tenth of a knot at
+  one end and nine tenths at the other. The step comes from the span and not
+  from the kind, so a slow wind is treated like a slow current and a fast
+  current is given no false precision.
+
   **Which colours the ramp runs through is a project setting** (M42), one for
   wind and one for currents, chosen from a catalogue the application ships.
   It is the project's and not the application's, for the reason the scale is:

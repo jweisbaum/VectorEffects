@@ -89,6 +89,7 @@ import type { NewMeasurement } from "../generated/NewMeasurement";
 import { showsHoverIndicator, showsMagnifier } from "./hover";
 import { KIND_LABELS, KINDS, type FieldKindName, kindOf } from "../kind";
 import { trackKeyframes } from "./macroTrack";
+import { legendKnots } from "./legend";
 import { rampCss, rampStops } from "./ramp";
 import { parseBasemap } from "./format";
 import { marqueeBounds } from "./marquee";
@@ -271,8 +272,8 @@ type SeenRange = { min: number; max: number } | null;
 interface Ramp {
   min: number;
   max: number;
-  minKnots: number;
-  maxKnots: number;
+  minKnots: string;
+  maxKnots: string;
   auto: boolean;
 }
 
@@ -284,14 +285,23 @@ interface Ramp {
  */
 function rampOf(scaleKnots: number, seen: SeenRange): Ramp {
   if (seen === null) {
-    return { min: 0, max: mpsFromKnots(scaleKnots), minKnots: 0, maxKnots: scaleKnots, auto: false };
+    return {
+      min: 0,
+      max: mpsFromKnots(scaleKnots),
+      minKnots: "0",
+      maxKnots: String(scaleKnots),
+      auto: false,
+    };
   }
   const max = Math.max(seen.max, seen.min + AUTO_SCALE_MIN_SPAN_MPS);
+  const lowKnots = knotsFromMps(seen.min);
+  const highKnots = knotsFromMps(max);
+  const span = highKnots - lowKnots;
   return {
     min: seen.min,
     max,
-    minKnots: Math.round(knotsFromMps(seen.min)),
-    maxKnots: Math.round(knotsFromMps(max)),
+    minKnots: legendKnots(lowKnots, span),
+    maxKnots: legendKnots(highKnots, span),
     auto: true,
   };
 }
