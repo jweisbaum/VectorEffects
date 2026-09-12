@@ -15,6 +15,12 @@ export interface LayerChoice {
   visible: boolean;
 }
 
+/** A layer and what is in it, for following a selection. */
+export interface LayerContents {
+  id: number;
+  objects: ReadonlyArray<{ id: number }>;
+}
+
 /**
  * The layer that should be made active, or `null` to leave it alone.
  *
@@ -46,4 +52,40 @@ export function layerToActivate(
     if (layer?.visible) return layer.id;
   }
   return null;
+}
+
+/**
+ * The layer a selection implies, or `null` to leave the active one alone
+ * (M83).
+ *
+ * Selecting an object in the layer panel already activates its layer — the two
+ * happen in one gesture, so nothing is left disagreeing. Selecting one **on
+ * the map** did not: the selection moved and the active layer stayed where it
+ * was, so the handles described an object in one layer while the next stroke
+ * would land in another, and the properties panel and the marquee's scope
+ * disagreed with what was plainly selected.
+ *
+ * **Only when the active layer holds none of the selection.** A selection can
+ * span layers (§8.2's cross-layer modifier), and pulling the active layer to
+ * the first of them would move it out from under a selection it already
+ * describes. Holding *any* of what is selected is enough to be the right
+ * layer; holding none of it is what makes it the wrong one.
+ *
+ * The first selected object's layer, in the document's own order, so the same
+ * selection always implies the same layer.
+ */
+export function layerForSelection(
+  active: number | null,
+  selection: readonly number[],
+  layers: readonly LayerContents[],
+): number | null {
+  if (selection.length === 0) return null;
+  const chosen = new Set(selection);
+  let holding: number | null = null;
+  for (const layer of layers) {
+    if (!layer.objects.some((object) => chosen.has(object.id))) continue;
+    if (layer.id === active) return null;
+    if (holding === null) holding = layer.id;
+  }
+  return holding;
 }

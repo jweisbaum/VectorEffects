@@ -2611,6 +2611,15 @@ front of every pan.
 - Selection is scoped to the **active layer** — the last layer or object clicked
   in the layer panel — and the cross-layer modifier lifts that. The active layer
   is also the one new objects join (§6.1).
+- **A selected object's layer is the active one** (M83), wherever the selection
+  was made. Clicking an object in the panel always did both in one gesture;
+  selecting one on the *map* moved the selection and left the active layer
+  where it was, so the handles described an object in one layer while the next
+  stroke would land in another, and the properties panel and the marquee's
+  scope disagreed with what was plainly selected. The active layer follows only
+  when it holds **none** of the selection: a selection can span layers, and
+  holding any of it is enough to be the right layer, while being pulled to the
+  first of them would move out from under a selection it already describes.
 - **A layer is always active while a project is open** (M75). One is chosen as
   soon as the layer tree lands, so a tool picked up has somewhere of its own to
   draw rather than falling through to "the top of the stack" — right as a

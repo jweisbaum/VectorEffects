@@ -3009,6 +3009,42 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M83 — A selected object's layer is the active one
+
+**The instruction:** if an object is selected, its layer should be
+selected if it isn't.
+
+Clicking an object in the layer panel already did both in one gesture —
+`clickObject` calls `onActivateLayer` before it selects. Selecting one on
+the **map** did not: `selectObjects` in the app sets the selection and
+nothing else, so the handles described an object in one layer while the
+next stroke would land in another, and the properties panel and the
+marquee's scope disagreed with what was plainly selected.
+
+`layerForSelection` beside M75's rule, enforced in the same panel and for
+the same reason: the panel is what knows which layer holds what.
+
+**It follows only when the active layer holds none of the selection.** A
+selection can span layers (8.2's cross-layer modifier), and pulling the
+active layer to the first of them would move it out from under a
+selection it already describes. Holding any of what is selected is enough
+to be the right layer; holding none of it is what makes it the wrong one.
+The first holder in the document's own order, so the same selection always
+implies the same layer.
+
+**Not verified end to end, and I tried.** The driver can put the pointer
+on the map — the readout follows it, and `object_at` confirms an object
+is under that point — but a synthetic press and release does not complete
+a selection even with pointer capture stubbed out, so the one path that
+was broken is the one path I could not drive. The rule itself is covered
+by seven cases, and the wiring is the same four-line effect as M75, which
+*was* verified in the running application. That is a weaker verification
+than the last few and it should be read as one.
+
+**Worth recording about the driver:** it can move the pointer and read
+what the map says about it, but it cannot yet complete a map gesture. That
+is the gap to close if map interactions are to be tested this way.
+
 ### M82 — A held edit keeps the scope of the frame it is held over
 
 **The report:** the flash on release is still there — it flashes and then

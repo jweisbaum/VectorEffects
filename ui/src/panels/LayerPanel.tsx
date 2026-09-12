@@ -6,7 +6,7 @@ import type { DocumentTree } from "../generated/DocumentTree";
 import type { ProjectSummary } from "../generated/ProjectSummary";
 import type { ImageLayerView } from "../generated/ImageLayerView";
 import { pickGribToImport, pickImageToImport } from "../project/dialogs";
-import { layerToActivate } from "./activeLayer";
+import { layerForSelection, layerToActivate } from "./activeLayer";
 import { CalendarIcon } from "./CalendarIcon";
 import { EyeIcon } from "./EyeIcon";
 import HistoryImportDialog, { type HistoryChoice } from "./HistoryImportDialog";
@@ -175,6 +175,18 @@ export default function LayerPanel({
     const wanted = layerToActivate(activeLayer, tree.layers);
     if (wanted !== null) onActivateLayer(wanted);
   }, [activeLayer, onActivateLayer, tree]);
+
+  // And a selected object's layer is the active one (M83). Clicking an object
+  // in this panel already does both in one gesture; selecting one on the *map*
+  // moved the selection and left the active layer where it was, so the handles
+  // described an object in one layer while the next stroke would land in
+  // another. Here rather than beside the selection, for the same reason as
+  // above: the panel is what knows which layer holds what.
+  useEffect(() => {
+    if (!tree) return;
+    const wanted = layerForSelection(activeLayer, selection, tree.layers);
+    if (wanted !== null) onActivateLayer(wanted);
+  }, [activeLayer, onActivateLayer, selection, tree]);
 
   // The map shows the active layer's kind of field (M29): making a current
   // layer active turns the map to the currents, since that is what a stroke
