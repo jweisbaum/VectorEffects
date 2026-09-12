@@ -3009,6 +3009,45 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M79 — What knocks a hole in an outline is opaque
+
+**The report:** why is there a purple shade over erased parts?
+
+Because `destination-out` removes destination alpha in proportion to the
+**source's**, and every knockout in `drawEdgeBand` reused `fillStyle` —
+the band's own colour, at 0.95 for the pink edge under the pointer and
+0.85 for the yellow selected one. So each knockout removed 95% or 85% of
+what it was clearing and left the rest: a wash of the band's colour at
+`α(1−α)` over the object's entire interior.
+
+Invisible over the field, because the field is drawn over it. Plain to
+see wherever the eraser had taken the field away, because then there is
+nothing behind it but the sea. Hence a shade over the erased parts and
+nowhere else — which is exactly how the report described it, and exactly
+why it looked like something the *eraser* was doing.
+
+**Measured rather than argued.** The same scene captured with the fix in
+and out: the erased interior was `(48, 51, 48)` against a background of
+`(18, 27, 40)`. The selected band is `rgba(255, 214, 102, 0.85)`, so the
+residue is `0.85 × 0.15 = 0.1275`, and
+
+```
+18 + 0.1275·(255−18) = 48.2      27 + 0.1275·(214−27) = 50.8
+40 + 0.1275·(102−40) = 47.9
+```
+
+which is the pixel. The reported pink case is `0.95 × 0.05 = 0.0475` of
+`rgba(255,110,190,·)` over the same background: `(29, 31, 47)` — faintly
+purple, and no other colour in the application would land there.
+
+The fix is one line in three places: a knockout uses an opaque fill. The
+colour is for what is drawn; what is erased takes no colour at all, since
+`destination-out` reads nothing but alpha.
+
+This is the same family as M78 and was hiding behind it — both are the
+band's composite arithmetic, and neither is visible until the eraser
+removes the field that was covering the evidence.
+
 ### M78 — An erased edge is the rim of the union, not of each piece
 
 **The report:** the eraser creates phantom edges that should not be there.

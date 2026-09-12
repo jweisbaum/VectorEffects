@@ -2492,6 +2492,15 @@ export default function MapView({
       erased: readonly ObjectOutline[] = [],
     ) => {
       const width = Math.max(1, widthCss * dpr);
+      // `destination-out` removes destination alpha in proportion to the
+      // *source's*, so anything knocking a hole in the band has to be opaque
+      // (M79). Reusing the band's own colour — 0.95, or 0.16 for the wide
+      // faint one — removed only that fraction and left the rest of it lying
+      // over everything the knockout was meant to clear: a wash of the band's
+      // colour across the object's whole interior, invisible over the field
+      // it covers and plain to see wherever the eraser had taken the field
+      // away. The colour is for what is drawn; what is erased takes this.
+      const ERASING = "#000";
       context.save();
       if (outline.kind === "ring") {
         context.strokeStyle = colour;
@@ -2499,6 +2508,7 @@ export default function MapView({
         context.stroke(maskPath(outline));
         // What the eraser took is no longer there to outline (M33).
         context.globalCompositeOperation = "destination-out";
+        context.fillStyle = ERASING;
         for (const hole of erased) context.fill(maskPath(hole, width / 2));
         context.restore();
         return;
@@ -2509,6 +2519,7 @@ export default function MapView({
       context.fillStyle = colour;
       context.fill(maskPath(outline, -width / 2));
       context.globalCompositeOperation = "destination-out";
+      context.fillStyle = ERASING;
       context.fill(maskPath(outline, width / 2));
       // The eraser takes pieces out of an object without changing the shape
       // it was drawn with (spec.md 8.1), so the edge has to be told: the band
@@ -2531,6 +2542,7 @@ export default function MapView({
       context.globalCompositeOperation = "source-over";
       for (const hole of erased) context.fill(maskPath(hole, -width / 2));
       context.globalCompositeOperation = "destination-out";
+      context.fillStyle = ERASING;
       for (const hole of erased) context.fill(maskPath(hole, width / 2));
       context.restore();
     },

@@ -1753,6 +1753,15 @@ covered, or that a click landed on it.
   grown by half the band's width and knocking out a copy shrunk by the same,
   which is the union's boundary exactly — for a swept chain, a square stamp or
   a ring alike — and centred on it, where a stroke of that width would be.
+- **What knocks a hole in that band is opaque** (M79). The knockout removes
+  destination alpha in proportion to the *source's*, so a knockout in the
+  band's own colour removes only that fraction and leaves the rest lying over
+  everything it was meant to clear — a wash of the band's colour across the
+  object's whole interior, at `α(1−α)`: a twentieth of the pink edge, an
+  eighth of the yellow one. Invisible over the field it covers, and plain to
+  see wherever the eraser had taken the field away, which is why it read as a
+  shade over the erased parts and nowhere else. The colour belongs to what is
+  drawn; what is erased takes no colour at all.
 - **A square stamp is joined to the one before it, not merely stamped near
   it** (M58). A round stamp's union is scalloped between samples and the
   scallop shrinks as the *square* of the spacing, so sampling densely enough
