@@ -833,3 +833,70 @@ fn cancel_from_the_preview_clears_the_preview() {
     assert!(app.session.lock().expect("lock").preview.is_none());
     assert!(!macros::mode(&app, None).expect("mode").active);
 }
+
+/// Moving a macro moves the field it paints, not only its outline.
+#[test]
+fn moving_a_macro_moves_the_field_it_paints() {
+    use ve_app::transform::{self, TransformKind};
+
+    let root = TempRoot::new("move");
+    let app = app(&root);
+    travelling_stroke(&app, 18.0);
+    macros::capture_start(&app, region(0.0, 0.0), 0, false, None).expect("start");
+    let library = macros::capture_finish(&app, "Still".to_owned(), 0).expect("finish");
+    let entry = &library.entries[0];
+    macros::macro_insert(&app, &entry.id, 100.0, 0.0, 0, None).expect("insert");
+    let object = {
+        let session = app.session.lock().expect("lock");
+        session.open.as_ref().expect("open").project.layers[0]
+            .objects
+            .last()
+            .expect("the macro")
+            .id
+            .raw()
+    };
+    assert!(
+        (field(&app, 0, 100.0, 0.0).0 - 18.0).abs() < 0.6,
+        "placed: {:?}",
+        field(&app, 0, 100.0, 0.0)
+    );
+
+    let before_keys = tile_keys(&app);
+    transform::start_transform(&app, &[object], 0, TransformKind::Move, 100.0, 0.0, false)
+        .expect("begin");
+    transform::update_transform(&app, 100.0, 30.0).expect("drag");
+
+    assert!(
+        (field(&app, 0, 100.0, 30.0).0 - 18.0).abs() < 0.6,
+        "the macro should have moved with it: {:?}",
+        field(&app, 0, 100.0, 30.0)
+    );
+    assert!(
+        field(&app, 0, 100.0, 0.0).0.abs() < 0.6,
+        "and left where it was: {:?}",
+        field(&app, 0, 100.0, 0.0)
+    );
+
+    // And the tiles it reaches are re-keyed, at both ends of the move: the map
+    // keeps a texture by its key, so a key that did not change is a macro that
+    // does not move on screen however right the document is.
+    assert_ne!(before_keys, tile_keys(&app), "the tiles the macro reaches");
+}
+
+/// The content keys of the tiles over the macro's two positions.
+fn tile_keys(state: &AppState) -> Vec<[u8; 32]> {
+    let session = state.session.lock().expect("lock");
+    let project = &session.open.as_ref().expect("open").project;
+    let scene = flatten(project, 0);
+    let digests = ve_render::cull::digests_of(&scene);
+    // Level 4: 11.25 degrees a side. (100, 0) and (100, 30).
+    [(0.0, 0.0), (100.0, 0.0), (100.0, 30.0)]
+        .into_iter()
+        .map(|(lon, lat): (f64, f64)| {
+            let x = ((lon + 180.0) / 11.25).floor() as u32;
+            let y = ((90.0 - lat) / 11.25).floor() as u32;
+            let tile = ve_render::tile::TileId::new(4, x, y).expect("tile");
+            ve_render::cull::tile_scene(&scene, &digests, tile).hash
+        })
+        .collect()
+}

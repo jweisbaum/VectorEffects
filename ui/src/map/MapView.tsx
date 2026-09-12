@@ -60,6 +60,7 @@ import {
   type SweptPathProgress,
 } from "./footprint";
 import { destination, distanceM } from "./geo";
+import { type Placement as GhostPlacement, ghostMatrix, ghostRegion } from "./ghost";
 import {
   extendLatticeUnderStroke,
   freshLattice,
@@ -1006,6 +1007,9 @@ export default function MapView({
    * anchor for one and the collective centroid for a group (spec.md 8.2).
    */
   const [committedTransform, setTransform] = useState<SelectionTransform | null>(null);
+  /** The same, for `draw`, which reads refs only. */
+  const committedTransformRef = useRef<SelectionTransform | null>(null);
+  committedTransformRef.current = committedTransform;
   /**
    * The document revision `committedTransform` was fetched for.
    *
@@ -1053,6 +1057,34 @@ export default function MapView({
    * preview.
    */
   const settlingDrag = useRef<(TransformPreview & Settling) | null>(null);
+  /**
+   * The frame under the selection when the drag began, and where it was
+   * (M84).
+   *
+   * The drag carries these pixels rather than leaving the object behind while
+   * only its edge moves; see `map/ghost.ts` for why the field itself cannot
+   * follow the pointer. Taken inside a GL frame — the drawing buffer is not
+   * preserved, so a copy made anywhere else is blank — and kept for the whole
+   * drag, since the source cannot change while the document is not being
+   * written.
+   */
+  const ghost = useRef<{
+    image: HTMLCanvasElement;
+    left: number;
+    top: number;
+    from: GhostPlacement;
+  } | null>(null);
+  /** Whether a drag is waiting for the next frame to take its ghost. */
+  const ghostWanted = useRef(false);
+  /**
+   * The selection's edges as the document had them when the drag began.
+   *
+   * What the ghost was lifted out of, and so what is dimmed while it is being
+   * carried. Held from the start of the drag rather than read from the current
+   * outlines: the write at pointer-up moves those, and dimming *them* would
+   * shade the place the object has just arrived at.
+   */
+  const ghostSource = useRef<OperatorOutline[]>([]);
   /**
    * The tool option whose marker is being dragged, if any.
    *
@@ -1337,6 +1369,52 @@ export default function MapView({
     [],
   );
 
+  /**
+   * Copies the frame under the selection, so the drag can carry it (M84).
+   *
+   * The square is taken from the reach the handles already carry, which is
+   * defined as covering every member's footprint — no path, no union, and a
+   * selection of twenty objects costs the same as one. Called from `draw` and
+   * from nowhere else: see the note there about the drawing buffer.
+   */
+  const takeGhost = useCallback(() => {
+    const canvas = canvasRef.current;
+    const placement = committedTransformRef.current;
+    if (!canvas || !placement) return;
+    const camera = cameraRef.current;
+    const view = viewRef.current;
+    const at = toScreen(camera, view, { lon: placement.lon, lat: placement.lat });
+    const { rx, ry } = footprintRadii(camera, placement.lat, placement.radius_m / 1000);
+    const region = ghostRegion(at, { rx, ry }, { width: canvas.width, height: canvas.height });
+    if (region === null) return;
+    const image = document.createElement("canvas");
+    image.width = region.width;
+    image.height = region.height;
+    const context = image.getContext("2d");
+    if (context === null) return;
+    context.drawImage(
+      canvas,
+      region.left,
+      region.top,
+      region.width,
+      region.height,
+      0,
+      0,
+      region.width,
+      region.height,
+    );
+    ghost.current = {
+      image,
+      left: region.left,
+      top: region.top,
+      from: {
+        pivot: at,
+        rotationDeg: placement.rotation_deg,
+        radiusM: placement.radius_m,
+      },
+    };
+  }, []);
+
   const draw = useCallback(() => {
     const renderer = rendererRef.current;
     if (!renderer) return;
@@ -1523,7 +1601,17 @@ export default function MapView({
         performance.now() - settled.at >= SETTLE_TIMEOUT_MS)
     ) {
       settlingDrag.current = null;
+      ghost.current = null;
+      ghostWanted.current = false;
     }
+
+    // The drag's ghost, taken from the frame just rendered (M84).
+    //
+    // **Here and nowhere else.** The GL context is created without
+    // `preserveDrawingBuffer`, so the drawing buffer is defined only until the
+    // compositor takes it: a copy made from an overlay redraw of its own — and
+    // every pointer report asks for one — comes out blank.
+    if (ghostWanted.current && ghost.current === null) takeGhost();
 
     // The overlay is drawn as part of the same frame, from the same camera.
     //
@@ -2770,6 +2858,53 @@ export default function MapView({
       }
     }
 
+    // The field the drag is carrying (M84).
+    //
+    // The document is not written until the pointer comes up, so the tiles
+    // still hold the object where it was: without this the outline follows the
+    // pointer and the object sits still, which for a macro — where the edge
+    // and the field inside it are visibly two different things — reads as the
+    // drag doing nothing. So the frame under the selection is copied when the
+    // drag begins and drawn back through the drag's own transform: an
+    // approximation of the re-render, which is what a preview is allowed to be
+    // (invariant 3), held until the real one lands.
+    //
+    // **After the edge bands, never before.** A band is made by knocking an
+    // inset copy out of a filled footprint with `destination-out`, which would
+    // take the ghost's interior with it.
+    const carried = ghost.current;
+    if (live && carried) {
+      // Where it is leaving, dimmed: two copies of one object is a worse
+      // reading of the gesture than none, and the shade says which is which.
+      context.save();
+      const vacated = new Path2D();
+      for (const outlined of ghostSource.current) vacated.addPath(maskPath(outlined.outline));
+      context.fillStyle = "rgba(9, 14, 24, 0.55)";
+      context.fill(vacated);
+      context.restore();
+
+      const to = live.handles;
+      const matrix = ghostMatrix(carried.from, {
+        pivot: toScreen(camera, view, { lon: to.lon, lat: to.lat }),
+        rotationDeg: to.rotation_deg,
+        radiusM: to.radius_m,
+      });
+      context.save();
+      const arriving = new Path2D();
+      // Inset by the band, so the copy sits inside the outline rather than
+      // over the edge that is showing where it lands.
+      for (const outline of live.outlines) arriving.addPath(maskPath(outline, 1.5 * dpr));
+      context.clip(arriving);
+      // A copy of the *frame*, which is the field over whatever was under it,
+      // so the ground it was lifted from comes with it wherever the field is
+      // thin. Slightly transparent, so that reads as a preview rather than as
+      // a patch of the wrong coastline pasted over the right one.
+      context.globalAlpha = 0.85;
+      context.transform(matrix[0], matrix[1], matrix[2], matrix[3], matrix[4], matrix[5]);
+      context.drawImage(carried.image, carried.left, carried.top);
+      context.restore();
+    }
+
     // A warp being pulled: from its anchor to the pointer, which is the push
     // the release will write (spec.md 6.3).
     const pull = pushDrag.current;
@@ -3511,16 +3646,31 @@ export default function MapView({
     (kind: TransformKind, geo: { lon: number; lat: number }) => {
       handleDrag.current = { kind, pointer: geo, asking: false, queued: null };
       dragPreview.current = null;
+      // The drag carries the pixels under the selection (M84). The copy itself
+      // has to wait for a GL frame; what is recorded here is that one is
+      // wanted, and what it will be lifted out of.
+      //
+      // Not for a repin, which leaves the geometry where it is on the ground —
+      // nothing moves, so nothing should look as though it has. And not for a
+      // group's rotation: a group has no orientation of its own, so its handles
+      // report none, and a ghost built from them would orbit the pivot without
+      // turning. Both of those keep the outline-only preview they had.
+      ghost.current = null;
+      ghostWanted.current = kind !== "anchor" && !(kind === "rotate" && selection.length > 1);
+      ghostSource.current = outlineList.filter((o) => selection.includes(o.object));
+      requestDraw();
       void api
         // Auto-key travels with the drag: with it on, or on any animated
         // property, the drag keys the current step rather than the base.
         .beginTransform(selection, step, kind, geo.lon, geo.lat, autoKey)
         .catch((err: unknown) => {
           handleDrag.current = null;
+          ghost.current = null;
+          ghostWanted.current = false;
           void api.frontendLog("error", `transform failed to start: ${String(err)}`);
         });
     },
-    [autoKey, selection, step],
+    [autoKey, outlineList, requestDraw, selection, step],
   );
 
   /**
@@ -3589,6 +3739,8 @@ export default function MapView({
         .catch((err: unknown) => {
           // Nothing moved, so nothing should keep looking moved.
           settlingDrag.current = null;
+          ghost.current = null;
+          ghostWanted.current = false;
           drawOverlayRef.current();
           void api.frontendLog("error", `drag failed: ${String(err)}`);
         }),

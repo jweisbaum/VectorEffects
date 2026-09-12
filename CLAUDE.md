@@ -542,10 +542,27 @@ to the hash input is a correctness bug that shows up as stale frames.
   the same, since the entry is removed on timeout and the late resolve finds
   nothing — so long work is *started and polled for*, never awaited in the
   webview.
-- **Kill the driver's application as a process group.** `npm run
+- **Kill the driver's application as a process group, and by pid.** `npm run
   dev:webdriver` is a wrapper around the Tauri CLI, which starts Vite as its
   `beforeDevCommand` and then cargo. Signalling the wrapper alone leaves Vite
   holding port 5173, and the next run dies with "Port 5173 is already in use".
+  **Never `pkill -f ve-app`**: the person whose machine this is very likely has
+  their own `tauri dev` running, and a pattern kill takes it with yours — it
+  did, and cost them everything since the last autosave.
+- **The driver can complete a map gesture** (M84), which M83 said it could not.
+  A `PointerEvent` with `bubbles`, `composed`, `pointerId` and `isPrimary` set,
+  dispatched on the canvas with `setPointerCapture` stubbed to a no-op, selects
+  an object and drags it. Two things make it look impossible. **Dispatch the
+  moves synchronously**: webview timers are throttled to tens of seconds when
+  the window is not composited, so a gesture paced with `setTimeout` outruns the
+  endpoint's 30 s script timeout and poisons its mutex (above). And **the camera
+  is not reset by opening a project**, so a run that ends in a pan leaves the
+  next run's fixed screen coordinates pointing somewhere else entirely; restart
+  the application between runs, or find the target in a capture first.
+- **A capture taken moments after an edit is racing the re-render.**
+  `__veCapture` settles by wall clock and gives up on a timeout, so a screenshot
+  taken in the same second as a commit can show the frame before it and look
+  exactly like a bug that is not there. Take several, spaced, and say which.
 - **The Tauri CLI always passes `--no-default-features`.** `tauri dev` runs
   `cargo run --no-default-features …`, with or without a `--features` flag of
   its own, so a `default = [...]` list on `ve-app` would do nothing under
@@ -581,6 +598,16 @@ to the hash input is a correctness bug that shows up as stale frames.
   frame is already pending (that frame draws the overlay). Pointer reports
   arrive faster than frames are shown; a synchronous `drawOverlay` per report
   drew the overlay twice per frame on a fast drag.
+- **A drag's ghost is copied inside a GL frame and nowhere else** (M84). The
+  overlay carries the field under a dragged selection so the object moves with
+  the pointer rather than only its outline, and it gets those pixels with
+  `drawImage` from the GL canvas — which is created without
+  `preserveDrawingBuffer`, so the drawing buffer is defined only until the
+  compositor takes it. `takeGhost` is called from `draw`, after the render;
+  called from an overlay redraw of its own — and every pointer report asks for
+  one — it copies a blank canvas. Draw it **after** the edge bands, too: a band
+  is a filled footprint with an inset copy knocked out by `destination-out`,
+  which would take the ghost's interior with it.
 - **A macro preview is a project in the session, not a change to the
   document.** `session.preview` holds a one-object `Project` served by
   `protocol::serve` under a revision with bit 62 set, so it can never collide

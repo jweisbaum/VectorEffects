@@ -3009,6 +3009,77 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M84 — A drag carries the field it was over
+
+**The report:** "moving macros is broken. When a macro is selected and I
+move it, only the orange selection box moves. The actual macro stays put
+and it shouldn't."
+
+**The backend was never wrong.** A move writes `PropId::Position`, the
+capture's lattice is stored as an offset from the anchor, and
+`hash_object` hashes the anchor — so the scene moves, the tiles the macro
+reaches are re-keyed at both ends of the move, and the re-render puts the
+field where the box is. `moving_a_macro_moves_the_field_it_paints` in
+`tests/macros.rs` holds all three, and the application confirms it: 0.8 s
+after the release the field is at the new place and the old one is clear.
+
+**The bug is the drag itself**, and it is by design up to here: a drag
+previews and writes once on release (8.2), because writing on every
+pointer report bumps the revision and the revision addresses every tile.
+So what followed the pointer was an outline over a field that had not
+moved. For a brush stroke the outline *is* the field's own edge and the
+two are hard to tell apart; for a macro the box and the patch of captured
+field inside it are visibly separate objects, and the gesture read as
+having done nothing.
+
+**The field is already on screen, so the drag can carry it.** `takeGhost`
+copies the frame under the selection into an offscreen canvas when the
+drag begins — inside a GL frame, since the drawing buffer is not preserved
+and a copy taken from an overlay redraw of its own comes out blank — and
+the overlay draws it back through `ghostMatrix`, the similarity that
+carries the old pivot, orientation and reach to the new ones. The square
+copied comes from the reach the handles already carry, which is defined as
+covering every member's footprint, so a selection of twenty objects costs
+one `drawImage` and no path arithmetic. It is clipped to the moved
+outline, inset by the band so it does not cover the edge, and drawn after
+the bands — a band is made with `destination-out` and would otherwise take
+the ghost's interior with it. The place it was lifted from is dimmed:
+two copies of one object is a worse reading of the gesture than none.
+
+Held through the release on the same rule as the outline, so nothing snaps
+back while the tiles render, and dropped by the same `previewHasLanded`
+that retires the outline.
+
+**What it is not.** A similarity transform of screen pixels is not the
+re-render: move a macro far enough north and the real one is wider than
+the ghost was, and the copy carries whatever was *under* the field with
+it, so a patch of the ground it left shows through wherever the capture is
+thin. Drawn at 0.85 alpha so that reads as a preview rather than as the
+wrong coastline pasted over the right one. Invariant 3 is what permits it
+— the view is a proxy — and the re-render is what settles it. Two drags
+keep the outline alone: a re-anchor, which leaves the geometry where it is
+on the ground so nothing should look as though it moved, and a group's
+rotation, whose handles report no orientation (`handles_for` gives a group
+none) and whose ghost would therefore orbit the pivot without turning.
+
+**Verified in the running application**, through the driver: the macro's
+field is at (19.9, 18.1) with the drag not yet begun, at (70.0, −3.7) with
+the pointer 200 px east and 100 px south and nothing written, and stays
+there through the release and the settle. Before the change the mid-drag
+capture had it still at (19.9, 18.1).
+
+**And the driver can complete a map gesture after all** — M83 recorded
+that it could not. It can: a `PointerEvent` with `bubbles`, `composed`,
+`pointerId` and `isPrimary` set, dispatched on the canvas with
+`setPointerCapture` stubbed to a no-op, selects an object and drags it.
+Two things make it look like it cannot. Timers in the webview are
+throttled hard when the window is not composited, so a gesture built on
+`setTimeout` never finishes and the 30 s script timeout then poisons the
+endpoint's mutex for the life of the process; dispatch the moves
+synchronously instead. And the camera is not reset by opening a project,
+so a run that ends in a pan leaves the next run's fixed screen
+coordinates pointing somewhere else entirely.
+
 ### M83 — A selected object's layer is the active one
 
 **The instruction:** if an object is selected, its layer should be

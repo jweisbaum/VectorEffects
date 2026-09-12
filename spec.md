@@ -2677,14 +2677,26 @@ front of every pan.
   after the release until the new revision's tiles are on screen, so the object
   does not snap back to where it started while they render.
 
-  The field itself is not previewed. A drag shows the footprint moving over a
-  field that has not moved yet, which is the same bargain §1.5's third invariant
-  makes everywhere: the view is a proxy, and evaluating one at pointer rate is
-  the thing that cannot be afforded. **The moving outline is the perimeter**,
-  drawn as the same edge band the static outline is: a swept stroke is a union
-  of stamps, and stroking it traced every stamp's ring. A selected object of
-  every tool — the brush included — is outlined in the selection colour; while
-  a drag is live the moving outline stands in for it.
+  **The drag carries the pixels it was over** (M84). The field cannot be
+  evaluated at pointer rate — that is the bargain above — but it does not have
+  to be: the object is already on screen, so the frame under the selection is
+  copied when the drag begins and drawn back through the drag's own transform,
+  turned and scaled with it, while the place it was lifted from is dimmed.
+  Without that the outline followed the pointer and the object sat still, which
+  for a macro — where the edge and the field inside it are plainly two
+  different things — read as the drag having no effect at all. It is a
+  *preview*, and §1.5's third invariant is what permits it: a similarity
+  transform of screen pixels is not what a re-render at a different latitude
+  produces, and it is not asked to be. The copy is held through the release,
+  like the outline, until the real tiles land. Two cases keep the outline alone:
+  a re-anchor, which leaves the geometry where it is on the ground, and a
+  group's rotation, whose handles report no orientation to turn the copy by.
+
+  **The moving outline is the perimeter**, drawn as the same edge band the
+  static outline is: a swept stroke is a union of stamps, and stroking it traced
+  every stamp's ring. A selected object of every tool — the brush included — is
+  outlined in the selection colour; while a drag is live the moving outline
+  stands in for it.
 - **Selection changes are not undo history entries** (standard editor
   convention).
 
