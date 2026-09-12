@@ -1770,8 +1770,17 @@ covered, or that a click landed on it.
   pieces out of an object without changing the shape it was drawn with
   (§8.1), so an edge drawn from the shape alone traced a footprint that is no
   longer all there. Each outline carries the erasures standing against it at
-  that step: the band is cut where a piece is gone and the piece's own rim is
-  drawn inside the object in its place.
+  that step: the band is cut where a piece is gone and the rim of what is gone
+  is drawn inside the object in its place.
+- **That rim is the boundary of the erasures' *union*, not of each of them**
+  (M78). Drawn one at a time it was the edge of every stamp, so a stroke
+  crossing ground an earlier stroke had already taken drew its edge there
+  anyway — a line through a region with no field behind it, and only ever on
+  the later of the two, since each erasure carved only its own inside. It is
+  the same union a footprint is (§6.1) and takes the same treatment: every
+  piece grown, every piece inset knocked out of that, which leaves one
+  boundary, no interior edges, and no dependence on the order they were drawn
+  in.
 - **The eraser's stroke in progress is neither filled nor outlined.** It is
   the same union, so the same rings would trail the pointer if it were
   stroked; and a tint over the sweep, which is what it carried at first,

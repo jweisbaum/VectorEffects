@@ -2517,15 +2517,21 @@ export default function MapView({
       for (const hole of erased) context.fill(maskPath(hole, width / 2));
       context.restore();
       if (erased.length === 0) return;
+      // The rim of the *union* of the holes, by the same trick the object's
+      // own band uses above: every hole grown, then every hole inset knocked
+      // out of that. Taken one hole at a time it was the rim of each, which
+      // is a different shape — a stroke crossing ground an earlier stroke had
+      // already taken drew its edge there anyway, a line with no field behind
+      // it, and only ever on the later of the two because a hole carved only
+      // its own inside (M78). The union has one boundary and no interior
+      // edges, and it does not depend on the order they were drawn in.
       context.save();
       context.clip(maskPath(outline, width / 2));
-      for (const hole of erased) {
-        context.fillStyle = colour;
-        context.globalCompositeOperation = "source-over";
-        context.fill(maskPath(hole, -width / 2));
-        context.globalCompositeOperation = "destination-out";
-        context.fill(maskPath(hole, width / 2));
-      }
+      context.fillStyle = colour;
+      context.globalCompositeOperation = "source-over";
+      for (const hole of erased) context.fill(maskPath(hole, -width / 2));
+      context.globalCompositeOperation = "destination-out";
+      for (const hole of erased) context.fill(maskPath(hole, width / 2));
       context.restore();
     },
     [maskPath],
@@ -5017,21 +5023,45 @@ export default function MapView({
     // a field that failed to render. A project whose viewport holds no tile
     // never satisfies it, so the attempts are still bounded and the capture
     // goes ahead either way.
-    for (let attempt = 0; attempt < 100; attempt++) {
+    //
+    // Bounded by the **clock**, not by a count of attempts (M78). A window
+    // that is not composited has its timers throttled towards one a second,
+    // so a hundred hundred-millisecond waits is ten seconds in front and a
+    // minute and a half behind — which is exactly when a driver is taking the
+    // picture.
+    const settleBy = performance.now() + 10_000;
+    for (;;) {
       const tiles = tilesRef.current?.stats();
       if (tiles && tiles.pending === 0 && tiles.ready > 0) break;
+      if (performance.now() > settleBy) break;
       await new Promise((resolve) => window.setTimeout(resolve, 100));
     }
 
     const pendingCapture = renderer.captureNextFrame();
     requestDraw();
-    const image = await pendingCapture;
-    if (!image) return null;
+    // A frame may never arrive — `requestAnimationFrame` is suspended while
+    // the window is not composited, and the scheduler's timer fallback is
+    // throttled with everything else. Better to say so than to hang (M78).
+    const image = await Promise.race([
+      pendingCapture,
+      new Promise<null>((resolve) => window.setTimeout(() => resolve(null), 20_000)),
+    ]);
+    if (!image) {
+      void api.frontendLog("warn", "capture: no frame was drawn to read back");
+      return null;
+    }
 
     const scratch = document.createElement("canvas");
     scratch.width = image.width;
     scratch.height = image.height;
-    scratch.getContext("2d")?.putImageData(image, 0, 0);
+    const onto = scratch.getContext("2d");
+    onto?.putImageData(image, 0, 0);
+    // The overlay on top of the field (M78). Handles, outlines, brush
+    // footprints and every gesture preview are drawn on a second canvas over
+    // the GL one, so a capture of the framebuffer alone is the map with all
+    // of that missing — which is most of what there is to look at when the
+    // question is about an edge rather than about the field.
+    if (onto && overlayRef.current) onto.drawImage(overlayRef.current, 0, 0);
     const blob = await new Promise<Blob | null>((resolve) =>
       scratch.toBlob(resolve, "image/png"),
     );

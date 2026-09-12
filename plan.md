@@ -3009,6 +3009,46 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M78 — An erased edge is the rim of the union, not of each piece
+
+**The report:** the eraser creates phantom edges that should not be there.
+
+It does, and only where erasures overlap. M33 draws the rim of what the
+eraser took, inside the object, so the edge tells the truth about a
+footprint that is no longer all there. It drew that rim one erasure at a
+time — each hole grown, then that same hole inset knocked out — so each
+hole carved only its **own** inside. A stroke crossing ground an earlier
+stroke had already taken therefore drew its edge there anyway: a line
+through a region with no field behind it. Always on the later of the two
+and never the earlier, which is the giveaway that the result depended on
+the order they were drawn in.
+
+The holes are a union and take the same treatment a footprint does: every
+piece grown, then every piece inset knocked out of that. One boundary, no
+interior edges, no order dependence — the same trick the object's own band
+two lines above already used.
+
+**Shown, not argued.** The driver built the case — a stroke with four
+eraser cuts, two of them overlapping — and captured it with the fix in and
+with it out. The before has a line down the middle of each merged black
+region; the after has a single boundary around it.
+
+Two things had to be fixed first for that picture to be takeable at all,
+and both are worth keeping:
+
+- **The capture includes the overlay now.** Handles, outlines, footprints
+  and every gesture preview are drawn on a second canvas over the GL one,
+  so a capture of the framebuffer alone had none of them — which is most
+  of what there is to look at when the question is about an *edge*. This
+  is the second time its absence blocked a verification.
+- **The capture is bounded by the clock, not by a count of attempts.** A
+  window that is not composited has its timers throttled towards one a
+  second, so M71's hundred hundred-millisecond waits were ten seconds in
+  front and a minute and a half behind — which is exactly when a driver is
+  taking the picture. It also no longer waits forever for a frame that may
+  never be drawn, `requestAnimationFrame` being suspended while the window
+  is not composited; it reports that instead.
+
 ### M77 — The legend and the readout can be put away
 
 **The request:** checkboxes beside Auto scale for the speed scale legend
