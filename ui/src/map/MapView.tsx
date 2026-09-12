@@ -277,12 +277,6 @@ interface Ramp {
   auto: boolean;
 }
 
-/**
- * The ramp's span: the project's own scale from calm (spec.md 5.3, M15) —
- * or, with the auto scale on (M27), the slowest to the fastest speed among
- * the tiles the last frame drew of this kind. A frame that drew no field of
- * the kind falls back to the project's scale rather than to nothing.
- */
 function rampOf(scaleKnots: number, seen: SeenRange): Ramp {
   if (seen === null) {
     return {
@@ -1390,6 +1384,24 @@ export default function MapView({
       belowFrame:
         editsFieldRef.current && activeLayerRef.current !== null
           ? beneathOf(stepRef.current, activeLayerRef.current)
+          : null,
+      // The same scope for the frame being *held* (M82). A commit
+      // re-addresses the beneath frame along with everything else, so for the
+      // round trip that follows a stroke the scope the live edit is drawn
+      // with names tiles nobody has fetched — and an edit whose scope has not
+      // arrived applies to nothing (M72). The held removal stopped being
+      // drawn there and the field it had taken came back until the new tiles
+      // landed: the flash at every release. The frame on screen during that
+      // window is the one before the commit, and its beneath frame is
+      // resident, having been warmed throughout the stroke.
+      belowHeldFrame:
+        editsFieldRef.current && activeLayerRef.current !== null && shown !== null && shown !== frame
+          ? (() => {
+              const was = parseFrameToken(shown);
+              return was === null
+                ? null
+                : beneathToken(was.revision, was.step, activeLayerRef.current);
+            })()
           : null,
       // Where a clone's source is read from (M45): the edited layer alone,
       // which is what its commit samples.

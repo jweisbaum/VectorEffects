@@ -199,6 +199,16 @@ export interface RenderState {
    */
   belowFrame?: string | null;
   /**
+   * The same scope for the frame being held over (M82).
+   *
+   * A commit re-addresses `belowFrame`, so for the round trip after a stroke
+   * it names tiles nobody has fetched — and a scope that has not arrived
+   * applies to nothing (M72), which took the held removal off the map and let
+   * the field it had taken flash back. The frame on screen through that
+   * window is the one before the commit, and this is its scope.
+   */
+  belowHeldFrame?: string | null;
+  /**
    * The layer being edited, by itself, or null (M45).
    *
    * Where a clone stamp reads its source from. Its commit samples the field
@@ -644,7 +654,7 @@ export class MapRenderer {
       if (!shown.texture) continue;
       const { texture, held } = shown;
       this.noteRange(shown.frame, tile);
-      this.bindScope(this.rasterUniforms, scope, tile, texture);
+      this.bindScope(this.rasterUniforms, scope, tile, texture, state.belowHeldFrame);
       gl.activeTexture(gl.TEXTURE0);
       const b = tileBounds(tile.z, tile.x, tile.y);
       this.setShared(this.rasterUniforms, camera, state.view, tile.lonOffset);
@@ -716,11 +726,19 @@ export class MapRenderer {
     scope: string | undefined,
     tile: VisibleTile,
     fallback: WebGLTexture,
+    heldScope?: string | null,
   ): void {
     const gl = this.gl;
     // Fetched, not peeked: the scope then arrives on its own rather than only
     // if something else happened to warm it.
-    const below = scope ? this.tiles.get(scope, tile.z, tile.x, tile.y) : null;
+    //
+    // Falling back to the *held* frame's scope rather than straight to
+    // "nowhere" (M82): while the map is still showing the frame before a
+    // commit, that frame's scope is the one that describes what is on screen,
+    // and it is resident. Only with neither does the edit apply to nothing.
+    const below =
+      (scope ? this.tiles.get(scope, tile.z, tile.x, tile.y) : null) ??
+      (heldScope ? this.tiles.peek(heldScope, tile.z, tile.x, tile.y) : null);
     const reach = editScope(scope !== undefined, below !== null);
     gl.uniform1i(u.uEditScoped ?? null, reach === "everywhere" ? 0 : 1);
     if (reach === "everywhere") return;
@@ -907,7 +925,7 @@ export class MapRenderer {
     for (const tile of tiles) {
       const { texture } = this.textureFor(state, tile, frame);
       if (!texture) continue;
-      this.bindScope(this.glyphUniforms, scope, tile, texture);
+      this.bindScope(this.glyphUniforms, scope, tile, texture, state.belowHeldFrame);
       gl.activeTexture(gl.TEXTURE0);
       const b = tileBounds(tile.z, tile.x, tile.y);
       const originX =

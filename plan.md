@@ -3009,6 +3009,38 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M82 — A held edit keeps the scope of the frame it is held over
+
+**The report:** the flash on release is still there — it flashes and then
+disappears.
+
+It was, and M80 fixed the wrong half of it. The preview was being held
+correctly; what stopped applying was the *scope* it is drawn through.
+
+M72 made an edit whose scope has not arrived apply to **nothing**, on the
+grounds that reaching a layer the user did not aim at is a lie and a
+delay is not. That is right during a stroke. It is wrong immediately
+after one, because a commit re-addresses the beneath frame along with
+every other frame: for the length of the round trip that follows, the
+scope names tiles nobody has fetched, so the held removal applied to
+nothing, the field it had taken came back, and then the new tiles landed
+and took it away again.
+
+The frame on screen through that window is the one *before* the commit,
+and its beneath frame is resident — it was warmed throughout the stroke.
+So the scope falls back to that rather than straight to "nowhere", and
+only with neither does the edit apply to nothing. It is peeked and not
+fetched: a frame the map has moved past is not worth a request.
+
+**Third instance of one mistake**, and worth naming as such. An edit
+re-addresses every tile at once, so for one round trip afterwards
+everything derived from the frame is momentarily absent — and absence
+reads as an answer. M70 read "no texture" as "stale" and dimmed the map;
+M80 read "nothing pending" as "everything arrived" and dropped the
+preview; this read "no scope" as "touch nothing" and dropped the edit.
+The rule that comes out of all three: during that window the frame *on
+screen* is the authority, not the frame the document has moved to.
+
 ### M81 — The legend's ends answer the view
 
 **The report:** the legend needs left and right numbers that adjust to

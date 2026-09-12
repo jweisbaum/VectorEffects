@@ -1936,7 +1936,11 @@ would turn arrows belonging to layers it does not touch.
 **A scope that has been asked for is never dropped** (M72). Until the frame
 without the layer is resident there is no way to tell which pixels belong to
 it, and the gesture applies to **nothing** — the tile is drawn plainly and the
-preview arrives a moment later. It used to fall back to acting on everything,
+preview arrives a moment later. Where the map is still showing the frame
+*before* a commit, that frame's scope is used instead of nothing (M82): a
+commit re-addresses the beneath frame with everything else, and applying to
+nothing there took a held edit off the map and let the field it had removed
+flash back for the length of a round trip. It used to fall back to acting on everything,
 reasoning that a gesture over every layer for a frame or two beat a gesture
 over none; that frame or two was the whole stroke, because the frame was
 fetched only while the tool was idle and every commit re-addresses it, so the
