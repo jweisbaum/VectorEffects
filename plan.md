@@ -3009,6 +3009,45 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M80 — A preview is held until the map shows the edit, not the document
+
+**The report:** releasing the mouse after an erase flashes the erased
+section back.
+
+The hold that exists to prevent exactly this was ending too early. M32
+keeps the live removal on screen after the release until the committed
+tiles land, because dropping it at the release would let the field fill
+back in for the round trip and then empty again. Its test for "landed"
+was the document's revision *and* no tiles pending.
+
+The second half is what failed. A tile is only pending once its key is
+known and a fetch has started, and an edit re-addresses every tile — so
+for the whole of the key round trip that follows a commit, nothing has
+been asked for and nothing is pending. The count was zero because nothing
+had started, and it was read as everything having arrived. The preview
+was dropped, the map went on drawing the previous frame, and the field
+the eraser had just taken came back until the new tiles landed.
+
+Held now until `shownFrame` is the frame carrying the edit, which is set
+only once every tile of it is resident — the one signal that says the
+*map* has it rather than the document. It is assigned earlier in the same
+draw that reads it, so the preview still drops on the frame the tiles
+land and waits no longer than before. The four-second timeout still
+bounds it.
+
+**This was the same misreading as M70**, one layer up: there, "no texture"
+conflated a key that was not known with a tile that was fetching, and
+dimmed the whole map; here, "nothing pending" conflated a frame nobody had
+asked for with a frame that had arrived, and dropped the preview. Both
+come of an edit re-addressing every tile at once, which is worth
+remembering as a thing that makes counts and absences lie for a round trip
+after every stroke.
+
+**Not reproduced in the app.** It is a transient of exactly the length of
+a round trip, and the driver's capture waits for tiles to settle — which
+is the opposite of the moment in question. Reasoned from the code, pinned
+by a test that asserts the case directly.
+
 ### M79 — What knocks a hole in an outline is opaque
 
 **The report:** why is there a purple shade over erased parts?

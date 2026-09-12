@@ -1475,14 +1475,17 @@ export default function MapView({
 
     const stats = tilesRef.current?.stats();
 
-    // Retire the previews whose field has arrived. Pending tiles mean the map
-    // is still showing the previous revision (spec.md 5.4), so the preview has
-    // to stay until nothing is outstanding.
+    // Retire the previews whose field has arrived — meaning the *map* is
+    // showing it, not merely that the document holds it (M80). `shownFrame`
+    // is set above only once every tile of this frame is resident, which is
+    // the one signal that says so; a count of pending tiles said nothing
+    // during the key round trip an edit starts, when no tile has been asked
+    // for yet.
+    const onScreen = shownFrameRef.current === frame;
     if (settling.current.length > 0) {
       const now = performance.now();
       const held = settling.current.filter(
-        (entry) =>
-          !previewHasLanded(entry, projectRef.current.revision, stats?.pending ?? 0, now),
+        (entry) => !previewHasLanded(entry, projectRef.current.revision, onScreen, now),
       );
       settling.current = held;
     }
@@ -1490,7 +1493,7 @@ export default function MapView({
     const settled = settlingDrag.current;
     if (
       settled &&
-      previewHasLanded(settled, projectRef.current.revision, stats?.pending ?? 0, performance.now()) &&
+      previewHasLanded(settled, projectRef.current.revision, onScreen, performance.now()) &&
       // ...and the handles it hands back to describe the same revision. The
       // timeout inside `previewHasLanded` still bounds the wait.
       (settled.revision === null ||

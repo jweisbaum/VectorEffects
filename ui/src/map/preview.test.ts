@@ -21,37 +21,48 @@ const held: HeldPreview = {
 describe("previewHasLanded", () => {
   /** Nothing is known until the commit comes back with a revision. */
   it("holds a preview whose commit has not returned", () => {
-    expect(previewHasLanded({ ...held, revision: null }, 9, 0, 1100)).toBe(false);
+    expect(previewHasLanded({ ...held, revision: null }, 9, true, 1100)).toBe(false);
   });
 
   /** The document is still one revision behind the stroke. */
   it("holds a preview whose revision has not been applied", () => {
-    expect(previewHasLanded(held, 6, 0, 1100)).toBe(false);
+    expect(previewHasLanded(held, 6, true, 1100)).toBe(false);
   });
 
   /**
-   * The revision is applied but the tiles for it are still in flight, so the
-   * map is drawing the revision before the stroke -- the very gap the preview
-   * covers.
+   * The revision is applied but the map is still showing the frame before it,
+   * so dropping the preview now shows the gap it covers.
    */
-  it("holds a preview while its tiles are outstanding", () => {
-    expect(previewHasLanded(held, 7, 3, 1100)).toBe(false);
+  it("holds a preview until the edited frame is the one on screen", () => {
+    expect(previewHasLanded(held, 7, false, 1100)).toBe(false);
   });
 
   it("drops a preview once its revision is drawn", () => {
-    expect(previewHasLanded(held, 7, 0, 1100)).toBe(true);
+    expect(previewHasLanded(held, 7, true, 1100)).toBe(true);
   });
 
   /** Later edits do not strand an earlier stroke's preview. */
   it("drops a preview overtaken by a later revision", () => {
-    expect(previewHasLanded(held, 9, 0, 1100)).toBe(true);
+    expect(previewHasLanded(held, 9, true, 1100)).toBe(true);
   });
 
   /** A tile that never arrives must not leave paint on the overlay forever. */
   it("drops a preview whose field never arrives", () => {
-    expect(previewHasLanded(held, 6, 4, 1000 + SETTLE_TIMEOUT_MS)).toBe(true);
-    expect(previewHasLanded({ ...held, revision: null }, 6, 4, 1000 + SETTLE_TIMEOUT_MS))
+    expect(previewHasLanded(held, 6, false, 1000 + SETTLE_TIMEOUT_MS)).toBe(true);
+    expect(previewHasLanded({ ...held, revision: null }, 6, false, 1000 + SETTLE_TIMEOUT_MS))
       .toBe(true);
+  });
+
+  /**
+   * The regression (M80). The document holding the stroke is not the map
+   * showing it: an edit re-addresses every tile, so for the length of the key
+   * round trip that follows, nothing has been asked for and nothing is
+   * pending — which the old condition read as "everything has arrived". The
+   * preview was dropped there and the field it had removed came back for the
+   * length of the round trip, then left again.
+   */
+  it("does not mistake a frame nobody has asked for yet for one that arrived", () => {
+    expect(previewHasLanded(held, 7, false, 1100)).toBe(false);
   });
 });
 

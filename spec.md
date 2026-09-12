@@ -1886,6 +1886,19 @@ screen-space proxy of the kernels' answer, the way every preview is (§7.9):
 a twist has none, and a push is previewed as a clone of the field under the
 start.
 
+**Landed means the map is showing it, not that the document holds it**
+(M80). The two are a round trip apart: an edit re-addresses every tile
+(§5.4), so between the commit and the new tiles there is a stretch in which
+the document has the stroke and the screen still has the frame before it. A
+preview dropped there hands the map back exactly what the stroke removed,
+for as long as the round trip takes, and then takes it away again — a flash
+of the erased field at every release. So the preview is held until the frame
+carrying the edit is the frame on screen, which is the one signal that says
+so; a count of tiles still in flight is not, because for the length of the
+key round trip none has been asked for yet and the count is zero. A timeout
+still bounds the wait, or a tile that never arrives would leave paint on the
+overlay for the rest of the session.
+
 **Every live preview acts on the layer being edited and no other** (M40,
 M44). The map draws the composite of every visible layer as a single tile,
 so a preview applied to that tile applied to all of them at once: a stroke

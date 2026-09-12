@@ -79,18 +79,28 @@ export const SETTLE_TIMEOUT_MS = 4000;
 /**
  * Whether a held preview can be dropped.
  *
- * Both conditions matter. The revision says the document contains the stroke;
- * outstanding tiles say the map is still drawing the revision before it, so
- * dropping the preview then would show the gap it exists to cover.
+ * Both conditions matter. The revision says the *document* contains the
+ * stroke; the frame says the *map* does. Dropping on the revision alone shows
+ * the gap the preview exists to cover — the previous frame's tiles are still
+ * what is on screen, and they still hold the field the stroke took away.
+ *
+ * **The second condition is "the edited frame is the one on screen"**, not
+ * "no tile is pending" (M80). A tile is only pending once its key is known and
+ * a fetch has started, and an edit re-addresses every tile, so for the length
+ * of the key round trip after every stroke *nothing* was pending — the count
+ * was zero because nothing had been asked for yet, not because everything had
+ * arrived. The preview was dropped there, the map went on drawing the frame
+ * before it, and the erased field came back for as long as the round trip
+ * took and then left again. A flash of exactly what had just been removed.
  */
 export function previewHasLanded(
   preview: Settling,
   revision: number,
-  pendingTiles: number,
+  editedFrameOnScreen: boolean,
   now: number,
 ): boolean {
   if (now - preview.at >= SETTLE_TIMEOUT_MS) return true;
-  return preview.revision !== null && revision >= preview.revision && pendingTiles === 0;
+  return preview.revision !== null && revision >= preview.revision && editedFrameOnScreen;
 }
 
 /** What the overlay draws for a gesture in progress (spec.md 6.1, 6.2). */
