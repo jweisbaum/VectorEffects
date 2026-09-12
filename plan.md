@@ -3009,6 +3009,39 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M85 — A moving macro is pointed at where it is drawn
+
+**Found while diagnosing M84**, not reported: a macro that recorded
+movement is drawn at its anchor plus the displacement the capture stored,
+and `flatten_where` was the only place that knew it. The hit test, the
+outlines the map draws, and the baseline a drag starts from all called
+`flatten_object_at` with the stored position. So at every step past the
+macro's first, the orange box sat where the keys said and the macro was
+somewhere else; a click on the macro selected nothing, and a drag of the
+box moved an outline that had never been over it.
+
+The comment in `flatten_where` said what the rule was — the displacement
+moves "its anchor, and with it its footprint, its outline and what a
+click selects" — and three of those four were not going through it. That
+is the shape of the bug: a rule stated in one function that three other
+functions have to obey by hand.
+
+`scene::place` is now the one function. It resolves the links and applies
+the capture's displacement and hands back both the placement and the
+`FlatCapture` the caller was going to ask for anyway, so no site computes
+the capture twice. `flatten_where`, `document::hit_test`,
+`transform::outlines_at` and `transform::baseline_of` all call it.
+`baseline_of` works from object ids rather than from a walk of the layers,
+so it finds the kind with `Project::locate`; a selection is small and the
+scan is not the scene's per-object one.
+
+`a_moving_macro_is_pointed_at_where_it_is_drawn` holds all four, at a step
+where the recorded displacement is twenty degrees: the field is there, a
+click there selects the macro, a click where its keys put it selects
+nothing, the outline's anchor is there, and the handles a drag begins from
+are there. It fails on the old code with `left: None, right: Some(4)` —
+the click on the macro finding nothing.
+
 ### M84 — A drag carries the field it was over
 
 **The report:** "moving macros is broken. When a macro is selected and I

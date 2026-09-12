@@ -3076,6 +3076,15 @@ footprint together: shifting only the lattice would leave the field trying to
 draw outside the shape that admits it. Motion is relative, so it begins
 wherever the click put it.
 
+**And everything that points at it points where it is** (M85). The
+displacement is part of the object's placement, not a detail of how its field
+is sampled, so the hit test, the outline the map draws, the handles and the
+baseline a drag is computed from all read it through the one function the
+scene reads it through (`scene::place`). Reading the stored position instead
+put the selection box where the macro's keys said while the field was
+somewhere else entirely, and a click on the macro selected nothing — it
+selected whatever was under a box the user was not looking at.
+
 **Time.** Frame `f` is at macro time `f·Δt_m` and the object's step `s` at
 `(s − start)·Δt_p`. Equal steps map one to one; when they differ, the object's
 **resample** option decides. **Hold** shows the frame at or before the step's

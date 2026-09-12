@@ -22,6 +22,7 @@ use ve_core::angle::Angle;
 use ve_core::command::Command;
 use ve_core::document::{Geometry, LocalPoint};
 use ve_core::keyframe::Animatable;
+use ve_core::project::FieldKind;
 use ve_core::schema::PropId;
 
 use crate::create::Tool;
@@ -436,20 +437,24 @@ pub fn outlines_at(
         } else {
             None
         };
-        // A follower is where its link puts it, not where its dormant keys
-        // say (spec.md 9.3): the outline has to agree with the field.
+        // An outline is drawn where the scene draws the object: a follower is
+        // where its link puts it rather than where its dormant keys say
+        // (spec.md 9.3), and a macro is where its capture's recorded movement
+        // takes it (spec.md 8.7). The outline has to agree with the field.
         let links = ve_core::follow::resolve(project, step);
         let mut out = Vec::new();
         for layer in &project.layers {
             if !layer.visible {
                 continue;
             }
+            let kind = layer.parameter();
             let all_here = whole_layer == Some(layer.id);
             for object in &layer.objects {
                 if !all_here && Some(object.tool) != wanted && !objects.contains(&object.id.raw()) {
                     continue;
                 }
-                let Some(flat) = flatten_object_at(object, step, links.of(object.id)) else {
+                let placed = ve_render::scene::place(project, object, kind, step, &links);
+                let Some(flat) = flatten_object_at(object, step, placed.derived) else {
                     continue;
                 };
                 out.push(OperatorOutline {
@@ -617,13 +622,23 @@ fn baseline_of(
     let links = ve_core::follow::resolve(project, step);
     let mut items = Vec::new();
     for raw in objects {
-        let Some(object) = project.object(object_id(*raw)) else {
+        let id = object_id(*raw);
+        let Some(object) = project.object(id) else {
             continue;
         };
+        // The handles go where the object is drawn — a follower where its link
+        // puts it (spec.md 9.3), a macro where its capture's recorded movement
+        // takes it (spec.md 8.7) — so a drag begins from the same place the
+        // outline is around. The kind comes from the layer holding it, which a
+        // selection is small enough to look up.
+        let kind = project
+            .locate(id)
+            .and_then(|(at, _)| project.layers.get(at))
+            .map_or(FieldKind::Wind, ve_core::document::Layer::parameter);
+        let placed = ve_render::scene::place(project, object, kind, step, &links);
         // No flat object means it is outside its lifetime or covers nothing,
-        // and there is nothing to put a handle on. A follower's handles go
-        // where its link puts it (spec.md 9.3).
-        let Some(flat) = flatten_object_at(object, step, links.of(object.id)) else {
+        // and there is nothing to put a handle on.
+        let Some(flat) = flatten_object_at(object, step, placed.derived) else {
             continue;
         };
         // The stored properties, keys and all, so a drag can write *into* an

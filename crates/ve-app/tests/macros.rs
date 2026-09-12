@@ -457,6 +457,76 @@ fn a_recorded_capture_moves_the_way_the_original_did() {
     );
 }
 
+/// A moving macro is grabbed where it *is*, not where its keys put it.
+///
+/// The field is drawn at the anchor plus the displacement the capture
+/// recorded (M33), so everything that points at the object — the hit test,
+/// the outline, the handles a drag starts from — has to be measured there
+/// too, or the box is in one place and the macro in another.
+#[test]
+fn a_moving_macro_is_pointed_at_where_it_is_drawn() {
+    let root = TempRoot::new("point");
+    let app = app(&root);
+    travelling_stroke(&app, 18.0);
+    macros::capture_start(&app, region(0.0, 0.0), 0, true, None).expect("start");
+    macros::capture_place(&app, 1, 10.0, 0.0).expect("place");
+    macros::capture_place(&app, 2, 20.0, 0.0).expect("place");
+    let library = macros::capture_finish(&app, "Moving".to_owned(), 2).expect("finish");
+    macros::macro_insert(&app, &library.entries[0].id, 100.0, 0.0, 0, None).expect("insert");
+    let object = {
+        let session = app.session.lock().expect("lock");
+        session.open.as_ref().expect("open").project.layers[0]
+            .objects
+            .last()
+            .expect("the macro")
+            .id
+            .raw()
+    };
+
+    // Where the field is at step 2: twenty degrees east of the insert.
+    assert!(
+        (field(&app, 2, 120.0, 0.0).0 - 18.0).abs() < 0.6,
+        "the field moved"
+    );
+
+    assert_eq!(
+        document::hit_test(&app, 120.0, 0.0, 2).expect("hit test"),
+        Some(object),
+        "a click on the macro selects it"
+    );
+    assert_eq!(
+        document::hit_test(&app, 100.0, 0.0, 2).expect("hit test"),
+        None,
+        "and a click where it no longer is selects nothing"
+    );
+
+    let outlines =
+        ve_app::transform::outlines_at(&app, 2, None, &[object], None, false).expect("outlines");
+    let anchor = outlines.first().expect("an outline").anchor;
+    assert!(
+        (anchor[0] - 120.0).abs() < 0.5 && anchor[1].abs() < 0.5,
+        "the outline is drawn around the macro, not around its keys: {anchor:?}"
+    );
+
+    let handles = ve_app::transform::start_transform(
+        &app,
+        &[object],
+        2,
+        ve_app::transform::TransformKind::Move,
+        120.0,
+        0.0,
+        false,
+    )
+    .expect("begin")
+    .expect("handles");
+    assert!(
+        (handles.lon - 120.0).abs() < 0.5 && handles.lat.abs() < 0.5,
+        "and the handles are on it: {}, {}",
+        handles.lon,
+        handles.lat
+    );
+}
+
 /// Capture mode is a **backend** lockout: while it runs, every document write
 /// is refused, and cancelling writes nothing.
 #[test]

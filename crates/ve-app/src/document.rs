@@ -1652,11 +1652,14 @@ pub fn hit_test(state: &AppState, lon: f64, lat: f64, step: u32) -> Result<Optio
             if !layer.visible || layer.locked {
                 continue;
             }
+            let kind = layer.parameter();
             for object in layer.objects.iter().rev() {
-                // A follower is where its link puts it, not where its dormant
-                // keys say (spec.md 9.3): picking has to agree with drawing.
-                let Some(flat) =
-                    ve_render::scene::flatten_object_at(object, step, links.of(object.id))
+                // Where the scene puts it, which is not always where its keys
+                // do: a follower is where its link puts it (spec.md 9.3) and a
+                // macro is where its capture's recorded movement takes it
+                // (spec.md 8.7). Picking has to agree with drawing.
+                let placed = ve_render::scene::place(project, object, kind, step, &links);
+                let Some(flat) = ve_render::scene::flatten_object_at(object, step, placed.derived)
                 else {
                     continue;
                 };

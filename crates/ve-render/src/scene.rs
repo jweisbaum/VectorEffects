@@ -1033,6 +1033,52 @@ fn translation_omega(from: LonLat, to: LonLat, dt: f64) -> [f64; 3] {
     [axis[0] * rate, axis[1] * rate, axis[2] * rate]
 }
 
+/// What a step makes of an object: the captured field it replays, and where
+/// the project puts it.
+#[derive(Debug, Clone, Default)]
+pub struct Placed {
+    /// The capture it shows at this step, if it is a patch or a macro.
+    pub capture: Option<FlatCapture>,
+    /// Its position and rotation after its links (spec.md 9.3) and after the
+    /// displacement its capture recorded (spec.md 8.7).
+    pub derived: Derived,
+}
+
+/// Resolves where an object is at a step.
+///
+/// **Everything that asks where an object is goes through this**: the scene,
+/// the hit test, the outlines the map draws, and the baseline a drag is
+/// computed from. A macro that recorded a moving region moves the *whole
+/// object* — its anchor, and with it its footprint, its outline and what a
+/// click selects — so a caller that read the stored position instead put the
+/// selection box where the keys said while the field was somewhere else
+/// entirely, and a click on the macro selected nothing (M85). Shifting only
+/// the lattice lookup would be the opposite mistake: the field would try to
+/// draw outside the shape that admits it, and nothing would appear.
+pub fn place(
+    project: &Project,
+    object: &Object,
+    kind: FieldKind,
+    step: u32,
+    links: &Resolved,
+) -> Placed {
+    let capture = capture_of(project, object, step, kind);
+    let mut derived = links.of(object.id);
+    if let Some(shift) = capture.as_ref().map(|patch| patch.shift_deg)
+        && shift != [0.0, 0.0]
+        && let Some(base) = derived
+            .position
+            .or_else(|| position(object, PropId::Position, step))
+    {
+        derived.position = LonLat::new(
+            ve_core::geo::normalize_lon(base.lon + shift[0]),
+            (base.lat + shift[1]).clamp(-90.0, 90.0),
+        )
+        .ok();
+    }
+    Placed { capture, derived }
+}
+
 /// The captured field a patch shows at a step (spec.md 8.5, M14).
 ///
 /// A still capture shows its one frame at every step. An animated one is
@@ -1189,31 +1235,14 @@ fn flatten_where(project: &Project, step: u32, wanted: impl Fn(&Layer) -> bool) 
                 // A patch replays a captured field (spec.md 8.5). The samples
                 // live beside the project, keyed by hash, so one whose entry
                 // is missing simply has none — it draws nothing, exactly as a
-                // GRIB layer whose file has gone.
-                let patch = capture_of(project, object, step, kind);
-                let mut derived = links.at.of(object.id);
-                // A macro that recorded a moving region moves the **whole
-                // object**: its anchor, and with it its footprint, its outline
-                // and what a click selects (spec.md 8.7). Shifting only the
-                // lattice lookup would leave the field trying to draw outside
-                // the shape that admits it, and nothing would appear.
-                if let Some(shift) = patch.as_ref().map(|p| p.shift_deg)
-                    && shift != [0.0, 0.0]
-                {
-                    let base = derived
-                        .position
-                        .or_else(|| position(object, PropId::Position, step))?;
-                    derived.position = LonLat::new(
-                        ve_core::geo::normalize_lon(base.lon + shift[0]),
-                        (base.lat + shift[1]).clamp(-90.0, 90.0),
-                    )
-                    .ok();
-                }
-                let mut flat = flatten_object_at(object, step, derived)?;
+                // GRIB layer whose file has gone. `place` is also what moves a
+                // macro that recorded a moving region.
+                let placed = place(project, object, kind, step, &links.at);
+                let mut flat = flatten_object_at(object, step, placed.derived)?;
                 flat.layer = layer_index;
                 flat.kind = kind;
                 flat.motion = motion_of(object, step, hours, last, &links);
-                flat.capture = patch;
+                flat.capture = placed.capture;
                 Some(flat)
             }));
     }
