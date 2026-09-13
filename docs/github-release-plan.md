@@ -2,18 +2,16 @@
 
 Destination: [jweisbaum/VectorEffects](https://github.com/jweisbaum/VectorEffects).
 
-The source repository is linked as `origin`. GitHub rejected the machine's saved
-HTTPS credentials on September 13, 2026, so the remote's contents and default
-branch have not been verified and the source has not been pushed. Refresh GitHub
-authentication in the local Git credential manager or GitHub Desktop; do not put
-a token in a remote URL or a tracked file.
+The source repository is linked as `origin` over SSH. On macOS, load the GitHub
+key using `ssh-add --apple-use-keychain ~/.ssh/github`. Git pushes use this key;
+the release workflow uses its own short-lived `GITHUB_TOKEN`. No personal token
+or signing credentials belong in the repository.
 
 ## 1. Publish the source
 
 After authentication, fetch and inspect `origin` before choosing the destination
 branch. Preserve any remote history; do not force-push over it. If the repository
-is empty, push local `main`. If it already contains work, publish this commit on
-a feature branch and merge through a pull request after resolving any divergence.
+already contains work, merge and resolve any divergence before pushing.
 
 ```sh
 git fetch origin
@@ -21,9 +19,10 @@ git log --oneline --all --graph -20
 git push -u origin main
 ```
 
-The last command is for an empty remote or a verified fast-forward only. Configure
-branch protection for `main` once CI has reported its check names. Source pushes
-and pull requests run CI; no source push creates a public release.
+The last command is for an empty remote or a verified fast-forward only. Source
+pushes and pull requests run CI. A version tag starts the release pipeline.
+Repository visibility also applies to release downloads; private repositories
+require collaborators to sign in.
 
 ## 2. Build all four targets
 
@@ -43,21 +42,21 @@ Separate Mac runners test each architecture natively. The Linux build uses the
 older Ubuntu baseline to avoid unnecessarily raising its runtime requirements.
 Runner architectures were checked against
 [GitHub's runner reference](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
-Bundling and draft-release uploads follow the
+Bundling and release uploads follow the
 [Tauri GitHub pipeline](https://v2.tauri.app/distribute/pipelines/github/), using
 [tauri-action's workflow artifact support](https://github.com/tauri-apps/tauri-action).
 
 ## 3. Sign and test the installers
 
-For distributed Mac builds, configure repository secrets `APPLE_CERTIFICATE`
+For Developer ID signed Mac builds, configure repository secrets `APPLE_CERTIFICATE`
 (base64 Developer ID certificate), `APPLE_CERTIFICATE_PASSWORD`,
 `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD` (app-specific password), and
 `APPLE_TEAM_ID`. The workflow passes these to Tauri. Without them it uses ad-hoc
-signing for test builds; notarization is a separate release requirement. See
+signing for beta builds, which are not notarized. See
 [Tauri macOS signing](https://v2.tauri.app/distribute/sign/macos/).
 
-Choose a Windows signing provider and configure its Tauri signing command before
-public distribution. The workflow currently builds unsigned Windows installers.
+To sign Windows installers, choose a signing provider and configure its Tauri
+signing command. The workflow currently builds unsigned Windows installers.
 See [Tauri Windows signing](https://v2.tauri.app/distribute/sign/windows/).
 
 On one real installation of each target, verify installation and launch, Help and
@@ -67,18 +66,30 @@ download retry, GRIB/Zarr playback, and GRIB export. Decode an exported file wit
 ecCodes and distinguish missing cells from painted calm. Check the expiry screen
 in an isolated test VM using dates immediately before and on January 1, 2027.
 
-Review the declared `MIT OR Apache-2.0` licensing and include the applicable
-license texts and bundled dataset/asset notices before making the source or
-installers public. No signing credentials belong in this repository.
-
-## 4. Publish a reviewed beta
+## 4. Publish a beta
 
 Keep `Cargo.toml`, `package.json`, `ui/package.json`, lockfiles, and the Tauri
-configuration on the same version. Use a beta version such as `0.1.0-beta.1` when
-preparing the first distributable build, then tag its tested commit with the
-matching `v0.1.0-beta.1` tag. Pushing the tag runs all four builds and attaches the
-installers to a **draft prerelease**. Check architecture labels and installation
-results, add release notes and checksums, and publish the draft when ready.
+configuration on the same version. Add release notes at `docs/releases/VERSION.md`
+and tag the tested commit with the matching `vVERSION` tag. The initial release
+uses `v0.1.0` and is marked as a beta prerelease on GitHub.
+
+```sh
+node tools/check-release.mjs
+git tag -a v0.1.0 -m "VectorEffects 0.1.0 Beta"
+git push origin v0.1.0
+```
+
+The pipeline validates versions and notes, creates one draft prerelease, and
+runs all four builds. Only after every build succeeds does it verify that each
+platform's installers exist, upload `SHA256SUMS`, and publish the beta. A failed
+build leaves a draft that can be resumed using Actions → Re-run failed jobs.
+Published releases are not overwritten by a new run; issue a new version instead.
+
+Downloads are hosted at
+[GitHub Releases](https://github.com/jweisbaum/VectorEffects/releases), linked from
+the repository README. No separate hosting service or personal access token is
+needed. GitHub Actions must be enabled for the repository; the workflow requests
+`contents: write` only in the release jobs.
 
 This version intentionally stops working at local midnight on January 1, 2027.
 State that expiry date in the beta release notes. Ship a replacement version
@@ -91,6 +102,7 @@ The local Intel Mac production executable has been built successfully, with the
 current frontend and Help images embedded and WebDriver disabled. Native/UI
 regressions, Metal rendering comparisons, ecCodes decoding, and offline checks
 are recorded in [the verification checklist](beta-improvements.md).
-GitHub-hosted builds, Windows/Linux installer smoke tests, and signing/notarization
-remain release steps until repository authentication and signing configuration
-are available. This plan does not claim that those builds have run.
+Use the [Actions page](https://github.com/jweisbaum/VectorEffects/actions) to verify
+the hosted build results for a specific commit and tag. Passing CI establishes
+automated build/test coverage; real installation smoke tests and optional signing
+and notarization are separate checks.

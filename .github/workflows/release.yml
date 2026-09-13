@@ -1,7 +1,7 @@
 name: Release builds
 
-# Manual runs create build artifacts. Version tags also create a draft beta
-# release for review before publication. Never enable the WebDriver feature.
+# Manual runs create build artifacts. Version tags publish a beta release only
+# after every platform succeeds. Never enable the WebDriver feature.
 
 on:
   push:
@@ -11,12 +11,53 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   CARGO_TERM_COLOR: always
   VE_FORCE_CPU: "1"
 
 jobs:
+  prepare:
+    name: validate version and prepare release
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    outputs:
+      release-id: ${{ steps.release.outputs.release-id }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check application and tag versions
+        run: node tools/check-release.mjs
+      - name: Prepare draft beta release
+        id: release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          # A failed build can resume its draft; a published release is immutable
+          # to this workflow. Create it once before the parallel uploads begin.
+          gh api --paginate --slurp "repos/$GH_REPO/releases" > "$RUNNER_TEMP/releases.json"
+          release_id=$(jq -r --arg tag "$RELEASE_TAG" '.[][] | select(.tag_name == $tag) | .id' "$RUNNER_TEMP/releases.json")
+          if [ -n "$release_id" ]; then
+            jq -e --arg tag "$RELEASE_TAG" '.[][] | select(.tag_name == $tag) | .draft == true' "$RUNNER_TEMP/releases.json"
+          else
+            gh release create "$RELEASE_TAG" --verify-tag --draft --prerelease \
+              --title "VectorEffects $RELEASE_TAG (Beta)" \
+              --notes-file "docs/releases/${RELEASE_TAG#v}.md"
+            release_id=$(gh release view "$RELEASE_TAG" --json databaseId --jq .databaseId)
+          fi
+          echo "release-id=$release_id" >> "$GITHUB_OUTPUT"
+
   bundle:
+    needs: prepare
     permissions:
       contents: write
     name: bundle / ${{ matrix.name }}
@@ -87,10 +128,34 @@ jobs:
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
-          tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
-          releaseName: VectorEffects ${{ github.ref_name }}
-          releaseDraft: true
-          prerelease: true
+          releaseId: ${{ needs.prepare.outputs.release-id }}
           uploadWorkflowArtifacts: true
           uploadUpdaterJson: false
           args: ${{ matrix.args }}
+
+  publish:
+    name: checksums and publish beta
+    needs: [prepare, bundle]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify installers and generate checksums
+        run: |
+          mkdir release-assets
+          gh release download "$RELEASE_TAG" --dir release-assets --skip-existing \
+            --pattern '*.dmg' --pattern '*.app.tar.gz' --pattern '*.msi' \
+            --pattern '*.exe' --pattern '*.AppImage' --pattern '*.deb' --pattern '*.rpm'
+          python3 tools/check-release-assets.py release-assets
+          gh release upload "$RELEASE_TAG" release-assets/SHA256SUMS --clobber
+      - name: Publish complete beta release
+        run: |
+          gh release edit "$RELEASE_TAG" --draft=false --prerelease --verify-tag \
+            --notes-file "docs/releases/${RELEASE_TAG#v}.md"
+          echo "Published [$RELEASE_TAG](https://github.com/$GH_REPO/releases/tag/$RELEASE_TAG)" >> "$GITHUB_STEP_SUMMARY"
