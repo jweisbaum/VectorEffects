@@ -451,7 +451,11 @@ pub fn priority_order(current: u32, last: u32) -> Vec<u32> {
 }
 
 /// Queues the viewport's tiles for rendering ahead of the playhead.
-#[tauri::command]
+///
+/// `async` because the frontend calls it on every playback advance: run
+/// inline it would take the session lock on the webview's own thread, and
+/// the frame it blocks is one the map needed to fetch and upload tiles in.
+#[tauri::command(async)]
 pub fn render_ahead(
     state: tauri::State<'_, AppState>,
     pool: tauri::State<'_, Arc<RenderPool>>,
@@ -462,7 +466,11 @@ pub fn render_ahead(
 }
 
 /// How ready every step is, for the viewport.
-#[tauri::command]
+///
+/// `async` for the same reason as [`render_ahead`], and more so: this walks
+/// every step of the timeline against every tile of the viewport, which is
+/// milliseconds of hashing that must not come out of the frame budget.
+#[tauri::command(async)]
 pub fn frame_readiness(
     state: tauri::State<'_, AppState>,
     pool: tauri::State<'_, Arc<RenderPool>>,

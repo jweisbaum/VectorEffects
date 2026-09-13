@@ -113,6 +113,7 @@ pub fn run() -> anyhow::Result<()> {
             projects::close_project,
             projects::current_project,
             projects::recent_projects,
+            projects::clear_recent_projects,
             create::create_object,
             palette::tool_palette,
             edit::add_brush_stroke,

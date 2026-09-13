@@ -488,6 +488,16 @@ under **Recovered work** — opened as the project it was taken from, dirty, at
 its old path so the next Save goes where it should, or with no path if it had
 never been saved. A snapshot is never read for any other purpose.
 
+**The recent list can be cleared.** A **Clear** beside the start screen's
+*Recent* heading forgets every entry at once, shown only when there is
+something to forget. It is asked for first, like the macro library's *delete
+all* (§8.7): the list cannot be rebuilt except by opening the projects again.
+It forgets shortcuts and nothing else — no project file is touched, and
+*Recovered work* is a separate list with its own per-entry Discard. The clear
+reaches the settings file before it is reported done, so a refused write says
+so rather than emptying the screen and letting the list return at the next
+launch.
+
 **Replacing the open project.** New and Open each replace what is open, as does
 Close, which returns to the start screen — and which is guarded like the other
 two, by the backend, so a frontend that forgot to ask still cannot drop work. When it has unsaved changes the user is asked first, with three
@@ -3319,7 +3329,31 @@ falls back to the follower's own keys.
   The backend holding a tile rendered is not enough; advancing on that alone
   draws the previous step under the new one for a frame, which is the flicker.
   While playing, the map keeps the next two steps' tiles fetched ahead of the
-  playhead.
+  playhead — **both of them started on the same frame, not one behind the
+  other**. Warming the second only once the first was resident is the same
+  thing as no lookahead at all: the two fetches never overlap, so every step
+  pays its own fetch latency inside the playback loop and buffering shows over
+  steps §9.5 already reports rendered. The depth is bounded by the tile cache,
+  which holds four viewports: the frame being drawn and the frame held behind
+  it (above) account for two, so two is what is left to warm.
+- **The tile cache is sized to hold a whole timeline of the viewport.**
+  Residency is what playback waits on, and a step's tiles have to be fetched
+  across the tile scheme and uploaded however long ago the backend rendered
+  them: pre-rendering removes the render cost, never the crossing cost. A loop
+  larger than the cache therefore pays that crossing on every lap and can
+  never reach the set rate, however much has been rendered ahead — at a
+  2880×1590 viewport a step is 128 tiles and 32 MB, so a 24-step loop wants
+  3,072 tiles against a fixed cache of 768. The cache is reserved for
+  `steps × viewport` instead, floored at four viewports and capped at 1 GB of
+  texture; past the cap a long timeline refetches, which is slow rather than
+  broken. **The first lap is unchanged** — it is the one that does the
+  fetching — and the laps after it play at the rate asked for.
+- **Nothing on the advance path runs on the webview's thread.** Moving the
+  playhead re-queues the render pool and re-probes readiness (§9.5), and
+  readiness walks every step of the timeline against every tile in view. Run
+  inline those come out of the same frame budget the map needed in order to
+  fetch and upload the next step's tiles, so the work of keeping playback fed
+  is what starves it.
 - **A frame that is not yet on screen draws its missing tiles from the last
   frame that was.** A step change or an edit re-addresses every tile; blanking
   the map until the new ones land is a flicker on every scrub and a flash on

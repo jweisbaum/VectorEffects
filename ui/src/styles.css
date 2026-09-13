@@ -457,7 +457,7 @@ body {
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 7px;
-  padding: 7px 14px;
+  padding: 9px 18px;
   cursor: pointer;
   font: inherit;
 }
@@ -477,8 +477,25 @@ body {
    heading is separator enough. */
 .modal .start-new { border-top: 0; margin-top: 0; padding-top: 0; }
 
+/* Buttons here are inline-block, so the only thing between two of them is a
+   collapsed space. Give them room of their own rather than relying on it. */
+.start-open > button { margin: 0 10px 10px 0; }
+
+/* The heading and its Clear button share a row; the heading carries the
+   spacing, so the button must not add its own vertical margin. */
+.recent-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.recent-header button { padding: 5px 12px; font-size: 12px; }
+
 .recent { list-style: none; margin: 0; padding: 0; }
-.recent li { margin-bottom: 4px; }
+.recent li { margin-bottom: 12px; }
+/* Discard wraps below its row — .recent-item is full width — so it needs
+   separating from the row it belongs to as well as from the next one. */
+.recent li > button + button { margin-top: 6px; }
 .recent-item {
   display: flex;
   flex-direction: column;

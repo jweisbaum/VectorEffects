@@ -22,6 +22,8 @@ import {
   tick,
   uniqueTiles,
   utcLabel,
+  WARM_AHEAD,
+  warmTargets,
 } from "./playback";
 
 function report(revision: number, ready: number[], total = 4): TimelineReadiness {
@@ -146,6 +148,52 @@ describe("tick", () => {
     const states = [...allSolid];
     states[0] = "empty";
     expect(tick(9, 9, true, 8, 200, states).buffering).toBe(true);
+  });
+});
+
+describe("warmTargets", () => {
+  it("names every step of the lookahead, nearest first", () => {
+    expect(warmTargets(0, 9, false)).toEqual([1, 2]);
+    expect(warmTargets(4, 9, false)).toEqual([5, 6]);
+  });
+
+  /**
+   * The whole point of the lookahead. A fetch for the second step ahead that
+   * only starts once the first is resident cannot overlap with it, so every
+   * step's fetch latency lands in the playback loop rather than being hidden
+   * behind the step before it. Both are named on the same frame, so both are
+   * in flight at once.
+   */
+  it("names the far step even though the near one is not resident yet", () => {
+    const resident = new Set<number>();
+    const targets = warmTargets(4, 9, false);
+    // Nothing is resident: the list must still hold both, not stop at the
+    // first miss.
+    expect(targets.filter((step) => !resident.has(step))).toEqual([5, 6]);
+    expect(targets).toHaveLength(WARM_AHEAD);
+  });
+
+  it("stops at the end of the timeline when not looping", () => {
+    expect(warmTargets(8, 9, false)).toEqual([9]);
+    expect(warmTargets(9, 9, false)).toEqual([]);
+  });
+
+  it("wraps when looping, and round a macro preview's own run", () => {
+    expect(warmTargets(9, 9, true)).toEqual([0, 1]);
+    expect(warmTargets(8, 9, true)).toEqual([9, 0]);
+  });
+
+  /**
+   * A loop shorter than the lookahead comes back round to the step being
+   * drawn. That step is resident already — playback only advanced into it
+   * because it was — so naming it would spend a pass over the viewport's
+   * tiles, every animation frame, warming what is on screen.
+   */
+  it("stops short rather than coming back round to the playhead", () => {
+    expect(warmTargets(0, 0, true)).toEqual([]);
+    expect(warmTargets(0, 1, true)).toEqual([1]);
+    expect(warmTargets(5, 5, true, 4)).toEqual([4]);
+    expect(warmTargets(3, 3, true, 3)).toEqual([]);
   });
 });
 

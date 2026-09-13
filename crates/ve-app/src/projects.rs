@@ -448,6 +448,26 @@ pub fn recent(state: &AppState) -> Result<Vec<RecentProject>> {
     })
 }
 
+/// Forgets every recent project, returning the emptied list.
+///
+/// Unlike the `remember` on an open, a failed write is **not** swallowed here:
+/// reaching the settings file is the whole of this operation, and a list that
+/// silently returns at the next launch is worse than an error now.
+#[tauri::command]
+pub fn clear_recent_projects(state: tauri::State<'_, AppState>) -> Result<Vec<RecentProject>> {
+    clear_recent(&state)
+}
+
+/// Implementation of [`clear_recent_projects`], callable without a Tauri handle.
+pub fn clear_recent(state: &AppState) -> Result<Vec<RecentProject>> {
+    let settings_file = state.paths.settings_file();
+    with_session(state, |session| {
+        session.forget_recent();
+        session.save_settings(&settings_file)
+    })?;
+    recent(state)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -9,7 +9,15 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { editScope, TileCache, tileSource } from "./tiles";
+import {
+  BASE_CAPACITY,
+  editScope,
+  MAX_CACHE_BYTES,
+  MAX_CAPACITY,
+  TILE_BYTES,
+  TileCache,
+  tileSource,
+} from "./tiles";
 
 describe("where a tile is drawn from", () => {
   /** Resident is resident, held frame or not. */
@@ -82,6 +90,54 @@ describe("knowing a lookup from a fetch", () => {
     // And another frame is its own question entirely — an edit re-addresses
     // every tile, which is what makes the distinction matter at all.
     expect(cache.unresolved("8/0", 2, 1, 1)).toBe(true);
+  });
+});
+
+describe("sizing the cache to the timeline", () => {
+  const cache = () => new TileCache({} as unknown as WebGL2RenderingContext, "ve-tile://");
+
+  /**
+   * The whole point of the reservation. Playback is gated on every tile of the
+   * next step being resident, and the tiles have to be fetched and uploaded
+   * whatever the backend has already rendered — so a loop that does not fit
+   * refetches every step on every lap and never reaches the set rate. A loop
+   * that fits pays once.
+   */
+  it("holds a whole timeline once it is reserved for one", () => {
+    const tiles = cache();
+    expect(tiles.capacity, "the floor, before anything is known").toBe(BASE_CAPACITY);
+
+    tiles.reserve(24, 128);
+    expect(tiles.capacity).toBeGreaterThanOrEqual(24 * 128);
+  });
+
+  /** A short timeline must not shrink the cache below what a viewport needs. */
+  it("never drops below the floor", () => {
+    const tiles = cache();
+    tiles.reserve(2, 8);
+    expect(tiles.capacity).toBe(BASE_CAPACITY);
+  });
+
+  /**
+   * The ceiling is what keeps a long timeline at a big viewport from asking
+   * for more texture memory than a GPU has: 240 steps of a 170-tile viewport
+   * is 40,800 tiles, or ten gigabytes.
+   */
+  it("stops at the memory ceiling rather than asking for the impossible", () => {
+    const tiles = cache();
+    tiles.reserve(240, 170);
+    expect(tiles.capacity).toBe(MAX_CAPACITY);
+    expect(MAX_CAPACITY * TILE_BYTES).toBeLessThanOrEqual(MAX_CACHE_BYTES);
+  });
+
+  /** Re-reserving for a smaller need releases the memory again. */
+  it("comes back down when the timeline or the viewport shrinks", () => {
+    const tiles = cache();
+    tiles.reserve(96, 128);
+    const large = tiles.capacity;
+    tiles.reserve(12, 32);
+    expect(tiles.capacity).toBeLessThan(large);
+    expect(tiles.capacity).toBeGreaterThanOrEqual(BASE_CAPACITY);
   });
 });
 

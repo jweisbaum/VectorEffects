@@ -1511,6 +1511,13 @@ export default function MapView({
       onViewportRef.current(unique);
     }
 
+    // Hold the whole timeline of this viewport, so a playback loop pays the
+    // fetch-and-upload crossing once rather than on every lap (spec.md 9.4).
+    // Called every frame rather than only on a viewport change, because the step
+    // count can change under a still camera; `reserve` returns at once when
+    // the answer has not moved.
+    tilesRef.current?.reserve(projectRef.current.step_count, unique.length);
+
     // The field beneath the edit, warmed before a stroke needs it (M40).
     // The hole a stroke opens is filled from that frame, and it is also what
     // tells every live edit which pixels belong to the layer it is aimed at.
@@ -2339,13 +2346,40 @@ export default function MapView({
     abandonRef.current();
   }, [tool]);
 
-  // What the timeline asks of the map (spec.md 9.4).
-  const warm = useCallback((target: number): boolean => {
-    const tiles = tilesRef.current;
-    if (!tiles) return true;
-    const unique = uniqueTiles(visibleTiles(cameraRef.current, viewRef.current));
-    return tiles.prefetch(frameOf(target), unique);
+  /**
+   * The viewport's unique tiles, rebuilt only when the camera or the view
+   * changes.
+   *
+   * Playback warms every step of its lookahead on every animation frame, so
+   * this ran a full pass over the pyramid several times a frame to produce the
+   * same list each time. Both refs are replaced wholesale rather than mutated
+   * (`panBy`, `zoomAbout`, `clampCamera` all return new cameras), so identity
+   * is a sound key.
+   */
+  const warmTilesRef = useRef<{
+    camera: Camera;
+    view: Viewport;
+    tiles: ReturnType<typeof uniqueTiles>;
+  } | null>(null);
+  const viewportTiles = useCallback(() => {
+    const camera = cameraRef.current;
+    const view = viewRef.current;
+    const held = warmTilesRef.current;
+    if (held && held.camera === camera && held.view === view) return held.tiles;
+    const tiles = uniqueTiles(visibleTiles(camera, view));
+    warmTilesRef.current = { camera, view, tiles };
+    return tiles;
   }, []);
+
+  // What the timeline asks of the map (spec.md 9.4).
+  const warm = useCallback(
+    (target: number): boolean => {
+      const tiles = tilesRef.current;
+      if (!tiles) return true;
+      return tiles.prefetch(frameOf(target), viewportTiles());
+    },
+    [viewportTiles],
+  );
   const bounds = useCallback((): [number, number, number, number] | null => {
     const view = viewRef.current;
     if (view.width <= 1 || view.height <= 1) return null;

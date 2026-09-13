@@ -6,6 +6,7 @@ import type { ProjectSummary } from "../generated/ProjectSummary";
 import type { Autosave } from "../generated/Autosave";
 import type { RecentProject } from "../generated/RecentProject";
 import NewProjectForm from "./NewProjectForm";
+import ConfirmDialog from "./ConfirmDialog";
 import { pickGribToImport, pickProjectToOpen } from "./dialogs";
 
 /**
@@ -25,6 +26,8 @@ export default function StartScreen({
   const [autosaves, setAutosaves] = useState<Autosave[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** Whether the confirmation for clearing the recent list is up. */
+  const [askClearRecent, setAskClearRecent] = useState(false);
 
   useEffect(() => {
     api.recentProjects().then(setRecent).catch(() => setRecent([]));
@@ -56,6 +59,20 @@ export default function StartScreen({
   const openFromGrib = async () => {
     const path = await pickGribToImport();
     if (path !== null) await run(() => api.newProjectFromGrib(path));
+  };
+
+  /**
+   * Drops every recent entry. The list is replaced with what the backend
+   * reports rather than an assumed empty one, so a refused write shows.
+   */
+  const clearRecent = async () => {
+    setAskClearRecent(false);
+    setError(null);
+    try {
+      setRecent(await api.clearRecentProjects());
+    } catch (err) {
+      setError(err instanceof IpcError ? err.message : String(err));
+    }
   };
 
   return (
@@ -122,7 +139,16 @@ export default function StartScreen({
 
           {recent.length > 0 && (
             <>
-              <h3 className="muted">Recent</h3>
+              <div className="recent-header">
+                <h3 className="muted">Recent</h3>
+                <button
+                  disabled={busy}
+                  onClick={() => setAskClearRecent(true)}
+                  title="Forget every project in this list. The projects themselves are not deleted."
+                >
+                  Clear
+                </button>
+              </div>
               <ul className="recent">
                 {recent.map((entry) => (
                   <li key={entry.path}>
@@ -145,6 +171,16 @@ export default function StartScreen({
 
         {error !== null && <p className="error">{error}</p>}
       </div>
+
+      {askClearRecent && (
+        <ConfirmDialog
+          title="Clear recent projects"
+          body="This forgets the list of recently opened projects. The projects themselves are not deleted."
+          confirmLabel="Clear"
+          onConfirm={() => void clearRecent()}
+          onCancel={() => setAskClearRecent(false)}
+        />
+      )}
     </div>
   );
 }

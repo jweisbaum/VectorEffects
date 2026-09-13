@@ -173,6 +173,30 @@ fn recent_projects_persist_across_sessions() {
     assert!(recent.iter().all(|entry| entry.exists));
 }
 
+/// Clearing has to outlive the session that did it: the list is read back off
+/// the settings file at every launch, so a clear that only emptied memory
+/// would look like the button did nothing.
+#[test]
+fn a_cleared_recent_list_does_not_come_back_after_a_restart() {
+    let root = TempRoot::new("clear");
+    let saved = root.0.join("one.veproj");
+
+    {
+        let app = state(&root);
+        projects::create(&app, request("One"), false).expect("create");
+        projects::save_as(&app, saved.to_string_lossy().into_owned()).expect("save");
+        assert_eq!(projects::recent(&app).expect("recent").len(), 1);
+
+        let after = projects::clear_recent(&app).expect("clear");
+        assert!(after.is_empty(), "the command reports the emptied list");
+    }
+
+    let restarted = state(&root);
+    assert!(projects::recent(&restarted).expect("recent").is_empty());
+    // The projects themselves are untouched — only the shortcuts to them.
+    assert!(saved.exists());
+}
+
 /// A recent entry whose file has been moved or deleted must be reported as
 /// missing rather than offered as if it would open.
 #[test]

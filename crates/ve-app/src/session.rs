@@ -282,6 +282,14 @@ impl Session {
         Ok(())
     }
 
+    /// Drops every entry from the recent list, leaving the other settings.
+    ///
+    /// The caller persists: the list is only really cleared once the settings
+    /// file no longer holds it.
+    pub fn forget_recent(&mut self) {
+        self.recent.clear();
+    }
+
     /// Moves `path` to the front of the recent list.
     pub fn remember(&mut self, path: &Path) {
         self.recent.retain(|existing| existing != path);
@@ -443,5 +451,41 @@ mod tests {
         let loaded = Session::load(&file);
         assert_eq!(loaded.recent, session.recent);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Clearing has to reach the disk. A cleared list that was only cleared in
+    /// memory comes back at the next launch, which looks like the button did
+    /// nothing.
+    #[test]
+    fn a_cleared_recent_list_stays_cleared_across_a_reload() {
+        let dir = std::env::temp_dir().join(format!("ve-session-clear-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let file = dir.join("settings.json");
+
+        let mut session = Session::default();
+        session.remember(Path::new("/one.veproj"));
+        session.remember(Path::new("/two.veproj"));
+        session.save_settings(&file).expect("save");
+
+        session.forget_recent();
+        session.save_settings(&file).expect("save cleared");
+
+        assert!(session.recent.is_empty());
+        assert!(Session::load(&file).recent.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The other preferences share the settings file, so clearing the recent
+    /// list must not take them with it.
+    #[test]
+    fn clearing_the_recent_list_keeps_the_other_settings() {
+        let mut session = Session::default();
+        session.remember(Path::new("/one.veproj"));
+        let settings = session.settings.clone();
+
+        session.forget_recent();
+
+        assert!(session.recent.is_empty());
+        assert_eq!(session.settings, settings);
     }
 }

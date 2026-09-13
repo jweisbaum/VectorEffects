@@ -63,9 +63,9 @@ import {
   stepAt,
   steppedBy,
   type StepState,
-  nextStep,
   tick,
   utcLabel,
+  warmTargets,
 } from "./playback";
 
 /** Width of the labels column, in CSS pixels. Sticky, so it never scrolls. */
@@ -401,11 +401,16 @@ export default function Timeline({
     const loopFrame = (now: number) => {
       // Keep the map two steps ahead of the playhead, so a step's tiles are on
       // the GPU before its turn comes and playback never waits on a fetch it
-      // could have started earlier.
-      const next = nextStep(stepRef.current, playLastRef.current, looping(), firstRef.current);
-      if (next !== null && warmRef.current(next)) {
-        const after = nextStep(next, playLastRef.current, looping(), firstRef.current);
-        if (after !== null) warmRef.current(after);
+      // could have started earlier. Every target every frame: warming the
+      // second only once the first was resident meant the two fetches never
+      // overlapped, and each step's latency was paid inside the loop.
+      for (const target of warmTargets(
+        stepRef.current,
+        playLastRef.current,
+        looping(),
+        firstRef.current,
+      )) {
+        warmRef.current(target);
       }
       const result = tick(
         stepRef.current,

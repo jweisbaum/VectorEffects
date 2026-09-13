@@ -78,6 +78,46 @@ export function nextStep(
   return loop ? first : null;
 }
 
+/**
+ * How many steps ahead of the playhead the map is kept warm.
+ *
+ * Two, bounded by the tile cache rather than by appetite: the cache holds
+ * four viewports, and the frame being drawn and the frame held behind it
+ * (`heldFrame`) already account for two. A deeper lookahead would evict the
+ * frames it just warmed and refetch them on their turn.
+ */
+export const WARM_AHEAD = 2;
+
+/**
+ * The steps to start warming on a playback frame, nearest first.
+ *
+ * Every one of them is warmed on every frame, unconditionally. Chaining them
+ * — warming the second only once the first is resident — is the same thing as
+ * having no lookahead at all: the two fetches never overlap, so each step's
+ * latency is paid in full inside the playback loop instead of being hidden
+ * behind the step before it.
+ *
+ * A step is never named twice, so a loop shorter than the lookahead does not
+ * spend a second pass over the viewport warming what it just warmed.
+ */
+export function warmTargets(
+  step: number,
+  last: number,
+  loop: boolean,
+  first = 0,
+  depth = WARM_AHEAD,
+): number[] {
+  const targets: number[] = [];
+  let at = step;
+  for (let i = 0; i < depth; i += 1) {
+    const next = nextStep(at, last, loop, first);
+    if (next === null || next === step || targets.includes(next)) break;
+    targets.push(next);
+    at = next;
+  }
+  return targets;
+}
+
 /** Whether the map holds a step's tiles on the GPU. */
 export type Resident = (step: number) => boolean;
 

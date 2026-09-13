@@ -191,6 +191,9 @@ export const api = {
   /** Recently opened projects, newest first. */
   recentProjects: () => call<RecentProject[]>("recent_projects"),
 
+  /** Forgets every recent project. Returns the emptied list. */
+  clearRecentProjects: () => call<RecentProject[]>("clear_recent_projects"),
+
   // --- Editing ---
 
   /**

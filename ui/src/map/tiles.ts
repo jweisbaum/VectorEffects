@@ -48,11 +48,37 @@ export type KeyResolver = (frame: string, tiles: readonly TileAddress[]) => Prom
 /** How many frames' key maps are remembered. Playback loops over a few dozen. */
 const FRAMES_KEPT = 96;
 
+/** One tile's texture: 256 x 256 RGBA8, matching `TILE_BYTES` in `ve-render`. */
+export const TILE_BYTES = 256 * 256 * 4;
+
+/**
+ * The cache floor, in tiles: room for a viewport at several steps.
+ *
+ * A viewport is at most 192 tiles (`visibleTiles`'s budget), so this is four
+ * of them — the frame being drawn, the frame held behind it, and the two
+ * warmed ahead of the playhead.
+ */
+export const BASE_CAPACITY = 768;
+
+/**
+ * The most texture memory the tile cache may hold.
+ *
+ * A whole timeline of a large viewport is unbounded — 240 steps of 170 tiles
+ * is ten gigabytes — so the reservation stops here. One gigabyte is chosen to
+ * fit a discrete GPU's memory alongside everything else the map draws; past
+ * this a long timeline simply refetches, which is slow rather than broken.
+ */
+export const MAX_CACHE_BYTES = 1024 * 1024 * 1024;
+
+/** [`MAX_CACHE_BYTES`] as a tile count. */
+export const MAX_CAPACITY = Math.floor(MAX_CACHE_BYTES / TILE_BYTES);
+
 /** Tracks fetched tiles and their textures. */
 export class TileCache {
   private readonly gl: WebGL2RenderingContext;
   private readonly baseUrl: string;
-  private readonly limit: number;
+  /** Raised and lowered by `reserve` to fit the open timeline. */
+  private limit: number;
   /** Textures by key. Insertion-ordered, which makes it an LRU when re-inserted on access. */
   private readonly entries = new Map<string, Entry>();
   /** Each frame's tiles' keys, as far as they have been resolved. */
@@ -73,16 +99,44 @@ export class TileCache {
   resolver: KeyResolver | null = null;
 
   /**
-   * `limit` is in tiles of a quarter megabyte each. Playback shows a viewport
-   * at every step in turn and loops, so the cache wants room for a viewport
-   * (up to 192 tiles) at several steps, or a loop refetches every step every
-   * time round. 768 is 192 MB at the very largest viewport; typical viewports
-   * are a quarter of that.
+   * `limit` is in tiles of [`TILE_BYTES`] each, and is raised to fit the open
+   * timeline by [`reserve`].
    */
-  constructor(gl: WebGL2RenderingContext, baseUrl: string, limit = 768) {
+  constructor(gl: WebGL2RenderingContext, baseUrl: string, limit = BASE_CAPACITY) {
     this.gl = gl;
     this.baseUrl = baseUrl;
     this.limit = limit;
+  }
+
+  /** How many tiles the cache will hold before it evicts. */
+  get capacity(): number {
+    return this.limit;
+  }
+
+  /**
+   * Sizes the cache to hold a whole timeline of one viewport.
+   *
+   * Playback advances only into a step every tile of which is resident, and
+   * those tiles must be fetched and uploaded however long ago the backend
+   * rendered them — pre-rendering removes the render cost, never the crossing
+   * cost. So a loop that does not fit in the cache pays that crossing on every
+   * lap and can never reach the set rate; one that fits pays it once and then
+   * plays as fast as it is asked to.
+   *
+   * Bounded by [`MAX_CACHE_BYTES`], because the product is unbounded: 240
+   * steps of a 170-tile viewport is ten gigabytes of texture. Floored at
+   * [`BASE_CAPACITY`] so a short timeline does not shrink the cache below what
+   * panning around a single step wants.
+   */
+  reserve(steps: number, tilesPerFrame: number): void {
+    const wanted = Math.max(0, Math.ceil(steps)) * Math.max(0, Math.ceil(tilesPerFrame));
+    const limit = Math.min(MAX_CAPACITY, Math.max(BASE_CAPACITY, wanted));
+    if (limit === this.limit) return;
+    this.limit = limit;
+    // Shrinking has to take effect now rather than at the next miss, or the
+    // memory the smaller viewport released is held until something else
+    // happens to fetch.
+    this.evict();
   }
 
   private static tileKey(z: number, x: number, y: number): string {
