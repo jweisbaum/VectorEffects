@@ -3,11 +3,11 @@
 /**
  * Which field evaluator backend is active, and why.
  */
-export type EvaluatorSelection = { 
+export type EvaluatorSelection = {
 /**
  * Backend name, e.g. `"wgpu"` or `"cpu"`.
  */
-backend: string, 
+backend: string,
 /**
  * Why the GPU backend was not used, if it was not. `None` when GPU is active.
  */

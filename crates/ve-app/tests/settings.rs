@@ -205,3 +205,108 @@ fn the_preference_is_the_default_for_new_projects_only() {
     assert!((unchanged.wind_scale_knots - 35.0).abs() < 1e-9);
     assert!((unchanged.current_scale_knots - 4.0).abs() < 1e-9);
 }
+
+#[test]
+fn display_units_persist_without_changing_the_open_project() {
+    use settings::{DistanceUnit, SpeedUnit};
+    let root = TempRoot::new("display-units");
+    let state = app(&root);
+    with_project(&state, "wind");
+    let before = projects::current(&state).expect("summary").expect("open");
+    for speed in [SpeedUnit::Kt, SpeedUnit::Mph, SpeedUnit::Kmh] {
+        let saved = settings::display_units_set(&state, DistanceUnit::Nm, speed).expect("units");
+        assert_eq!(saved.speed_unit, speed);
+        assert_eq!(saved.distance_unit, DistanceUnit::Nm);
+        let restarted = app(&root);
+        let session = restarted.session.lock().expect("settings");
+        assert_eq!(session.settings.speed_unit, speed);
+        assert_eq!(session.settings.distance_unit, DistanceUnit::Nm);
+    }
+    let after = projects::current(&state).expect("summary").expect("open");
+    assert_eq!(before.revision, after.revision);
+    assert_eq!(before.wind_scale_knots, after.wind_scale_knots);
+    assert_eq!(before.dirty, after.dirty);
+    let older: settings::AppSettings = serde_json::from_str("{}").expect("old preferences");
+    assert_eq!(older.distance_unit, DistanceUnit::Km);
+    assert_eq!(older.speed_unit, SpeedUnit::Kt);
+}
+
+#[test]
+fn glyph_appearance_is_independent_persistent_and_does_not_change_the_field() {
+    use settings::{GlyphAppearance, GlyphSetting, GlyphStyle};
+    let root = TempRoot::new("glyph-appearance");
+    let state = app(&root);
+    with_project(&state, "wind");
+    let before = projects::current(&state).expect("summary").expect("open");
+    for setting in [
+        GlyphSetting::SizePercent(160),
+        GlyphSetting::StrokeWidthPx(2.5),
+        GlyphSetting::Color("#12ABef".to_owned()),
+        GlyphSetting::OpacityPercent(45),
+        GlyphSetting::DensityPercent(200),
+        GlyphSetting::FadeWithSpeed(false),
+        GlyphSetting::ShadowEnabled(true),
+        GlyphSetting::ShadowColor("#123456".to_owned()),
+        GlyphSetting::ShadowOpacityPercent(75),
+        GlyphSetting::ShadowOffsetXPx(-3.5),
+        GlyphSetting::ShadowOffsetYPx(4.5),
+    ] {
+        settings::glyph_appearance_set(&state, GlyphStyle::Barb, setting).expect("appearance");
+    }
+    settings::glyph_appearance_set(
+        &state,
+        GlyphStyle::Arrow,
+        GlyphSetting::Color("#ff0000".to_owned()),
+    )
+    .expect("arrow colour");
+    let saved = settings::settings_of(&state).expect("settings");
+    assert_eq!(saved.glyphs.barb.size_percent, 160);
+    assert_eq!(saved.glyphs.barb.density_percent, 200);
+    assert_eq!(saved.glyphs.barb.color, "#12abef");
+    assert_eq!(saved.glyphs.barb.shadow.offset_x_px, -3.5);
+    assert_eq!(saved.glyphs.arrow.size_percent, 100);
+    assert_eq!(saved.glyphs.arrow.color, "#ff0000");
+    let loaded = settings::settings_of(&app(&root)).expect("restarted");
+    assert_eq!(loaded.glyphs, saved.glyphs);
+    let after = projects::current(&state).expect("summary").expect("open");
+    assert_eq!(before.revision, after.revision);
+    assert_eq!(before.dirty, after.dirty);
+    let reset = settings::glyph_appearance_set(&state, GlyphStyle::Barb, GlyphSetting::Reset)
+        .expect("reset");
+    assert_eq!(reset.glyphs.barb, GlyphAppearance::default());
+    assert_eq!(reset.glyphs.arrow, saved.glyphs.arrow);
+}
+
+#[test]
+fn invalid_glyph_edits_are_atomic_and_old_preferences_gain_defaults() {
+    use settings::{AppSettings, GlyphAppearance, GlyphSetting, GlyphStyle};
+    let root = TempRoot::new("glyph-invalid");
+    let state = app(&root);
+    let before = settings::settings_of(&state).expect("settings");
+    for invalid in [
+        GlyphSetting::SizePercent(0),
+        GlyphSetting::DensityPercent(301),
+        GlyphSetting::OpacityPercent(101),
+        GlyphSetting::Color("red".to_owned()),
+        GlyphSetting::StrokeWidthPx(f32::NAN),
+        GlyphSetting::ShadowOffsetXPx(f32::INFINITY),
+        GlyphSetting::ShadowOffsetYPx(-13.0),
+        GlyphSetting::ShadowOpacityPercent(101),
+        GlyphSetting::ShadowColor("#gg0000".to_owned()),
+    ] {
+        assert!(settings::glyph_appearance_set(&state, GlyphStyle::Arrow, invalid).is_err());
+        assert_eq!(settings::settings_of(&state).expect("unchanged"), before);
+    }
+    let older: AppSettings = serde_json::from_str("{}").expect("old preferences");
+    assert_eq!(older.glyphs.arrow, GlyphAppearance::default());
+    let partial: AppSettings = serde_json::from_str(r##"{"glyphs":{"barb":{"color":"#123456"}}}"##)
+        .expect("partial preferences");
+    assert_eq!(partial.glyphs.barb.color, "#123456");
+    assert_eq!(partial.glyphs.barb.size_percent, 100);
+    assert!(!partial.glyphs.barb.shadow.enabled);
+    let mut invalid = partial;
+    invalid.glyphs.arrow.size_percent = 0;
+    let fixed = invalid.normalised();
+    assert_eq!(fixed.glyphs.arrow, GlyphAppearance::default());
+    assert_eq!(fixed.glyphs.barb.color, "#123456");
+}

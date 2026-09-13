@@ -3,11 +3,11 @@
 /**
  * The shape an [`AppError`] takes when it crosses IPC.
  */
-export type AppErrorPayload = { 
+export type AppErrorPayload = {
 /**
  * Stable discriminant, e.g. `"grib"`.
  */
-kind: string, 
+kind: string,
 /**
  * Human-readable message. Not intended for programmatic branching.
  */

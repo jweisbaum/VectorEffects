@@ -25,3 +25,11 @@ export function layerDropIndex(from: number, target: number, above: boolean): nu
   if (above) return from < target ? target : target + 1;
   return from < target ? target - 1 : target;
 }
+
+/**
+ * Object insertion index after removing the source. `from` is its index in
+ * the destination layer, or null when it comes from a different layer.
+ */
+export function objectDropIndex(from: number | null, target: number, above: boolean): number {
+  return from === null ? target + Number(above) : layerDropIndex(from, target, above);
+}

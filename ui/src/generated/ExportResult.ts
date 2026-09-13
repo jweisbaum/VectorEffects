@@ -3,19 +3,19 @@
 /**
  * What an export produced.
  */
-export type ExportResult = { 
+export type ExportResult = {
 /**
  * Where it was written.
  */
-path: string, 
+path: string,
 /**
  * Total bytes.
  */
-bytes: number, 
+bytes: number,
 /**
  * Messages written: two per time step.
  */
-messages: number, 
+messages: number,
 /**
  * How long it took, in milliseconds.
  */

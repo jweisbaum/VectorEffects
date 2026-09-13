@@ -77,6 +77,7 @@ fn scene_of(id: tile::TileId, count: u32, reach_m: f64, square: bool) -> Scene {
         })
         .collect();
     Scene {
+        speed_ranges: Default::default(),
         objects,
         rasters: Vec::new(),
     }

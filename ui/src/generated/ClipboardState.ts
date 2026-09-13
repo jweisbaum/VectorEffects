@@ -3,7 +3,7 @@
 /**
  * What the clipboard holds.
  */
-export type ClipboardState = { 
+export type ClipboardState = {
 /**
  * Objects available to paste.
  */

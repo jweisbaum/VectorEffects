@@ -152,7 +152,12 @@ fn build(recipe: &ProjectRecipe) -> Project {
                 other => other,
             };
 
-            let ids: Vec<PropId> = all_specs(tool).map(|s| s.id).collect();
+            // Generate edits a user can make; fixed properties (including a
+            // macro's strategy) cannot acquire keys in a valid new document.
+            let ids: Vec<PropId> = all_specs(tool)
+                .filter(|s| ve_core::schema::animatable(tool, s.id))
+                .map(|s| s.id)
+                .collect();
             for key in &spec.keys {
                 let Some(&id) = ids.get(key.prop % ids.len()) else {
                     continue;

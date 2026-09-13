@@ -436,13 +436,14 @@ pub fn recent(state: &AppState) -> Result<Vec<RecentProject>> {
         Ok(session
             .recent
             .iter()
+            .filter(|path| path.is_file())
             .map(|path| RecentProject {
                 path: path.to_string_lossy().into_owned(),
                 name: path
                     .file_stem()
                     .map(|s| s.to_string_lossy().into_owned())
                     .unwrap_or_else(|| "untitled".to_owned()),
-                exists: path.exists(),
+                exists: true,
             })
             .collect())
     })

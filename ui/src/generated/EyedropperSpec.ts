@@ -8,15 +8,15 @@ import type { OptionDependency } from "./OptionDependency";
  * renders a button from this and nothing else, so a tool gains an eyedropper
  * by declaring one in the schema.
  */
-export type EyedropperSpec = { 
+export type EyedropperSpec = {
 /**
  * The speed option it writes, in m/s.
  */
-speed: string, 
+speed: string,
 /**
  * The direction option it writes, as an azimuth-toward.
  */
-direction: string, 
+direction: string,
 /**
  * What makes it inert, in the same terms an option's dependencies use.
  */

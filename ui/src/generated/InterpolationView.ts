@@ -8,19 +8,19 @@
  * the timeline reading and writing its neighbours; the panel offers the named
  * presets.
  */
-export type InterpolationView = { "kind": "step" } | { "kind": "linear" } | { "kind": "ease_in" } | { "kind": "ease_out" } | { "kind": "ease_in_out" } | { "kind": "bezier", 
+export type InterpolationView = { "kind": "step" } | { "kind": "linear" } | { "kind": "ease_in" } | { "kind": "ease_out" } | { "kind": "ease_in_out" } | { "kind": "bezier",
 /**
  * First control point, x.
  */
-x1: number, 
+x1: number,
 /**
  * First control point, y.
  */
-y1: number, 
+y1: number,
 /**
  * Second control point, x.
  */
-x2: number, 
+x2: number,
 /**
  * Second control point, y.
  */

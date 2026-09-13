@@ -374,6 +374,13 @@ describe("sizes in px and km", () => {
 });
 
 describe("frozenOptions", () => {
+  it("keeps a one-pixel nib below one kilometre when zoomed in", () => {
+    const state: ToolState = { values: { SizeKm: { kind: "number", value: 1 } }, unit: "px" };
+    const zoomed: Camera = { ...camera, pxPerDeg: 512, projection: "mercator" };
+    const sent = frozenOptions(state, brush, zoomed, 75);
+    expect(sent.find(o => o.property === "SizeKm")?.value).toEqual({ kind: "number", value: KM_PER_DEGREE / 512 });
+    expect(sent.find(o => o.property === "StampSpace")?.value).toEqual({ kind: "choice", index: 2 });
+  });
   /**
    * The unit chose the space, so the space must reach the object — otherwise a
    * px stroke is stored as a ground shape and paints an ellipse.

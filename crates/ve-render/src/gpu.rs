@@ -22,7 +22,7 @@ use crate::scene::{DirectionMode, EdgeMode, Modifier, Scene, SpeedMode};
 use crate::sdf::Shape;
 
 /// Words per packed object. Must match the WGSL `Object` struct.
-const OBJECT_WORDS: usize = 36;
+const OBJECT_WORDS: usize = 40;
 /// Words per packed raster header. Must match the WGSL `Raster` struct.
 const RASTER_WORDS: usize = 12;
 /// Threads per workgroup. Must match the `@workgroup_size` in the shader.
@@ -166,7 +166,7 @@ fn pack(scene: &Scene) -> Packed {
 
     for object in &scene.objects {
         let shape_offset = point_count;
-        let (kind, a, b) = match &object.shape {
+        let (kind, mut a, mut b) = match &object.shape {
             Shape::Capsule { chains, radius_m } => {
                 push_chains(&mut points, &mut point_count, chains);
                 (0u32, *radius_m as f32, 0.0)
@@ -189,6 +189,19 @@ fn pack(scene: &Scene) -> Packed {
                 half_width_m,
                 half_height_m,
             } => (3, *half_width_m as f32, *half_height_m as f32),
+            Shape::Contours { rings, .. } => {
+                for ring in rings.iter().filter(|r| r.len() >= 3) {
+                    for (a, b) in ring
+                        .iter()
+                        .zip(ring.iter().cycle().skip(1))
+                        .take(ring.len())
+                    {
+                        push_point(&mut points, &mut point_count, *a);
+                        push_point(&mut points, &mut point_count, *b);
+                    }
+                }
+                (6, 0.0, 0.0)
+            }
             Shape::Polygon { ring } => {
                 for point in ring {
                     push_point(&mut points, &mut point_count, *point);
@@ -197,6 +210,21 @@ fn pack(scene: &Scene) -> Packed {
             }
         };
         let shape_count = point_count - shape_offset;
+
+        // A contour's footprint, source skeleton and direction path have
+        // separate offsets. A radial edit must not read the direction path
+        // as segment pairs when both are present.
+        if let Shape::Contours { source, .. } = &object.shape {
+            match source.as_ref() {
+                Shape::Capsule { chains, .. } | Shape::SweptSquare { chains, .. } => {
+                    b = point_count as f32;
+                    let offset = point_count;
+                    push_chains(&mut points, &mut point_count, chains);
+                    a = (point_count - offset) as f32;
+                }
+                _ => {}
+            }
+        }
 
         // The path is uploaded separately: a curve's shape is a corridor and
         // its direction follows the ordered path, so one region cannot serve
@@ -221,14 +249,23 @@ fn pack(scene: &Scene) -> Packed {
 
         let (dir_kind, dir_a, dir_b) = match &object.direction {
             DirectionMode::Constant(bearing) => (0u32, bearing.degrees() as f32, 0.0),
-            DirectionMode::Toward(target) => (1, target.lon as f32, target.lat as f32),
-            DirectionMode::Away(target) => (5, target.lon as f32, target.lat as f32),
+            DirectionMode::Target { target, rhumb, .. } => (
+                if *rhumb { 6 } else { 1 },
+                target.lon as f32,
+                target.lat as f32,
+            ),
             DirectionMode::Axis { start, end } => (2, start.degrees() as f32, end.degrees() as f32),
             DirectionMode::AlongPath { offset } => (3, offset.degrees() as f32, 0.0),
             // Tangential is a signed quarter turn off the outward bearing.
-            DirectionMode::Tangential { clockwise } => {
-                (4, if *clockwise { 90.0 } else { -90.0 }, 0.0)
-            }
+            DirectionMode::Tangential { clockwise, angle } => (
+                4,
+                (if *clockwise {
+                    90.0 - angle
+                } else {
+                    angle - 90.0
+                }) as f32,
+                0.0,
+            ),
         };
 
         push_f32(&mut objects, object.frame.anchor.lon as f32);
@@ -286,6 +323,8 @@ fn pack(scene: &Scene) -> Packed {
             match object.frame.space {
                 Space::Geodesic => 0,
                 Space::Projected => 1,
+                Space::Mercator => 2,
+                Space::Miller => 3,
             },
         );
         push_u32(&mut objects, u32::from(object.invert));
@@ -303,6 +342,17 @@ fn pack(scene: &Scene) -> Packed {
         push_u32(&mut objects, object.layer);
         push_u32(&mut objects, kind_word(object.kind));
         push_u32(&mut objects, u32::from(object.erases));
+        let target_offset = match object.direction {
+            DirectionMode::Target { offset, .. } => offset as f32,
+            _ => 0.0,
+        };
+        push_f32(&mut objects, target_offset);
+        let (low, high) = scene
+            .speed_band(object.layer)
+            .map_or((0.0, f32::INFINITY), |band| (band.min_mps, band.max_mps));
+        push_f32(&mut objects, low);
+        push_f32(&mut objects, high);
+        push_u32(&mut objects, 0);
         push_u32(&mut objects, 0);
 
         debug_assert_eq!(objects.len() % (OBJECT_WORDS * 4), 0);
@@ -334,8 +384,8 @@ fn pack(scene: &Scene) -> Packed {
         // The layer's speed band, as a pair the shader can compare against
         // without a branch on "is there one": no band is the widest possible
         // one (spec.md 4.8).
-        let (low, high) = raster
-            .speed_range
+        let (low, high) = scene
+            .speed_band(raster.layer)
             .map_or((0.0, f32::INFINITY), |band| (band.min_mps, band.max_mps));
         push_f32(&mut rasters, low);
         push_f32(&mut rasters, high);

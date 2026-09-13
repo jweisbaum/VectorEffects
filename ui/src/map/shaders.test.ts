@@ -250,8 +250,9 @@ describe("the renderer's uniform lookups", () => {
       "uTileGeo", "uTile", "uSpeedScale", "uRampWind", "uRampCurrent", "uDim",
       "uRampStopsWind", "uRampStopsCurrent", "uRampCountWind", "uRampCountCurrent",
       "uBelow", "uEditScoped",
-      "uGlyphOrigin", "uGlyphStep", "uGrid", "uSpacing",
-      "uSizeScaleArrow", "uSizeScaleBarb", "uColor", "uPixelRatio",
+      "uColor", "uPixelRatio", "uLengthArrow", "uLengthBarb", "uStrokeArrow", "uStrokeBarb",
+      "uColorArrow", "uColorBarb", "uFadeArrow", "uFadeBarb", "uShadowPass",
+      "uShadowArrow", "uShadowBarb", "uShadowOffsetArrow", "uShadowOffsetBarb",
     ]);
 
     for (const [name, sources] of Object.entries(PROGRAMS)) {

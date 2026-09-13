@@ -6,22 +6,22 @@ import type { ToolOption } from "./ToolOption";
 /**
  * A gesture ready to become an object.
  */
-export type NewObject = { 
+export type NewObject = {
 /**
  * Which tool drew it.
  */
-tool: Tool, 
+tool: Tool,
 /**
  * What it drew.
  */
-gesture: Gesture, 
+gesture: Gesture,
 /**
  * The tool's options at the moment of the gesture.
  *
  * Anything omitted takes the schema default, which is what makes an
  * option a tool never offers still exist on the object at a known value.
  */
-options: Array<ToolOption>, 
+options: Array<ToolOption>,
 /**
  * Which layer receives it. `None` means the top layer.
  */

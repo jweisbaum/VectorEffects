@@ -3,28 +3,28 @@
 /**
  * Where a selection's handles go.
  */
-export type SelectionTransform = { 
+export type SelectionTransform = {
 /**
  * Pivot longitude: the object's anchor, or the collective centroid.
  */
-lon: number, 
+lon: number,
 /**
  * Pivot latitude.
  */
-lat: number, 
+lat: number,
 /**
  * True-bearing rotation of the one selected object; 0 for a group, which
  * has no orientation of its own until it is rotated.
  */
-rotation_deg: number, 
+rotation_deg: number,
 /**
  * Scale of the one selected object; 100 for a group.
  */
-scale_pct: number, 
+scale_pct: number,
 /**
  * How far the selection reaches from the pivot, in metres.
  */
-radius_m: number, 
+radius_m: number,
 /**
  * How many objects the handles act on.
  */

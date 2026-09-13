@@ -36,7 +36,16 @@ impl Drop for TempRoot {
 }
 
 fn app(root: &TempRoot) -> AppState {
-    AppState::new(AppPaths::in_directory(&root.0).expect("paths"))
+    {
+        let state = AppState::new(AppPaths::in_directory(&root.0).expect("paths"));
+        ve_app::settings::display_units_set(
+            &state,
+            ve_app::settings::DistanceUnit::Nm,
+            ve_app::settings::SpeedUnit::Kt,
+        )
+        .expect("units");
+        state
+    }
 }
 
 fn open(state: &AppState) {
@@ -72,8 +81,11 @@ fn a_leg_previews_as_it_will_be_placed() {
     let root = TempRoot::new("preview-leg");
     let state = app(&root);
     open(&state);
-    let previewed =
-        measure::measurement_preview(dividers(vec![[0.0, 0.0], [10.0, 0.0]])).expect("preview");
+    let previewed = measure::measurement_preview(
+        dividers(vec![[0.0, 0.0], [10.0, 0.0]]),
+        ve_app::settings::DistanceUnit::Nm,
+    )
+    .expect("preview");
     assert!(
         measure::measurements_of(&state).expect("list").is_empty(),
         "nothing stored"

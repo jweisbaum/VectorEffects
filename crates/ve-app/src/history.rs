@@ -81,16 +81,12 @@ const HOUR: i64 = 3600;
 
 /// How many steps are fetched at once.
 ///
-/// Four rather than one, because a step is a couple of megabytes over a link
-/// whose latency is a real share of the wait, and four rather than a dozen
-/// because of what the second number does to the first. Measured against
-/// these archives from a domestic connection: four chunks one after another
-/// took 7 s and the same four at once took 8 s, so the link was already
-/// saturated by one. All concurrency buys there is a longer silence — every
-/// fetch finishing at once instead of one every few seconds — and a bar that
-/// does not move is the thing this import can least afford. Four keeps the
-/// gain where a link *is* latency-bound without turning the whole wait into
-/// one step.
+/// Four hours keep the decoder's working set small while hiding network
+/// latency. GlobCurrent fetches each hour's u and v together (up to eight
+/// requests); ERA5's larger chunks already saturated the measured connection
+/// at four requests. Both overlap independent metadata reads when opening;
+/// see `ve-zarr`'s history_download example for an opt-in benchmark against
+/// the public stores.
 const FETCHES_AT_ONCE: usize = 4;
 
 /// Steps the hand-off channel may hold beyond what the workers are reading.

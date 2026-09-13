@@ -24,6 +24,7 @@ export default function NumberField({
   max = null,
   step,
   title,
+  "aria-label": ariaLabel,
   format = (v) => String(Math.round(v * 1e6) / 1e6),
   commitWhileTyping = true,
 }: {
@@ -34,6 +35,7 @@ export default function NumberField({
   max?: number | null;
   step?: number | string;
   title?: string;
+  "aria-label"?: string;
   /** How a committed value is written into the box when it is not being edited. */
   format?: (value: number) => string;
   /**
@@ -65,6 +67,7 @@ export default function NumberField({
       max={max ?? undefined}
       step={step}
       title={title}
+      aria-label={ariaLabel}
       value={draft ?? format(value)}
       onChange={(event) => {
         const raw = event.target.value;

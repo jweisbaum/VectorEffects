@@ -1586,3 +1586,67 @@ fn only_position_and_rotation_can_follow() {
         );
     }
 }
+
+#[test]
+fn constant_motion_starts_here_stops_at_next_key_and_undo_restores_keys() {
+    let (_root, state) = project("constant-motion");
+    let object = circle(&state, 179.0, 60.0);
+    animation::key_at(&state, object, "Position", 0, None).unwrap();
+    animation::key_at(
+        &state,
+        object,
+        "Position",
+        7,
+        Some(PropertyValue::Position {
+            lon: 175.0,
+            lat: 60.0,
+        }),
+    )
+    .unwrap();
+    animation::key_at(
+        &state,
+        object,
+        "Position",
+        11,
+        Some(PropertyValue::Position {
+            lon: 170.0,
+            lat: 65.0,
+        }),
+    )
+    .unwrap();
+    let before = document_of(&state);
+    assert!(animation::constant_motion(&state, object, 3, 90.0, 10.0, false).is_err());
+    assert_eq!(document_of(&state).layers, before.layers);
+    animation::constant_motion(&state, object, 3, 90.0, 10.0, true).unwrap();
+    let after = document_of(&state);
+    let position = after
+        .object(ve_core::Id::from_raw(object))
+        .unwrap()
+        .props
+        .get(PropId::Position)
+        .unwrap();
+    for at in 4..=7 {
+        let a = position.value_at(at - 1).as_lonlat().unwrap();
+        let b = position.value_at(at).as_lonlat().unwrap();
+        assert!((ve_core::geo::rhumb_distance_m(a, b) - 108_000.0).abs() < 0.01);
+        assert!((ve_core::geo::rhumb_bearing(a, b).degrees() - 90.0).abs() < 1e-6);
+    }
+    let old = before
+        .object(ve_core::Id::from_raw(object))
+        .unwrap()
+        .props
+        .get(PropId::Position)
+        .unwrap();
+    assert!(
+        position
+            .value_at(3)
+            .as_lonlat()
+            .unwrap()
+            .distance_m(old.value_at(3).as_lonlat().unwrap())
+            < 0.0001
+    );
+    assert_eq!(position.value_at(0), old.value_at(0));
+    assert_eq!(position.value_at(11), old.value_at(11));
+    edit::undo_for_test(&state).unwrap();
+    assert_eq!(document_of(&state).layers, before.layers);
+}

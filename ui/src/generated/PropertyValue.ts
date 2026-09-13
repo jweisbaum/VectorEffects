@@ -3,27 +3,27 @@
 /**
  * A property value crossing IPC.
  */
-export type PropertyValue = { "kind": "number", 
+export type PropertyValue = { "kind": "number",
 /**
  * The value.
  */
-value: number, } | { "kind": "bool", 
+value: number, } | { "kind": "bool",
 /**
  * The value.
  */
-value: boolean, } | { "kind": "angle", 
+value: boolean, } | { "kind": "angle",
 /**
  * Degrees clockwise from north.
  */
-degrees: number, } | { "kind": "position", 
+degrees: number, } | { "kind": "position",
 /**
  * Longitude.
  */
-lon: number, 
+lon: number,
 /**
  * Latitude.
  */
-lat: number, } | { "kind": "choice", 
+lat: number, } | { "kind": "choice",
 /**
  * Selected variant.
  */

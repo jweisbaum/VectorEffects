@@ -43,6 +43,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     AppInfo::export_all(&cfg)?;
     EvaluatorSelection::export_all(&cfg)?;
     FieldSample::export_all(&cfg)?;
+    ve_app::selection_preview::SelectionPreviewRequest::export_all(&cfg)?;
     AppErrorPayload::export_all(&cfg)?;
     ProjectSummary::export_all(&cfg)?;
     ve_app::create::Created::export_all(&cfg)?;
@@ -64,6 +65,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Sizing::export_all(&cfg)?;
     PreviewKind::export_all(&cfg)?;
     ObjectTracks::export_all(&cfg)?;
+    ve_app::shape_animation::ShapeControls::export_all(&cfg)?;
     TrackView::export_all(&cfg)?;
     TrackSamples::export_all(&cfg)?;
     TrackSeries::export_all(&cfg)?;
@@ -97,6 +99,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ve_app::measure::NewMeasurement::export_all(&cfg)?;
     ve_app::autosave::Autosave::export_all(&cfg)?;
     ve_app::settings::AppSettings::export_all(&cfg)?;
+    ve_app::settings::GlyphStyle::export_all(&cfg)?;
+    ve_app::settings::GlyphSetting::export_all(&cfg)?;
     ve_app::settings::GradientView::export_all(&cfg)?;
     ve_app::settings::AutosaveMode::export_all(&cfg)?;
     ve_app::settings::Shortcut::export_all(&cfg)?;
@@ -118,6 +122,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     HistoryProgress::export_all(&cfg)?;
     ExportEstimate::export_all(&cfg)?;
 
+    // Keep generated files deterministic and free of ts-rs's trailing spaces.
+    for entry in std::fs::read_dir(&out_dir)? {
+        let path = entry?.path();
+        if path.extension().is_some_and(|extension| extension == "ts") {
+            let source = std::fs::read_to_string(&path)?;
+            let clean = source
+                .lines()
+                .map(str::trim_end)
+                .collect::<Vec<_>>()
+                .join("\n");
+            std::fs::write(path, format!("{clean}\n"))?;
+        }
+    }
     println!("bindings written to {}", out_dir.display());
     Ok(())
 }

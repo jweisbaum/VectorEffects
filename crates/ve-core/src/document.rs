@@ -336,6 +336,9 @@ pub struct Object {
     pub tool: ToolKind,
     /// Shape, in the object's local AEQD frame.
     pub geometry: Geometry,
+    /// Optional independently animated perimeter vertices.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shape_animation: Option<crate::shape_animation::ShapeAnimation>,
     /// Coarse lifetime.
     pub active_range: StepRange,
     /// Every property, animatable.
@@ -376,6 +379,9 @@ pub struct Object {
 /// same feather ramp a stroke's edge has. `step` limits it to one frame.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Erasure {
+    /// Exact perimeter of a screen-space cut, in the object’s local frame.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub contour: Vec<LocalPoint>,
     /// The stroke's centreline, one or more polylines.
     pub chains: Vec<Vec<LocalPoint>>,
     /// The stamp's radius, or half-size for a square.
@@ -423,6 +429,9 @@ pub struct RasterErasure {
     /// Defaulting to false is what every erasure written before M67 meant.
     #[serde(default)]
     pub projected: bool,
+    /// Frozen cylindrical projection: 0 legacy, 2 Mercator, 3 Miller.
+    #[serde(default)]
+    pub projection: u8,
     /// Edge falloff, 0 to 1, as a fraction of the radius.
     #[serde(default)]
     pub feather: f32,
@@ -444,6 +453,7 @@ impl Object {
             name: name.into(),
             tool,
             geometry: Geometry::default_for(tool),
+            shape_animation: None,
             active_range: StepRange::full(step_count),
             props: PropertyMap::for_tool(tool),
             capture: None,

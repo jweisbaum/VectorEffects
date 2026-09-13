@@ -359,11 +359,7 @@ fn check_modes(tool: ToolKind, props: &PropertyMap, options: &[ToolOption]) -> R
 /// points are map-space metres, and converting them with a ground frame would
 /// bend the drawing away from where it was made (spec.md 7.2).
 fn frame_at(anchor: LonLat, props: &PropertyMap, tool: ToolKind) -> Frame {
-    let space = if choice(props, tool, PropId::StampSpace) == 1 {
-        Space::Projected
-    } else {
-        Space::Geodesic
-    };
+    let space = Space::from_choice(choice(props, tool, PropId::StampSpace));
     Frame::in_space(anchor, 0.0, 100.0, space)
 }
 

@@ -17,8 +17,7 @@ use serde::{Deserialize, Serialize};
 use tauri::Emitter;
 use ts_rs::TS;
 use ve_core::project::{FieldKind, Project};
-use ve_core::vector::Uv;
-use ve_grib::writer::{GridSpec, MessageSpec, Parameter, ReferenceTime, write_message};
+use ve_grib::writer::{GridSpec, MessageSpec, Parameter, ReferenceTime, write_message_masked};
 use ve_render::cpu::CpuEvaluator;
 use ve_render::evaluator::FieldEvaluator;
 use ve_render::scene::flatten_kind;
@@ -108,17 +107,15 @@ pub struct ExportEstimate {
 /// At 0.1 degrees with 240 steps this is about 12 GB, which the user should see
 /// before starting rather than discover afterwards (spec.md 12.4).
 ///
-/// An upper bound. A time step whose field is entirely constant — every step of
-/// a project with nothing painted in it — needs no data section at all and
-/// collapses to a few hundred bytes. Any step with content packs every point,
-/// so the estimate is accurate as soon as a project has anything in it.
+/// An upper bound including a bitmap. Missing cells have no packed value;
+/// constant fields need no packed data, so their files can be much smaller.
 pub fn estimate(project: &Project, bits: u8) -> ExportEstimate {
     let points = project.settings.resolution.point_count();
-    let messages = project.settings.step_count * 2;
+    let messages = project.settings.step_count * 2 * project.kinds_present().len() as u32;
     // `bits` per packed value, rounded up to whole octets per message, plus a
     // little for section headers.
     let data = (points * u64::from(bits)).div_ceil(8);
-    let bytes = data * u64::from(messages) + u64::from(messages) * 200;
+    let bytes = (data + points.div_ceil(8) + 200) * u64::from(messages);
     ExportEstimate {
         bytes,
         messages,
@@ -255,10 +252,18 @@ pub fn run(
             let hour = settings.forecast_hour(step);
             for &kind in &kinds {
                 let scene = flatten_kind(project, step, kind);
-                let samples: Vec<Uv> = CpuEvaluator.evaluate(&scene, &points)?;
+                let samples = CpuEvaluator.evaluate_samples(&scene, &points)?;
                 for (index, sample) in samples.iter().enumerate() {
-                    u[index] = sample.u;
-                    v[index] = sample.v;
+                    u[index] = if sample.coverage > 0.0 {
+                        sample.uv.u
+                    } else {
+                        f32::NAN
+                    };
+                    v[index] = if sample.coverage > 0.0 {
+                        sample.uv.v
+                    } else {
+                        f32::NAN
+                    };
                 }
                 let (u_parameter, v_parameter) = parameters(kind);
                 for (parameter, values) in [(u_parameter, &u), (v_parameter, &v)] {
@@ -270,7 +275,7 @@ pub fn run(
                         centre: request.centre,
                         bits: request.bits,
                     };
-                    bytes += write_message(&mut out, &spec, values)? as u64;
+                    bytes += write_message_masked(&mut out, &spec, values)? as u64;
                     messages += 1;
                 }
             }

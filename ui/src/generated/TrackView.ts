@@ -6,36 +6,36 @@ import type { PropertyValue } from "./PropertyValue";
 /**
  * One property's track: its base, its keys, and what the timeline may do to it.
  */
-export type TrackView = { 
+export type TrackView = {
 /**
  * The property id, as the inspector spells it.
  */
-property: string, 
+property: string,
 /**
  * Its label.
  */
-label: string, 
+label: string,
 /**
  * The value used when there are no keys.
  */
-base: PropertyValue, 
+base: PropertyValue,
 /**
  * Every key, in step order.
  */
-keys: Array<KeyframeView>, 
+keys: Array<KeyframeView>,
 /**
  * The interpolations this property's kind allows (spec.md 4.5).
  */
-interpolations: Array<InterpolationView>, 
+interpolations: Array<InterpolationView>,
 /**
  * Whether a key sits on the step being viewed.
  */
-keyed_here: boolean, 
+keyed_here: boolean,
 /**
  * Whether the value at the step being viewed comes from interpolation
  * between keys rather than from a key or the base (spec.md 9.3).
  */
-interpolated_here: boolean, 
+interpolated_here: boolean,
 /**
  * Whether this track can put the object's own movement into the field
  * (spec.md 9.3, M13).
@@ -44,11 +44,11 @@ interpolated_here: boolean,
  * that paint a vector have a field to add it to: a modifier writes what
  * it read and a mask writes calm, so neither has anything to carry.
  */
-motion_available: boolean, 
+motion_available: boolean,
 /**
  * Whether it is doing so.
  */
-motion: boolean, 
+motion: boolean,
 /**
  * Whether this track can follow another object's (spec.md 9.3, M13).
  *
@@ -56,16 +56,16 @@ motion: boolean,
  * speed would be a different feature, and no other property is a place
  * in the world for an offset to be kept in.
  */
-can_follow: boolean, 
+can_follow: boolean,
 /**
  * The object this track follows, if it follows one. Its keys are then
  * dormant: the value comes from the link.
  */
-follows: number | null, 
+follows: number | null,
 /**
  * That object's name, for the row.
  */
-follows_name: string | null, 
+follows_name: string | null,
 /**
  * The keys this track actually moves by, when it follows another (M65).
  *

@@ -3,11 +3,11 @@
 /**
  * What the timeline shows about the frame clipboard.
  */
-export type FrameClipboardState = { 
+export type FrameClipboardState = {
 /**
  * Frames available to paste.
  */
-count: number, 
+count: number,
 /**
  * The layer they will paste into, whatever layer is active.
  */

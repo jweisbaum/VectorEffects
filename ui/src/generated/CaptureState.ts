@@ -3,19 +3,19 @@
 /**
  * What the clipboard holds after a capture.
  */
-export type CaptureState = { 
+export type CaptureState = {
 /**
  * Whether a captured field is available to paste.
  */
-has_capture: boolean, 
+has_capture: boolean,
 /**
  * Its lattice size, for the status line.
  */
-ni: number, 
+ni: number,
 /**
  * And its height.
  */
-nj: number, 
+nj: number,
 /**
  * How many time slices it holds.
  */

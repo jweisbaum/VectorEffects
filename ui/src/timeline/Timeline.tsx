@@ -13,6 +13,8 @@
  * re-renders the map (decision D29), and a keyframe drag must not do that.
  */
 
+import { useUnits } from "../settings/units";
+
 import { listen } from "@tauri-apps/api/event";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -29,6 +31,7 @@ import type { ShrinkImpact } from "../generated/ShrinkImpact";
 import type { TileAddress } from "../generated/TileAddress";
 import type { TrackSamples } from "../generated/TrackSamples";
 import NumberField from "../NumberField";
+import ConstantMotionDialog, { type MotionSegment } from "./ConstantMotionDialog";
 import { PlaybackClock } from "./clock";
 import { ReadinessPoller } from "./readiness";
 import { playbackCount, playbackTime } from "./metrics";
@@ -201,7 +204,11 @@ export default function Timeline({
   capture,
   hidden = false,
   onCapture,
+  shapeEditing = null,
+  onShapeEditing,
 }: {
+  shapeEditing?: number | null;
+  onShapeEditing?: (object: number) => void;
   project: ProjectSummary;
   step: number;
   onStepChange: (step: number) => void;
@@ -244,6 +251,7 @@ export default function Timeline({
   /** Put away: not drawn, but mounted, so playback goes on (M27). */
   hidden?: boolean;
 }) {
+  const units = useUnits();
   const capturing = capture !== null && capture.active;
   const recordingPhase = capturing && capture.phase === "recording";
   const previewing = capturing && capture.phase === "previewing";
@@ -529,11 +537,11 @@ export default function Timeline({
     const out = new Map<string, { series: PlotSeries[]; extent: Extent }>();
     for (const [id, entry] of samples) {
       if (entry.series.length === 0) continue;
-      const series = entry.series.map((one) => plotSeries(one, project.direction_convention));
+      const series = entry.series.map((one) => plotSeries(one, project.direction_convention, units));
       out.set(id, { series, extent: extentOf(series) });
     }
     return out;
-  }, [samples, project.direction_convention]);
+  }, [samples, project.direction_convention, units]);
 
   /**
    * Shows or hides an object's property tracks.
@@ -830,6 +838,13 @@ export default function Timeline({
     if (drag) {
       keyDragRef.current = null;
       setKeyDrag(null);
+      if (drag.delta === 0 && drag.ids.length === 1) {
+        const key = parseKey(drag.ids[0]!);
+        if (key.property === "shape" && key.object === shapeEditing) {
+          setPlaying(false);
+          onStepChange(key.step);
+        }
+      }
       if (drag.delta !== 0) {
         // Written once, on release, in a stable order — and moved from the far
         // end first when going right, so a key never lands on a selected
@@ -995,6 +1010,7 @@ export default function Timeline({
 
   // --- Timeline-wide settings ---
   const [shrink, setShrink] = useState<{ to: number; impact: ShrinkImpact } | null>(null);
+  const [constantMotion, setConstantMotion] = useState<MotionSegment | null>(null);
   const changeStepCount = (to: number) => {
     if (!Number.isFinite(to) || to < 1 || to > MAX_STEPS || to === project.step_count) return;
     if (to > project.step_count) {
@@ -1015,6 +1031,7 @@ export default function Timeline({
 
   return (
     <div className={capturing ? "timeline tl-capturing" : "timeline"} hidden={hidden}>
+      {constantMotion && <ConstantMotionDialog segment={constantMotion} onClose={() => setConstantMotion(null)} onDone={(summary) => run(Promise.resolve(summary))} />}
       <div className="tl-transport">
         <button onClick={() => setPlaying((on) => !on)} title="Play / pause (Space)">
           {playing ? "❚❚" : "▶"}
@@ -1374,6 +1391,23 @@ export default function Timeline({
                       >
                         {object.name}
                       </span>
+                      <button
+                        className={`tl-shape-toggle${shapeEditing === object.id ? " on" : ""}`}
+                        aria-label={`Animate shape of ${object.name}`}
+                        aria-pressed={shapeEditing === object.id}
+                        title={shapeEditing === object.id ? "Finish editing shape animation" : "Animate shape — edit perimeter points on the map"}
+                        disabled={layer.locked || !layer.visible}
+                        onClick={() => {
+                          if (shapeEditing !== object.id && !open) toggleObject(object.id);
+                          setPlaying(false);
+                          onShapeEditing?.(object.id);
+                        }}
+                      >
+                        <svg width="16" height="16" viewBox="0 0 20 20" aria-hidden="true">
+                          <path d="M4 5 15 3 16 15 5 16Z" fill="none" stroke="currentColor" />
+                          {[[4,5],[15,3],[16,15],[5,16]].map(([x,y],i) => <circle key={i} cx={x} cy={y} r="2" fill="currentColor" />)}
+                        </svg>
+                      </button>
                     </div>
                     <div className="tl-grid" style={{ width: gridWidth }}>
                       {/* The lifetime bar: either end resizes it, and the
@@ -1509,6 +1543,17 @@ export default function Timeline({
                               <span className="tl-graph-toggle" />
                             )}
                             <span className="tl-track-name">{track.label}</span>
+                            {track.property === "Position" && <button
+                              className="tl-motion"
+                              aria-label="Add constant motion"
+                              title={track.follows !== null ? "Unlink position before adding constant motion" : "Add constant motion from this frame to the next position keyframe"}
+                              disabled={track.follows !== null || step >= Math.min(object.end_step, last)}
+                              onClick={() => {
+                                setPlaying(false);
+                                const end = Math.min(track.keys.find((key) => key.step > step)?.step ?? last, object.end_step);
+                                setConstantMotion({ object: object.id, start: step, end, existing: track.keys.filter((key) => key.step >= step && key.step <= end).length });
+                              }}
+                            >→+</button>}
                             {/*
                               Motion: while this is on, the object's own
                               movement along this track is added to the vector
@@ -1600,7 +1645,22 @@ export default function Timeline({
                               ◆
                             </button>
                           </div>
-                          <div className="tl-grid" style={{ width: gridWidth }}>
+                          <div
+                            className="tl-grid"
+                            style={{ width: gridWidth }}
+                            title={track.property === "shape" ? "Click to visit a frame; double-click to add a shape key" : undefined}
+                            onPointerDown={(event) => {
+                              if (track.property !== "shape" || shapeEditing !== object.id || event.target !== event.currentTarget) return;
+                              event.stopPropagation();
+                              setPlaying(false);
+                              onStepChange(stepAt(gridX(event), pxPerStep, last));
+                            }}
+                            onDoubleClick={(event) => {
+                              if (track.property !== "shape" || shapeEditing !== object.id || event.target !== event.currentTarget) return;
+                              event.stopPropagation();
+                              run(api.setKeyframe(object.id, "shape", stepAt(gridX(event), pxPerStep, last)));
+                            }}
+                          >
                             {/* One dot per interpolated step, so a blended
                                 segment reads as animated and a held one does
                                 not (spec.md 9.3). */}
@@ -1670,14 +1730,14 @@ export default function Timeline({
                                         {one.label && `${one.label} `}
                                         {one.values[step] === undefined
                                           ? "—"
-                                          : formatValue(one.unit, one.values[step])}
+                                          : formatValue(one.unit, one.values[step], units)}
                                       </span>
                                     ))}
                                   </span>
                                   <span className="muted">
-                                    {formatValue(plot.series[0]?.unit ?? "none", plot.extent.min)}
+                                    {formatValue(plot.series[0]?.unit ?? "none", plot.extent.min, units)}
                                     {" – "}
-                                    {formatValue(plot.series[0]?.unit ?? "none", plot.extent.max)}
+                                    {formatValue(plot.series[0]?.unit ?? "none", plot.extent.max, units)}
                                   </span>
                                 </>
                               ) : (

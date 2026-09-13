@@ -184,20 +184,20 @@ flow direction in one mode and a relative offset in another (the curve's
 
 | Quantity | Storage | Notes |
 |---|---|---|
-| Speed | m/s (f32) | **Always displayed in knots.** Not configurable — see below. |
+| Speed | m/s (f32) | Global display preference: kt (default), mph, or km/h. |
 | Distance (geometry) | metres (f64) | |
-| Distance (UI) | km and nautical miles | Both shown on measurement tools. |
+| Distance (UI) | km or nautical miles | Global display preference; km by default. |
 | Sizes in tool options | km | See §3.5. |
 | Time | UTC only | No local time anywhere. |
 
-**Speed is stored in m/s and shown in knots, always.** m/s is what GRIB2
-encodes, so it is what the document holds and what the evaluator works in.
-Knots is what this tool's audience reads: a sailing forecast and a wind barb
-are both in knots, and a barb is *defined* in 5-knot increments. An
-earlier draft made the display unit a project setting; that bought nothing —
-nobody wants half their speeds in km/h — and cost a branch at every display site
-plus a field in the file format. Conversion happens at the UI boundary and
-nowhere else, exactly as with the direction convention.
+**Global units live in Settings → Units.** Speed can be shown and entered in
+kt, mph, or km/h; ground distances in km or nm. The preference applies across
+tool options, object properties, speed filters, colour scales, map readouts,
+legends, measurements, and timeline graphs. Changing it converts the displayed
+numbers without editing the project. Existing settings files default to km and
+kt. Geometry stays in metres, size properties in km, and vector components in
+m/s. Pixel inputs keep their existing meaning. Wind-barb flags continue to
+encode the meteorological 5-knot increments regardless of the readout unit.
 
 ### 3.5 Pixel-valued options resolve to km at creation time
 
@@ -221,20 +221,14 @@ stamp is a shape in.
 | Unit | Stamp space | Footprint |
 |---|---|---|
 | km | `geodesic` | A shape on the **ground**: a disc of `size_km` at any latitude, drawn as an ellipse that widens with latitude. |
-| px | `projected` | A shape on the **map**: a circle of exactly that many pixels, at any latitude and any zoom. On the ground it is an ellipse, narrowed east-west by `cos(lat)`. |
+| px | `projected`, `mercator`, or `miller` | A shape in the projection active when it is created: the requested pixels across and tall, independent of latitude. |
 
-`km/px` for a projected stamp is therefore `KM_PER_DEGREE / pxPerDeg`, with no
-cosine: a degree of latitude is a fixed number of pixels everywhere, so the
-conversion is latitude-independent and the footprint comes out the requested
-number of pixels **across and tall**. `size_km` means the same thing in both
-spaces — the footprint's north-south ground extent — so switching units changes
-the shape's width, never its height.
-
-Both statements are made in the project's map space, which is equirectangular
-(§5.1). The px number is measured on the horizontal axis, where every
-projection the view offers is linear, so what a px size resolves to in km does
-not depend on which projection the map is showing — as it must not, since the
-answer is frozen into the object.
+Pixel distances use `KM_PER_DEGREE / pxPerDeg` on both projected axes. The
+frozen space selects the corresponding northing function: latitude for
+Equirectangular, Mercator northing for Mercator, and Miller northing for Miller.
+The internal kilometre value measures projected coordinates, not ground distance.
+The brush, its preview, filled glyph placement, and destructive eraser all use
+this same frame. Sub-kilometre pixel sizes must not be rounded up to a kilometre.
 
 The space is a property of the object, frozen at creation like every other tool
 option (§6.1), and it survives in the file. It is not a display setting: a
@@ -252,8 +246,8 @@ tool has.
 of its own, because the unit already asks exactly that question and a tool that
 offered both would have two controls for one property — with the space as the
 one that did nothing, since it is the unit the gesture freezes. So the bar shows
-`km`/`px` and the object stores `geodesic`/`projected`, and the mapping between
-them is the whole of the rule.
+`km`/`px` (or the preferred ground-distance unit). The object stores `geodesic`
+for ground units and the current projection for pixels.
 
 It follows that a tool has a unit exactly when it has a `stamp_space`, and that
 the unit inherits that property's dependencies. A tool whose sizes are *drawn*
@@ -265,15 +259,9 @@ or on the ground, where they bend with the projection and stay over the sea
 they were drawn around. A polygon has that as much as a rectangle does, so it
 is offered the unit too (M57). It simply has no number beside it.
 
-**A projected object's local frame is map space, not AEQD** (§7.2). That is the
-one exception to the frame rule, and it is a definitional one rather than a
-concession: a shape defined on the map has to be measured on the map. It gives
-up ground fidelity — a local metre is north-equivalent, worth `cos(lat)` metres
-of ground when it points east — and gives up nothing at the antimeridian or the
-poles, where it is if anything better behaved: there is no cosine to divide by,
-longitude deltas normalise as they do everywhere else, and local north is true
-north by construction rather than only at the anchor. Directions are unaffected:
-they still come from geographic bearings, never from a frame angle (§7.2).
+**A projected object's local frame uses its frozen projection**, not AEQD (§7.2).
+Longitude deltas normalize across the antimeridian; latitude uses the matching
+projection and inverse. Directions continue to use geographic bearings.
 
 ---
 
@@ -369,6 +357,9 @@ Object {
 
 **Z-order** is layer order first, then object order within the layer. The
 basemap is not a layer and is always beneath everything (§5.2).
+In the layer panel, drag an object's grip or name above or below another
+object to change its z-order; higher rows are higher in the stack. An insertion
+line marks the destination. Each move is undoable, and Escape cancels a drag.
 
 ### 4.4 Animatable properties
 
@@ -401,6 +392,32 @@ tool-specific ones:
 `edge_mode` (§7.4) is carried alongside these by every tool that paints a
 field. A **modifier** (§6.3) does not carry it: its output is whatever was
 beneath it, changed, so there is nothing for "replace" to name.
+
+**Shape animation.** Every existing create or edit object has an **Animate shape**
+button on its timeline row. It toggles a temporary editing mode: perimeter dots
+appear on the map, and choosing another tool, pressing Escape, or pressing the
+same button closes the mode. Opening it alone does not alter the document.
+Scrubbing keeps the mode active. Dragging a dot keys only that point at the
+current frame, regardless of Auto-key; its local x and y positions interpolate
+independently. A first edit after the object's start preserves its original
+position at the start. The Shape track's diamond pins every point at the
+current frame; its markers support moving, deleting, and easing keys. Clicking
+a shape marker or its track visits that frame; double-clicking empty track
+space adds a shape key while the editing mode is active.
+
+Perimeter topology stays fixed during animation, including holes and separate
+parts of a merged stroke. Circle boundaries use 48 vertices; swept brush unions
+are contoured before assigning point identities. The original geometry retains
+its direction skeleton and feather settings, and size changes adjust the
+perimeter about that skeleton. Position, rotation and scale still place the
+whole animated object. Shape keys persist, participate in undo/redo, and follow
+copy/paste and timeline duration changes.
+
+The eraser continues to make permanent cuts in an object's own frame after the
+animated footprint is evaluated. Later shape keys cannot fill those cuts back
+in. Shift-erasing affects only the current frame. A whole object is deleted
+only when no geometry survives in any active frame; an empty current frame
+alone is insufficient. Captured objects retain their destructive sample edits.
 
 ### 4.5 Interpolation
 
@@ -607,28 +624,24 @@ A time with only one of `u` and `v`, or whose two components sit on different
 grids, is dropped from the sequence, and is therefore a time with no message
 like any other.
 
-**Speed filter.** A GRIB layer can be limited to a band of speeds: a low end
-and a high end, in knots on screen and m/s in the document, set by a slider or
-typed. A sample outside the band is dropped exactly as a missing one is, so
-whatever is beneath shows through — including the layer's own painted objects,
-which is what makes this a filter on the *import* rather than on the layer. A
-forecast is far easier to read one band at a time: the calms, the gale, the
-jet.
+**Speed filter.** Every layer has optional inclusive minimum and maximum
+speed thresholds, displayed in the preferred speed unit and stored in m/s.
+For vector layers the band applies to the layer's final contribution, after
+its raster, creations and modifiers, before compositing with other layers.
+Outside the band the contribution is undefined and layers beneath show through.
+Both CPU and GPU apply the same rule. Image layers have no intrinsic velocity;
+their displayed pixels are filtered using the displayed vector field at each
+location. Image thresholds do not change exported vector data.
 
-It is a property of the layer and not of the lattice — a choice about what to
-show, not a fact about the file — so it costs two numbers in the project file,
-survives the file being re-read on open, and is undoable like any other edit.
-Changing it changes every tile the field reaches, so the whole map re-renders
-when it is released; a global forecast is every tile.
+Thresholds are saved with the layer and support undo. Raster slider ceilings
+start at the source maximum; other layers have a useful default. Typed values
+can extend beyond those initial limits.
 
 **Edit tools work on a GRIB layer** (M31). The modifiers of §6.3, the mask,
 the clone stamp and the eraser can be aimed at an imported layer and edit its
 field in place — an intensified band, a turned region, a masked-out patch —
 and they reach nothing in the layers beneath (§7.6). Tools that paint a field
 of their own still cannot land in one (§6.1, D66).
-Both kernels apply it, in the same place: after the lattice is sampled and
-before it is written into the buffer. The scale the slider runs to is the file's
-own fastest sample, since a filter is set by looking at the field.
 
 **The slider writes on release, never while the thumb is down.** A write
 invalidates every tile of the imported field and re-renders every panel, and
@@ -986,13 +999,17 @@ is written: several are fetched at once, the earliest can be the last to
 land, and a bar that waited for it would stand still through the download and
 then jump.
 
-**A few steps are fetched at once, not many.** The archives are read over a
-link that is often already saturated by a single request — measured from a
-domestic connection, four chunks one after another took 7 s and the same four
-at once took 8 s — so the concurrency that matters is the little that hides
-latency, not the amount that would fill a fast pipe. Beyond that it buys no
-throughput and costs the only thing the wait has going for it, which is a bar
-that keeps moving.
+**Independent reads overlap, in bounded groups.** Opening an archive reads
+the component metadata and coordinate axes concurrently; GlobCurrent also
+opens its multi-year and near-real-time datasets together. Four hours are
+then fetched at once. GlobCurrent reads each hour's u and v together, for up
+to eight component requests; ERA5 keeps four requests because its larger
+chunks already saturated the measured connection. The time-axis validation,
+preference for final current data, missing-value handling and GRIB packing
+still apply to every field. The opt-in `ve-zarr` `history_download` example
+measures setup and reading separately against the real archives; faster
+setup helps short ranges most, while long transfers still depend on the
+connection and archive throughput.
 
 **Times are UTC and land on the hour**, like every other time in the
 application (§3.6). The dialog says so on both labels: the control has no
@@ -1038,17 +1055,13 @@ export has its own grid, so a projection cannot affect a saved project or an
 exported file (invariant 3). It lives in the *application's* settings, not the
 project's: it says how this person likes to look at a map, not what the map is.
 
-**`stamp_space: projected` means the project's map space, never the view's.**
-A projected stamp (§3.5, §7.2) is defined in equirectangular lon/lat degrees —
-the space the data grid is in — and the view then draws it like any other
-geometry. It has to be that way round: the space is frozen into the object at
-creation and reaches the exported GRIB, so binding it to the projection the map
-happened to be showing would make a document depend on a view setting, and a
-circle drawn under Mercator would change shape when someone opened the file
-flat. The visible consequence is that a projected stamp is a circle on the map
-only under equirectangular; under Mercator it draws taller the further from the
-equator, exactly as a lat/lon rectangle does. That is the same statement as
-"the projection is a view setting", seen from the other side.
+**Pixel tools capture the current projection at creation.** The original
+`Projected` value remains equirectangular for old documents. `Mercator` and
+`Miller` retain those projections explicitly, so a pixel brush is circular on
+the screen at every latitude when drawn. The stored geometry is geographic:
+subsequent zoom or projection changes display that same geometry and do not
+rewrite it or change an export. This replaces the earlier rule that always
+froze equirectangular geometry, which stretched pixel brushes in Mercator.
 
 **Not done, and why.** The pseudo-cylindrical projections (Mollweide, Robinson,
 Winkel Tripel) and the globe are *not* offered. They break all four cylindrical
@@ -1155,8 +1168,22 @@ anywhere in the UI.
 - **Direction** as instanced glyphs on a lattice anchored to the globe — points
   sit at whole-degree multiples chosen so their on-screen spacing stays near a
   target, and the step snaps to a fixed ladder so it changes only at discrete
-  zoom thresholds. Glyphs are generated in the shader by sampling the tile
-  texture, so glyph layout costs no CPU round-trip.
+  zoom thresholds. Where a narrow ring or stroke falls between those points,
+  half- and quarter-step sites fill gaps, with at least 80% of the ordinary
+  spacing between stations in screen space. Selection spans tile boundaries;
+  only covered sites qualify, so holes and erased regions remain empty. A
+  solid field keeps its ordinary lattice. Drawing previews use the same rule.
+  Coverage is retained as one bit per tile texel (8 KiB); station layouts are
+  cached by coverage and view, so changing vectors alone can reuse them.
+  Glyph geometry and vectors still come from the shader sampling the tile
+  texture, without a GPU readback or a field-evaluation round trip.
+
+  Arrow and barb density can be set independently in global Settings (§8.6).
+  Each style uses its own snapped step; sites are selected together, with the
+  minimum separation based on both styles at a boundary. A second bit per texel
+  records field kind for placement. Coverage and kind together use 16 KiB per
+  tile. Size, color, opacity, and shadow edits redraw immediately without
+  regenerating field tiles.
 
   A screen-anchored lattice was tried first and abandoned. Anchored per tile it
   leaves a gap of `tile width mod spacing` at every tile edge, which reads as
@@ -1169,8 +1196,8 @@ anywhere in the UI.
   chosen from the scale at the equator (§5.1).
 - **Two glyph styles ship in v1**, and the kind of field chooses between them
   (M30): a glyph switch in the title bar shows or hides them, and nothing
-  picks a style. A glyph is drawn at a fraction of the lattice spacing, but
-  never larger than its style's own target (M33) — the ladder of lattice
+  picks a style. A glyph's size is its style's target, adjustable in Settings
+  independently of density, and does not grow with zoom (M33) — the ladder of lattice
   steps is discrete, and zoomed in far enough a step is hundreds of pixels
   wide, which drew one barb across the whole of what it described.
   - **Arrows** — uniform instanced geometry, length optionally scaled by speed.
@@ -1195,7 +1222,7 @@ edge fades with its coverage. A layer above hides the layers beneath
 wherever it is defined and shows them wherever it is not — a defined wind
 cell and a defined current cell are never shown together, even where one
 of them is calm. Each cell's kind picks its glyph — wind is always a barb, a
-current always an arrow, on one lattice — and its colour scale, with a
+current always an arrow, at its style's lattice sites — and its colour scale, with a
 legend entry for each kind the project holds and the auto scale kept per
 kind. The readout reports the composite: the kind that wins the cell, or
 *no field*. The eyedropper, a region copy and a macro capture take the
@@ -1529,7 +1556,7 @@ built differently. A new tool gets them all, and the checklist below is what
 | Inherited | Rule | Where |
 |---|---|---|
 | Option bar | Spans the map view and wraps within it. A tool's options grow with the tool, and a bar that sizes to its contents puts the last ones off screen where they cannot be reached. Nothing else may occupy the map's top edge. | §5.5 |
-| Sizes in px | A size given in px selects `stamp_space: projected` and one in km selects `geodesic`, for **every** tool with a size. px means a shape on the map, at any latitude and zoom; km means one on the ground. One vocabulary, one property — and one control: the unit, never the space beside it. | §3.5 |
+| Sizes in px | A size given in px freezes the active projection in `stamp_space` and one in km selects `geodesic`, for **every** tool with a size. px means a shape on the map, at any latitude and zoom; km means one on the ground. One vocabulary, one property — and one control: the unit, never the space beside it. | §3.5 |
 | Gesture preview | Every gesture previews the field it will paint — speed colour and direction glyphs, not an outline — and the preview is held after release until the new revision's tiles are drawn. A tool that *operates* on the field rather than adding one is previewed by applying the operation to the map, live, and that too is held until the commit lands. | §6.1 |
 | Hover indicator | Where a tool has one, it is the exact footprint a click would produce, in the same colour and with the same glyph as the gesture preview. | §6.1 |
 | Chrome | Handles, markers and previews are drawn in the same frame as the map, and never overlap each other. | §5.5 |
@@ -1606,16 +1633,18 @@ swept capsule chain of the brush shape along that polyline.
 |---|---|---|
 | `brush_shape` | enum `Circle` \| `Square` | **Fixed at creation** (§6.1). The stamp swept along the polyline; the square is axis-aligned in the object's frame, so rotating the object turns it. |
 | `size_km` | f32 | Entered as px or km; stored km (§3.5). The disc's **diameter** and the square's **side**, so the two shapes agree across the flats and differ only at the corners. Measured north-south, which is the axis both stamp spaces share. |
-| `stamp_space` | enum `Geodesic` \| `Projected` | **Fixed at creation** (§6.1), being the stamp's geometry like `brush_shape`. Whether the stamp is a shape on the ground or a shape on the map (§3.5). **Not a control of its own**: the size's unit chooses it, km paints geodesic and px paints projected. Two strokes differing in it never merge — the footprints are different shapes. |
+| `stamp_space` | enum `Geodesic` \| `Projected` \| `Mercator` \| `Miller` | **Fixed at creation** (§6.1), being the stamp's geometry like `brush_shape`. Whether the stamp is a shape on the ground or a shape on the map (§3.5). **Not a control of its own**: the size's unit chooses it, km paints geodesic and px paints projected. Two strokes differing in it never merge — the footprints are different shapes. |
 | `speed` | f32 m/s | |
 | `direction_mode` | enum `Constant` \| `TowardPoint` \| `AwayFromPoint` | Step-interpolated. `AwayFromPoint` is the reciprocal of `TowardPoint` at every cell, so a field radiating out of a low and one converging on it are the same stroke with one option flipped. |
 | `direction` | Angle | Used when `Constant`. |
 | `target` | LonLat | Used by both aimed modes: each cell's azimuth is the initial great-circle bearing from that cell to the target, and `AwayFromPoint` adds 180° to it — the outward tangent to the same great circle. **Not** the bearing measured at the target: that differs from the reciprocal by the meridian convergence between the two points, which is tens of degrees for a distant target. Set three ways — typing coordinates, arming **Pick on map** and clicking, or dragging the marker itself. The marker is a handle and takes precedence over painting under it, on the same rule as §8.1's transform handles: without that, a placed target could never be adjusted on the map, only retyped or re-picked. |
+| `target_path` | enum `GreatCircle` \| `RhumbLine` | Shared by every target-mode tool. Great circle (default) uses the initial bearing at each cell; rhumb line uses its constant compass bearing to the target. Visible only in target modes. |
+| `target_angle` | signed degrees −180…180 | Clockwise offset relative to the selected toward/away direction, default 0°. Shared by every target-mode tool and hidden in constant/gradient modes. |
 | `feather` | f32 0–1 | Fraction of the radius over which speed falls to zero at the edge. |
 
 **No tool has `divergence` or `curl`** (§7.5). An object's direction mode is
-the whole of its direction; a field that converges as well as turns is built
-from more than one object.
+the whole of its direction. Circle stamps can tilt that direction inward or
+outward using their angle from the tangent.
 
 
 Hover: yes — outline of the brush footprint at the cursor, filled in the speed
@@ -1633,8 +1662,14 @@ Click to place; no drag.
 | `speed_min`, `speed_max` | f32 | `FilledGradient`: radial ramp, centre→edge. |
 | `rotation_sense` | enum `CW` \| `CCW` | Tangential flow direction. |
 | `diameter_km` | f32 | px or km input; stored km (§3.5). |
-| `stamp_space` | enum `Geodesic` \| `Projected` | **Fixed at creation**, and set by the diameter's unit rather than by a control of its own — px paints `projected`, a circle on the map at any latitude; km paints `geodesic`, a constant-radius cap that appears stretched near the poles. The unit governs the ring width too: one space per object means one unit per tool (§3.5). It was once `circle_space`, with its own `ScreenCircular`/`GeodesicCircular` vocabulary; one question deserves one name (§6.1). |
+| `stamp_space` | enum `Geodesic` \| `Projected` \| `Mercator` \| `Miller` | **Fixed at creation**, and set by the diameter's unit rather than by a control of its own — px paints `projected`, a circle on the map at any latitude; km paints `geodesic`, a constant-radius cap that appears stretched near the poles. The unit governs the ring width too: one space per object means one unit per tool (§3.5). It was once `circle_space`, with its own `ScreenCircular`/`GeodesicCircular` vocabulary; one question deserves one name (§6.1). |
 | `feather` | f32 0–1 | |
+
+The **Angle from tangent** property (`circle_angle`) ranges from −90° (toward
+the centre), through 0° (tangent, the default), to +90° (outward). Rotation
+sense chooses the tangent's direction; inward and outward retain the same
+meaning in both senses. Intermediate angles make spiralling flow while
+preserving the selected speed.
 
 Hover: yes — the disc a click would place, in the speed colour with its glyph.
 
@@ -1679,7 +1714,7 @@ carries an optional radius to say which of the two a given disc is.
 | Option | Type | Notes |
 |---|---|---|
 | `shape_source` | enum `Polygon` \| `Square` \| `Rectangle` \| `Circle` | **Fixed at creation**: it decides which geometry the object *is*. |
-| `stamp_space` | enum `Geodesic` \| `Projected` | **Fixed at creation**, and set by the tool's unit rather than by a control of its own. px gives a shape that keeps its proportions on the map, km one that keeps them on the ground. Read in all four modes, the freehand polygon included (M57): the space is the plane the shape is drawn in, which a ring of clicked vertices has as much as a dragged-out rectangle. Nothing here types a number, so the unit stands alone, labelled "Shape in" (§3.5). |
+| `stamp_space` | enum `Geodesic` \| `Projected` \| `Mercator` \| `Miller` | **Fixed at creation**, and set by the tool's unit rather than by a control of its own. px gives a shape that keeps its proportions on the map, km one that keeps them on the ground. Read in all four modes, the freehand polygon included (M57): the space is the plane the shape is drawn in, which a ring of clicked vertices has as much as a dragged-out rectangle. Nothing here types a number, so the unit stands alone, labelled "Shape in" (§3.5). |
 | `vector_mode` | enum `Constant` \| `Gradient` | |
 | `speed` | f32 | `Constant`. |
 | `speed_start`, `speed_end` | f32 | `Gradient`. |
@@ -1706,7 +1741,7 @@ which `invert` makes plain.
 |---|---|
 | `brush_shape` | enum `Circle` \| `Square` — **fixed at creation**, as on the brush |
 | `size_km` | f32 (px or km input) |
-| `stamp_space` | enum `Geodesic` \| `Projected` — **fixed at creation**; set by the size's unit, px selecting `projected`, as on the brush (§3.5) |
+| `stamp_space` | enum `Geodesic` \| `Projected` \| `Mercator` \| `Miller` — **fixed at creation**; set by the size's unit, px selecting `projected`, as on the brush (§3.5) |
 | `feather` | f32 0–1 — ramps *toward* 0 speed, i.e. blends back toward the underlying field's speed at the edge |
 | `invert` | bool — cover everything **except** the footprint |
 
@@ -1847,7 +1882,7 @@ this is the one tool whose evaluation has a single implementation.
 |---|---|---|
 | `brush_shape` | enum `Circle` \| `Square` | **Fixed at creation**, as on the brush. |
 | `size_km` | f32 | px or km input. |
-| `stamp_space` | enum `Geodesic` \| `Projected` | **Fixed at creation**; set by the size's unit, px selecting `projected` (§3.5). |
+| `stamp_space` | enum `Geodesic` \| `Projected` \| `Mercator` \| `Miller` | **Fixed at creation**; set by the size's unit, px selecting `projected` (§3.5). |
 | `source_point` | LonLat | Placeable by pointing, on the tool and on the object, like every position option (§6.1) — "a dedicated pick action" is that shared affordance, not a bespoke one. |
 | `offset_mode` | enum `Aligned` \| `Fixed` | `Aligned`: the source moves with the brush, preserving the offset the gesture began with, so a long stroke copies a correspondingly long band. `Fixed`: the source stays where it was put, so every stamp along the stroke reads the same neighbourhood of it and a long stroke repeats one patch. The displacement is measured from the object's anchor in the first case and from the nearest point of the stroke's own skeleton — the stamp centre for that cell — in the second. |
 | `feather` | f32 0–1 | |
@@ -1869,7 +1904,7 @@ A polyline or cubic-Bézier path with a vector field along it.
 | Option | Type | Notes |
 |---|---|---|
 | `curve_kind` | enum `Polyline` \| `Bezier` | **Fixed at creation.** A node's handles are what make a segment a Bézier, so the kind is implied by the geometry — but it is also what the *tool* was set to when the path was drawn, which is what the option bar has to remember. |
-| `stamp_space` | enum `Geodesic` \| `Projected` | **Fixed at creation**; set by the width's unit. The corridor has a width, so it asks the same question every sized tool asks (§3.5). |
+| `stamp_space` | enum `Geodesic` \| `Projected` \| `Mercator` \| `Miller` | **Fixed at creation**; set by the width's unit. The corridor has a width, so it asks the same question every sized tool asks (§3.5). |
 | `speed` | f32 | |
 | `direction_mode` | enum `Absolute` \| `RelativeToPath` | **Its own property**, not the shared `direction_mode`: a curve aims along its path, where the shared modes aim at a point. A tool may add modes of its own; it may not redefine a shared one. `Constant` is named for the fixed bearing every other tool calls by that name — it was `Absolute`, which meant the same thing in different words and made two option bars read as though they described different things. The variant is renamed in place, not reordered: the stored value is the index. |
 | `direction` | Angle | `Constant`: fixed bearing, a flow direction shown in the project's convention (§3.3). `RelativeToPath`: an *offset* added to the path's local tangent, so 0 = along the path and 90 = across it — an offset is not an azimuth and must not be converted. The two readings of one property are why it is displayed by mode, not by unit, and why the eyedropper (§6.1) is offered in `Constant` mode only. |
@@ -2126,22 +2161,19 @@ This single construction gives, for free:
 
 #### The projected frame
 
-An object whose `stamp_space` is `Projected` (§3.5) is defined on the map rather
-than on the ground, so its frame is map space:
+An object whose stamp space is `Projected`, `Mercator`, or `Miller` (§3.5)
+uses its saved projection's northing function `Y`:
 
 ```
-x = (normalize_lon(cell.lon - anchor.lon) · M_PER_DEGREE) / (scale_pct / 100)
-y = ((cell.lat - anchor.lat)              · M_PER_DEGREE) / (scale_pct / 100)
-        then rotated by rotation_deg, as above
+x = normalize_lon(cell.lon - anchor.lon) * M_PER_DEGREE / (scale_pct / 100)
+y = (Y(cell.lat) - Y(anchor.lat)) * M_PER_DEGREE / (scale_pct / 100)
+    then rotated by rotation_deg
 ```
 
-`M_PER_DEGREE` is metres per degree of *latitude*, derived from
-`EARTH_RADIUS_M`, so a local metre is north-equivalent: exact due north, and
-worth `cos(lat)` metres of ground due east. A circle in this frame is therefore
-a circle on an equirectangular map at every latitude, which is the whole point,
-and an ellipse on the ground. **Equirectangular, not whichever projection the
-view is showing**: the space is frozen into the object and reaches the export,
-so it cannot depend on a view setting (§5.1).
+`Y` returns projected degrees: latitude, Mercator northing, or Miller northing.
+The inverse frame uses the matching inverse projection. The CPU, GPU, outlines,
+creation gestures and eraser contours agree on this mapping. Saved legacy
+`Projected` objects retain their original equirectangular geometry.
 
 Everything downstream is unchanged. The SDFs (§7.3) are the same functions on
 the same numbers; feather is a fraction of the shape's own extent (§7.4), so it
@@ -2266,11 +2298,9 @@ the evaluator, and with it some of the `f32` disagreement between the kernels
 that removing the properties bought — bounded now to the modifier's own
 footprint, and measured in the fidelity suite like everything else.
 
-What this costs is the spiral. A radial component is what makes a low converge
-rather than merely turn, so a cyclone painted with the circle tool is a pure
-rotation and the inflow has to be built from other objects — a second, larger
-circle aimed at the centre, or a shape fill on `toward_point`. The aimed
-direction modes reach the same fields; they take more than one object to do it.
+The circle's angle from tangent now supplies inward or outward spiralling flow
+as part of its direction mode, without adding a second vector component or
+changing its speed.
 
 What it buys is that a direction is decided in exactly one place. The components
 were the last thing that could modify a vector after its mode had produced it,
@@ -2282,8 +2312,8 @@ The circle tool's `rotation_sense` was never sugar over curl and is unaffected.
 Curl *added* to a base direction, and the circle has no direction property of
 its own, so a curl-based rotation defaulted that base to north and produced a
 circle that drifted northward while it turned. Rotation is its own direction
-mode — flow tangential to the anchor at the object's `speed` — and now the only
-thing a circle does.
+mode — flow about the anchor at the object's `speed`, tilted from the tangent
+by `circle_angle` when requested.
 
 Removing a property from a tool is a migration, never only a table edit: a
 `PropertyMap` returns whatever it holds and falls back to the schema only when
@@ -2913,7 +2943,20 @@ because the GPU never evaluates one.
 
 ### 8.6 Settings and shortcuts
 
-`Cmd`-`,` opens a Settings dialog with three sections.
+`Cmd`-`,` opens the Settings dialog.
+
+**Arrows and wind barbs.** Separate controls, each with a visual sample, set
+size (25–300% of the standard glyph), line width (0.5–6 CSS px), color,
+opacity (0–100%), and density (25–300% of the standard number per area).
+Size and density are independent, and sizes remain consistent on Retina
+displays. Optional speed fading preserves the previous appearance by default;
+turning it off uses the chosen opacity at every speed. Drop shadows have an
+enable switch, color, opacity, and signed X/Y offsets (−12 to +12 CSS px).
+All shadows are drawn before glyph ink. The map and tool previews read the
+same preferences, and resetting one style leaves the other untouched.
+These are application preferences, saved across restarts without changing
+projects, invalidating field tiles, or changing the standard 5/10/50-knot
+encoding of wind barbs. Older preference files acquire defaults.
 
 **Shortcuts.** One bindings table, read by the palette's tooltips, the
 timeline's keys and the map's handlers alike — before it, each of those wired
@@ -3097,10 +3140,12 @@ selected whatever was under a box the user was not looking at.
 
 **Time.** Frame `f` is at macro time `f·Δt_m` and the object's step `s` at
 `(s − start)·Δt_p`. Equal steps map one to one; when they differ, the object's
-**resample** option decides. **Hold** shows the frame at or before the step's
-time — a macro is a thing the user *placed*, and it holds like a keyframe; §4.8's
+**Interpolation strategy** property decides. It appears only when project
+steps fall between recorded frames, and it cannot be animated. **Repeat Frames**
+(the default) shows the frame at or before the step's time — a macro is a thing the user *placed*, and it holds like a keyframe; §4.8's
 rule against holding a measurement forward is about a forecast, and this is not
-one. **Interpolate** blends the two nearest frames, `u` and `v` linearly and
+one. **Empty Frames** shows only recorded timestamps, leaving intermediate
+steps transparent so any field beneath remains visible. **Interpolate** blends the two nearest frames, `u` and `v` linearly and
 the displacement likewise, and is **undefined where either frame is**: half a
 field painted over what is beneath would be worse than none. Past the last
 frame there is nothing unless **loop** is set. Both are per object, because the
@@ -3456,7 +3501,7 @@ request in flight, the newest position waiting; nothing is stored by asking.
 
 | Mode | Behaviour |
 |---|---|
-| **Dividers** | Click a chain of points. Shows each segment's great-circle distance and initial bearing, plus a running total. The chain stays open until `Enter`, `Escape` or a tool change, so it is built click by click as the polygon is. Points are draggable. km and nm shown together. |
+| **Dividers** | Click a chain of points. Shows each segment's great-circle distance and initial bearing, plus a running total. The chain stays open until `Enter`, `Escape` or a tool change, so it is built click by click as the polygon is. Points are draggable. Distances use the global km/nm preference. |
 | **Great circle / rhumb line** | Pick two points; draws both paths simultaneously — the great circle solid, the rhumb dashed — labelled `GC` and `RL` with each distance, the great circle's *initial* bearing and the rhumb's constant one. |
 | **Range rings** | Pick a centre; draws N geodesic circles at a set interval, labelled. Interval and count are typed in the option bar and edit the set most recently placed or touched; the centre is a draggable handle. |
 
@@ -3545,8 +3590,8 @@ Section layout per message:
 | 3 | Grid definition, template 3.0 (regular lat/lon) | 72 |
 | 4 | Product definition, template 4.0 (analysis/forecast at a horizontal level) | 34 |
 | 5 | Data representation, template 5.0 (simple packing) | 21 |
-| 6 | Bitmap indicator 255 (no bitmap) | 6 |
-| 7 | Packed data | 5 + ⌈N·bits/8⌉ |
+| 6 | Bitmap indicator 0 and validity bits if any cells are undefined; otherwise 255 | 6 + optional ⌈grid points/8⌉ |
+| 7 | Packed defined values only | 5 + ⌈defined points·bits/8⌉ |
 | 8 | `7777` | 4 |
 
 Key field values:
@@ -3675,3 +3720,35 @@ their reasoning so they are not reopened by accident.
 | Q1 | Feather over existing data — fade to calm, or blend? | **`Blend` by default**, `Replace` available per object. The two are identical over calm areas, so the default only governs the case `Replace` handles badly. | §7.4 |
 | Q2 | Keyframes beyond a reduced `step_count`? | **Deleted, behind a confirmation** stating the exact count and affected objects. No invisible state. | §4.1 |
 | Q5 | Arrows or wind barbs? | **Both ship in v1**, switchable. Barbs are wind-only. The colour ramp always carries unquantised speed regardless. | §5.3 |
+
+
+### September 2026 beta behavior
+
+- Selected-object drag previews evaluate the selected objects themselves. They
+  never copy the rectangular region of the composited map. Selected edit tools
+  show their affected field within their own footprint, with later unselected
+  objects excluded.
+- Position tracks offer **Add constant motion**. The dialog asks for direction
+  toward true north and speed in the preferred unit. Motion starts at the
+  selected frame and ends at the next position key, or the object's final active
+  frame. Existing keys in that interval require confirmation before replacement.
+  Each frame gets a rhumb-line position at constant speed; keys outside the
+  interval survive. The operation is one undo and is unavailable on linked tracks.
+- Failed historical imports leave **Retry download** in the bottom error panel.
+  It reuses the requested archives and dates only when clicked. A different
+  project invalidates the retry action.
+- Recent projects whose paths no longer name files are hidden. Their saved
+  references remain available if a disconnected drive returns.
+- Before mounting the editor, the app checks the system's local date. Beginning
+  January 1, 2027, it displays only: “Thank you for beta testing VectorEffects!
+  The version you are using expired on January 1st, 2027. Please upgrade to use
+  the latest version.” Native commands also enforce the date and the screen
+  rechecks while the application remains open.
+- GRIB export uses coverage to distinguish undefined cells from painted calm.
+  Undefined cells have bitmap bits cleared and no packed u/v values. True zero
+  values remain defined. Entirely undefined messages are valid empty bitmaps.
+- **Help → VectorEffects Help** (F1) opens searchable help with bundled real app
+  screenshots. Text and images work offline; screenshots can be enlarged.
+- GitHub workflows build Intel Mac, ARM Mac, Windows x64 and Linux x64. Manual
+  runs retain artifacts; version tags prepare draft beta releases. See
+  `docs/github-release-plan.md` for credentials, signing and publication steps.

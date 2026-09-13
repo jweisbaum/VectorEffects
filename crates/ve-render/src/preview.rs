@@ -312,6 +312,7 @@ mod tests {
     fn disc_scene(speed: f64) -> Scene {
         let centre = tile().pixel_position(128, 128);
         Scene {
+            speed_ranges: Default::default(),
             rasters: Vec::new(),
             objects: vec![FlatObject {
                 erased: Vec::new(),
@@ -411,6 +412,7 @@ mod tests {
     fn a_smooth_gradient_interpolates_cleanly() {
         let centre = tile().pixel_position(128, 128);
         let scene = Scene {
+            speed_ranges: Default::default(),
             rasters: Vec::new(),
             objects: vec![FlatObject {
                 erased: Vec::new(),

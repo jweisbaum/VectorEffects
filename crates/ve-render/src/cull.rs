@@ -217,6 +217,7 @@ pub fn tile_scene(scene: &Scene, digests: &Digests, tile: TileId) -> TileScene {
 
     let mut hasher = blake3::Hasher::new();
     hasher.update(&EVALUATOR_VERSION.to_le_bytes());
+    crate::cache::hash_speed_ranges(&mut hasher, scene);
     hasher.update(&(count as u64).to_le_bytes());
     let mut objects = Vec::with_capacity(count);
     for (index, object) in scene.objects.iter().enumerate() {
@@ -232,6 +233,15 @@ pub fn tile_scene(scene: &Scene, digests: &Digests, tile: TileId) -> TileScene {
         .iter()
         .filter_map(|raster| {
             let mut kept = tile_raster(raster, tile, &bounds, centre, radius_m)?;
+            // Operators can raise the layer's final speed above any source
+            // node, so the source maximum cannot bound their output filter.
+            if scene
+                .objects
+                .iter()
+                .any(|object| object.layer == raster.layer)
+            {
+                kept.speed_range = raster.speed_range;
+            }
             kept.z = kept_before[raster.z.min(scene.objects.len())];
             Some(kept)
         })
@@ -243,7 +253,11 @@ pub fn tile_scene(scene: &Scene, digests: &Digests, tile: TileId) -> TileScene {
     }
 
     TileScene {
-        scene: Scene { objects, rasters },
+        scene: Scene {
+            objects,
+            rasters,
+            speed_ranges: scene.speed_ranges.clone(),
+        },
         hash: *hasher.finalize().as_bytes(),
     }
 }
@@ -298,6 +312,7 @@ mod tests {
     #[test]
     fn a_tiles_sub_scene_renders_as_the_whole_scene_does() {
         let scene = Scene {
+            speed_ranges: Default::default(),
             objects: vec![
                 disc(-5.0, 45.0, 600_000.0, 10.0, 0),
                 disc(150.0, -30.0, 900_000.0, 20.0, 0),
@@ -325,6 +340,7 @@ mod tests {
     #[test]
     fn a_distant_edit_leaves_the_key_alone_and_a_near_one_changes_it() {
         let mut scene = Scene {
+            speed_ranges: Default::default(),
             objects: vec![
                 disc(-5.0, 45.0, 600_000.0, 10.0, 0),
                 disc(150.0, -30.0, 900_000.0, 20.0, 0),
@@ -361,6 +377,7 @@ mod tests {
             ve_core::raster::RasterGrid::new(4, 3, -11.0, 56.0, 1.0, 1.0, vec![[1.0, 0.0]; 12])
                 .expect("valid grid");
         let scene = Scene {
+            speed_ranges: Default::default(),
             objects: vec![
                 disc(150.0, -30.0, 900_000.0, 20.0, 0),
                 inverted,
@@ -411,6 +428,7 @@ mod tests {
         let here = raster_of(-11.0, 50.0, &[5.0, 9.0], None);
         let elsewhere = raster_of(150.0, -30.0, &[5.0, 9.0], None);
         let scene = Scene {
+            speed_ranges: Default::default(),
             objects: Vec::new(),
             rasters: vec![here, elsewhere],
         };
@@ -438,6 +456,7 @@ mod tests {
     fn a_band_is_clamped_to_the_speeds_the_tile_holds() {
         let key = |band: Option<(f32, f32)>| {
             let scene = Scene {
+                speed_ranges: Default::default(),
                 objects: Vec::new(),
                 rasters: vec![raster_of(-11.0, 50.0, &[5.0, 9.0], band)],
             };
@@ -471,6 +490,7 @@ mod tests {
     #[test]
     fn an_erasure_is_kept_only_where_it_reaches() {
         let erasure = |lon: f64, lat: f64| crate::scene::FlatRasterErasure {
+            projection: 0,
             chains: vec![vec![LonLat::new(lon, lat).expect("valid")]],
             radius_m: 100_000.0,
             square: false,
@@ -480,6 +500,7 @@ mod tests {
         let mut raster = raster_of(-11.0, 50.0, &[5.0, 9.0], None);
         let keyed = |raster: &FlatRaster| {
             let scene = Scene {
+                speed_ranges: Default::default(),
                 objects: Vec::new(),
                 rasters: vec![raster.clone()],
             };

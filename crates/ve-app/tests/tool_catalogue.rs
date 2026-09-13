@@ -1779,3 +1779,122 @@ fn a_warp_stroke_pushes_from_its_first_point_to_its_last() {
     );
     assert!((named.lon - 50.0).abs() < 1e-9 && (named.lat - 2.0).abs() < 1e-9);
 }
+
+#[test]
+fn circle_tilt_points_inward_and_outward_in_both_rotation_senses() {
+    for sense in [0, 1] {
+        for (tilt, expected) in [
+            (-90.0, 180.0),
+            (0.0, if sense == 0 { 90.0 } else { 270.0 }),
+            (90.0, 0.0),
+        ] {
+            let (_root, state) = project("circle-tilt");
+            draw(
+                &state,
+                Tool::Circle,
+                Gesture::Point { at: [0.0, 0.0] },
+                vec![
+                    number(PropId::DiameterKm, 2000.0),
+                    number(PropId::Speed, 15.0),
+                    number(PropId::Feather, 0.0),
+                    pick(PropId::RotationSense, sense),
+                    number(PropId::CircleAngle, tilt),
+                ],
+            );
+            let (speed, bearing) = sample(&state, ll(0.0, 5.0));
+            assert!((speed - 15.0).abs() < 0.01);
+            assert!(((bearing - expected + 540.0) % 360.0 - 180.0).abs() < 0.01);
+        }
+    }
+}
+
+#[test]
+fn circle_tilt_uses_the_bearing_at_the_cell_at_high_latitude() {
+    let centre = ll(0.0, 65.0);
+    let point = ll(15.0, 70.0);
+    let inward = point.initial_bearing(centre).degrees();
+    for sense in [0, 1] {
+        for (tilt, expected) in [
+            (-90.0, inward),
+            (90.0, inward + 180.0),
+            (0.0, inward + if sense == 0 { 270.0 } else { 90.0 }),
+        ] {
+            let (_root, state) = project("circle-polar-tilt");
+            draw(
+                &state,
+                Tool::Circle,
+                Gesture::Point {
+                    at: [centre.lon, centre.lat],
+                },
+                vec![
+                    number(PropId::DiameterKm, 4000.0),
+                    number(PropId::Speed, 15.0),
+                    number(PropId::Feather, 0.0),
+                    pick(PropId::RotationSense, sense),
+                    number(PropId::CircleAngle, tilt),
+                ],
+            );
+            let (_, bearing) = sample(&state, point);
+            assert!(
+                ((bearing - expected + 540.0) % 360.0 - 180.0).abs() < 0.01,
+                "tilt {tilt}, sense {sense}: {bearing} vs {expected}"
+            );
+        }
+    }
+}
+
+#[test]
+fn all_target_tools_apply_route_choice_and_clockwise_offset() {
+    for tool in [Tool::Brush, Tool::ShapeFill] {
+        for path in [0, 1] {
+            for mode in [1, 2] {
+                let (_root, state) = project("target-route");
+                let gesture = if tool == Tool::Brush {
+                    Gesture::Stroke {
+                        points: vec![[0.0, 60.0]],
+                    }
+                } else {
+                    Gesture::Ring {
+                        points: vec![[-5.0, 55.0], [5.0, 55.0], [5.0, 65.0], [-5.0, 65.0]],
+                    }
+                };
+                draw(
+                    &state,
+                    tool,
+                    gesture,
+                    vec![
+                        number(PropId::Speed, 15.0),
+                        number(PropId::Feather, 0.0),
+                        pick(PropId::DirectionMode, mode),
+                        pick(PropId::TargetPath, path),
+                        number(PropId::TargetAngle, -30.0),
+                        at(PropId::Target, 90.0, 60.0),
+                    ],
+                );
+                let expected = if path == 1 {
+                    90.0
+                } else {
+                    ll(0.0, 60.0).initial_bearing(ll(90.0, 60.0)).degrees()
+                } - 30.0
+                    + if mode == 2 { 180.0 } else { 0.0 };
+                let (speed, bearing) = sample(&state, ll(0.0, 60.0));
+                assert!((speed - 15.0).abs() < 0.01);
+                assert!(
+                    ((bearing - expected + 540.0) % 360.0 - 180.0).abs() < 0.01,
+                    "{tool:?} path {path} mode {mode}: {bearing} vs {expected}"
+                );
+                let doc = document(&state);
+                let object = doc.layers[0].objects.last().expect("drawn object");
+                let properties =
+                    ve_app::document::properties(&state, object.id.raw(), 0).expect("properties");
+                for name in ["TargetPath", "TargetAngle"] {
+                    assert!(properties.iter().any(|p| p.id == name));
+                }
+                // New options and signed offsets survive a project round trip.
+                let decoded =
+                    ve_core::io::from_json(&ve_core::io::to_canonical_json(&doc).expect("encode"));
+                assert!(decoded.is_ok());
+            }
+        }
+    }
+}

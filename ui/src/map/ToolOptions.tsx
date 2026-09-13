@@ -19,7 +19,7 @@ import NumberField from "../NumberField";
 import type { PropertyValue } from "../generated/PropertyValue";
 import type { ToolOptionSpec } from "../generated/ToolOptionSpec";
 import type { ToolSchema } from "../generated/ToolSchema";
-import { knotsFromMps, mpsFromKnots } from "../project/format";
+import { useUnits } from "../settings/units";
 import type { Camera } from "./camera";
 import { releaseFocus } from "./focus";
 import { EYEDROPPER_ICON, IconSvg } from "./ToolIcon";
@@ -77,6 +77,7 @@ function ToolOptions({
   sampling: boolean;
   onSample: (on: boolean) => void;
 }) {
+  const units = useUnits();
   const set = (property: string, value: PropertyValue) =>
     onChange({ ...state, values: { ...state.values, [property]: value } });
 
@@ -147,7 +148,7 @@ function ToolOptions({
             }}
             title={DRAWN_UNIT_TITLE}
           >
-            <option value="km">km (on the ground)</option>
+            <option value="km">{units.distanceUnit} (on the ground)</option>
             <option value="px">px (on the map)</option>
           </select>
         </label>
@@ -169,7 +170,7 @@ function unitOf(value: string): SizeUnit {
  */
 const UNIT_TITLE =
   "A size in pixels paints a shape on the map — the same size on screen at any latitude. " +
-  "It resolves to kilometres when the object is created and never changes afterwards. " +
+  "Its ground size is fixed when the object is created. " +
   "One unit for the whole tool, because the space it selects is one property of the object.";
 
 /**
@@ -181,7 +182,7 @@ const UNIT_TITLE =
  */
 const DRAWN_UNIT_TITLE =
   "px draws the shape on the map: straight edges stay straight on the chart, at any latitude. " +
-  "km draws it on the ground, so it keeps its real proportions and bends with the projection. " +
+  "A ground distance draws it on the ground, so it keeps its real proportions and bends with the projection. " +
   "Fixed when the object is created and never changes afterwards.";
 
 function Option({
@@ -203,6 +204,7 @@ function Option({
   onValue: (value: PropertyValue) => void;
   onUnit: (unit: SizeUnit) => void;
 }) {
+  const units = useUnits();
   const value = state.values[spec.property] ?? spec.default;
 
   switch (value.kind) {
@@ -254,7 +256,7 @@ function Option({
             max={360}
             step={5}
             value={shown}
-            format={(v) => String(Math.round(v))}
+            format={(v) => String(Math.round(v * 100) / 100)}
             onCommit={(degrees) =>
               onValue({ kind: "angle", degrees: shownAngle(spec.unit, convention, degrees) })
             }
@@ -339,25 +341,27 @@ function Option({
         );
       }
 
-      // Speed is stored in m/s and always shown in knots (`ve_core::units`).
+      // Convert only at the editor boundary; the tool keeps canonical m/s.
       if (spec.unit === "speed") {
         return (
           <label>
             {spec.label}
             <NumberField
               min={0}
-              max={200}
+              max={spec.max === null ? null : units.speedFromMps(spec.max)}
               step={1}
-              value={knotsFromMps(value.value)}
-              format={(v) => String(Math.round(v))}
-              onCommit={(knots) => onValue({ kind: "number", value: mpsFromKnots(knots) })}
+              value={units.speedFromMps(value.value)}
+              format={(v) => String(Math.round(v * 100) / 100)}
+              onCommit={(speed) => onValue({ kind: "number", value: units.speedToMps(speed) })}
             />
-            kt
+            {units.speedUnit}
           </label>
         );
       }
 
       const size = spec.unit === "kilometres";
+      const ground = size && state.unit !== "px";
+      const shown = (v: number) => ground ? units.distanceFromKm(v) : v;
       return (
         <label>
           {spec.label}
@@ -368,12 +372,12 @@ function Option({
             (spec.md 6.3).
           */}
           <NumberField
-            min={spec.min ?? 1}
-            max={size && state.unit === "px" ? 2000 : spec.max}
-            step={size && state.unit === "px" ? 5 : 50}
-            value={value.value}
-            format={(v) => String(Math.round(v))}
-            onCommit={(next) => onValue({ kind: "number", value: next })}
+            min={shown(spec.min ?? 1)}
+            max={size && state.unit === "px" ? 2000 : spec.max === null ? null : shown(spec.max)}
+            step={size ? (state.unit === "px" ? 5 : 50) : 1}
+            value={shown(value.value)}
+            format={(v) => String(Math.round(v * 100) / 100)}
+            onCommit={(next) => onValue({ kind: "number", value: ground ? units.distanceToKm(next) : next })}
           />
           {size && showUnit && (
             <select
@@ -384,12 +388,12 @@ function Option({
             }}
               title={UNIT_TITLE}
             >
-              <option value="km">km</option>
+              <option value="km">{units.distanceUnit}</option>
               <option value="px">px</option>
             </select>
           )}
-          {size && !showUnit && state.unit}
-          {!size && spec.unit === "percent" && "%"}
+          {size && !showUnit && (ground ? units.distanceUnit : state.unit)}
+          {!size && units.suffix(spec.unit)}
         </label>
       );
     }

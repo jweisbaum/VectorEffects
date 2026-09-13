@@ -3,15 +3,15 @@
 /**
  * A previously opened project.
  */
-export type RecentProject = { 
+export type RecentProject = {
 /**
  * Full path.
  */
-path: string, 
+path: string,
 /**
  * File stem, for display.
  */
-name: string, 
+name: string,
 /**
  * Whether the file is still there.
  */

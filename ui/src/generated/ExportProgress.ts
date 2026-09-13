@@ -3,15 +3,15 @@
 /**
  * Progress, emitted as the `export://progress` event.
  */
-export type ExportProgress = { 
+export type ExportProgress = {
 /**
  * Steps completed.
  */
-step: number, 
+step: number,
 /**
  * Steps in total.
  */
-total: number, 
+total: number,
 /**
  * Bytes written so far.
  */

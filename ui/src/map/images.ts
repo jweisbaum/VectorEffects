@@ -86,7 +86,7 @@ export class ImageCache {
    */
   draws(
     token: number,
-    views: readonly ImageLayerView[],
+    views: readonly (ImageLayerView & { speedRange?: [number, number] | undefined })[],
     over: ReadonlySet<number> = new Set(),
   ): ImageDraw[] {
     const wanted = new Set<string>();
@@ -99,6 +99,7 @@ export class ImageCache {
         layer: view.layer,
         texture: this.texture(key),
         opacity: view.opacity,
+        speedRange: view.speedRange,
         over: over.has(view.layer),
         ...placeVectors(view),
       });

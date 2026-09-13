@@ -4,27 +4,27 @@ import type { EvaluatorSelection } from "./EvaluatorSelection";
 /**
  * Static facts about this build and installation.
  */
-export type AppInfo = { 
+export type AppInfo = {
 /**
  * Product name.
  */
-name: string, 
+name: string,
 /**
  * Semantic version of this build.
  */
-version: string, 
+version: string,
 /**
  * The active evaluator backend.
  */
-evaluator: EvaluatorSelection, 
+evaluator: EvaluatorSelection,
 /**
  * Where log files are written.
  */
-log_dir: string, 
+log_dir: string,
 /**
  * Where the evictable render cache lives. Safe to delete when closed.
  */
-cache_dir: string, 
+cache_dir: string,
 /**
  * Whether to capture the first rendered frame to the log directory.
  *

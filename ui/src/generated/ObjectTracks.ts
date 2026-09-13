@@ -4,23 +4,23 @@ import type { TrackView } from "./TrackView";
 /**
  * An object's tracks, for the timeline's tree.
  */
-export type ObjectTracks = { 
+export type ObjectTracks = {
 /**
  * Which object.
  */
-object: number, 
+object: number,
 /**
  * Its name.
  */
-name: string, 
+name: string,
 /**
  * First step of its lifetime.
  */
-start_step: number, 
+start_step: number,
 /**
  * Last step, inclusive.
  */
-end_step: number, 
+end_step: number,
 /**
  * Its editable properties, in schema order.
  */

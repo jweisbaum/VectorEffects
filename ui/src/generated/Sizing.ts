@@ -11,7 +11,7 @@ import type { OptionDependency } from "./OptionDependency";
  * this stands in its place — carrying the same dependency rules, so a control
  * the mode makes inert is still hidden.
  */
-export type Sizing = { 
+export type Sizing = {
 /**
  * What makes the unit inert, if anything.
  *

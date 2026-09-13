@@ -3,15 +3,15 @@
 /**
  * A centred slider's labelling (M29), as the schema declares it.
  */
-export type SliderView = { 
+export type SliderView = {
 /**
  * The label at the left end.
  */
-low_label: string, 
+low_label: string,
 /**
  * And at the right end.
  */
-high_label: string, 
+high_label: string,
 /**
  * Whether the stored value's positive end is the left one.
  */

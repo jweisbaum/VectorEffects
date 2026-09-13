@@ -3,15 +3,15 @@
 /**
  * One node of a drawn path, in geographic coordinates.
  */
-export type PathPoint = { 
+export type PathPoint = {
 /**
  * The on-curve point, as `[lon, lat]`.
  */
-at: [number, number], 
+at: [number, number],
 /**
  * Incoming control handle, if this node is a Bézier control.
  */
-in_handle?: [number, number], 
+in_handle?: [number, number],
 /**
  * Outgoing control handle, if this node is a Bézier control.
  */

@@ -31,6 +31,9 @@ pub struct ObjectSnapshot {
     pub props: Box<PropertyMap>,
     /// Its active range before the change.
     pub active_range: StepRange,
+    /// Perimeter animation before a timeline resize.
+    #[serde(default)]
+    pub shape_animation: Option<crate::shape_animation::ShapeAnimation>,
 }
 
 /// A reversible change to a project.
@@ -210,6 +213,15 @@ pub enum Command {
         after: Box<Geometry>,
     },
     /// Replaces where the eraser has been over an object (M29).
+    SetShapeAnimation {
+        /// Target object.
+        object: crate::id::Id,
+        /// Previous perimeter animation.
+        before: Option<crate::shape_animation::ShapeAnimation>,
+        /// New perimeter animation.
+        after: Option<crate::shape_animation::ShapeAnimation>,
+    },
+    /// Replaces an object's destructive cuts.
     SetErasures {
         /// Target object.
         object: crate::id::Id,
@@ -417,6 +429,7 @@ impl Command {
                 }
             }
             Self::SetActiveRange { .. } => "Change active range".into(),
+            Self::SetShapeAnimation { .. } => "Animate shape".into(),
             Self::SetGeometry { .. } => "Edit shape".into(),
             Self::SetErasures { .. } | Self::SetRasterErasures { .. } | Self::SetCapture { .. } => {
                 "Erase".into()
@@ -548,6 +561,10 @@ impl Command {
                 object_mut(project, *object)?.geometry = (**after).clone();
                 Ok(())
             }
+            Self::SetShapeAnimation { object, after, .. } => {
+                object_mut(project, *object)?.shape_animation = after.clone();
+                Ok(())
+            }
             Self::SetErasures { object, after, .. } => {
                 object_mut(project, *object)?.erased = after.clone();
                 Ok(())
@@ -609,11 +626,18 @@ impl Command {
                         .layers
                         .iter()
                         .flat_map(|l| l.objects.iter())
-                        .filter(|o| o.props.count_after(last) > 0 || o.active_range.end > last)
+                        .filter(|o| {
+                            o.props.count_after(last) > 0
+                                || o.shape_animation
+                                    .as_ref()
+                                    .is_some_and(|a| a.count_after(last) > 0)
+                                || o.active_range.end > last
+                        })
                         .map(|o| ObjectSnapshot {
                             object: o.id,
                             props: Box::new(o.props.clone()),
                             active_range: o.active_range,
+                            shape_animation: o.shape_animation.clone(),
                         })
                         .collect();
                 }
@@ -725,6 +749,10 @@ impl Command {
                 object_mut(project, *object)?.geometry = (**before).clone();
                 Ok(())
             }
+            Self::SetShapeAnimation { object, before, .. } => {
+                object_mut(project, *object)?.shape_animation = before.clone();
+                Ok(())
+            }
             Self::SetErasures { object, before, .. } => {
                 object_mut(project, *object)?.erased = before.clone();
                 Ok(())
@@ -784,6 +812,7 @@ impl Command {
                     if let Some(obj) = project.object_mut(snap.object) {
                         obj.props = (*snap.props).clone();
                         obj.active_range = snap.active_range;
+                        obj.shape_animation = snap.shape_animation.clone();
                     }
                 }
                 Ok(())
@@ -877,6 +906,32 @@ impl Command {
                 },
             ) if a == b => {
                 *after = *next_after;
+                true
+            }
+            (
+                Self::SetErasures {
+                    object: a, after, ..
+                },
+                Self::SetErasures {
+                    object: b,
+                    after: next,
+                    ..
+                },
+            ) if a == b => {
+                *after = next.clone();
+                true
+            }
+            (
+                Self::SetShapeAnimation {
+                    object: a, after, ..
+                },
+                Self::SetShapeAnimation {
+                    object: b,
+                    after: next,
+                    ..
+                },
+            ) if a == b => {
+                *after = next.clone();
                 true
             }
             (

@@ -3,31 +3,31 @@
 /**
  * One object, as the layer panel sees it.
  */
-export type ObjectNode = { 
+export type ObjectNode = {
 /**
  * Stable identity.
  */
-id: number, 
+id: number,
 /**
  * User-editable name.
  */
-name: string, 
+name: string,
 /**
  * Which tool made it, e.g. `"brush"`.
  */
-tool: string, 
+tool: string,
 /**
  * Display name of the tool.
  */
-tool_label: string, 
+tool_label: string,
 /**
  * Whether it contributes at the step being viewed.
  */
-active_here: boolean, 
+active_here: boolean,
 /**
  * First step of its lifetime, inclusive.
  */
-start_step: number, 
+start_step: number,
 /**
  * Last step of its lifetime, inclusive.
  */

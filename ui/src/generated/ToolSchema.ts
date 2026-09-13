@@ -9,23 +9,23 @@ import type { ToolOptionSpec } from "./ToolOptionSpec";
 /**
  * Everything the palette and the option bar need for one tool.
  */
-export type ToolSchema = { 
+export type ToolSchema = {
 /**
  * Which tool.
  */
-tool: Tool, 
+tool: Tool,
 /**
  * Display name.
  */
-label: string, 
+label: string,
 /**
  * Keyboard shortcut, a single lowercase letter.
  */
-shortcut: string, 
+shortcut: string,
 /**
  * How it is drawn.
  */
-gesture: GestureSelector, 
+gesture: GestureSelector,
 /**
  * Whether a click has a footprint worth previewing under the cursor.
  *
@@ -33,11 +33,11 @@ gesture: GestureSelector,
  * (spec.md 6.2): both are built up point by point, so a single click
  * produces nothing to show.
  */
-hover: boolean, 
+hover: boolean,
 /**
  * How a gesture with this tool previews itself.
  */
-preview: PreviewKind, 
+preview: PreviewKind,
 /**
  * The unit control, when the tool's shapes are measured at all.
  *
@@ -46,12 +46,12 @@ preview: PreviewKind,
  * but a drag is still a measurement and is still made either on the ground
  * or on the map.
  */
-sizing: Sizing | null, 
+sizing: Sizing | null,
 /**
  * Sampling the field for a constant speed and direction, where the tool
  * paints one.
  */
-eyedropper: EyedropperSpec | null, 
+eyedropper: EyedropperSpec | null,
 /**
  * Its options, in the order the bar should show them.
  */

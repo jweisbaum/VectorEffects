@@ -1658,8 +1658,20 @@ mod tests {
                 },
             }));
 
+        let mut animated = crate::shape_animation::ShapeAnimation::new(
+            vec![vec![
+                LocalPoint::new(HOSTILE[0], HOSTILE[1]),
+                LocalPoint::new(-HOSTILE[1], HOSTILE[0]),
+                LocalPoint::new(HOSTILE[1], -HOSTILE[0]),
+            ]],
+            HOSTILE[0],
+        );
+        animated.rings[0][0].set(3, LocalPoint::new(HOSTILE[1], HOSTILE[2]));
+        object.shape_animation = Some(animated);
+
         // An erasure's radius and its centreline reach the file (M29).
         object.erased.push(crate::document::Erasure {
+            contour: Vec::new(),
             chains: vec![vec![LocalPoint {
                 x: HOSTILE[1],
                 y: HOSTILE[0],
@@ -1722,6 +1734,7 @@ mod tests {
         project.layers[0]
             .erased
             .push(crate::document::RasterErasure {
+                projection: 0,
                 chains: vec![vec![LonLat {
                     lon: HOSTILE[2],
                     lat: 45.123_456_789_012_34,

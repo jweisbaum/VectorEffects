@@ -3,11 +3,11 @@
 /**
  * Progress, emitted as the `render://progress` event when a tile lands.
  */
-export type RenderProgress = { 
+export type RenderProgress = {
 /**
  * The revision being rendered.
  */
-revision: number, 
+revision: number,
 /**
  * The step the tile belongs to.
  */

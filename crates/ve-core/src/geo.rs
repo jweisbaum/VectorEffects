@@ -121,12 +121,40 @@ pub fn rhumb_distance_m(from: LonLat, to: LonLat) -> f64 {
 
 /// Constant bearing that follows the rhumb line to `other`.
 pub fn rhumb_bearing(from: LonLat, to: LonLat) -> Angle {
-    let (phi1, phi2) = (from.lat.to_radians(), to.lat.to_radians());
     let dlambda = normalize_lon(to.lon - from.lon).to_radians();
-    let dpsi = ((phi2 / 2.0 + std::f64::consts::FRAC_PI_4).tan()
-        / (phi1 / 2.0 + std::f64::consts::FRAC_PI_4).tan())
-    .ln();
+    let dpsi = isometric_lat(to.lat) - isometric_lat(from.lat);
     Angle::new(dlambda.atan2(dpsi).to_degrees())
+}
+
+/// Walk a constant true bearing and distance. A rhumb line cannot cross a pole.
+pub fn rhumb_destination(from: LonLat, bearing: Angle, distance_m: f64) -> Option<LonLat> {
+    if !distance_m.is_finite() || distance_m < 0.0 {
+        return None;
+    }
+    if distance_m == 0.0 {
+        return Some(from);
+    }
+    let phi1 = from.lat.to_radians();
+    let theta = bearing.degrees().to_radians();
+    let delta = distance_m / EARTH_RADIUS_M;
+    let dphi = delta * theta.cos();
+    let phi2 = phi1 + dphi;
+    if phi1.abs() >= std::f64::consts::FRAC_PI_2 || phi2.abs() >= std::f64::consts::FRAC_PI_2 {
+        return None;
+    }
+    let dpsi = ((std::f64::consts::FRAC_PI_4 + phi2 / 2.0).tan()
+        / (std::f64::consts::FRAC_PI_4 + phi1 / 2.0).tan())
+    .ln();
+    let q = if dpsi.abs() > 1e-12 {
+        dphi / dpsi
+    } else {
+        phi1.cos()
+    };
+    LonLat::new(
+        from.lon + (delta * theta.sin() / q).to_degrees(),
+        phi2.to_degrees(),
+    )
+    .ok()
 }
 
 /// Isometric latitude: the Mercator projection's stretched latitude.
@@ -136,7 +164,7 @@ pub fn rhumb_bearing(from: LonLat, to: LonLat) -> Angle {
 /// at the poles, so it is clamped there — a rhumb line reaching a pole spirals
 /// into it through infinitely many turns and has no last point to draw.
 fn isometric_lat(lat_deg: f64) -> f64 {
-    let phi = lat_deg.clamp(-89.999_999, 89.999_999).to_radians();
+    let phi = lat_deg.clamp(-89.9999, 89.9999).to_radians();
     (phi / 2.0 + std::f64::consts::FRAC_PI_4).tan().ln()
 }
 

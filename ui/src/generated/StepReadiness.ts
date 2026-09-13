@@ -3,15 +3,15 @@
 /**
  * How much of one step's viewport is cached.
  */
-export type StepReadiness = { 
+export type StepReadiness = {
 /**
  * Which step.
  */
-step: number, 
+step: number,
 /**
  * Tiles of the viewport already in the cache.
  */
-ready: number, 
+ready: number,
 /**
  * Tiles of the viewport.
  */

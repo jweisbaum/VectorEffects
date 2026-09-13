@@ -3,25 +3,25 @@
 /**
  * Settings for a project being created.
  */
-export type NewProjectRequest = { 
+export type NewProjectRequest = {
 /**
  * Display name.
  */
-name: string, 
+name: string,
 /**
  * The kind every layer starts as (M29): `"wind"` unless said otherwise.
  * The dialog no longer asks — a layer says which field it is part of —
  * so this is only the default a new layer takes.
  */
-field_kind: string, 
+field_kind: string,
 /**
  * One of `"1.0"`, `"0.5"`, `"0.25"`, `"0.1"`.
  */
-resolution: string, 
+resolution: string,
 /**
  * One of 1, 3, 6, 24.
  */
-step_hours: number, 
+step_hours: number,
 /**
  * Number of time steps.
  */

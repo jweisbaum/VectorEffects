@@ -30,7 +30,7 @@ export default function StartScreen({
   const [askClearRecent, setAskClearRecent] = useState(false);
 
   useEffect(() => {
-    api.recentProjects().then(setRecent).catch(() => setRecent([]));
+    api.recentProjects().then((entries) => setRecent(entries.filter((entry) => entry.exists))).catch(() => setRecent([]));
     api.autosaves().then(setAutosaves).catch(() => setAutosaves([]));
   }, []);
 

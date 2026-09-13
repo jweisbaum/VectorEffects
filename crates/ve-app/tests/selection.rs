@@ -110,6 +110,9 @@ fn outline_points(outline: &ve_app::transform::ObjectOutline) -> Vec<[f64; 2]> {
             chains.iter().flatten().copied().collect()
         }
         ve_app::transform::ObjectOutline::Ring { points } => points.clone(),
+        ve_app::transform::ObjectOutline::Contours { rings } => {
+            rings.iter().flatten().copied().collect()
+        }
     }
 }
 

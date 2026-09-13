@@ -40,11 +40,12 @@ pub type SceneHash = [u8; 32];
 /// served as this one's (spec.md 7.10). 2: divergence radiates from a
 /// stroke's centreline (M29). 3: layers are composited on their own and
 /// stacked by coverage, and a tile carries the coverage and the kind (M31).
-pub const EVALUATOR_VERSION: u32 = 3;
+pub const EVALUATOR_VERSION: u32 = 4;
 
 pub fn scene_hash(scene: &Scene) -> SceneHash {
     let mut hasher = blake3::Hasher::new();
     hasher.update(&EVALUATOR_VERSION.to_le_bytes());
+    hash_speed_ranges(&mut hasher, scene);
     hasher.update(&(scene.objects.len() as u64).to_le_bytes());
     for object in &scene.objects {
         hasher.update(&object_digest(object));
@@ -84,6 +85,7 @@ pub fn raster_digest(raster: &FlatRaster) -> [u8; 32] {
     // And what the eraser has taken from the lattice (M29).
     hasher.update(&(raster.erased.len() as u64).to_le_bytes());
     for erasure in &raster.erased {
+        hasher.update(&[u8::from(erasure.projected), erasure.projection]);
         hash_f64(&mut hasher, erasure.radius_m);
         hash_f64(&mut hasher, erasure.feather);
         hasher.update(&[u8::from(erasure.square)]);
@@ -105,6 +107,16 @@ pub fn raster_digest(raster: &FlatRaster) -> [u8; 32] {
         }
     };
     *hasher.finalize().as_bytes()
+}
+
+/// Include layer thresholds in full-scene and culled-tile cache keys.
+pub fn hash_speed_ranges(hasher: &mut blake3::Hasher, scene: &Scene) {
+    hasher.update(&(scene.speed_ranges.len() as u64).to_le_bytes());
+    for (layer, band) in &scene.speed_ranges {
+        hasher.update(&layer.to_le_bytes());
+        hasher.update(&band.min_mps.to_le_bytes());
+        hasher.update(&band.max_mps.to_le_bytes());
+    }
 }
 
 fn kind_byte(kind: ve_core::project::FieldKind) -> u8 {
@@ -133,6 +145,8 @@ fn hash_object(hasher: &mut blake3::Hasher, object: &FlatObject) {
     hasher.update(&[match object.frame.space {
         Space::Geodesic => 0,
         Space::Projected => 1,
+        Space::Mercator => 2,
+        Space::Miller => 3,
     }]);
     hash_f64(hasher, object.cap_radius_m);
     hash_f64(hasher, object.feather);
@@ -168,54 +182,7 @@ fn hash_object(hasher: &mut blake3::Hasher, object: &FlatObject) {
         }
     }
 
-    match &object.shape {
-        Shape::Capsule { chains, radius_m } => {
-            hasher.update(&[0]);
-            hash_f64(hasher, *radius_m);
-            hasher.update(&(chains.len() as u64).to_le_bytes());
-            for chain in chains {
-                hash_points(hasher, chain);
-            }
-        }
-        Shape::Disc { radius_m } => {
-            hasher.update(&[1]);
-            hash_f64(hasher, *radius_m);
-        }
-        Shape::Annulus {
-            radius_m,
-            half_width_m,
-        } => {
-            hasher.update(&[2]);
-            hash_f64(hasher, *radius_m);
-            hash_f64(hasher, *half_width_m);
-        }
-        Shape::Rect {
-            half_width_m,
-            half_height_m,
-        } => {
-            hasher.update(&[3]);
-            hash_f64(hasher, *half_width_m);
-            hash_f64(hasher, *half_height_m);
-        }
-        Shape::Polygon { ring } => {
-            hasher.update(&[4]);
-            hash_points(hasher, ring);
-        }
-        // A distinct tag, not a reuse of the capsule's: a round and a square
-        // stroke over the same chains look different, so they must not share a
-        // cache entry.
-        Shape::SweptSquare {
-            chains,
-            half_size_m,
-        } => {
-            hasher.update(&[5]);
-            hash_f64(hasher, *half_size_m);
-            hasher.update(&(chains.len() as u64).to_le_bytes());
-            for chain in chains {
-                hash_points(hasher, chain);
-            }
-        }
-    }
+    hash_shape(hasher, &object.shape);
 
     match object.speed {
         SpeedMode::Constant(speed) => {
@@ -244,15 +211,15 @@ fn hash_object(hasher: &mut blake3::Hasher, object: &FlatObject) {
             hasher.update(&[0]);
             hash_f64(hasher, bearing.degrees());
         }
-        DirectionMode::Toward(target) => {
-            hasher.update(&[1]);
+        DirectionMode::Target {
+            target,
+            rhumb,
+            offset,
+        } => {
+            hasher.update(&[1, u8::from(*rhumb)]);
             hash_f64(hasher, target.lon);
             hash_f64(hasher, target.lat);
-        }
-        DirectionMode::Away(target) => {
-            hasher.update(&[5]);
-            hash_f64(hasher, target.lon);
-            hash_f64(hasher, target.lat);
+            hash_f64(hasher, *offset);
         }
         DirectionMode::Axis { start, end } => {
             hasher.update(&[2]);
@@ -263,9 +230,10 @@ fn hash_object(hasher: &mut blake3::Hasher, object: &FlatObject) {
             hasher.update(&[3]);
             hash_f64(hasher, offset.degrees());
         }
-        DirectionMode::Tangential { clockwise } => {
+        DirectionMode::Tangential { clockwise, angle } => {
             hasher.update(&[4]);
             hasher.update(&[u8::from(*clockwise)]);
+            hash_f64(hasher, *angle);
         }
     }
 
@@ -668,6 +636,65 @@ fn write_atomically(path: &Path, bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
+fn hash_shape(hasher: &mut blake3::Hasher, shape: &Shape) {
+    match shape {
+        Shape::Capsule { chains, radius_m } => {
+            hasher.update(&[0]);
+            hash_f64(hasher, *radius_m);
+            hasher.update(&(chains.len() as u64).to_le_bytes());
+            for chain in chains {
+                hash_points(hasher, chain);
+            }
+        }
+        Shape::Disc { radius_m } => {
+            hasher.update(&[1]);
+            hash_f64(hasher, *radius_m);
+        }
+        Shape::Annulus {
+            radius_m,
+            half_width_m,
+        } => {
+            hasher.update(&[2]);
+            hash_f64(hasher, *radius_m);
+            hash_f64(hasher, *half_width_m);
+        }
+        Shape::Rect {
+            half_width_m,
+            half_height_m,
+        } => {
+            hasher.update(&[3]);
+            hash_f64(hasher, *half_width_m);
+            hash_f64(hasher, *half_height_m);
+        }
+        Shape::Contours { rings, source } => {
+            hasher.update(&[6]);
+            hasher.update(&(rings.len() as u64).to_le_bytes());
+            for ring in rings {
+                hash_points(hasher, ring);
+            }
+            hash_shape(hasher, source);
+        }
+        Shape::Polygon { ring } => {
+            hasher.update(&[4]);
+            hash_points(hasher, ring);
+        }
+        // A distinct tag, not a reuse of the capsule's: a round and a square
+        // stroke over the same chains look different, so they must not share a
+        // cache entry.
+        Shape::SweptSquare {
+            chains,
+            half_size_m,
+        } => {
+            hasher.update(&[5]);
+            hash_f64(hasher, *half_size_m);
+            hasher.update(&(chains.len() as u64).to_le_bytes());
+            for chain in chains {
+                hash_points(hasher, chain);
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -747,10 +774,12 @@ mod tests {
     #[test]
     fn an_identical_scene_hashes_identically() {
         let a = Scene {
+            speed_ranges: Default::default(),
             rasters: Vec::new(),
             objects: vec![object(10.0)],
         };
         let b = Scene {
+            speed_ranges: Default::default(),
             rasters: Vec::new(),
             objects: vec![object(10.0)],
         };
@@ -776,6 +805,7 @@ mod tests {
     #[test]
     fn an_imported_field_keys_the_frame() {
         let base = Scene {
+            speed_ranges: Default::default(),
             rasters: vec![raster(0, 5.0)],
             objects: vec![object(10.0)],
         };
@@ -783,6 +813,7 @@ mod tests {
         assert_ne!(
             original,
             scene_hash(&Scene {
+                speed_ranges: Default::default(),
                 rasters: Vec::new(),
                 objects: vec![object(10.0)],
             }),
@@ -791,6 +822,7 @@ mod tests {
         assert_eq!(
             original,
             scene_hash(&Scene {
+                speed_ranges: Default::default(),
                 rasters: vec![raster(0, 5.0)],
                 objects: vec![object(10.0)],
             }),
@@ -799,6 +831,7 @@ mod tests {
         assert_ne!(
             original,
             scene_hash(&Scene {
+                speed_ranges: Default::default(),
                 rasters: vec![raster(0, 6.0)],
                 objects: vec![object(10.0)],
             }),
@@ -807,6 +840,7 @@ mod tests {
         assert_ne!(
             original,
             scene_hash(&Scene {
+                speed_ranges: Default::default(),
                 rasters: vec![raster(1, 5.0)],
                 objects: vec![object(10.0)],
             }),
@@ -819,6 +853,7 @@ mod tests {
     #[test]
     fn any_visible_change_changes_the_hash() {
         let base = Scene {
+            speed_ranges: Default::default(),
             rasters: Vec::new(),
             objects: vec![object(10.0)],
         };
@@ -884,6 +919,7 @@ mod tests {
     #[test]
     fn the_offset_mode_alone_does_not_change_a_hash() {
         let base = Scene {
+            speed_ranges: Default::default(),
             rasters: Vec::new(),
             objects: vec![object(10.0)],
         };
@@ -896,10 +932,12 @@ mod tests {
     #[test]
     fn reordering_objects_changes_the_hash() {
         let a = Scene {
+            speed_ranges: Default::default(),
             rasters: Vec::new(),
             objects: vec![object(10.0), object(20.0)],
         };
         let b = Scene {
+            speed_ranges: Default::default(),
             rasters: Vec::new(),
             objects: vec![object(20.0), object(10.0)],
         };
@@ -909,6 +947,7 @@ mod tests {
     #[test]
     fn different_tiles_and_qualities_are_different_entries() {
         let scene = Scene {
+            speed_ranges: Default::default(),
             rasters: Vec::new(),
             objects: vec![object(10.0)],
         };
@@ -934,6 +973,7 @@ mod tests {
         let temp = TempCache::new("contains", 1 << 20);
         let cache = &temp.cache;
         let key = key(&Scene {
+            speed_ranges: Default::default(),
             rasters: Vec::new(),
             objects: vec![object(10.0)],
         });
@@ -951,6 +991,7 @@ mod tests {
     fn a_stored_tile_comes_back() {
         let temp = TempCache::new("roundtrip", DEFAULT_CAPACITY_BYTES);
         let scene = Scene {
+            speed_ranges: Default::default(),
             rasters: Vec::new(),
             objects: vec![object(10.0)],
         };
@@ -967,12 +1008,14 @@ mod tests {
     fn an_edited_scene_misses() {
         let temp = TempCache::new("miss", DEFAULT_CAPACITY_BYTES);
         let scene = Scene {
+            speed_ranges: Default::default(),
             rasters: Vec::new(),
             objects: vec![object(10.0)],
         };
         temp.cache.put(&key(&scene), &[9; 16]).expect("stores");
 
         let edited = Scene {
+            speed_ranges: Default::default(),
             rasters: Vec::new(),
             objects: vec![object(12.0)],
         };
@@ -1014,6 +1057,7 @@ mod tests {
     fn a_restart_adopts_what_is_already_there() {
         let temp = TempCache::new("restart", DEFAULT_CAPACITY_BYTES);
         let scene = Scene {
+            speed_ranges: Default::default(),
             rasters: Vec::new(),
             objects: vec![object(10.0)],
         };
@@ -1029,6 +1073,7 @@ mod tests {
     fn clearing_leaves_nothing_behind() {
         let temp = TempCache::new("clear", DEFAULT_CAPACITY_BYTES);
         let scene = Scene {
+            speed_ranges: Default::default(),
             rasters: Vec::new(),
             objects: vec![object(10.0)],
         };
@@ -1045,6 +1090,7 @@ mod tests {
     fn a_vanished_file_is_forgotten() {
         let temp = TempCache::new("vanish", DEFAULT_CAPACITY_BYTES);
         let scene = Scene {
+            speed_ranges: Default::default(),
             rasters: Vec::new(),
             objects: vec![object(10.0)],
         };
@@ -1066,6 +1112,7 @@ mod tests {
         assert_ne!(
             scene_hash(&Scene::default()),
             scene_hash(&Scene {
+                speed_ranges: Default::default(),
                 rasters: Vec::new(),
                 objects: vec![object(1.0)]
             })

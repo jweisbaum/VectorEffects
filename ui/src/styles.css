@@ -989,28 +989,24 @@ body {
   gap: 3px;
   padding: 5px 8px;
   font-size: 12px;
-  /* WebKit starts a drag from an element only when told it is one; without
-     this a row with no selectable text had nothing to pick up (M29). */
-  -webkit-user-drag: element;
+  cursor: grab;
 }
 .layer-header .name { font-weight: 600; cursor: grab; }
 /* The grip: a place that is plainly for picking the row up. */
 .layer-header .grip,
 .object .grip { color: var(--muted); opacity: 0.55; cursor: grab; letter-spacing: -2px; font-size: 11px; }
 .layer-header:active .grip, .object:active .grip { cursor: grabbing; }
-/* A layer drop lands above or below the row the pointer is over: a line on
-   that edge says which (M29). */
-.layer-header.drop-above { box-shadow: inset 0 2px 0 0 var(--accent); }
-.layer-header.drop-below { box-shadow: inset 0 -2px 0 0 var(--accent); }
+/* Layer and object drops show the insertion edge of the target row. */
+.layer-header.drop-above,
+.object.drop-above { box-shadow: inset 0 2px 0 0 var(--accent); }
+.layer-header.drop-below,
+.object.drop-below { box-shadow: inset 0 -2px 0 0 var(--accent); }
 .layer-header.drop-into { outline: 1px dashed var(--accent); outline-offset: -1px; }
 /* The active layer receives new objects and scopes a plain marquee, so it has
    to be visible at a glance rather than inferred from the selection. */
 .layer-header.active { background: #16263d; border-left: 2px solid var(--accent); }
 .layer-header.active .name { color: var(--accent); }
 
-/* Reordering feedback: the row a drop would land on. */
-.layer-header.drop-target,
-.object.drop-target { outline: 1px dashed var(--accent); outline-offset: -1px; }
 .layer-header input,
 .object input {
   background: #0f1a2c;
@@ -1027,7 +1023,12 @@ body {
 /* A shift-click builds a selection of rows, and the browser would otherwise
    build a selection of *text* across them at the same time. */
 .object,
-.layer-header { user-select: none; }
+.layer-header {
+  user-select: none;
+  /* Reordering uses pointer events. A native WebKit drag cancels them. */
+  -webkit-user-drag: none;
+  touch-action: none;
+}
 .object input,
 .layer-header input { user-select: text; }
 .object {
@@ -1036,9 +1037,8 @@ body {
   gap: 6px;
   padding: 3px 8px 3px 4px;
   font-size: 12px;
-  cursor: pointer;
+  cursor: grab;
   border-left: 2px solid transparent;
-  -webkit-user-drag: element;
 }
 .object:hover { background: #141f34; }
 .object.selected {
@@ -1049,8 +1049,11 @@ body {
 .object.empty { cursor: default; font-style: italic; }
 .object .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .object .tool { font-size: 10px; }
-.object[draggable="true"], .layer-header[draggable="true"] { cursor: grab; }
-.object[draggable="true"]:active, .layer-header[draggable="true"]:active { cursor: grabbing; }
+.layer-header.reordering, .object.reordering { opacity: 0.5; }
+.layer-panel.reordering .layer-header,
+.layer-panel.reordering .layer-header .name,
+.layer-panel.reordering .grip,
+.layer-panel.reordering .object { cursor: grabbing; }
 
 /* --- Inspector --------------------------------------------------------- */
 
@@ -1634,3 +1637,44 @@ body {
   padding: 2px 6px;
 }
 .modal-error { color: #ff8fb0; margin: 0 0 8px; }
+
+/* Shape controls are an explicit timeline mode, separate from selection. */
+.tl-shape-toggle { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 24px; padding: 2px; border: 0; background: transparent; color: var(--muted); cursor: pointer; }
+.tl-shape-toggle:hover, .tl-shape-toggle.on { color: #ffd666; background: #ffd66618; }
+.tl-shape-toggle:disabled { opacity: .35; cursor: default; }
+
+.shape-edit-hint { position: absolute; bottom: 36px; left: 50%; transform: translateX(-50%); padding: 6px 10px; border-radius: 4px; background: #1c2638ed; color: #ffd666; font-size: 12px; pointer-events: none; white-space: nowrap; }
+
+/* Independent direction-glyph appearance preferences and their live samples. */
+.glyph-settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.modal .glyph-settings-card { min-width: 0; margin: 0; padding: 12px; border: 1px solid var(--border); border-radius: 6px; }
+.glyph-settings-card legend { padding: 0 6px; font-weight: 600; }
+.glyph-sample { display: block; width: 100%; margin-bottom: 10px; background: #0b1422; border-radius: 4px; }
+.modal .glyph-field { display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 8px; margin: 8px 0; font-size: 12px; }
+.glyph-field input { width: 70px; min-width: 0; }
+.glyph-field input[type="color"] { height: 28px; padding: 2px; cursor: pointer; }
+.modal .glyph-check { display: flex; flex-direction: row; align-items: center; gap: 6px; margin: 10px 0; font-size: 12px; }
+.glyph-check input[type="checkbox"] { width: auto; }
+.glyph-shadow-settings { padding: 2px 0 4px; border-top: 1px solid var(--border); }
+@media (max-width: 560px) { .glyph-settings-grid { grid-template-columns: 1fr; } }
+.beta-gate { display: grid; place-items: center; min-height: 100vh; padding: 48px; background: #111820; color: #ecf0f4; }
+.beta-gate > div { max-width: 600px; font-size: 18px; line-height: 1.65; }
+.statusbar .hint.has-retry { display: flex; align-items: center; min-width: 145px; gap: 8px; }
+.hint-message { overflow: hidden; text-overflow: ellipsis; }
+.status-retry { flex: 0 0 auto; padding: 2px 8px; }
+.help-dialog { width: min(1180px, 94vw); height: 88vh; display: flex; flex-direction: column; background: #18212c; color: #e5eaf0; border: 1px solid #475361; border-radius: 10px; box-shadow: 0 18px 70px #0009; }
+.help-dialog header { display: flex; align-items: center; justify-content: space-between; padding: 12px 22px; border-bottom: 1px solid #374352; }
+.help-dialog h2 { margin: 0; font-size: 20px; }
+.help-body { display: grid; grid-template-columns: 235px minmax(0, 1fr); min-height: 0; flex: 1; }
+.help-body nav { padding: 18px 12px; overflow-y: auto; border-right: 1px solid #374352; display: flex; flex-direction: column; gap: 7px; }
+.help-body nav input { width: 100%; box-sizing: border-box; margin-bottom: 12px; }
+.help-body nav button { text-align: left; white-space: normal; padding: 10px; }
+.help-body nav button[aria-current] { border-color: #7fcdbd; color: #b0e8d8; }
+.help-body article { overflow: auto; padding: 12px 28px 28px; font-size: 15px; line-height: 1.65; user-select: text; }
+.help-body article h3 { font-size: 23px; margin-bottom: 16px; }
+.help-body li { margin-bottom: 10px; }
+.help-body figure { margin: 24px 0 0; }
+.help-screenshot { display: block; padding: 0; width: 100%; overflow: auto; cursor: zoom-in; }
+.help-screenshot img { display: block; width: 100%; height: auto; }
+.help-screenshot img.zoomed { width: auto; max-width: none; cursor: zoom-out; }
+.help-body figcaption { font-size: 12px; color: #aab8c7; margin-top: 8px; }

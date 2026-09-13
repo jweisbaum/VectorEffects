@@ -11,7 +11,7 @@ import type { PropertyValue } from "../generated/PropertyValue";
 import type { PropertyView } from "../generated/PropertyView";
 import { KIND_LABELS, kindOf } from "../kind";
 import { formatUtcHour } from "./historyRange";
-import { knotsFromMps, mpsFromKnots } from "../project/format";
+import { useUnits } from "../settings/units";
 import type { PositionPick } from "../picking";
 import { toShownAngle } from "./inspectorAngle";
 
@@ -101,32 +101,6 @@ function LayerFacts({ layer }: { layer: LayerNode | null }) {
   );
 }
 
-/** Suffix shown after a property's editor. */
-function unitLabel(unit: string): string {
-  switch (unit) {
-    case "speed":
-      return "kt";
-    case "kilometres":
-      return "km";
-    case "degrees":
-      return "°";
-    case "percent":
-      return "%";
-    default:
-      return "";
-  }
-}
-
-/** Converts a stored number into the one shown. */
-function toDisplay(unit: string, value: number): number {
-  return unit === "speed" ? knotsFromMps(value) : value;
-}
-
-/** Converts an entered number back into the stored one. */
-function toStored(unit: string, value: number): number {
-  return unit === "speed" ? mpsFromKnots(value) : value;
-}
-
 /** Rounds for display without hiding meaningful precision. */
 function tidy(value: number): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(2);
@@ -161,6 +135,7 @@ export default function Inspector({
   onPick: (pick: PositionPick | null) => void;
   onChanged: (project: ProjectSummary) => void;
 }) {
+  const { toDisplay, toStored, suffix: unitLabel } = useUnits();
   // Editing shows one object's values. A multi-selection is transformed on the
   // map rather than edited field by field, and showing one member's numbers as
   // though they applied to all of them would be a lie.

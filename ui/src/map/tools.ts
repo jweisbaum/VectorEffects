@@ -24,6 +24,7 @@ import { type Camera, type Viewport, normalizeLon, project, projectionFor } from
 import { OP_POINTS, type OperatorPreview } from "./renderer";
 import {
   cosLat,
+  stampProjection,
   type Footprint,
   KM_PER_DEGREE,
   kmFromPixels,
@@ -243,8 +244,10 @@ export function sampled(
  * just a conversion (spec.md 3.5). This is the whole of the rule, in one place,
  * for every tool that has a size.
  */
-export function spaceFor(unit: SizeUnit): StampSpace {
-  return unit === "px" ? "projected" : "geodesic";
+export function spaceFor(unit: SizeUnit, camera?: Camera): StampSpace {
+  if (unit !== "px") return "geodesic";
+  const projection = camera ? projectionFor(camera).id : "equirectangular";
+  return projection === "equirectangular" ? "projected" : projection;
 }
 
 /**
@@ -266,7 +269,7 @@ export function eraserStamp(
   camera: Camera,
   lat: number,
 ): { radiusKm: number; space: StampSpace } {
-  const space = spaceFor(brush.unit);
+  const space = spaceFor(brush.unit, camera);
   const diameterKm =
     brush.unit === "px" ? kmFromPixels(camera, lat, brush.size, space) : brush.size;
   return { radiusKm: diameterKm / 2, space };
@@ -287,7 +290,7 @@ export function sizeKm(
 ): number {
   const amount = numberOf(state.values, property);
   if (state.unit === "km") return amount;
-  return kmFromPixels(camera, lat, amount, spaceFor(state.unit));
+  return kmFromPixels(camera, lat, amount, spaceFor(state.unit, camera));
 }
 
 /**
@@ -366,7 +369,7 @@ export function frozenOptions(
         property: spec.property,
         value: {
           kind: "number",
-          value: Math.max(1, sizeKm(state, spec.property, camera, lat)),
+          value: Math.max(0.001, sizeKm(state, spec.property, camera, lat)),
         },
       });
       continue;
@@ -383,10 +386,10 @@ export function frozenOptions(
   // Sent even where the mode makes it inert — a polygon's, say. Hidden is not
   // deleted, and the object still carries the property at a known value.
   if (schema.sizing) {
-    const space = spaceFor(state.unit);
+    const space = spaceFor(state.unit, camera);
     options.push({
       property: "StampSpace",
-      value: { kind: "choice", index: space === "projected" ? 1 : 0 },
+      value: { kind: "choice", index: ["geodesic", "projected", "mercator", "miller"].indexOf(space) },
     });
   }
   return options;
@@ -428,7 +431,7 @@ export function footprintOf(
   gesture: Gesture,
   camera: Camera,
 ): Footprint | null {
-  const space = spaceFor(state.unit);
+  const space = spaceFor(state.unit, camera);
   const size = (property: string, lat: number) => sizeKm(state, property, camera, lat);
 
   switch (gesture.kind) {
@@ -551,11 +554,12 @@ export function extentOf(
   rim: readonly [number, number],
   space: StampSpace,
 ): { halfWidthKm: number; halfHeightKm: number } {
-  const dLat = rim[1] - centre[1];
+  const projection = stampProjection(space);
+  const dLat = projection.yOf(rim[1]) - projection.yOf(centre[1]);
   let dLon = rim[0] - centre[0];
   // The shorter way round, so a drag across the dateline stays a drag.
   dLon = ((dLon + 540) % 360) - 180;
-  const scale = space === "projected" ? 1 : cosLat(centre[1]);
+  const scale = space !== "geodesic" ? 1 : cosLat(centre[1]);
   return {
     halfWidthKm: Math.abs(dLon) * KM_PER_DEGREE * scale,
     halfHeightKm: Math.abs(dLat) * KM_PER_DEGREE,
@@ -585,10 +589,12 @@ export function perimeterExtent(
   source: "square" | "rect" | "circle",
   space: StampSpace,
 ): { centre: [number, number]; halfWidthKm: number; halfHeightKm: number } {
-  const dLat = release[1] - press[1];
+  const projection = stampProjection(space);
+  const y = projection.yOf(press[1]);
+  const dLat = projection.yOf(release[1]) - y;
   // The shorter way round, so a drag across the dateline stays a drag.
   const dLon = ((release[0] - press[0] + 540) % 360) - 180;
-  const scale = space === "projected" ? 1 : cosLat(press[1]);
+  const scale = space !== "geodesic" ? 1 : cosLat(press[1]);
   const acrossKm = Math.abs(dLon) * KM_PER_DEGREE * scale;
   const downKm = Math.abs(dLat) * KM_PER_DEGREE;
 
@@ -600,14 +606,14 @@ export function perimeterExtent(
     return {
       centre: [
         press[0] + (Math.sign(dLon) || 1) * (lonSide / 2),
-        press[1] + (Math.sign(dLat) || 1) * (latSide / 2),
+        projection.latOf(y + (Math.sign(dLat) || 1) * (latSide / 2)),
       ],
       halfWidthKm: side / 2,
       halfHeightKm: side / 2,
     };
   }
   return {
-    centre: [press[0] + dLon / 2, press[1] + dLat / 2],
+    centre: [press[0] + dLon / 2, projection.latOf(y + dLat / 2)],
     halfWidthKm: acrossKm / 2,
     halfHeightKm: downKm / 2,
   };
@@ -719,6 +725,13 @@ function bearingTo(
   return (Math.atan2(y, x) / toRad + 360) % 360;
 }
 
+/** Constant compass bearing along the shortest rhumb line to the target. */
+function rhumbBearingTo(from: readonly [number, number], to: readonly [number, number]): number {
+  const rad = Math.PI / 180;
+  const mercator = (lat: number) => Math.log(Math.tan(Math.PI / 4 + Math.max(-89.9999, Math.min(89.9999, lat)) * rad / 2));
+  return Math.atan2(normalizeLon(to[0] - from[0]) * rad, mercator(to[1]) - mercator(from[1])) / rad;
+}
+
 /**
  * How the preview's glyphs should point, for any tool.
  *
@@ -748,12 +761,13 @@ export function previewField(
   // A circle's flow turns about its centre, a quarter turn off the outward
   // bearing, which side depending on the sense.
   if (tool === "circle") {
-    const quarter = choiceOf(values, "RotationSense") === 0 ? 90 : -90;
+    const angle = numberOf(values, "CircleAngle");
+    const quarter = (choiceOf(values, "RotationSense") === 0 ? 1 : -1) * (90 - angle);
     const centre =
       footprint && "centre" in footprint ? footprint.centre : ([0, 0] as const);
     return {
       knots,
-      azimuthAt: (lon, lat) => (bearingTo(centre, [lon, lat]) + quarter + 360) % 360,
+      azimuthAt: (lon, lat) => (bearingTo([lon, lat], centre) + 180 + quarter + 360) % 360,
     };
   }
 
@@ -765,10 +779,11 @@ export function previewField(
   const gradient = tool === "shape_fill" && choiceOf(values, "VectorMode") === 1;
   if (!gradient && (aims === 1 || aims === 2)) {
     const target = positionOf(values, "Target");
-    const turn = aims === 2 ? 180 : 0;
+    const turn = (aims === 2 ? 180 : 0) + numberOf(values, "TargetAngle");
+    const bearing = choiceOf(values, "TargetPath") === 1 ? rhumbBearingTo : bearingTo;
     return {
       knots,
-      azimuthAt: (lon, lat) => (bearingTo([lon, lat], target) + turn + 360) % 360,
+      azimuthAt: (lon, lat) => (bearing([lon, lat], target) + turn + 360) % 360,
     };
   }
 
@@ -976,7 +991,7 @@ export function operatorOf(
         kind: "smear",
         points: at,
         deltas,
-        radiusPx: pixelsFromKm(camera, first[1], radiusKm, spaceFor(state.unit)),
+        radiusPx: pixelsFromKm(camera, first[1], radiusKm, spaceFor(state.unit, camera)),
         feather: Math.min(1, Math.max(0, numberOf(values, "Feather"))),
       };
     }

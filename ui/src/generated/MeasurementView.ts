@@ -5,27 +5,27 @@ import type { MeasurementKind } from "./MeasurementKind";
 /**
  * A measurement, as the map draws it.
  */
-export type MeasurementView = { 
+export type MeasurementView = {
 /**
  * Which measurement this is, for dragging and clearing.
  */
-id: number, 
+id: number,
 /**
  * Which tool made it.
  */
-kind: MeasurementKind, 
+kind: MeasurementKind,
 /**
  * The points the user placed, as `[lon, lat]`. These are the handles.
  */
-handles: Array<[number, number]>, 
+handles: Array<[number, number]>,
 /**
  * The lines to draw, in order.
  */
-paths: Array<MeasuredPathView>, 
+paths: Array<MeasuredPathView>,
 /**
  * The chain's total, for a measurement that has one.
  */
-total: string | null, 
+total: string | null,
 /**
  * Where the total belongs: at the last point placed.
  */

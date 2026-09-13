@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 465ab399269c8dc04dacb548ce7a69a17ce669914e0ddc2f8dde75f2be524673 # shrinks to recipe = ProjectRecipe { name: "a", field_kind: 0, resolution: 0, step_hours: 0, step_count: 1, layers: [("a", false, false, [ObjectRecipe { tool: 0, name: " ", range: (0, 0), points: [(380812.35841535684, 0.0)], keys: [] }])] }
+cc 48eb257198de719d686c7d691eb38fe9b43b423d75402f6b90864ce2e80dcf9b # shrinks to recipe = ProjectRecipe { name: "A", field_kind: 0, resolution: 0, step_hours: 0, step_count: 1, layers: [("a", false, false, [ObjectRecipe { tool: 12, name: "a", range: (0, 0), points: [], keys: [KeyRecipe { prop: 6, step: 0, magnitude: 0.0, interp: 0 }] }])] }

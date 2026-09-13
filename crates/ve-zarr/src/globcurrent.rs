@@ -23,6 +23,7 @@
 //!   [`crate::store::open_array`] accounts for.
 
 use crate::error::{Result, ZarrError};
+use crate::parallel::try_join;
 use crate::regrid::{CellGrid, to_era5_grid};
 use crate::source::{Field, FieldSource, Step, Variable, step_at_hour, steps_between};
 use crate::store::{
@@ -99,8 +100,7 @@ fn attr_f32(array: &ReadArray, key: &str, default: f32) -> Result<f32> {
 
 fn open_dataset(url: &str, label: &'static str) -> Result<Dataset> {
     let store = open_http(url)?;
-    let u = open_array(&store, U_PATH)?;
-    let v = open_array(&store, V_PATH)?;
+    let (u, v) = try_join(|| open_array(&store, U_PATH), || open_array(&store, V_PATH))?;
 
     for (path, array) in [(U_PATH, &u), (V_PATH, &v)] {
         match array.shape() {
@@ -127,7 +127,20 @@ fn open_dataset(url: &str, label: &'static str) -> Result<Dataset> {
         )));
     }
 
-    let lat = read_axis_f32(&store, "/latitude", "the latitude coordinate")?;
+    let ((lat, lon), (elevation, times)) = try_join(
+        || {
+            try_join(
+                || read_axis_f32(&store, "/latitude", "the latitude coordinate"),
+                || read_axis_f32(&store, "/longitude", "the longitude coordinate"),
+            )
+        },
+        || {
+            try_join(
+                || read_axis_f32(&store, "/elevation", "the elevation coordinate"),
+                || read_time_axis(&store, "/time", u.shape()[0]),
+            )
+        },
+    )?;
     check_axis(
         "latitude",
         &lat,
@@ -135,7 +148,6 @@ fn open_dataset(url: &str, label: &'static str) -> Result<Dataset> {
         GRID.lat0 as f32,
         GRID.dlat as f32,
     )?;
-    let lon = read_axis_f32(&store, "/longitude", "the longitude coordinate")?;
     check_axis(
         "longitude",
         &lon,
@@ -144,7 +156,6 @@ fn open_dataset(url: &str, label: &'static str) -> Result<Dataset> {
         GRID.dlon as f32,
     )?;
 
-    let elevation = read_axis_f32(&store, "/elevation", "the elevation coordinate")?;
     let surface = elevation.iter().position(|&e| e == 0.0).ok_or_else(|| {
         ZarrError::Layout(format!(
             "{label} has no surface level; elevation axis is {elevation:?}"
@@ -179,7 +190,6 @@ fn open_dataset(url: &str, label: &'static str) -> Result<Dataset> {
         }
     };
 
-    let times = read_time_axis(&store, "/time", u.shape()[0])?;
     Ok(Dataset {
         label,
         u,
@@ -226,8 +236,10 @@ impl Dataset {
 impl GlobCurrentStore {
     /// Opens both datasets and validates their layout.
     pub fn open(my_url: &str, nrt_url: &str) -> Result<Self> {
-        let my = open_dataset(my_url, "GlobCurrent my")?;
-        let nrt = open_dataset(nrt_url, "GlobCurrent nrt")?;
+        let (my, nrt) = try_join(
+            || open_dataset(my_url, "GlobCurrent my"),
+            || open_dataset(nrt_url, "GlobCurrent nrt"),
+        )?;
 
         // Merge the two hour lists. `my` wins where both have an hour.
         let mut merged: Vec<(i64, Which, u64)> = my
@@ -266,10 +278,10 @@ impl GlobCurrentStore {
             Which::My => &self.my,
             Which::Nrt => &self.nrt,
         };
-        Ok((
-            ds.read_native(&ds.u, index, "u")?,
-            ds.read_native(&ds.v, index, "v")?,
-        ))
+        try_join(
+            || ds.read_native(&ds.u, index, "u"),
+            || ds.read_native(&ds.v, index, "v"),
+        )
     }
 
     /// The store's own grid.

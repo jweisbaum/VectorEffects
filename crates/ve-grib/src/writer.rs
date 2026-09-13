@@ -410,8 +410,8 @@ pub fn message(spec: &MessageSpec, values: &[f32]) -> Result<Vec<u8>> {
 /// of the data section and marked absent in a bitmap, so a decoder reads it
 /// back as missing rather than as a number. That is what an observation
 /// archive hands over — GlobCurrent is masked over land and under sea ice —
-/// and what [`message`] refuses, since a painted field with a hole in it is
-/// a bug rather than a measurement.
+/// and preserves the uncovered cells of an edited field. An entirely missing
+/// field is represented by an all-zero bitmap and zero packed values.
 ///
 /// A field with no holes takes [`message`]'s path and no bitmap, so the two
 /// agree byte for byte where they can.
@@ -430,12 +430,6 @@ pub fn message_masked(spec: &MessageSpec, values: &[f32]) -> Result<Vec<u8>> {
         return message(spec, values);
     }
     let written: Vec<f32> = values.iter().copied().filter(|v| v.is_finite()).collect();
-    if written.is_empty() {
-        return Err(GribError::UnsupportedGrid(
-            "a message with no value anywhere on the grid".to_owned(),
-        ));
-    }
-
     let packed = packing::pack(&written, spec.bits)?;
     let body = [
         section1(spec),
@@ -466,6 +460,17 @@ pub fn message_masked(spec: &MessageSpec, values: &[f32]) -> Result<Vec<u8>> {
 /// in memory at once (spec.md 12.4).
 pub fn write_message<W: Write>(out: &mut W, spec: &MessageSpec, values: &[f32]) -> Result<usize> {
     let bytes = message(spec, values)?;
+    out.write_all(&bytes)?;
+    Ok(bytes.len())
+}
+
+/// Appends one message, preserving missing cells with a GRIB bitmap.
+pub fn write_message_masked<W: Write>(
+    out: &mut W,
+    spec: &MessageSpec,
+    values: &[f32],
+) -> Result<usize> {
+    let bytes = message_masked(spec, values)?;
     out.write_all(&bytes)?;
     Ok(bytes.len())
 }
@@ -529,13 +534,19 @@ mod tests {
         );
     }
 
-    /// A field that is nothing but holes is refused rather than written as an
-    /// empty message a decoder would have to guess at.
     #[test]
-    fn a_field_of_nothing_but_holes_is_refused() {
+    fn a_field_of_nothing_but_holes_has_a_bitmap() {
         let spec = spec();
         let values = vec![f32::NAN; spec.grid.point_count() as usize];
-        assert!(message_masked(&spec, &values).is_err());
+        let bytes = message_masked(&spec, &values).expect("all missing");
+        let decoded = crate::decode::read_all(&bytes).expect("read bitmap");
+        assert_eq!(decoded.messages[0].values.len(), values.len());
+        assert!(
+            decoded.messages[0]
+                .values
+                .iter()
+                .all(|v| *v == crate::decode::MISSING)
+        );
     }
 
     fn spec() -> MessageSpec {

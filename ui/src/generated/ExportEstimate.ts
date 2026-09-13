@@ -3,23 +3,23 @@
 /**
  * An estimate shown before the user commits to an export.
  */
-export type ExportEstimate = { 
+export type ExportEstimate = {
 /**
  * Approximate output size in bytes.
  */
-bytes: number, 
+bytes: number,
 /**
  * Messages that will be written.
  */
-messages: number, 
+messages: number,
 /**
  * Grid points per message.
  */
-points_per_message: number, 
+points_per_message: number,
 /**
  * The width the estimate was made at.
  */
-bits: number, 
+bits: number,
 /**
  * The step one level is worth at that width, in knots, over a nominal
  * ±60 m/s field — the resolution the width implies before the field's own

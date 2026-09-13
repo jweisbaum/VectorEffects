@@ -3,42 +3,42 @@
 /**
  * What the frontend gets when it asks about an image layer.
  */
-export type ImageLayerView = { 
+export type ImageLayerView = {
 /**
  * Which layer this is.
  */
-layer: number, 
+layer: number,
 /**
  * The file, for the panel to show and for a missing-file message.
  */
-path: string, 
+path: string,
 /**
  * Whether the file could be read at all.
  */
-loaded: boolean, 
+loaded: boolean,
 /**
  * The image's size in its own pixels, before any downsampling.
  */
-width: number, 
+width: number,
 /**
  * And its height.
  */
-height: number, 
+height: number,
 /**
  * Where it sits: `[a, b, c, d, e, f]` (see `Placement`).
  */
-placement: [number, number, number, number, number, number], 
+placement: [number, number, number, number, number, number],
 /**
  * How strongly it shows, 0 to 1.
  */
-opacity: number, 
+opacity: number,
 /**
  * The four corners as `[lon, lat]`, top-left first, clockwise.
  *
  * Computed here rather than in the frontend so the placement has one
  * implementation: the map draws these and the control points drag them.
  */
-corners: Array<[number, number]>, 
+corners: Array<[number, number]>,
 /**
  * Whether the file carried its own georeference.
  *

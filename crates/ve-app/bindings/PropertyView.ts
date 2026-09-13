@@ -21,7 +21,7 @@ value: PropertyValue,
 /**
  * Display unit: `"speed"`, `"kilometres"`, `"degrees"`, `"percent"` or `"none"`.
  *
- * A speed is stored in m/s and shown in knots; the frontend converts
+ * A speed is stored in m/s and shown in the preferred speed unit; the frontend converts
  * (`ve_core::units`).
  */
 unit: string, 

@@ -11,6 +11,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AppSettings } from "../generated/AppSettings";
+import { DEFAULT_GLYPHS } from "../map/glyphAppearance";
 import type { MacroLibrary } from "../generated/MacroLibrary";
 import type { ProjectSummary } from "../generated/ProjectSummary";
 
@@ -74,6 +75,7 @@ const held = vi.hoisted(() => {
     gradients,
     project,
     chosen: [] as Array<[string, string]>,
+    units: [] as Array<[string, string]>,
   };
 });
 
@@ -87,6 +89,10 @@ vi.mock("../ipc", () => ({
       held.chosen.push([kind, gradient]);
       return Promise.resolve(held.project);
     },
+    setDisplayUnits: (distance: AppSettings["distance_unit"], speed: AppSettings["speed_unit"]) => {
+      held.units.push([distance, speed]);
+      return Promise.resolve({ ...settings, distance_unit: distance, speed_unit: speed });
+    },
     macroLibrary: () => Promise.resolve(held.library),
     deleteMacros: (id: string | null) => {
       held.deleted.push(id);
@@ -99,8 +105,11 @@ vi.mock("../ipc", () => ({
 const SettingsDialog = (await import("./SettingsDialog")).default;
 
 const settings: AppSettings = {
+  glyphs: DEFAULT_GLYPHS,
   shortcuts: [],
   autosave: "recovery",
+  distance_unit: "km",
+  speed_unit: "kt",
   default_wind_scale_knots: 60,
   default_current_scale_knots: 6,
   macro_directory: "/macros",
@@ -116,6 +125,7 @@ beforeEach(() => {
   held.library = held.full;
   held.deleted.length = 0;
   held.chosen.length = 0;
+  held.units.length = 0;
   libraryChanges = 0;
   container = document.createElement("div");
   document.body.append(container);
@@ -304,5 +314,26 @@ describe("deleting the macro library", () => {
     expect(held.deleted).toEqual([]);
     expect(libraryChanges).toBe(0);
     expect(container.querySelector('[aria-label="Delete all macros"]')).toBeNull();
+  });
+});
+
+
+describe("global unit preferences", () => {
+  it("offers both distance units and all three speed units, and saves each choice", async () => {
+    await render();
+    const section = [...container.querySelectorAll("section")].find((s) => s.querySelector("h3")?.textContent === "Units")!;
+    const [distance, speed] = section.querySelectorAll("select");
+    expect([...distance!.options].map((o) => o.value)).toEqual(["km", "nm"]);
+    expect([...speed!.options].map((o) => o.textContent)).toEqual(["kt — knots", "mph — miles per hour", "km/h — kilometres per hour"]);
+    await act(async () => {
+      distance!.value = "nm";
+      distance!.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(held.units).toEqual([["nm", "kt"]]);
+    await act(async () => {
+      speed!.value = "mph";
+      speed!.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(held.units[1]).toEqual(["km", "mph"]);
   });
 });

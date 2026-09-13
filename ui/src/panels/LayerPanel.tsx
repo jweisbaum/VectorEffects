@@ -10,23 +10,23 @@ import { layerForSelection, layerToActivate } from "./activeLayer";
 import { CalendarIcon } from "./CalendarIcon";
 import { EyeIcon } from "./EyeIcon";
 import HistoryImportDialog, { type HistoryChoice } from "./HistoryImportDialog";
-import { dropSide, layerDropIndex } from "./reorder";
+import { dropSide, layerDropIndex, objectDropIndex } from "./reorder";
 import { KIND_LABELS, KINDS, type FieldKindName, kindOf } from "../kind";
 import SpeedFilter from "./SpeedFilter";
 
-/** Which side of a row a drop lands on: above or below a layer, or into it. */
+/** A drop lands above or below a row, or into a layer. */
 type DropWhere = "above" | "below" | "into";
 
 /** A row a drop would land on, read off the DOM under the pointer. */
 type DropAt =
-  | { row: "layer"; id: number; index: number; where: DropWhere }
-  | { row: "object"; id: number; layer: number; index: number };
+  | { row: "layer"; id: number; where: DropWhere }
+  | { row: "object"; id: number; layer: number; where: "above" | "below" };
 
 /** How far the pointer must travel before a press becomes a drag, in px. */
 const DRAG_SLACK_PX = 4;
 
 /**
- * The row under the pointer, and which side of it a layer would land on.
+ * The row under the pointer, and which side of it a drop would land on.
  *
  * Read from the DOM rather than from React's own hit testing, because the
  * pointer is captured by the row the press began on: every move after that
@@ -46,11 +46,12 @@ function dropAt(x: number, y: number, dragging: Dragging["kind"]): DropAt | null
   if (!(at instanceof Element)) return null;
   const objectRow = dragging === "object" ? at.closest<HTMLElement>("[data-object-id]") : null;
   if (objectRow) {
+    const rect = objectRow.getBoundingClientRect();
     return {
       row: "object",
       id: Number(objectRow.dataset.objectId),
       layer: Number(objectRow.dataset.objectLayer),
-      index: Number(objectRow.dataset.objectIndex),
+      where: dropSide(y, rect.top, rect.height),
     };
   }
   const block = at.closest<HTMLElement>("[data-layer-id]");
@@ -63,14 +64,13 @@ function dropAt(x: number, y: number, dragging: Dragging["kind"]): DropAt | null
   return {
     row: "layer",
     id: Number(block.dataset.layerId),
-    index: Number(block.dataset.layerIndex),
     where: dropSide(y, rect.top, rect.height),
   };
 }
 
 /** What is being dragged, while a reorder is in progress. */
 type Dragging =
-  | { kind: "layer"; id: number; index: number }
+  | { kind: "layer"; id: number }
   | { kind: "object"; id: number };
 
 /**
@@ -131,6 +131,12 @@ export default function LayerPanel({
   const [folded, setFolded] = useState<Set<number>>(new Set());
   /** Whether the history range dialog is up (M38). */
   const [historyOpen, setHistoryOpen] = useState(false);
+  const opening = useRef<number | null>(project.image_token);
+  opening.current = project.image_token;
+  useEffect(() => {
+    opening.current = project.image_token;
+    return () => { opening.current = null; };
+  }, [project.image_token]);
   const toggleFold = (id: number) =>
     setFolded((current) => {
       const next = new Set(current);
@@ -232,16 +238,20 @@ export default function LayerPanel({
    * network, and only from this button.
    */
   const importHistory = (choice: HistoryChoice) => {
+    const token = project.image_token;
+    if (opening.current !== token) return;
     setHistoryOpen(false);
     setError(null);
-    run(
-      api.importHistory(
+    void api.importHistory(
         choice.archives,
         choice.startUnixS,
         choice.endUnixS,
         choice.setStartTime,
-      ),
-    );
+      ).then((summary) => {
+        if (opening.current === token) onChanged(summary);
+      }).catch((err: unknown) => {
+        if (opening.current === token) reportError(String(err), null, () => importHistory(choice));
+      });
   };
 
   /** Picks an image and lays it under the field (spec.md 4.9, M18). */
@@ -302,18 +312,20 @@ export default function LayerPanel({
     }
   };
 
-  const endDrag = () => {
-    setDragging(null);
-    setDropTarget(null);
-  };
-
   /**
    * The press in progress, and whether it has become a drag.
    *
    * A press that never travels is a click — activating a layer, selecting an
    * object — so the click handlers stand down only once one actually has.
    */
-  const press = useRef<{ drag: Dragging; x: number; y: number; moved: boolean } | null>(null);
+  const press = useRef<{
+    drag: Dragging;
+    x: number;
+    y: number;
+    moved: boolean;
+    pointerId: number;
+    element: HTMLElement;
+  } | null>(null);
   const dragged = useRef(false);
   /**
    * What a release does, kept in a ref because it needs the layer tree and
@@ -321,16 +333,20 @@ export default function LayerPanel({
    */
   const dropRef = useRef<(drag: Dragging, at: DropAt | null) => void>(() => {});
 
-  const startPress = (event: React.PointerEvent, drag: Dragging) => {
-    if (event.button !== 0) return;
-    press.current = { drag, x: event.clientX, y: event.clientY, moved: false };
+  const startPress = (event: React.PointerEvent<HTMLElement>, drag: Dragging) => {
+    if (event.button !== 0 || !event.isPrimary || press.current) return;
+    if (event.target instanceof Element && event.target.closest("button, input, select, textarea")) return;
+    press.current = {
+      drag, x: event.clientX, y: event.clientY, moved: false,
+      pointerId: event.pointerId, element: event.currentTarget,
+    };
     dragged.current = false;
   };
 
   useEffect(() => {
     const move = (event: PointerEvent) => {
       const held = press.current;
-      if (!held) return;
+      if (!held || held.pointerId !== event.pointerId) return;
       if (
         !held.moved &&
         Math.hypot(event.clientX - held.x, event.clientY - held.y) < DRAG_SLACK_PX
@@ -341,24 +357,35 @@ export default function LayerPanel({
         held.moved = true;
         dragged.current = true;
         setDragging(held.drag);
+        // Capture only once it is a drag, preserving name clicks and rename
+        // double-clicks. Keep receiving the release outside the panel too.
+        try {
+          held.element.setPointerCapture(held.pointerId);
+        } catch {
+          // Window listeners still handle the gesture if capture is unavailable.
+        }
       }
+      event.preventDefault();
       const at = dropAt(event.clientX, event.clientY, held.drag.kind);
       const shown =
         at === null
           ? null
           : at.row === "object"
-            ? { id: at.id, where: "into" as DropWhere }
+            ? { id: at.id, where: at.where }
             : { id: at.id, where: held.drag.kind === "object" ? ("into" as DropWhere) : at.where };
       setDropTarget((current) =>
         current?.id === shown?.id && current?.where === shown?.where ? current : shown,
       );
     };
-    const up = (event: PointerEvent) => {
+    const finish = (event?: PointerEvent) => {
       const held = press.current;
+      if (!held || (event && held.pointerId !== event.pointerId)) return;
       press.current = null;
-      if (!held) return;
-      if (held.moved) {
+      if (event?.type === "pointerup" && held.moved) {
         dropRef.current(held.drag, dropAt(event.clientX, event.clientY, held.drag.kind));
+      }
+      if (held.element.hasPointerCapture?.(held.pointerId)) {
+        held.element.releasePointerCapture(held.pointerId);
       }
       setDragging(null);
       setDropTarget(null);
@@ -368,13 +395,31 @@ export default function LayerPanel({
         dragged.current = false;
       }, 0);
     };
+    const cancel = () => finish();
+    const key = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && press.current) {
+        event.preventDefault();
+        finish();
+      }
+    };
     window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
-    window.addEventListener("pointercancel", up);
+    window.addEventListener("pointerup", finish);
+    window.addEventListener("pointercancel", finish);
+    window.addEventListener("lostpointercapture", finish);
+    window.addEventListener("blur", cancel);
+    window.addEventListener("keydown", key);
     return () => {
       window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-      window.removeEventListener("pointercancel", up);
+      window.removeEventListener("pointerup", finish);
+      window.removeEventListener("pointercancel", finish);
+      window.removeEventListener("lostpointercapture", finish);
+      window.removeEventListener("blur", cancel);
+      window.removeEventListener("keydown", key);
+      const held = press.current;
+      press.current = null;
+      if (held?.element.hasPointerCapture?.(held.pointerId)) {
+        held.element.releasePointerCapture(held.pointerId);
+      }
     };
   }, []);
 
@@ -391,36 +436,44 @@ export default function LayerPanel({
    *
    * A layer lands above or below the row it was let go on — the halves of
    * that row, so a layer can be put on either side of any other in one drag
-   * (M29). An object lands in the layer of whatever it was let go on: at that
-   * object's place among its siblings, or at the top of a layer dropped on
-   * directly.
+   * (M29). Objects use the same above/below rule among their siblings, or
+   * land at the top of a layer when dropped on its header.
    */
   dropRef.current = (drag, at) => {
     if (at === null) return;
     if (drag.kind === "layer") {
       if (at.row !== "layer") return;
-      const to = layerDropIndex(drag.index, at.index, at.where !== "below");
-      if (drag.index !== to) run(api.moveLayer(drag.index, to));
+      // Resolve identities against the current tree if an edit landed while
+      // the pointer was held, rather than moving a different layer by index.
+      const from = tree.layers.findIndex((layer) => layer.id === drag.id);
+      const target = tree.layers.findIndex((layer) => layer.id === at.id);
+      if (from < 0 || target < 0) return;
+      const to = layerDropIndex(from, target, at.where !== "below");
+      if (from !== to) run(api.moveLayer(from, to));
       return;
     }
+    const source = tree.layers.find((layer) => layer.objects.some((object) => object.id === drag.id));
+    const destination = tree.layers.find((layer) => layer.id === (at.row === "object" ? at.layer : at.id));
+    if (!source || !destination) return;
+    const from = source.id === destination.id
+      ? source.objects.findIndex((object) => object.id === drag.id)
+      : null;
+    // The backend removes the object before inserting it. Resolve the target
+    // by identity, then account for that removal within the same layer.
+    let to = destination.objects.length - Number(from !== null);
     if (at.row === "object") {
-      dropOnObject(at.layer, at.index);
-      return;
+      const target = destination.objects.findIndex((object) => object.id === at.id);
+      if (target < 0) return;
+      to = objectDropIndex(from, target, at.where === "above");
     }
-    const layer = tree.layers.find((l) => l.id === at.id);
-    if (layer) run(api.moveObject(drag.id, at.id, layer.objects.length));
-  };
-
-  /** Moves the dragged object to a position in the object list. */
-  const dropOnObject = (layerId: number, documentIndex: number) => {
-    const drag = dragging;
-    endDrag();
-    if (drag?.kind !== "object") return;
-    run(api.moveObject(drag.id, layerId, documentIndex));
+    if (from !== to) run(api.moveObject(drag.id, destination.id, to));
   };
 
   return (
-    <div className="layer-panel">
+    <div
+      className={dragging ? "layer-panel reordering" : "layer-panel"}
+      onDragStartCapture={(event) => event.preventDefault()}
+    >
       <header>
         <h2>Layers</h2>
         <button title="Add a layer" onClick={() => run(api.addLayer(""))}>
@@ -467,6 +520,7 @@ export default function LayerPanel({
               <div
                 className={[
                   "layer-header",
+                  dragging?.kind === "layer" && dragging.id === layer.id ? "reordering" : "",
                   activeLayer === layer.id ? "active" : "",
                   dropTarget?.id === layer.id ? `drop-${dropTarget.where}` : "",
                 ]
@@ -477,7 +531,7 @@ export default function LayerPanel({
                   activateLayer(layer.id);
                 }}
                 onMouseDown={noTextSelect}
-                onPointerDown={(e) => startPress(e, { kind: "layer", id: layer.id, index })}
+                onPointerDown={(e) => startPress(e, { kind: "layer", id: layer.id })}
                 title="Click to make this the active layer; drag to reorder"
               >
                 <span className="grip" aria-hidden="true" title="Drag to reorder">
@@ -597,9 +651,9 @@ export default function LayerPanel({
                   {layer.source === "zarr" ? "from the archive" : "from the file"}
                 </div>
               )}
-              {layer.grib?.loaded && (
+              {(
                 <SpeedFilter
-                  grib={layer.grib}
+                  grib={layer.speed_filter ?? layer.grib ?? { speed_min_mps: null, speed_max_mps: null, speed_ceiling_mps: 60 }}
                   treeRevision={treeRevision}
                   onChange={(min, max, gesture) =>
                     run(api.setLayerSpeedRange(layer.id, min, max, gesture)).then(
@@ -608,6 +662,7 @@ export default function LayerPanel({
                   }
                 />
               )}
+              {layer.source === "image" && <p className="muted layer-filter-note">Image thresholds use the displayed vector speed at each image position.</p>}
 
               {layer.image && (
                 <ImageControls
@@ -627,9 +682,10 @@ export default function LayerPanel({
                       key={object.id}
                       className={[
                         "object",
+                        dragging?.kind === "object" && dragging.id === object.id ? "reordering" : "",
                         selection.includes(object.id) ? "selected" : "",
                         object.active_here ? "" : "inactive",
-                        dropTarget?.id === object.id ? "drop-target" : "",
+                        dropTarget?.id === object.id ? `drop-${dropTarget.where}` : "",
                       ]
                         .filter(Boolean)
                         .join(" ")}
@@ -642,7 +698,11 @@ export default function LayerPanel({
                         if (dragged.current) return;
                         clickObject(object.id, layer.id, e);
                       }}
+                      title="Drag to change stacking order"
                     >
+                      <span className="grip" aria-hidden="true" title="Drag to reorder">
+                        ⋮⋮
+                      </span>
                       {renaming === object.id ? (
                         <input
                           autoFocus
@@ -661,7 +721,7 @@ export default function LayerPanel({
                             setRenaming(object.id);
                             setDraft(object.name);
                           }}
-                          title={`${object.tool_label} · steps ${object.start_step}–${object.end_step}`}
+                          title={`${object.tool_label} · steps ${object.start_step}–${object.end_step} · drag to reorder · double-click to rename`}
                         >
                           {object.name}
                         </span>

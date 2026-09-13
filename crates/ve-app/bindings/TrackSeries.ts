@@ -13,7 +13,7 @@ export type TrackSeries = {
 label: string, 
 /**
  * Display unit, in [`crate::document::PropertyView`]'s vocabulary. The
- * frontend converts — a speed is sampled in m/s and graphed in knots.
+ * frontend converts — a speed is sampled in m/s and graphed in the preferred speed unit.
  */
 unit: string, 
 /**

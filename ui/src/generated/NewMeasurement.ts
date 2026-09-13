@@ -9,20 +9,20 @@ import type { MeasurementKind } from "./MeasurementKind";
  * not send. The alternative — three commands — would have three arms of the
  * same match on the other side of the wire.
  */
-export type NewMeasurement = { 
+export type NewMeasurement = {
 /**
  * Which tool is placing it.
  */
-kind: MeasurementKind, 
+kind: MeasurementKind,
 /**
  * The points placed, as `[lon, lat]`.
  */
-points: Array<[number, number]>, 
+points: Array<[number, number]>,
 /**
  * Ring spacing in kilometres, for a ring set. The UI's unit, not the
  * document's: the conversion happens here, at the boundary.
  */
-interval_km: number, 
+interval_km: number,
 /**
  * How many rings.
  */

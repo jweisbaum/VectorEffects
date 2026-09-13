@@ -8,11 +8,11 @@
  * here, so "which options does this mode make inert" has one answer for the
  * inspector and the option bar both (spec.md 6.1).
  */
-export type OptionDependency = { 
+export type OptionDependency = {
 /**
  * The choice property that decides.
  */
-on: string, 
+on: string,
 /**
  * The variant indices of `on` for which the option is read.
  */

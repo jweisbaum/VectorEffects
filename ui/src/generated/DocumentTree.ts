@@ -4,7 +4,7 @@ import type { LayerNode } from "./LayerNode";
 /**
  * The whole document, for the panel.
  */
-export type DocumentTree = { 
+export type DocumentTree = {
 /**
  * Layers, bottom of the stack first — the order they composite in.
  */

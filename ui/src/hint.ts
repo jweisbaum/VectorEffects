@@ -29,6 +29,7 @@ export interface HintSnapshot {
    * status bar is where the eye already goes for what is happening.
    */
   activity: string | null;
+  retry?: (() => void) | null;
 }
 
 let snapshot: HintSnapshot = { hint: null, error: null, errorKind: null, activity: null };
@@ -39,7 +40,7 @@ function publish(next: HintSnapshot) {
     next.hint === snapshot.hint &&
     next.error === snapshot.error &&
     next.errorKind === snapshot.errorKind &&
-    next.activity === snapshot.activity
+    next.activity === snapshot.activity && next.retry === snapshot.retry
   ) {
     return;
   }
@@ -53,7 +54,7 @@ function publish(next: HintSnapshot) {
  * not changed has nothing new to say over it.
  */
 export function setHint(hint: string | null): void {
-  const keep = hint === snapshot.hint;
+  const keep = hint === snapshot.hint || !!snapshot.retry;
   publish({
     ...snapshot,
     hint,
@@ -68,8 +69,15 @@ export function setHint(hint: string | null): void {
  * `kind` is the backend's discriminant, kept for the tooltip and never for the
  * line itself (M59).
  */
-export function reportError(error: string | null, kind: string | null = null): void {
-  publish({ ...snapshot, error, errorKind: error === null ? null : kind });
+export function reportError(error: string | null, kind: string | null = null, retry?: () => void): void {
+  publish({ ...snapshot, error, errorKind: error === null ? null : kind, retry: error ? retry ?? null : null });
+}
+
+/** Consume the action before starting, preventing duplicate downloads. */
+export function retryError(): void {
+  const retry = snapshot.retry;
+  reportError(null);
+  retry?.();
 }
 
 /** Sets what the map is busy with, or clears it. Independent of the hint and the error. */

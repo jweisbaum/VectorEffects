@@ -13,6 +13,14 @@ use crate::aeqd::Local;
 /// A shape in an object's local frame. Distances are metres.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Shape {
+    /// Animated closed contours, filled with the even/odd rule. The source
+    /// retains feather sizing and swept-tool skeleton semantics.
+    Contours {
+        /// Outer boundaries and holes, each implicitly closed.
+        rings: Vec<Vec<Local>>,
+        /// Original parametric footprint at this step.
+        source: Box<Shape>,
+    },
     /// A swept disc along one or more polylines: brush, mask, clone stamp,
     /// and the corridor along a curve. A single point is a plain disc.
     ///
@@ -94,6 +102,16 @@ impl Shape {
                 half_height_m,
             } => rect_distance(p, half_width_m.max(0.0), half_height_m.max(0.0)),
             Self::Polygon { ring } => polygon_distance(ring, p),
+            Self::Contours { rings, .. } => {
+                let mut inside = false;
+                let mut nearest = f64::INFINITY;
+                for ring in rings.iter().filter(|r| r.len() >= 3) {
+                    let d = polygon_distance(ring, p);
+                    inside ^= d < 0.0;
+                    nearest = nearest.min(d.abs());
+                }
+                if inside { -nearest } else { nearest }
+            }
         }
     }
 
@@ -135,12 +153,43 @@ impl Shape {
                 half_height_m,
             } => half_width_m.max(0.0).hypot(half_height_m.max(0.0)),
             Self::Polygon { ring } => ring.iter().map(|p| p[0].hypot(p[1])).fold(0.0, f64::max),
+            Self::Contours { rings, .. } => rings
+                .iter()
+                .flatten()
+                .map(|p| p[0].hypot(p[1]))
+                .fold(0.0, f64::max),
+        }
+    }
+
+    /// Applies size changes about the original stroke skeleton (or anchor).
+    /// Increasing brush width must not stretch the length of its centreline.
+    pub fn rescale_perimeter_point(&self, point: Local, factor: f64) -> Local {
+        let centre = self.nearest_on_skeleton(point).unwrap_or([0.0, 0.0]);
+        [
+            centre[0] + (point[0] - centre[0]) * factor,
+            centre[1] + (point[1] - centre[1]) * factor,
+        ]
+    }
+
+    /// The animated size of the source stamp, independent of its anchor.
+    /// Drawn polygons and rectangles have no separate size property.
+    pub fn animation_reference_m(&self) -> f64 {
+        match self {
+            Self::Capsule { radius_m, .. } | Self::Disc { radius_m } => *radius_m,
+            Self::SweptSquare { half_size_m, .. } => *half_size_m,
+            Self::Annulus {
+                radius_m,
+                half_width_m,
+            } => radius_m + half_width_m,
+            Self::Contours { source, .. } => source.animation_reference_m(),
+            Self::Polygon { .. } | Self::Rect { .. } => 1.0,
         }
     }
 
     /// A characteristic size, used to scale the feather band (spec.md 7.4).
     pub fn feather_reference_m(&self) -> f64 {
         match self {
+            Self::Contours { source, .. } => source.feather_reference_m(),
             Self::Capsule { radius_m, .. } => radius_m.max(0.0),
             Self::SweptSquare { half_size_m, .. } => half_size_m.max(0.0),
             Self::Disc { radius_m } => radius_m.max(0.0),
@@ -169,6 +218,7 @@ impl Shape {
             Self::Capsule { chains, .. } | Self::SweptSquare { chains, .. } => {
                 nearest_on_chains(chains, p)
             }
+            Self::Contours { source, .. } => source.nearest_on_skeleton(p),
             Self::Disc { .. } | Self::Annulus { .. } | Self::Rect { .. } | Self::Polygon { .. } => {
                 None
             }
@@ -195,6 +245,7 @@ impl Shape {
                 half_height_m,
             } => *half_width_m <= 0.0 || *half_height_m <= 0.0,
             Self::Polygon { ring } => ring.len() < 3,
+            Self::Contours { rings, .. } => rings.iter().all(|r| r.len() < 3),
         }
     }
 }

@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import type { AppSettings } from "../generated/AppSettings";
+import { DEFAULT_GLYPHS } from "../map/glyphAppearance";
 import { actionFor, bindingFor, chordLabel, chordOf, toolChord } from "./bindings";
 
 const settings: AppSettings = {
+  glyphs: DEFAULT_GLYPHS,
   shortcuts: [
     { action: "play_pause", tool: "", key: " ", shift: false, alt: false, accel: false },
     { action: "step_back", tool: "", key: "arrowleft", shift: false, alt: false, accel: false },
@@ -13,6 +15,8 @@ const settings: AppSettings = {
     { action: "deselect", tool: "", key: "d", shift: false, alt: false, accel: true },
   ],
   autosave: "recovery",
+  distance_unit: "km",
+  speed_unit: "kt",
   default_wind_scale_knots: 60,
   default_current_scale_knots: 6,
   macro_directory: "",

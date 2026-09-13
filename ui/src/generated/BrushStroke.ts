@@ -9,11 +9,11 @@ import type { StampSpace } from "./StampSpace";
  * [`Default`] is derived so a caller — a test, or an example — can name only
  * the options it is about, rather than restating every one of them.
  */
-export type BrushStroke = { 
+export type BrushStroke = {
 /**
  * Path in geographic coordinates, as `[lon, lat]` pairs.
  */
-points: Array<[number, number]>, 
+points: Array<[number, number]>,
 /**
  * Brush size in kilometres: the disc's diameter, or the square's side.
  *
@@ -21,11 +21,11 @@ points: Array<[number, number]>,
  * the map scale before it gets here, and never revisited, so zooming
  * afterwards cannot resize an existing stroke (spec.md 3.5).
  */
-size_km: number, 
+size_km: number,
 /**
  * Speed in metres per second.
  */
-speed_mps: number, 
+speed_mps: number,
 /**
  * Direction the flow points toward, degrees clockwise from north.
  *
@@ -33,15 +33,15 @@ speed_mps: number,
  * nothing below the IPC boundary sees a "from" bearing (spec.md 3.3).
  * Ignored by the modes that aim at a target.
  */
-direction_toward_deg: number, 
+direction_toward_deg: number,
 /**
  * Edge falloff, 0 to 1.
  */
-feather: number, 
+feather: number,
 /**
  * Circular or square stamp.
  */
-shape: BrushShape, 
+shape: BrushShape,
 /**
  * Whether the stamp is a shape on the ground or a shape on the map.
  *
@@ -49,15 +49,15 @@ shape: BrushShape,
  * north-south ground extent, which is the one axis the projection leaves
  * alone (spec.md 3.5).
  */
-space: StampSpace, 
+space: StampSpace,
 /**
  * A constant bearing, or every vector aimed at or away from `target`.
  */
-direction_mode: BrushDirectionMode, 
+direction_mode: BrushDirectionMode,
 /**
  * Where the vectors aim, as `[lon, lat]`. Required by the aimed modes.
  */
-target?: [number, number], 
+target?: [number, number],
 /**
  * Which layer receives it. `None` means the top layer.
  */

@@ -970,3 +970,150 @@ fn tile_keys(state: &AppState) -> Vec<[u8; 32]> {
         })
         .collect()
 }
+
+#[test]
+fn macro_strategy_is_static_and_missing_frames_are_transparent_or_interpolated() {
+    use std::sync::Arc;
+    use ve_core::capture::{Capture, CaptureFrame, CaptureLattice};
+    use ve_core::document::{Geometry, Object};
+    use ve_core::project::FieldKind;
+    use ve_core::schema::PropId;
+
+    let root = TempRoot::new("interpolation-strategy");
+    let app = app(&root);
+    projects::create(
+        &app,
+        NewProjectRequest {
+            name: "Hourly".into(),
+            field_kind: "wind".into(),
+            resolution: "1.0".into(),
+            step_hours: 1,
+            step_count: 7,
+        },
+        true,
+    )
+    .expect("hourly project");
+    create::create(
+        &app,
+        NewObject {
+            tool: Tool::Brush,
+            gesture: Gesture::Stroke {
+                points: vec![[0.0, 0.0]],
+            },
+            options: vec![
+                number("SizeKm", 5000.0),
+                number("Speed", 7.0),
+                number("Feather", 0.0),
+            ],
+            layer: None,
+        },
+    )
+    .expect("underlying field");
+    let capture = Capture::new(
+        vec![FieldKind::Wind],
+        CaptureLattice {
+            ni: 3,
+            nj: 3,
+            spacing_deg: 1.0,
+            x0_deg: -1.0,
+            y0_deg: 1.0,
+        },
+        10800.0,
+        Geometry::Rect {
+            half_width_m: 100000.0,
+            half_height_m: 100000.0,
+        },
+        vec![
+            CaptureFrame {
+                offset_hours: 0.0,
+                dx_deg: 0.0,
+                dy_deg: 0.0,
+                uv: vec![[12.0, -6.0]; 9],
+            },
+            CaptureFrame {
+                offset_hours: 3.0,
+                dx_deg: 6.0,
+                dy_deg: 0.0,
+                uv: vec![[-6.0, 12.0]; 9],
+            },
+        ],
+    )
+    .expect("recording");
+    let mut object = Object::new(ToolKind::Macro, "Recorded motion", 7);
+    object.geometry = capture.shape.clone();
+    object.capture = Some(capture.hash.clone());
+    let id = object.id.raw();
+    {
+        let mut session = app.session.lock().expect("lock");
+        let project = &mut session.require_open().expect("open").project;
+        project
+            .captures
+            .insert(capture.hash.clone(), Arc::new(capture));
+        project.layers[0].objects.push(object);
+    }
+    let listed = document::properties(&app, id, 1).expect("properties");
+    let strategy = listed
+        .iter()
+        .find(|p| p.id == "Resample")
+        .expect("strategy for hourly gaps");
+    assert_eq!(strategy.label, "Interpolation strategy");
+    assert!(!strategy.keyable);
+    assert_eq!(
+        field(&app, 1, 0.0, 0.0),
+        (12.0, -6.0),
+        "repeat is the default"
+    );
+    document::set_property_with(
+        &app,
+        id,
+        "Resample",
+        PropertyValue::Choice { index: 2 },
+        None,
+        1,
+        true,
+    )
+    .expect("empty even with auto-key enabled");
+    assert!(ve_app::animation::key_at(&app, id, "Resample", 2, None).is_err());
+    assert_eq!(
+        field(&app, 1, 0.0, 0.0),
+        (0.0, 7.0),
+        "empty leaves the underlying field visible"
+    );
+    assert_eq!(
+        field(&app, 3, 6.0, 0.0),
+        (-6.0, 12.0),
+        "recorded frames remain visible"
+    );
+    document::set_property(&app, id, "Resample", PropertyValue::Choice { index: 1 })
+        .expect("interpolate");
+    let vector = field(&app, 1, 2.0, 0.0);
+    assert!(
+        (vector.0 - 6.0).abs() < 1e-4 && vector.1.abs() < 1e-4,
+        "{vector:?}"
+    );
+    assert_eq!(
+        field(&app, 1, 0.0, 0.0),
+        (0.0, 7.0),
+        "the footprint moves with the interpolated recording"
+    );
+    {
+        let mut session = app.session.lock().expect("lock");
+        let project = &mut session.require_open().expect("open").project;
+        let object = project.object(ve_core::Id::from_raw(id)).expect("macro");
+        assert!(
+            !object
+                .props
+                .get(PropId::Resample)
+                .expect("strategy")
+                .is_animated()
+        );
+        project.settings.step_hours = ve_core::project::StepHours::H3;
+    }
+    assert!(
+        !document::properties(&app, id, 0)
+            .expect("properties")
+            .iter()
+            .any(|p| p.id == "Resample"),
+        "matching cadence hides the setting"
+    );
+}

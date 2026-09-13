@@ -4,11 +4,11 @@ import type { PropertyValue } from "./PropertyValue";
 /**
  * One tool option, frozen onto the object at creation (spec.md 6.1).
  */
-export type ToolOption = { 
+export type ToolOption = {
 /**
  * The property id, spelled as the inspector spells it.
  */
-property: string, 
+property: string,
 /**
  * The value, in the same shape the inspector sends.
  */

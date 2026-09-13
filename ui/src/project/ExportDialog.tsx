@@ -1,3 +1,4 @@
+import { useUnits } from "../settings/units";
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 
@@ -27,6 +28,7 @@ export default function ExportDialog({
   project: ProjectSummary;
   onClose: () => void;
 }) {
+  const units = useUnits();
   // The project's start time when it has one, else now rounded to the
   // nearest hour, UTC (M29): the dialog still asks, it just starts right.
   const start = startDraftFrom(project.start_unix_s);
@@ -143,7 +145,7 @@ export default function ExportDialog({
             </select>
             <span className="muted">
               {estimate
-                ? `steps of about ${estimate.step_knots >= 0.1 ? estimate.step_knots.toFixed(2) : estimate.step_knots.toFixed(4)} kt over ±60 m/s · ${formatBytes(estimate.bytes)}`
+                ? `steps of about ${units.speedFromKnots(estimate.step_knots).toFixed(units.speedFromKnots(estimate.step_knots) >= 0.1 ? 2 : 4)} ${units.speedUnit} over ±${units.speedFromMps(60).toFixed(1)} ${units.speedUnit} · ${formatBytes(estimate.bytes)}`
                 : ""}
               {bits === 16 ? " · the default, and what earlier exports used" : ""}
             </span>

@@ -10,6 +10,12 @@ import type { BrushShape } from "../generated/BrushShape";
 import type { StampSpace } from "../generated/StampSpace";
 import { type Camera, type Viewport, normalizeLon, project, projectionFor } from "./camera";
 import { EARTH_RADIUS_M } from "./geo";
+import { projectionOf } from "./projection";
+
+/** The projection frozen into a pixel footprint; ground previews use latitude. */
+export function stampProjection(space: StampSpace) {
+  return projectionOf(space === "mercator" || space === "miller" ? space : "equirectangular");
+}
 
 /**
  * Kilometres per degree of latitude — a ground measure, so it is the same
@@ -79,14 +85,15 @@ export function footprintRadii(
   space: StampSpace = "geodesic",
 ): { rx: number; ry: number } {
   const halfDeg = radiusKm / KM_PER_DEGREE;
-  const ry = halfDeg * projectionFor(camera).scaleAt(lat) * camera.pxPerDeg;
+  const sourceScale = space === "mercator" || space === "miller" ? projectionOf(space).scaleAt(lat) : 1;
+  const ry = halfDeg * projectionFor(camera).scaleAt(lat) / sourceScale * camera.pxPerDeg;
   // A circle on the ground spans more longitude the further from the equator,
   // so it draws as an ellipse. A projected stamp is defined on the map instead
   // and spans the same degrees both ways — which is what a size in pixels is
   // asking for (spec.md 3.5).
   // Clamped so a geodesic footprint near a pole stays finite rather than
   // filling the map.
-  const rx = (space === "projected" ? halfDeg : halfDeg / cosLat(lat)) * camera.pxPerDeg;
+  const rx = (space !== "geodesic" ? halfDeg : halfDeg / cosLat(lat)) * camera.pxPerDeg;
   return { rx, ry };
 }
 
@@ -115,7 +122,7 @@ export function kmFromPixels(
   pixels: number,
   space: StampSpace = "geodesic",
 ): number {
-  const scale = space === "projected" ? 1 : cosLat(lat);
+  const scale = space !== "geodesic" ? 1 : cosLat(lat);
   return (pixels / camera.pxPerDeg) * KM_PER_DEGREE * scale;
 }
 
@@ -126,7 +133,7 @@ export function pixelsFromKm(
   km: number,
   space: StampSpace = "geodesic",
 ): number {
-  const scale = space === "projected" ? 1 : cosLat(lat);
+  const scale = space !== "geodesic" ? 1 : cosLat(lat);
   return (km / (KM_PER_DEGREE * scale)) * camera.pxPerDeg;
 }
 
@@ -469,6 +476,7 @@ export type Footprint =
  * and so the conversion can be tested against the backend's contract.
  */
 export function footprintOfOutline(outline: ObjectOutlineShape): Footprint[] {
+  if (outline.kind === "contours") return outline.rings.map((points) => ({ kind: "polygon", points }));
   if (outline.kind === "ring") {
     return [{ kind: "polygon", points: outline.points }];
   }
@@ -495,6 +503,7 @@ export type ObjectOutlineShape =
       square: boolean;
       space: StampSpace;
     }
+  | { kind: "contours"; rings: ReadonlyArray<ReadonlyArray<readonly [number, number]>> }
   | { kind: "ring"; points: ReadonlyArray<readonly [number, number]> };
 
 /**

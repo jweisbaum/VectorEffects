@@ -5317,6 +5317,7 @@ name = "ve-app"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "directories",
  "jpeg-decoder",
  "png 0.18.1",

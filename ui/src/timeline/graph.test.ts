@@ -109,7 +109,7 @@ describe("pointsOf", () => {
 
 describe("formatValue", () => {
   it("carries the unit and keeps precision where it matters", () => {
-    expect(formatValue("speed", 12.345)).toBe("12.3 kn");
+    expect(formatValue("speed", 12.345)).toBe("12.3 kt");
     expect(formatValue("kilometres", 800)).toBe("800 km");
     expect(formatValue("percent", 0.25)).toBe("0.25%");
   });

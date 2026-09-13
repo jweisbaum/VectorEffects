@@ -513,7 +513,11 @@ impl Project {
         let mut names = Vec::new();
         for layer in &self.layers {
             for object in &layer.objects {
-                let n = object.props.count_after(last_step);
+                let n = object.props.count_after(last_step)
+                    + object
+                        .shape_animation
+                        .as_ref()
+                        .map_or(0, |a| a.count_after(last_step));
                 if n > 0 {
                     total += n;
                     names.push(object.name.as_str());
@@ -531,6 +535,9 @@ impl Project {
         for layer in &mut self.layers {
             for object in &mut layer.objects {
                 removed += object.props.truncate_to(last_step);
+                if let Some(a) = &mut object.shape_animation {
+                    removed += a.truncate_to(last_step);
+                }
                 object.active_range = object.active_range.clamped_to(last_step);
             }
         }
@@ -577,7 +584,11 @@ impl Project {
         let last = step_count.clamp(1, MAX_STEPS).saturating_sub(1);
         let mut impact = ShrinkImpact::default();
         for object in self.layers.iter().flat_map(|layer| &layer.objects) {
-            let keys = object.props.count_after(last);
+            let keys = object.props.count_after(last)
+                + object
+                    .shape_animation
+                    .as_ref()
+                    .map_or(0, |a| a.count_after(last));
             let clamped = object.active_range.end > last;
             if keys > 0 || clamped {
                 impact.keyframes += keys as u32;
@@ -605,6 +616,20 @@ impl Project {
             for object in &layer.objects {
                 if !object.geometry.is_finite() {
                     return Err(CoreError::NonFiniteCoordinate("object geometry"));
+                }
+                if let Some(a) = &object.shape_animation
+                    && (!a.reference_size_m.is_finite()
+                        || a.reference_size_m <= 0.0
+                        || a.rings.iter().any(|r| r.len() < 3)
+                        || a.rings.iter().flatten().any(|p| {
+                            !p.base.x.is_finite()
+                                || !p.base.y.is_finite()
+                                || p.keys
+                                    .values()
+                                    .any(|k| !k.point.x.is_finite() || !k.point.y.is_finite())
+                        }))
+                {
+                    return Err(CoreError::NonFiniteCoordinate("shape animation"));
                 }
                 if object.active_range.end > last {
                     return Err(CoreError::RangeOutOfBounds {

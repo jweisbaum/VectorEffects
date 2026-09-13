@@ -4,23 +4,27 @@ import type { StampSpace } from "./StampSpace";
 /**
  * One object's footprint under a drag, in geographic coordinates.
  */
-export type ObjectOutline = { "kind": "swept", 
+export type ObjectOutline = { "kind": "swept",
 /**
  * Chains of `[lon, lat]` points.
  */
-chains: Array<Array<[number, number]>>, 
+chains: Array<Array<[number, number]>>,
 /**
  * The stamp's radius in kilometres, as the map draws sizes.
  */
-radius_km: number, 
+radius_km: number,
 /**
  * Whether the stamp is square.
  */
-square: boolean, 
+square: boolean,
 /**
  * Which space the stamp is a circle in (spec.md 3.5).
  */
-space: StampSpace, } | { "kind": "ring", 
+space: StampSpace, } | { "kind": "contours",
+/**
+ * Outer rings and holes.
+ */
+rings: Array<Array<[number, number]>>, } | { "kind": "ring",
 /**
  * The ring, in order; the closing edge is implied.
  */

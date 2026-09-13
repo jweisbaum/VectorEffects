@@ -283,11 +283,197 @@ pub enum AutosaveMode {
     Save,
 }
 
+/// Preferred display unit for ground distances; stored geometry remains km.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum DistanceUnit {
+    /// Kilometres.
+    #[default]
+    Km,
+    /// Nautical miles.
+    Nm,
+}
+
+/// Preferred display unit for speeds; fields remain metres per second.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum SpeedUnit {
+    /// Knots.
+    #[default]
+    Kt,
+    /// Miles per hour.
+    Mph,
+    /// Kilometres per hour.
+    Kmh,
+}
+
+/// Which direction glyph's appearance is being edited.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum GlyphStyle {
+    /// Ocean-current arrow.
+    Arrow,
+    /// Meteorological wind barb.
+    Barb,
+}
+
+/// A glyph's drop shadow, in display pixels.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(default)]
+#[ts(export)]
+pub struct GlyphShadow {
+    /// Draw the shadow behind the glyph.
+    pub enabled: bool,
+    /// Six-digit sRGB hex colour.
+    pub color: String,
+    /// Opacity, from zero to one hundred percent.
+    pub opacity_percent: u8,
+    /// Horizontal offset in CSS pixels, positive rightward.
+    pub offset_x_px: f32,
+    /// Vertical offset in CSS pixels, positive downward.
+    pub offset_y_px: f32,
+}
+
+impl Default for GlyphShadow {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            color: "#000000".to_owned(),
+            opacity_percent: 65,
+            offset_x_px: 1.5,
+            offset_y_px: 1.5,
+        }
+    }
+}
+
+/// Appearance of one glyph style. These preferences never reach field evaluation.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(default)]
+#[ts(export)]
+pub struct GlyphAppearance {
+    /// Size relative to the standard glyph, 25–300 percent.
+    pub size_percent: u16,
+    /// Stroke width in CSS pixels, 0.5–6.
+    pub stroke_width_px: f32,
+    /// Six-digit sRGB hex colour.
+    pub color: String,
+    /// Opacity, from zero to one hundred percent.
+    pub opacity_percent: u8,
+    /// Number of glyphs per area relative to normal, 25–300 percent.
+    pub density_percent: u16,
+    /// Preserve the familiar fading of glyphs in slower flow.
+    pub fade_with_speed: bool,
+    /// Shadow appearance.
+    pub shadow: GlyphShadow,
+}
+
+impl Default for GlyphAppearance {
+    fn default() -> Self {
+        Self {
+            size_percent: 100,
+            stroke_width_px: 1.8,
+            color: "#f0f7ff".to_owned(),
+            opacity_percent: 90,
+            density_percent: 100,
+            fade_with_speed: true,
+            shadow: GlyphShadow::default(),
+        }
+    }
+}
+
+/// Independent arrow and wind-barb preferences.
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(default)]
+#[ts(export)]
+pub struct GlyphSettings {
+    /// Ocean-current arrows.
+    pub arrow: GlyphAppearance,
+    /// Wind barbs.
+    pub barb: GlyphAppearance,
+}
+
+/// One atomic appearance edit; simultaneous controls cannot overwrite each other.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(tag = "property", content = "value", rename_all = "snake_case")]
+#[ts(export)]
+pub enum GlyphSetting {
+    /// Relative glyph size.
+    SizePercent(u16),
+    /// Line width in CSS pixels.
+    StrokeWidthPx(f32),
+    /// Glyph colour.
+    Color(String),
+    /// Glyph opacity.
+    OpacityPercent(u8),
+    /// Relative glyph density.
+    DensityPercent(u16),
+    /// Fade slow flow.
+    FadeWithSpeed(bool),
+    /// Enable the shadow.
+    ShadowEnabled(bool),
+    /// Shadow colour.
+    ShadowColor(String),
+    /// Shadow opacity.
+    ShadowOpacityPercent(u8),
+    /// Shadow horizontal offset.
+    ShadowOffsetXPx(f32),
+    /// Shadow vertical offset.
+    ShadowOffsetYPx(f32),
+    /// Restore this style's defaults.
+    Reset,
+}
+
+fn glyph_color_valid(color: &str) -> bool {
+    color.len() == 7
+        && color.starts_with('#')
+        && color.as_bytes()[1..].iter().all(u8::is_ascii_hexdigit)
+}
+
+impl GlyphAppearance {
+    fn valid(&self) -> bool {
+        (25..=300).contains(&self.size_percent)
+            && (0.5..=6.0).contains(&self.stroke_width_px)
+            && glyph_color_valid(&self.color)
+            && self.opacity_percent <= 100
+            && (25..=300).contains(&self.density_percent)
+            && glyph_color_valid(&self.shadow.color)
+            && self.shadow.opacity_percent <= 100
+            && (-12.0..=12.0).contains(&self.shadow.offset_x_px)
+            && (-12.0..=12.0).contains(&self.shadow.offset_y_px)
+    }
+
+    fn apply(&mut self, setting: GlyphSetting) {
+        match setting {
+            GlyphSetting::SizePercent(value) => self.size_percent = value,
+            GlyphSetting::StrokeWidthPx(value) => self.stroke_width_px = value,
+            GlyphSetting::Color(value) => self.color = value.to_ascii_lowercase(),
+            GlyphSetting::OpacityPercent(value) => self.opacity_percent = value,
+            GlyphSetting::DensityPercent(value) => self.density_percent = value,
+            GlyphSetting::FadeWithSpeed(value) => self.fade_with_speed = value,
+            GlyphSetting::ShadowEnabled(value) => self.shadow.enabled = value,
+            GlyphSetting::ShadowColor(value) => self.shadow.color = value.to_ascii_lowercase(),
+            GlyphSetting::ShadowOpacityPercent(value) => self.shadow.opacity_percent = value,
+            GlyphSetting::ShadowOffsetXPx(value) => self.shadow.offset_x_px = value,
+            GlyphSetting::ShadowOffsetYPx(value) => self.shadow.offset_y_px = value,
+            GlyphSetting::Reset => *self = Self::default(),
+        }
+    }
+}
+
 /// The application's persisted preferences.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "AppSettings.ts")]
 #[serde(default)]
 pub struct AppSettings {
+    /// Global arrow and wind-barb appearance preferences.
+    pub glyphs: GlyphSettings,
+    /// Global ground-distance display preference.
+    pub distance_unit: DistanceUnit,
+    /// Global speed display preference.
+    pub speed_unit: SpeedUnit,
     /// What happens to unsaved work while the user is not saving (D70).
     pub autosave: AutosaveMode,
     /// Every binding, in the order the dialog lists them.
@@ -329,6 +515,9 @@ pub const PROJECTIONS: [&str; 3] = ["equirectangular", "mercator", "miller"];
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
+            glyphs: GlyphSettings::default(),
+            distance_unit: DistanceUnit::Km,
+            speed_unit: SpeedUnit::Kt,
             autosave: AutosaveMode::Recovery,
             shortcuts: default_shortcuts(),
             default_wind_scale_knots: 60.0,
@@ -395,6 +584,11 @@ impl AppSettings {
     /// default rather than refused, so a bad line costs one preference and
     /// not the launch.
     pub fn normalised(mut self) -> Self {
+        for appearance in [&mut self.glyphs.arrow, &mut self.glyphs.barb] {
+            if !appearance.valid() {
+                *appearance = GlyphAppearance::default();
+            }
+        }
         let defaults = default_shortcuts();
         let mut seen: BTreeMap<String, ()> = BTreeMap::new();
         self.shortcuts.retain(|binding| {
@@ -443,6 +637,45 @@ fn describe(binding: &Shortcut) -> String {
     }
 }
 
+/// Sets one arrow or wind-barb appearance preference.
+#[tauri::command]
+pub fn set_glyph_appearance(
+    state: tauri::State<'_, AppState>,
+    style: GlyphStyle,
+    setting: GlyphSetting,
+) -> Result<AppSettings> {
+    glyph_appearance_set(&state, style, setting)
+}
+
+/// Changes and persists one glyph preference without invalidating rendered tiles.
+pub fn glyph_appearance_set(
+    state: &AppState,
+    style: GlyphStyle,
+    setting: GlyphSetting,
+) -> Result<AppSettings> {
+    let file = state.paths.settings_file();
+    with_session(state, |session| {
+        let mut next = session.settings.clone();
+        let appearance = match style {
+            GlyphStyle::Arrow => &mut next.glyphs.arrow,
+            GlyphStyle::Barb => &mut next.glyphs.barb,
+        };
+        appearance.apply(setting);
+        if !appearance.valid() {
+            return Err(AppError::BadOption {
+                field: "glyph appearance",
+                value: "use valid colours and values within the displayed ranges".to_owned(),
+            });
+        }
+        let before = std::mem::replace(&mut session.settings, next);
+        if let Err(error) = session.save_settings(&file) {
+            session.settings = before;
+            return Err(error);
+        }
+        Ok(session.settings.clone())
+    })
+}
+
 /// The current settings.
 #[tauri::command]
 pub fn app_settings(state: tauri::State<'_, AppState>) -> Result<AppSettings> {
@@ -481,6 +714,31 @@ pub fn shortcuts_reset(state: &AppState) -> Result<AppSettings> {
     let file = state.paths.settings_file();
     with_session(state, |session| {
         session.settings.shortcuts = default_shortcuts();
+        session.save_settings(&file)?;
+        Ok(session.settings.clone())
+    })
+}
+
+/// Changes global display units without modifying any document values.
+#[tauri::command]
+pub fn set_display_units(
+    state: tauri::State<'_, AppState>,
+    distance_unit: DistanceUnit,
+    speed_unit: SpeedUnit,
+) -> Result<AppSettings> {
+    display_units_set(&state, distance_unit, speed_unit)
+}
+
+/// Persists the display preferences.
+pub fn display_units_set(
+    state: &AppState,
+    distance_unit: DistanceUnit,
+    speed_unit: SpeedUnit,
+) -> Result<AppSettings> {
+    let file = state.paths.settings_file();
+    with_session(state, |session| {
+        session.settings.distance_unit = distance_unit;
+        session.settings.speed_unit = speed_unit;
         session.save_settings(&file)?;
         Ok(session.settings.clone())
     })

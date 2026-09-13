@@ -5,15 +5,15 @@ import type { PropertyValue } from "./PropertyValue";
 /**
  * One keyframe, on the wire.
  */
-export type KeyframeView = { 
+export type KeyframeView = {
 /**
  * The step the key is pinned to.
  */
-step: number, 
+step: number,
 /**
  * Its value.
  */
-value: PropertyValue, 
+value: PropertyValue,
 /**
  * How the segment leaving it is eased.
  */

@@ -1,8 +1,7 @@
 /**
  * The Settings dialog (spec.md 8.6, M15).
  *
- * Three sections: Shortcuts, Display and Macros. The bindings it edits are the
- * same table every handler reads, so a rebind here changes the key everywhere
+ * The bindings it edits are the same table every handler reads, so a rebind here changes the key everywhere
  * at once — including the tooltips, which is the half of a rebind that is
  * usually forgotten.
  *
@@ -10,6 +9,8 @@
  * see every binding at once; this shows what it said rather than deciding for
  * itself.
  */
+
+import { useUnits } from "./units";
 
 import { useEffect, useState } from "react";
 
@@ -24,6 +25,7 @@ import { chordLabel } from "./bindings";
 import type { GradientView } from "../generated/GradientView";
 import { knownGradients, loadGradients } from "../gradients";
 import GradientPicker from "./GradientPicker";
+import GlyphSettings from "./GlyphSettings";
 
 /** The rows the Shortcuts section lists, in order, with their labels. */
 const ACTIONS: ReadonlyArray<{ action: Shortcut["action"]; tool: string; label: string }> = [
@@ -80,6 +82,7 @@ export default function SettingsDialog({
   onLibrary: () => void;
   onClose: () => void;
 }) {
+  const units = useUnits();
   const [error, setError] = useState<string | null>(null);
   /** The row waiting for a key press, if any. */
   const [capturing, setCapturing] = useState<string | null>(null);
@@ -135,6 +138,8 @@ export default function SettingsDialog({
       >
         <h2>Settings</h2>
         {error !== null && <p className="modal-error">{error}</p>}
+
+        <GlyphSettings settings={settings} onSettings={value => { setError(null); onSettings(value); }} onError={report} />
 
         <section>
           <h3>Shortcuts</h3>
@@ -199,6 +204,29 @@ export default function SettingsDialog({
         </section>
 
         <section>
+          <h3>Units</h3>
+          <label className="settings-field">
+            Distance
+            <select value={settings.distance_unit} onChange={(e) => {
+              void api.setDisplayUnits(e.target.value as AppSettings["distance_unit"], settings.speed_unit).then(onSettings).catch(report);
+            }}>
+              <option value="km">km — kilometres</option>
+              <option value="nm">nm — nautical miles</option>
+            </select>
+          </label>
+          <label className="settings-field">
+            Speed
+            <select value={settings.speed_unit} onChange={(e) => {
+              void api.setDisplayUnits(settings.distance_unit, e.target.value as AppSettings["speed_unit"]).then(onSettings).catch(report);
+            }}>
+              <option value="kt">kt — knots</option>
+              <option value="mph">mph — miles per hour</option>
+              <option value="kmh">km/h — kilometres per hour</option>
+            </select>
+          </label>
+        </section>
+
+        <section>
           <h3>Display</h3>
           {/*
             The scale is the *project's* (spec.md 5.3): two people opening one
@@ -207,32 +235,32 @@ export default function SettingsDialog({
           */}
           {project !== null && (
             <label className="settings-field">
-              This project&rsquo;s colour scale for wind, in knots
+              This project&rsquo;s colour scale for wind, in {units.speedUnit}
               <NumberField
-                value={project.wind_scale_knots}
-                min={1}
-                max={400}
+                value={units.speedFromKnots(project.wind_scale_knots)}
+                min={units.speedFromKnots(1)}
+                max={units.speedFromKnots(400)}
                 step={1}
                 commitWhileTyping={false}
                 onCommit={(value) => {
                   setError(null);
-                  void api.setColourScale("wind", value).then(onProject).catch(report);
+                  void api.setColourScale("wind", units.speedToKnots(value)).then(onProject).catch(report);
                 }}
               />
             </label>
           )}
           {project !== null && (
             <label className="settings-field">
-              This project&rsquo;s colour scale for currents, in knots
+              This project&rsquo;s colour scale for currents, in {units.speedUnit}
               <NumberField
-                value={project.current_scale_knots}
-                min={1}
-                max={400}
+                value={units.speedFromKnots(project.current_scale_knots)}
+                min={units.speedFromKnots(1)}
+                max={units.speedFromKnots(400)}
                 step={1}
                 commitWhileTyping={false}
                 onCommit={(value) => {
                   setError(null);
-                  void api.setColourScale("current", value).then(onProject).catch(report);
+                  void api.setColourScale("current", units.speedToKnots(value)).then(onProject).catch(report);
                 }}
               />
             </label>
@@ -283,32 +311,32 @@ export default function SettingsDialog({
               );
             })}
           <label className="settings-field">
-            Default for new wind projects
+            Default for new wind projects, in {units.speedUnit}
             <NumberField
-              value={settings.default_wind_scale_knots}
-              min={1}
-              max={400}
+              value={units.speedFromKnots(settings.default_wind_scale_knots)}
+              min={units.speedFromKnots(1)}
+              max={units.speedFromKnots(400)}
               step={1}
               commitWhileTyping={false}
               onCommit={(value) => {
                 void api
-                  .setDefaultScales(value, settings.default_current_scale_knots)
+                  .setDefaultScales(units.speedToKnots(value), settings.default_current_scale_knots)
                   .then(onSettings)
                   .catch(report);
               }}
             />
           </label>
           <label className="settings-field">
-            Default for new current projects
+            Default for new current projects, in {units.speedUnit}
             <NumberField
-              value={settings.default_current_scale_knots}
-              min={1}
-              max={400}
+              value={units.speedFromKnots(settings.default_current_scale_knots)}
+              min={units.speedFromKnots(1)}
+              max={units.speedFromKnots(400)}
               step={1}
               commitWhileTyping={false}
               onCommit={(value) => {
                 void api
-                  .setDefaultScales(settings.default_wind_scale_knots, value)
+                  .setDefaultScales(settings.default_wind_scale_knots, units.speedToKnots(value))
                   .then(onSettings)
                   .catch(report);
               }}

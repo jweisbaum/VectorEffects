@@ -200,7 +200,7 @@ fn a_cleared_recent_list_does_not_come_back_after_a_restart() {
 /// A recent entry whose file has been moved or deleted must be reported as
 /// missing rather than offered as if it would open.
 #[test]
-fn a_deleted_recent_entry_is_marked_missing() {
+fn a_deleted_recent_entry_is_hidden() {
     let root = TempRoot::new("missing");
     let path = root.0.join("gone.veproj");
 
@@ -210,8 +210,7 @@ fn a_deleted_recent_entry_is_marked_missing() {
     std::fs::remove_file(&path).expect("remove");
 
     let recent = projects::recent(&app).expect("recent");
-    assert_eq!(recent.len(), 1);
-    assert!(!recent[0].exists);
+    assert!(recent.is_empty());
 }
 
 #[test]

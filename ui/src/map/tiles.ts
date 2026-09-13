@@ -18,12 +18,15 @@
 
 import { type TileRanges, hasField, tileSpeedRange } from "./tileRange";
 import { playbackCount, playbackTime } from "../timeline/metrics";
+import { glyphCoverage } from "./glyphPlacement";
 
 /** How a tile is doing. */
 export type TileStatus = "ready" | "pending" | "failed";
 
 interface Entry {
   texture: WebGLTexture | null;
+  coverage: Uint8Array | null;
+  windCoverage: Uint8Array | null;
   status: TileStatus;
   /**
    * The tile's speed range of each kind as 14-bit fractions of full scale,
@@ -224,7 +227,7 @@ export class TileCache {
       return existing.texture;
     }
 
-    const entry: Entry = { texture: null, status: "pending", range: null, attempts: 0, retryAt: 0, background };
+    const entry: Entry = { texture: null, coverage: null, windCoverage: null, status: "pending", range: null, attempts: 0, retryAt: 0, background };
     this.entries.set(key, entry);
     this.enqueue(frame, z, x, y, key, entry, background);
     this.evict();
@@ -321,6 +324,18 @@ export class TileCache {
   peek(frame: string, z: number, x: number, y: number): WebGLTexture | null {
     const key = this.keyOf(frame, z, x, y);
     return key === undefined ? null : (this.entries.get(key)?.texture ?? null);
+  }
+
+  /** Coverage of the resident texture, for filling gaps in the glyph lattice. */
+  coverageOf(frame: string, z: number, x: number, y: number): Uint8Array | null {
+    const key = this.keyOf(frame, z, x, y);
+    return key === undefined ? null : (this.entries.get(key)?.coverage ?? null);
+  }
+
+  /** The subset of covered texels whose visible field is wind. */
+  windCoverageOf(frame: string, z: number, x: number, y: number): Uint8Array | null {
+    const key = this.keyOf(frame, z, x, y);
+    return key === undefined ? null : (this.entries.get(key)?.windCoverage ?? null);
   }
 
   /**
@@ -509,6 +524,8 @@ export class TileCache {
           if (!entry.texture) throw new Error("texture upload failed");
           const ranges = tileSpeedRange(bytes);
           entry.range = hasField(ranges) ? ranges : null;
+          entry.coverage = glyphCoverage(bytes);
+          entry.windCoverage = glyphCoverage(bytes, true);
           entry.status = "ready";
           playbackCount("tileUploads");
         } catch (error) {

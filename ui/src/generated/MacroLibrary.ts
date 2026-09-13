@@ -4,15 +4,15 @@ import type { MacroEntry } from "./MacroEntry";
 /**
  * The library's contents, for the insert bar and the settings dialog.
  */
-export type MacroLibrary = { 
+export type MacroLibrary = {
 /**
  * Where the files live.
  */
-directory: string, 
+directory: string,
 /**
  * Entries, newest first.
  */
-entries: Array<MacroEntry>, 
+entries: Array<MacroEntry>,
 /**
  * Total bytes on disk, for the settings dialog.
  */

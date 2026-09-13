@@ -81,7 +81,10 @@ struct Object {
     layer: u32,
     kind: u32,
     erases: u32,
-    pad0: u32,
+    target_offset: f32,
+    speed_min: f32,
+    speed_max: f32,
+    padding: vec2<u32>,
 };
 
 // An imported field's time slice: a regular lat/lon lattice in canonical
@@ -210,12 +213,24 @@ fn initial_bearing(a: vec2<f32>, b: vec2<f32>) -> f32 {
 // The object's local frame: geometry only, never a direction (see aeqd.rs for
 // why). Mirrors `Frame::to_local`; the two are the same construction twice, and
 // the fidelity suite is what keeps them the same.
+fn projected_y(space: u32, lat: f32) -> f32 {
+    if (space == 2u) { return log(tan(PI / 4.0 + clamp(lat, -89.999, 89.999) * DEG / 2.0)) / DEG; }
+    if (space == 3u) { return log(tan(PI / 4.0 + clamp(lat, -90.0, 90.0) * DEG * 0.4)) / (DEG * 0.8); }
+    return lat;
+}
+
+fn projected_lat(space: u32, y: f32) -> f32 {
+    if (space == 2u) { return (2.0 * atan(exp(y * DEG)) - PI / 2.0) / DEG; }
+    if (space == 3u) { return clamp((2.5 * atan(exp(y * DEG * 0.8)) - PI * 0.625) / DEG, -90.0, 90.0); }
+    return clamp(y, -90.0, 90.0);
+}
+
 fn to_local(object: Object, position: vec2<f32>) -> vec2<f32> {
-    if (object.space == 1u) {
+    if (object.space != 0u) {
         // Map space: degrees scaled to metres, no cosine, so a circle in the
         // frame is a circle on the map at every latitude.
         let east = normalize_lon(position.x - object.anchor.x) * M_PER_DEGREE / object.scale;
-        let north = (position.y - object.anchor.y) * M_PER_DEGREE / object.scale;
+        let north = (projected_y(object.space, position.y) - projected_y(object.space, object.anchor.y)) * M_PER_DEGREE / object.scale;
         let theta = object.rotation_deg * DEG;
         let c = cos(theta);
         let s = sin(theta);
@@ -295,6 +310,22 @@ fn shape_distance(object: Object, p: vec2<f32>) -> f32 {
                     if (p.x < a.x + t * (b.x - a.x)) {
                         inside = !inside;
                     }
+                }
+            }
+            if (inside) { return -best; }
+            return best;
+        }
+        case 6u: {
+            // Independent closed-ring edges, even/odd across all contours.
+            var best = 1e30;
+            var inside = false;
+            for (var i = 0u; i + 1u < object.shape_count; i = i + 2u) {
+                let a = points[object.shape_offset + i];
+                let b = points[object.shape_offset + i + 1u];
+                best = min(best, segment_distance(p, a, b));
+                if ((a.y > p.y) != (b.y > p.y)) {
+                    let t = (p.y - a.y) / (b.y - a.y);
+                    if (p.x < a.x + t * (b.x - a.x)) { inside = !inside; }
                 }
             }
             if (inside) { return -best; }
@@ -398,7 +429,7 @@ fn destination(origin: vec2<f32>, bearing_deg: f32, distance: f32) -> vec2<f32> 
 // compared: it put the segment endpoints tens of degrees from where the CPU had
 // them, and the tangent between them is what the flow follows.
 fn to_global(object: Object, local: vec2<f32>) -> vec2<f32> {
-    if (object.space == 1u) {
+    if (object.space != 0u) {
         // Undo `to_local`'s rotation, then read the offset back as degrees.
         let theta = object.rotation_deg * DEG;
         let c = cos(theta);
@@ -408,7 +439,7 @@ fn to_global(object: Object, local: vec2<f32>) -> vec2<f32> {
         let lon = object.anchor.x + east * object.scale / M_PER_DEGREE;
         // Clamped rather than wrapped, as in `Frame::to_global`: a shape
         // reaching past a pole flattens against it, which is what the map shows.
-        let lat = clamp(object.anchor.y + north * object.scale / M_PER_DEGREE, -90.0, 90.0);
+        let lat = projected_lat(object.space, projected_y(object.space, object.anchor.y) + north * object.scale / M_PER_DEGREE);
         return vec2<f32>(normalize_lon(lon), lat);
     }
     let radius = length(local);
@@ -442,7 +473,7 @@ fn path_bearing(object: Object, local: vec2<f32>) -> f32 {
 fn direction_at(object: Object, position: vec2<f32>, local: vec2<f32>) -> f32 {
     switch object.dir_kind {
         case 1u: {
-            return initial_bearing(position, vec2<f32>(object.dir_a, object.dir_b));
+            return initial_bearing(position, vec2<f32>(object.dir_a, object.dir_b)) + object.target_offset;
         }
         case 2u: {
             return lerp_bearing(object.dir_a, object.dir_b, axis_fraction(object, local));
@@ -451,13 +482,16 @@ fn direction_at(object: Object, position: vec2<f32>, local: vec2<f32>) -> f32 {
             return path_bearing(object, local) + object.dir_a;
         }
         case 4u: {
-            let radial = initial_bearing(object.anchor, position);
+            let radial = initial_bearing(position, object.anchor) + 180.0;
             return radial + object.dir_a;
         }
-        // Away from the target: the reciprocal of the bearing to it, which is
-        // the outward tangent to the same great circle.
-        case 5u: {
-            return initial_bearing(position, vec2<f32>(object.dir_a, object.dir_b)) + 180.0;
+        case 6u: {
+            // Clamp before Mercator's logarithm, including cells at either pole.
+            let phi1 = clamp(position.y, -89.9999, 89.9999) * DEG;
+            let phi2 = clamp(object.dir_b, -89.9999, 89.9999) * DEG;
+            let dpsi = log(tan(phi2 / 2.0 + PI / 4.0)) - log(tan(phi1 / 2.0 + PI / 4.0));
+            let dlambda = normalize_lon(object.dir_a - position.x) * DEG;
+            return atan2(dlambda, dpsi) / DEG + object.target_offset;
         }
         default: { return object.dir_a; }
     }
@@ -506,12 +540,13 @@ fn uv_from(speed: f32, bearing_deg: f32) -> vec2<f32> {
 // the point rather than the distance. `sdf::nearest_on_chains` is the
 // authority; this is its port.
 fn nearest_on_segments(object: Object, p: vec2<f32>) -> vec2<f32> {
-    let n = object.shape_count;
+    let n = select(object.shape_count, u32(object.shape_a), object.shape_kind == 6u);
+    let offset = select(object.shape_offset, u32(object.shape_b), object.shape_kind == 6u);
     var best = 1e30;
     var nearest = p;
     for (var i = 0u; i + 1u < n; i = i + 2u) {
-        let a = points[object.shape_offset + i];
-        let b = points[object.shape_offset + i + 1u];
+        let a = points[offset + i];
+        let b = points[offset + i + 1u];
         let ab = b - a;
         let len2 = dot(ab, ab);
         var t = 0.0;
@@ -543,7 +578,7 @@ fn modified_vector(object: Object, position: vec2<f32>, beneath: vec2<f32>) -> v
         // CPU's `Modifier::Radial` arm.
         var origin = object.anchor;
         var weight = 1.0;
-        if (object.shape_kind == 0u || object.shape_kind == 5u) {
+        if (object.shape_kind == 0u || object.shape_kind == 5u || (object.shape_kind == 6u && object.shape_a > 0.0)) {
             let local = to_local(object, position);
             let q = nearest_on_segments(object, local);
             weight = clamp(distance(local, q) / RADIAL_TAPER_M, 0.0, 1.0);
@@ -582,6 +617,8 @@ struct Composite {
     layer: u32,
     kind: u32,
     open: bool,
+    speed_min: f32,
+    speed_max: f32,
 };
 
 // Stacks the layer being accumulated over what is beneath it. The
@@ -589,7 +626,8 @@ struct Composite {
 // stack by the usual rule; the kind is the topmost layer's that covers at
 // least half the cell, or, while none does, the topmost that touches it.
 fn close_layer(c: ptr<function, Composite>) {
-    if ((*c).open && (*c).coverage > 0.0) {
+    let speed = length((*c).acc);
+    if ((*c).open && (*c).coverage > 0.0 && speed >= (*c).speed_min && speed <= (*c).speed_max) {
         let cov = (*c).coverage;
         (*c).out_uv = (*c).out_uv * (1.0 - cov) + (*c).acc;
         (*c).out_coverage = (*c).out_coverage * (1.0 - cov) + cov;
@@ -624,8 +662,10 @@ fn covered(object: Object, before: f32, weight: f32) -> f32 {
 
 fn apply_raster(c: ptr<function, Composite>, raster: Raster, position: vec2<f32>) {
     enter_layer(c, raster.layer_kind & 0xffffu, raster.layer_kind >> 16u);
+    (*c).speed_min = raster.speed_min;
+    (*c).speed_max = raster.speed_max;
     let sampled = sample_raster(raster, position);
-    if (sampled.z > 0.5 && kept(raster, sampled.xy)) {
+    if (sampled.z > 0.5) {
         (*c).acc = sampled.xy;
         (*c).coverage = 1.0;
     }
@@ -664,6 +704,8 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
         }
         let object = objects[o];
         enter_layer(&c, object.layer, object.kind);
+        c.speed_min = object.speed_min;
+        c.speed_max = object.speed_max;
 
         // Coverage, the port of `coverage` in cpu.rs: the cap cull, the signed
         // distance, the feather ramp, and the inversion that turns all three

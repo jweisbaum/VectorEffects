@@ -5,51 +5,51 @@ import type { SliderView } from "./SliderView";
 /**
  * One property, described well enough for the inspector to render it.
  */
-export type PropertyView = { 
+export type PropertyView = {
 /**
  * Identifier, e.g. `"speed"`.
  */
-id: string, 
+id: string,
 /**
  * Inspector label.
  */
-label: string, 
+label: string,
 /**
  * Value at the step being viewed.
  */
-value: PropertyValue, 
+value: PropertyValue,
 /**
  * Display unit: `"speed"`, `"kilometres"`, `"degrees"`, `"percent"` or `"none"`.
  *
- * A speed is stored in m/s and shown in knots; the frontend converts
+ * A speed is stored in m/s and shown in the preferred speed unit; the frontend converts
  * (`ve_core::units`).
  */
-unit: string, 
+unit: string,
 /**
  * Lower bound, for numeric properties.
  */
-min: number | null, 
+min: number | null,
 /**
  * Upper bound, for numeric properties.
  */
-max: number | null, 
+max: number | null,
 /**
  * Variant names, for choices.
  */
-variants: Array<string>, 
+variants: Array<string>,
 /**
  * Whether the property has keyframes.
  */
-animated: boolean, 
+animated: boolean,
 /**
  * Whether a key sits on the step being viewed (spec.md 9.3).
  */
-keyed_here: boolean, 
+keyed_here: boolean,
 /**
  * Whether the value shown is interpolated between keys rather than keyed
  * or held (spec.md 9.3).
  */
-interpolated_here: boolean, 
+interpolated_here: boolean,
 /**
  * Whether the property can carry keyframes at all (M60).
  *
@@ -57,7 +57,7 @@ interpolated_here: boolean,
  * which other properties are live is edited like anything else and cannot
  * be keyed, so its row has no diamond rather than a diamond that refuses.
  */
-keyable: boolean, 
+keyable: boolean,
 /**
  * Edited by a centred slider rather than a typed number (M29).
  */

@@ -4,11 +4,11 @@ import type { HistoryEntry } from "./HistoryEntry";
 /**
  * The undo history, for the history panel.
  */
-export type HistoryView = { 
+export type HistoryView = {
 /**
  * Entries, oldest first.
  */
-entries: Array<HistoryEntry>, 
+entries: Array<HistoryEntry>,
 /**
  * How many are applied. Entries at or past this index can be redone.
  */

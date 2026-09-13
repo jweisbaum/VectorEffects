@@ -2,9 +2,9 @@ import { useState } from "react";
 
 import type { GribLayerInfo } from "../generated/GribLayerInfo";
 import NumberField from "../NumberField";
-import { knotsFromMps, mpsFromKnots } from "../project/format";
+import { useUnits } from "../settings/units";
 
-/** A band in whole knots, low end first — the slider's own resolution. */
+/** A band in whole display units, low end first — the slider's own resolution. */
 type Band = [number, number];
 
 const same = (a: Band, b: Band) => a[0] === b[0] && a[1] === b[1];
@@ -33,7 +33,7 @@ type Pending = { band: Band; revision: number | null };
  * looked like the two sliders being tied together. A typed value may still
  * cross, and the backend orders it.
  *
- * **The control works in whole knots.** The document holds the band as f32
+ * **The control works in whole display units.** The document holds the band as f32
  * metres per second, and 7 kt comes back from it as 7.00000017 kt: not the
  * integer the slider sent, not equal to it, and not a value a step-1 slider
  * can hold. The band read from the document is rounded to the step before
@@ -45,7 +45,7 @@ export default function SpeedFilter({
   treeRevision,
   onChange,
 }: {
-  grib: GribLayerInfo;
+  grib: Pick<GribLayerInfo, "speed_min_mps" | "speed_max_mps" | "speed_ceiling_mps">;
   /**
    * The document revision `grib` was read at.
    *
@@ -67,11 +67,13 @@ export default function SpeedFilter({
     gesture: string | null,
   ) => Promise<number | null>;
 }) {
-  const ceiling = Math.max(5, Math.ceil(knotsFromMps(grib.speed_ceiling_mps)));
+  const units = useUnits();
+  const { speedFromMps, speedToMps } = units;
+  const ceiling = Math.max(5, Math.ceil(speedFromMps(grib.speed_ceiling_mps)));
   const on = grib.speed_min_mps !== null && grib.speed_max_mps !== null;
   const stored: Band = [
-    on ? Math.round(knotsFromMps(grib.speed_min_mps ?? 0)) : 0,
-    on ? Math.round(knotsFromMps(grib.speed_max_mps ?? 0)) : ceiling,
+    on ? Math.round(speedFromMps(grib.speed_min_mps ?? 0)) : 0,
+    on ? Math.round(speedFromMps(grib.speed_max_mps ?? 0)) : ceiling,
   ];
   /**
    * The band while the thumb is down.
@@ -102,10 +104,16 @@ export default function SpeedFilter({
   if (pending !== null && pending.revision !== null && treeRevision >= pending.revision) {
     setPending(null);
   }
+  const [bandUnit, setBandUnit] = useState(units.speedUnit);
+  if (bandUnit !== units.speedUnit) {
+    setBandUnit(units.speedUnit);
+    setDragging(null);
+    setPending(null);
+  }
   const [low, high] = dragging ?? pending?.band ?? stored;
 
   const set = (nextLow: number, nextHigh: number) =>
-    onChange(mpsFromKnots(nextLow), mpsFromKnots(nextHigh), null);
+    onChange(speedToMps(nextLow), speedToMps(nextHigh), null);
   const endDrag = () => {
     const band = dragging;
     if (band === null) return;
@@ -150,7 +158,6 @@ export default function SpeedFilter({
             />
             <NumberField
               min={0}
-              max={ceiling}
               value={low}
               format={(v) => String(Math.round(v))}
               onCommit={(next) => set(next, high)}
@@ -171,13 +178,12 @@ export default function SpeedFilter({
             />
             <NumberField
               min={0}
-              max={ceiling}
               value={high}
               format={(v) => String(Math.round(v))}
               onCommit={(next) => set(low, next)}
             />
           </span>
-          <span className="muted">kt, of {ceiling} in the file</span>
+          <span className="muted">{units.speedUnit} · speeds outside this range are hidden</span>
         </div>
       )}
     </div>

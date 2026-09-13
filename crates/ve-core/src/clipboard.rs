@@ -122,6 +122,9 @@ impl Clipboard {
                     for (_, animatable) in copy.props.iter_mut() {
                         *animatable = Animatable::constant(animatable.value_at(self.source_step));
                     }
+                    if let Some(a) = &mut copy.shape_animation {
+                        a.freeze(self.source_step);
+                    }
                     copy.motion = MotionFlags::default();
                     copy.active_range = StepRange::new(0, last_step);
                 }
@@ -134,6 +137,9 @@ impl Clipboard {
                         .clamp(0, i64::from(last_step)) as u32;
                     copy.active_range = crate::document::StepRange::new(start, end);
 
+                    if let Some(a) = &mut copy.shape_animation {
+                        a.shift_keys(delta, last_step);
+                    }
                     for (_, animatable) in copy.props.iter_mut() {
                         animatable.shift_keys(delta, last_step);
                     }

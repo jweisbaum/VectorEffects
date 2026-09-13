@@ -9,19 +9,19 @@ import type { TrackSeries } from "./TrackSeries";
  * graph drawn from a second implementation of them would eventually disagree
  * with the field it claims to describe.
  */
-export type TrackSamples = { 
+export type TrackSamples = {
 /**
  * Which object.
  */
-object: number, 
+object: number,
 /**
  * The property id, as the inspector spells it.
  */
-property: string, 
+property: string,
 /**
  * Its label.
  */
-label: string, 
+label: string,
 /**
  * One series per numeric component, empty for a kind that has no
  * magnitude — a boolean or a choice graphs nothing.

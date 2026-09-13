@@ -6,16 +6,16 @@
  * A scalar or an angle has one; a position has two, longitude and latitude,
  * which share an axis because they share a unit.
  */
-export type TrackSeries = { 
+export type TrackSeries = {
 /**
  * Empty for a property with a single component; otherwise which one.
  */
-label: string, 
+label: string,
 /**
  * Display unit, in [`crate::document::PropertyView`]'s vocabulary. The
- * frontend converts — a speed is sampled in m/s and graphed in knots.
+ * frontend converts — a speed is sampled in m/s and graphed in the preferred speed unit.
  */
-unit: string, 
+unit: string,
 /**
  * The value at every step of the project, in step order.
  */

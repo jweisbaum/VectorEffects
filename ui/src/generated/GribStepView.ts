@@ -3,23 +3,23 @@
 /**
  * What one step of a GRIB layer shows (spec.md 4.8, M20).
  */
-export type GribStepView = { 
+export type GribStepView = {
 /**
  * The file has a message of its own for this step's time.
  */
-in_file: boolean, 
+in_file: boolean,
 /**
  * The step whose message this one shows, when the user pasted one here.
  *
  * `null` when the step is not overridden at all — which is not the same
  * as being overridden to show nothing, and `hidden` is what says which.
  */
-source: number | null, 
+source: number | null,
 /**
  * The step is overridden to show no imported field, which is what a bad
  * message needs.
  */
-hidden: boolean, 
+hidden: boolean,
 /**
  * A frame reaches the map here, from the file or from a paste.
  */

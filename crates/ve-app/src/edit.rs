@@ -77,14 +77,20 @@ pub enum StampSpace {
     /// which covers `cos(lat)` as much ground east-west as it does north-south.
     /// What a size entered in pixels asks for.
     Projected,
+    /// A circle in the Mercator projection used when it was drawn.
+    Mercator,
+    /// A circle in the Miller projection used when it was drawn.
+    Miller,
 }
 
 impl StampSpace {
     /// Index into [`ve_core::schema::STAMP_SPACES`].
-    fn variant(self) -> u8 {
+    pub(crate) fn variant(self) -> u8 {
         match self {
             Self::Geodesic => 0,
             Self::Projected => 1,
+            Self::Mercator => 2,
+            Self::Miller => 3,
         }
     }
 }
@@ -156,7 +162,7 @@ pub fn paint(state: &AppState, stroke: BrushStroke) -> Result<ProjectSummary> {
         option(
             PropId::SizeKm,
             PropertyValue::Number {
-                value: f64::from(stroke.size_km.max(1.0)),
+                value: f64::from(stroke.size_km.max(0.001)),
             },
         ),
         option(

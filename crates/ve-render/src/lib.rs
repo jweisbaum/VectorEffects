@@ -13,6 +13,7 @@ pub mod cull;
 pub mod error;
 pub mod evaluator;
 pub mod gpu;
+pub mod perimeter;
 pub mod preview;
 pub mod scene;
 pub mod sdf;

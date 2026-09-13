@@ -136,14 +136,17 @@ fn speed_at(object: &FlatObject, local: Local) -> f64 {
 fn direction_at(object: &FlatObject, position: LonLat, local: Local) -> Angle {
     match &object.direction {
         DirectionMode::Constant(bearing) => *bearing,
-        // Exact everywhere: the bearing from the cell to the target.
-        DirectionMode::Toward(target) => position.initial_bearing(*target),
-        // The reciprocal of that, which is the outward tangent to the same
-        // great circle. Not `target.initial_bearing(position)`: that is the
-        // outward bearing measured at the *target*, and the two differ by the
-        // meridian convergence between the two points.
-        DirectionMode::Away(target) => {
-            Angle::new(position.initial_bearing(*target).degrees() + 180.0)
+        DirectionMode::Target {
+            target,
+            rhumb,
+            offset,
+        } => {
+            let bearing = if *rhumb {
+                ve_core::geo::rhumb_bearing(position, *target)
+            } else {
+                position.initial_bearing(*target)
+            };
+            Angle::new(bearing.degrees() + offset)
         }
         DirectionMode::Axis { start, end } => {
             start.lerp_shortest(*end, axis_fraction(object, local))
@@ -151,10 +154,17 @@ fn direction_at(object: &FlatObject, position: LonLat, local: Local) -> Angle {
         DirectionMode::AlongPath { offset } => {
             Angle::new(path_bearing(object, local).degrees() + offset.degrees())
         }
-        DirectionMode::Tangential { clockwise } => {
+        DirectionMode::Tangential { clockwise, angle } => {
             // 90 degrees off the outward bearing, which side depending on sense.
-            let radial = object.frame.radial_bearing(position).degrees();
-            Angle::new(radial + if *clockwise { 90.0 } else { -90.0 })
+            let radial = position.initial_bearing(object.frame.anchor).degrees() + 180.0;
+            Angle::new(
+                radial
+                    + if *clockwise {
+                        90.0 - angle
+                    } else {
+                        angle - 90.0
+                    },
+            )
         }
     }
 }
@@ -234,7 +244,9 @@ pub fn raster_erased(erased: &[crate::scene::FlatRasterErasure], position: LonLa
         let Some(origin) = erasure.chains.iter().flatten().next().copied() else {
             return false;
         };
-        let space = if erasure.projected {
+        let space = if erasure.projection >= 2 {
+            Space::from_choice(erasure.projection)
+        } else if erasure.projected {
             Space::Projected
         } else {
             Space::Geodesic
@@ -289,6 +301,7 @@ const COVERAGE_EPSILON: f32 = 1e-4;
 /// `flatten` keeps contiguous (M31).
 #[derive(Debug, Clone)]
 struct LayerSpan {
+    layer: u32,
     kind: FieldKind,
     objects: std::ops::Range<usize>,
     rasters: std::ops::Range<usize>,
@@ -328,6 +341,7 @@ fn layer_spans(scene: &Scene) -> impl Iterator<Item = LayerSpan> + '_ {
             .or_else(|| scene.rasters.get(ri).map(|r| r.kind))
             .unwrap_or(FieldKind::Wind);
         let span = LayerSpan {
+            layer,
             kind,
             objects: oi..o_end,
             rasters: ri..r_end,
@@ -375,7 +389,43 @@ pub fn composite(scene: &Scene, position: LonLat) -> Sample {
     let mut strong = false;
     for span in layer_spans(scene) {
         let (uv, coverage) = sample_layer(scene, &span, span.objects.end, position, 0);
+        if scene
+            .speed_band(span.layer)
+            .is_some_and(|band| !band.keeps(uv.u.hypot(uv.v)))
+        {
+            continue;
+        }
         stack(&mut out, &mut strong, uv, coverage, span.kind);
+    }
+    out
+}
+
+/// Render only selected contributions, preserving the input needed by edits.
+pub fn selection_sample(scenes: &[(Scene, Vec<FlatObject>)], position: LonLat) -> Sample {
+    let mut out = Sample::default();
+    let mut strong = false;
+    for (scene, operators) in scenes {
+        let mut sample = composite(scene, position);
+        if !operators.is_empty() {
+            let mask = operators
+                .iter()
+                .filter_map(|object| operator_weight(object, position))
+                .fold(0.0, f64::max) as f32;
+            let cov = sample.coverage.min(mask);
+            if sample.coverage > 0.0 {
+                let scale = cov / sample.coverage;
+                sample.uv.u *= scale;
+                sample.uv.v *= scale;
+            }
+            sample.coverage = cov;
+        }
+        stack(
+            &mut out,
+            &mut strong,
+            sample.uv,
+            sample.coverage,
+            sample.kind,
+        );
     }
     out
 }
@@ -419,13 +469,8 @@ fn sample_layer(
                 // does outside a regional grid (spec.md 4.8). Filtered here and
                 // not inside `RasterGrid::sample`, which is the lattice's own
                 // reading of itself and is shared with the GPU port.
-                if raster
-                    .speed_range
-                    .is_none_or(|band| band.keeps(uv.u.hypot(uv.v)))
-                {
-                    *accumulated = uv;
-                    *coverage = 1.0;
-                }
+                *accumulated = uv;
+                *coverage = 1.0;
             }
         }
     };
@@ -763,28 +808,49 @@ fn warp_source_position(object: &FlatObject, warp: Warp, position: LonLat, weigh
 /// as far. It follows that a stroke slowing down over a spot piles up there,
 /// which is what a smear does.
 fn smear_source_position(object: &FlatObject, position: LonLat) -> LonLat {
-    let radius = match &object.shape {
+    let source = match &object.shape {
+        Shape::Contours { source, .. } => source.as_ref(),
+        shape => shape,
+    };
+    let radius = match source {
         Shape::Capsule { radius_m, .. } => *radius_m,
         Shape::SweptSquare { half_size_m, .. } => *half_size_m,
         _ => return position,
     };
-    let chains = match &object.shape {
+    let chains = match source {
         Shape::Capsule { chains, .. } | Shape::SweptSquare { chains, .. } => chains,
         _ => return position,
     };
     let local = object.frame.to_local(position);
     let mut moved = local;
+    let mut weighted = false;
+    let mut nearest: Option<(f64, Local)> = None;
     for (chain, deltas) in chains.iter().zip(&object.smear) {
         for (stamp, delta) in chain.iter().zip(deltas) {
             let distance = (local[0] - stamp[0]).hypot(local[1] - stamp[1]);
+            if nearest.is_none_or(|(best, _)| distance < best) {
+                nearest = Some((distance, *delta));
+            }
             // Signed distance to the stamp's own edge, so the ramp is the
             // footprint's ramp: zero weight at the rim, full inside the band.
             let w = feather_weight(distance - radius, object.feather, radius);
             if w > 0.0 {
+                weighted = true;
                 moved[0] -= delta[0] * w;
                 moved[1] -= delta[1] * w;
             }
         }
+    }
+    if !weighted
+        && matches!(object.shape, Shape::Contours { .. })
+        && object.shape.distance(local) <= 0.0
+        && let Some((_, delta)) = nearest
+    {
+        // Extending the animated perimeter carries the nearest recorded
+        // push into the new area. The perimeter supplies its feather there.
+        let w = feather_weight(object.shape.distance(local), object.feather, radius);
+        moved[0] -= delta[0] * w;
+        moved[1] -= delta[1] * w;
     }
     object.frame.to_global(moved)
 }
@@ -798,6 +864,7 @@ mod erasure_tests {
     /// A one-stamp erasure over an imported layer, in one space or the other.
     fn stamp(at: LonLat, radius_m: f64, projected: bool) -> FlatRasterErasure {
         FlatRasterErasure {
+            projection: 0,
             chains: vec![vec![at]],
             radius_m,
             square: false,
@@ -935,6 +1002,31 @@ mod smear_tests {
         // And far outside, nothing — the position comes back unchanged.
         let far = local(smear_source_position(&object, at(10.0 * r, 10.0 * r)));
         assert!((far[0] - 10.0 * r).abs() < 1.0);
+    }
+
+    #[test]
+    fn animated_liquify_keeps_its_recorded_push_and_extends_it_to_new_geometry() {
+        let mut object = smear(50_000.0, 0.0, 20_000.0);
+        let here = object.frame.to_global([20_000.0, 0.0]);
+        let expected = smear_source_position(&object, here);
+        object.shape = Shape::Contours {
+            rings: vec![vec![
+                [-100_000.0, -100_000.0],
+                [100_000.0, -100_000.0],
+                [100_000.0, 100_000.0],
+                [-100_000.0, 100_000.0],
+            ]],
+            source: Box::new(object.shape.clone()),
+        };
+        assert!(smear_source_position(&object, here).distance_m(expected) < 1e-6);
+        let extended = object.frame.to_global([20_000.0, 80_000.0]);
+        let read = object
+            .frame
+            .to_local(smear_source_position(&object, extended));
+        assert!(
+            read[0] < 19_000.0,
+            "newly included geometry must carry the push"
+        );
     }
 
     /// The read is *behind* the movement: a stroke dragged east reads from

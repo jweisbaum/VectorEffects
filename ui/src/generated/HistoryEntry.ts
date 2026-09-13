@@ -3,15 +3,15 @@
 /**
  * One entry in the undo history.
  */
-export type HistoryEntry = { 
+export type HistoryEntry = {
 /**
  * Position in the stack, oldest first.
  */
-index: number, 
+index: number,
 /**
  * What the change was.
  */
-label: string, 
+label: string,
 /**
  * Whether it is currently applied.
  */

@@ -19,7 +19,10 @@ import {
 } from "./camera";
 import type { Basemap } from "./format";
 import { KINDS, type FieldKindName } from "../kind";
-import { glyphSizeScale, mapGlyphLayout } from "./glyph";
+import { DEFAULT_GLYPHS, glyphDisplayLayout, glyphRgb } from "./glyphAppearance";
+import type { GlyphSettings } from "../generated/GlyphSettings";
+import type { GlyphStyle } from "../generated/GlyphStyle";
+import { GLYPH_SUBDIVISIONS, glyphCovered, glyphTileIsFull, glyphTileIsEmpty, spacedGlyphs } from "./glyphPlacement";
 import { SPEED_MAX } from "./tileRange";
 import {
   GEO_FRAG,
@@ -68,6 +71,8 @@ const IMAGE_CELLS = 16;
 
 /** One georeferenced image, as the renderer draws it (spec.md 4.9, M18). */
 export interface ImageDraw {
+  /** Mask against the displayed vector field, in m/s. */
+  speedRange?: [number, number] | undefined;
   /** The layer, which is also the texture's key. */
   layer: number;
   /**
@@ -231,6 +236,8 @@ export interface RenderState {
    */
   gradients: Record<FieldKindName, readonly (readonly [number, number, number])[]>;
   showGlyphs: boolean;
+  /** Global per-style appearance preferences; omitted only by older fixtures. */
+  glyphs?: GlyphSettings;
   showGraticule: boolean;
   pixelRatio: number;
   /** A gesture that operates on the field, while one is being drawn. */
@@ -249,7 +256,6 @@ const SEA: [number, number, number, number] = [0.043, 0.078, 0.133, 1];
 const LAND: [number, number, number, number] = [0.20, 0.25, 0.23, 1];
 const COAST: [number, number, number, number] = [0.86, 0.93, 1.0, 0.75];
 const GRATICULE: [number, number, number, number] = [0.55, 0.68, 0.85, 0.16];
-const GLYPH: [number, number, number, number] = [0.94, 0.97, 1.0, 0.9];
 
 /**
  * How much a tile held over from the previous frame is dimmed (M73).
@@ -336,6 +342,11 @@ export class MapRenderer {
   private readonly coastByLod = new Map<number, GeoBuffers>();
   private readonly quadVao: WebGLVertexArrayObject;
   private readonly glyphVao: WebGLVertexArrayObject;
+  private readonly glyphBuffer: WebGLBuffer;
+  /** Layout depends on coverage, not on the changing vectors during playback. */
+  private readonly glyphMaskIds = new WeakMap<Uint8Array, number>();
+  private nextGlyphMaskId = 0;
+  private readonly glyphLayouts = new Map<string, readonly Float32Array[]>();
   private graticule: { vao: WebGLVertexArrayObject; buffer: WebGLBuffer; count: number } | null =
     null;
   private graticuleKey = "";
@@ -380,10 +391,13 @@ export class MapRenderer {
     ]);
     this.imageUniforms = uniforms(gl, this.imageProgram, [
       ...shared, "uPlaceLon", "uPlaceLat", "uImage", "uOpacity",
+      "uFiltered", "uSpeedRange", "uFilterTile", "uFilterGeo", "uSpeedScale",
     ]);
     this.glyphUniforms = uniforms(gl, this.glyphProgram, [
-      ...shared, ...mask, "uTileGeo", "uGlyphOrigin", "uGlyphStep", "uGrid", "uSpacing",
-      "uTile", "uSpeedScale", "uSizeScaleArrow", "uSizeScaleBarb", "uColor", "uPixelRatio",
+      ...shared, ...mask, "uTileGeo", "uTile", "uSpeedScale", "uPixelRatio",
+      "uLengthArrow", "uLengthBarb", "uStrokeArrow", "uStrokeBarb", "uColorArrow", "uColorBarb",
+      "uFadeArrow", "uFadeBarb", "uShadowPass", "uShadowArrow", "uShadowBarb",
+      "uShadowOffsetArrow", "uShadowOffsetBarb",
       "uBelow", "uEditScoped",
     ]);
 
@@ -394,10 +408,18 @@ export class MapRenderer {
 
     this.quadVao = this.buildQuad();
     this.imageMesh = this.buildImageMesh();
-    // Glyphs need no vertex data at all: geometry comes from gl_VertexID.
+    // Only stations are uploaded; each mark's geometry comes from gl_VertexID.
     const glyphVao = gl.createVertexArray();
-    if (!glyphVao) throw new Error("could not create glyph vao");
+    const glyphBuffer = gl.createBuffer();
+    if (!glyphVao || !glyphBuffer) throw new Error("could not create glyph buffers");
     this.glyphVao = glyphVao;
+    this.glyphBuffer = glyphBuffer;
+    gl.bindVertexArray(glyphVao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, glyphBuffer);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+    gl.vertexAttribDivisor(0, 1);
+    gl.bindVertexArray(null);
 
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
@@ -685,7 +707,31 @@ export class MapRenderer {
       gl.uniform3f(this.imageUniforms.uPlaceLon ?? null, ...image.placeLon);
       gl.uniform3f(this.imageUniforms.uPlaceLat ?? null, ...image.placeLat);
       gl.uniform1f(this.imageUniforms.uOpacity ?? null, image.opacity);
+      gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, image.texture);
+      gl.uniform1i(this.imageUniforms.uFiltered ?? null, image.speedRange ? 1 : 0);
+      if (image.speedRange) {
+        gl.uniform2f(this.imageUniforms.uSpeedRange ?? null, ...image.speedRange);
+        gl.uniform1i(this.imageUniforms.uFilterTile ?? null, 1);
+        gl.uniform1f(this.imageUniforms.uSpeedScale ?? null, SPEED_SCALE_MPS);
+        const visited = new Set<string>();
+        for (const tile of visibleTiles(state.camera, state.view)) {
+          const key = `${tile.z}/${tile.x}/${tile.y}`;
+          if (visited.has(key)) continue;
+          visited.add(key);
+          const shown = this.textureFor(state, tile);
+          if (!shown.texture) continue;
+          const b = tileBounds(tile.z, tile.x, tile.y);
+          gl.uniform4f(this.imageUniforms.uFilterGeo ?? null, b.west, b.north, b.east - b.west, b.north - b.south);
+          gl.activeTexture(gl.TEXTURE1);
+          gl.bindTexture(gl.TEXTURE_2D, shown.texture);
+          for (const offset of offsets) {
+            this.setShared(this.imageUniforms, state.camera, state.view, offset);
+            gl.drawArrays(gl.TRIANGLES, 0, this.imageMesh.count);
+          }
+        }
+        continue;
+      }
       for (const offset of offsets) {
         this.setShared(this.imageUniforms, state.camera, state.view, offset);
         gl.drawArrays(gl.TRIANGLES, 0, this.imageMesh.count);
@@ -897,36 +943,49 @@ export class MapRenderer {
   ): void {
     const gl = this.gl;
     // Spacing is resolved to a whole-degree lattice step so the grid is
-    // globally anchored. `mapGlyphLayout` is shared with the gesture preview,
-    // which draws the same glyphs on the same lattice. One lattice for both
-    // kinds (M31): each cell's kind picks the glyph, so a barb and an arrow
-    // never share a point.
-    const { stepDeg, spacing } = mapGlyphLayout(camera.pxPerDeg, state.pixelRatio);
-    // Held to the size each style asks for where the lattice is wider than
-    // it wanted (M33), the same cap the gesture preview's glyphs take.
-    const arrowScale = glyphSizeScale("arrow", spacing, state.pixelRatio);
-    const barbScale = glyphSizeScale("barb", spacing, state.pixelRatio);
+    // globally anchored. `glyphDisplayLayout` is shared with the gesture
+    // preview. Each style can have its own density; coverage and kind ensure
+    // a barb and an arrow never claim the same geographic point.
+    const glyphs = state.glyphs ?? DEFAULT_GLYPHS;
+    const layouts = {
+      arrow: glyphDisplayLayout("arrow", camera.pxPerDeg, state.pixelRatio, glyphs.arrow),
+      barb: glyphDisplayLayout("barb", camera.pxPerDeg, state.pixelRatio, glyphs.barb),
+    };
+    const spacing = Math.max(layouts.arrow.spacing, layouts.barb.spacing);
+    const margin = Math.max(spacing * 2, layouts.arrow.lengthPx * 1.5, layouts.barb.lengthPx * 1.5) + 12 * state.pixelRatio;
     gl.useProgram(this.glyphProgram);
     gl.bindVertexArray(this.glyphVao);
     gl.uniform1i(this.glyphUniforms.uTile ?? null, 0);
     gl.uniform1f(this.glyphUniforms.uSpeedScale ?? null, SPEED_SCALE_MPS);
-    gl.uniform1f(this.glyphUniforms.uSpacing ?? null, spacing);
-    gl.uniform1f(this.glyphUniforms.uGlyphStep ?? null, stepDeg);
-    gl.uniform1f(this.glyphUniforms.uSizeScaleArrow ?? null, arrowScale);
-    gl.uniform1f(this.glyphUniforms.uSizeScaleBarb ?? null, barbScale);
     gl.uniform1f(this.glyphUniforms.uPixelRatio ?? null, state.pixelRatio);
-    gl.uniform4f(this.glyphUniforms.uColor ?? null, ...GLYPH);
+    for (const style of ["arrow", "barb"] as const) {
+      const appearance = glyphs[style];
+      const suffix = style === "arrow" ? "Arrow" : "Barb";
+      gl.uniform1f(this.glyphUniforms[`uLength${suffix}`] ?? null, layouts[style].lengthPx);
+      gl.uniform1f(this.glyphUniforms[`uStroke${suffix}`] ?? null, appearance.stroke_width_px * state.pixelRatio);
+      gl.uniform4f(this.glyphUniforms[`uColor${suffix}`] ?? null, ...glyphRgb(appearance.color), appearance.opacity_percent / 100);
+      gl.uniform1i(this.glyphUniforms[`uFade${suffix}`] ?? null, appearance.fade_with_speed ? 1 : 0);
+      gl.uniform4f(this.glyphUniforms[`uShadow${suffix}`] ?? null, ...glyphRgb(appearance.shadow.color),
+        appearance.shadow.enabled ? appearance.shadow.opacity_percent / 100 : 0);
+      gl.uniform2f(this.glyphUniforms[`uShadowOffset${suffix}`] ?? null,
+        appearance.shadow.offset_x_px * state.pixelRatio, appearance.shadow.offset_y_px * state.pixelRatio);
+    }
     this.setOperator(this.glyphUniforms, state.view, state.operator ?? null, stage);
     gl.uniform1i(this.glyphUniforms.uBelow ?? null, BELOW_UNIT);
 
     const projection = projectionFor(camera);
     const centreY = projection.yOf(camera.centerLat);
+    const batches: Array<{ tile: VisibleTile; texture: WebGLTexture; coverage: Uint8Array; wind: Uint8Array }> = [];
+    const layoutParts = [layouts.arrow.stepDeg, layouts.barb.stepDeg, glyphs.arrow.opacity_percent > 0, glyphs.barb.opacity_percent > 0, margin, camera.pxPerDeg, camera.centerLon, camera.centerLat,
+      camera.projection, state.view.width, state.view.height].join("/");
+    const coverageKeys: string[] = [];
 
     for (const tile of tiles) {
-      const { texture } = this.textureFor(state, tile, frame);
+      const { texture, frame: textureFrame } = this.textureFor(state, tile, frame);
       if (!texture) continue;
-      this.bindScope(this.glyphUniforms, scope, tile, texture, state.belowHeldFrame);
-      gl.activeTexture(gl.TEXTURE0);
+      const coverage = this.tiles.coverageOf(textureFrame, tile.z, tile.x, tile.y);
+      const wind = this.tiles.windCoverageOf(textureFrame, tile.z, tile.x, tile.y);
+      if (!coverage || !wind) continue;
       const b = tileBounds(tile.z, tile.x, tile.y);
       const originX =
         (b.west + tile.lonOffset - camera.centerLon) * camera.pxPerDeg + state.view.width / 2;
@@ -939,30 +998,85 @@ export class MapRenderer {
       const widthPx = (b.east - b.west) * camera.pxPerDeg;
       const heightPx = (projection.yOf(b.north) - projection.yOf(b.south)) * camera.pxPerDeg;
 
-      // Entirely off screen: skip before spending instances on it.
+      // Keep a margin for spacing against neighboring sites just outside view.
       if (
-        originX + widthPx < 0 || originX > state.view.width ||
-        originY + heightPx < 0 || originY > state.view.height
+        originX + widthPx < -margin || originX > state.view.width + margin ||
+        originY + heightPx < -margin || originY > state.view.height + margin
       ) {
         continue;
       }
-
-      const lattice = glyphLattice(b, stepDeg);
-      if (lattice.cols === 0 || lattice.rows === 0) continue;
-      if (lattice.cols * lattice.rows > 4096) continue;
-
-      this.setShared(this.glyphUniforms, camera, state.view, tile.lonOffset);
-      gl.uniform4f(
-        this.glyphUniforms.uTileGeo ?? null,
-        b.west, b.north, b.east - b.west, b.north - b.south,
-      );
-      gl.uniform2f(
-        this.glyphUniforms.uGlyphOrigin ?? null,
-        lattice.originLon, lattice.originLat,
-      );
-      gl.uniform2f(this.glyphUniforms.uGrid ?? null, lattice.cols, lattice.rows);
-      gl.bindTexture(gl.TEXTURE_2D, texture);
-      gl.drawArraysInstanced(gl.TRIANGLES, 0, GLYPH_VERTICES, lattice.cols * lattice.rows);
+      const ids = [coverage, wind].map(mask => {
+        let id = this.glyphMaskIds.get(mask);
+        if (id === undefined) { id = this.nextGlyphMaskId++; this.glyphMaskIds.set(mask, id); }
+        return id;
+      });
+      coverageKeys.push(`${tile.z}/${tile.x}/${tile.y}/${tile.lonOffset}/${ids.join("/")}`);
+      batches.push({ tile, texture, coverage, wind });
+    }
+    const layoutKey = `${layoutParts}|${coverageKeys.join("|")}`;
+    let pointsByTile = this.glyphLayouts.get(layoutKey);
+    if (pointsByTile) {
+      this.glyphLayouts.delete(layoutKey);
+    } else {
+      const candidates: Array<{ lon: number; lat: number; tileIndex: number; style: GlyphStyle }> = [];
+      // Fully covered forecasts need no infill, including on the first frame
+      // or while panning, when there is no cached layout yet.
+      for (const style of ["arrow", "barb"] as const) {
+        if (glyphs[style].opacity_percent === 0) continue;
+        const stepDeg = layouts[style].stepDeg;
+        const solid = batches.every(({ coverage, wind }) => style === "barb" ? glyphTileIsFull(wind) : glyphTileIsFull(coverage) && glyphTileIsEmpty(wind));
+        for (const [tileIndex, { tile, coverage, wind }] of batches.entries()) {
+          if (style === "barb" ? glyphTileIsEmpty(wind) : glyphTileIsFull(wind)) continue;
+          const b = tileBounds(tile.z, tile.x, tile.y);
+          const fineStep = solid ? stepDeg : stepDeg / GLYPH_SUBDIVISIONS;
+          const lattice = glyphLattice(b, fineStep);
+          if (lattice.cols === 0 || lattice.rows === 0) continue;
+          for (let row = 0; row < lattice.rows; row++) {
+            const lat = lattice.originLat - row * fineStep;
+            const y = (centreY - projection.yOf(lat)) * camera.pxPerDeg + state.view.height / 2;
+            if (y < -margin || y > state.view.height + margin) continue;
+            for (let col = 0; col < lattice.cols; col++) {
+              const lon = lattice.originLon + col * fineStep;
+              const x = (lon + tile.lonOffset - camera.centerLon) * camera.pxPerDeg + state.view.width / 2;
+              if (x < -margin || x > state.view.width + margin) continue;
+              const u = (lon - b.west) / (b.east - b.west);
+              const v = (b.north - lat) / (b.north - b.south);
+              if (glyphCovered(coverage, u, v) && glyphCovered(wind, u, v) === (style === "barb")) {
+                candidates.push({ lon: lon + tile.lonOffset, lat, tileIndex, style });
+              }
+            }
+          }
+        }
+      }
+      const points = batches.map((): number[] => []);
+      // Select across the whole view: per-tile selection clusters marks at seams.
+      for (const point of spacedGlyphs(candidates, p => layouts[p.style].stepDeg, camera)) {
+        points[point.tileIndex]!.push(point.lon - batches[point.tileIndex]!.tile.lonOffset, point.lat);
+      }
+      pointsByTile = points.map(p => new Float32Array(p));
+    }
+    this.glyphLayouts.set(layoutKey, pointsByTile);
+    if (this.glyphLayouts.size > 64) this.glyphLayouts.delete(this.glyphLayouts.keys().next().value!);
+    // Draw every shadow first so none can cover a neighboring glyph's ink.
+    const shadows = glyphs.arrow.shadow.enabled || glyphs.barb.shadow.enabled;
+    for (const shadow of shadows ? [true, false] : [false]) {
+      gl.uniform1i(this.glyphUniforms.uShadowPass ?? null, shadow ? 1 : 0);
+      for (const [index, { tile, texture }] of batches.entries()) {
+        const points = pointsByTile[index]!;
+        if (points.length === 0) continue;
+        const b = tileBounds(tile.z, tile.x, tile.y);
+        this.bindScope(this.glyphUniforms, scope, tile, texture, state.belowHeldFrame);
+        gl.activeTexture(gl.TEXTURE0);
+        this.setShared(this.glyphUniforms, camera, state.view, tile.lonOffset);
+        gl.uniform4f(
+          this.glyphUniforms.uTileGeo ?? null,
+          b.west, b.north, b.east - b.west, b.north - b.south,
+        );
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.glyphBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, points, gl.STREAM_DRAW);
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+        gl.drawArraysInstanced(gl.TRIANGLES, 0, GLYPH_VERTICES, points.length / 2);
+      }
     }
   }
 
@@ -1195,6 +1309,7 @@ export class MapRenderer {
     }
     gl.deleteVertexArray(this.quadVao);
     gl.deleteVertexArray(this.glyphVao);
+    gl.deleteBuffer(this.glyphBuffer);
     gl.deleteProgram(this.geoProgram);
     gl.deleteProgram(this.rasterProgram);
     gl.deleteProgram(this.glyphProgram);

@@ -10,8 +10,10 @@
  * the model's answer, arriving already sampled (`api.trackSamples`).
  */
 
+import { displayUnits, type DisplayUnits } from "../settings/units";
+
 import type { TrackSeries } from "../generated/TrackSeries";
-import { displayDirection, knotsFromMps } from "../project/format";
+import { displayDirection } from "../project/format";
 
 /** A series ready to plot: display units, and continuous across the seam. */
 export interface PlotSeries {
@@ -23,12 +25,13 @@ export interface PlotSeries {
 }
 
 /** The suffix a graphed value carries. Mirrors the inspector's. */
-export function unitSuffix(unit: string): string {
+export function unitSuffix(unit: string, units: DisplayUnits = displayUnits()): string {
   switch (unit) {
     case "speed":
-      return " kn";
+      return ` ${units.speedUnit}`;
     case "kilometres":
-      return " km";
+      return ` ${units.distanceUnit}`;
+    case "signed_degrees":
     case "degrees":
     case "direction":
       return "°";
@@ -79,14 +82,14 @@ export function normaliseDegrees(value: number): number {
 /**
  * One sampled series as it is graphed.
  *
- * Speed is stored in m/s and always shown in knots; a flow direction is stored
+ * Speed and distance use the global display units; a flow direction is stored
  * as an azimuth-toward and shown in the project's convention. Both conversions
  * are the same ones the inspector and the map readout make — this is the IPC
  * boundary for a graph.
  */
-export function plotSeries(series: TrackSeries, convention: string): PlotSeries {
-  if (series.unit === "speed") {
-    return { label: series.label, unit: series.unit, values: series.values.map(knotsFromMps) };
+export function plotSeries(series: TrackSeries, convention: string, units: DisplayUnits = displayUnits()): PlotSeries {
+  if (series.unit === "speed" || series.unit === "kilometres") {
+    return { label: series.label, unit: series.unit, values: series.values.map((v) => units.toDisplay(series.unit, v)) };
   }
   if (series.unit === "direction") {
     return {
@@ -165,9 +168,9 @@ export function polyline(points: readonly Point[]): string {
  * Angles are normalised back into `[0, 360)`: the plotted line may run past a
  * turn to stay continuous, but "370°" is not a direction anyone reads.
  */
-export function formatValue(unit: string, value: number): string {
+export function formatValue(unit: string, value: number, units: DisplayUnits = displayUnits()): string {
   const shown = isAngular(unit) ? normaliseDegrees(value) : value;
   const magnitude = Math.abs(shown);
   const digits = magnitude >= 100 ? 0 : magnitude >= 10 ? 1 : 2;
-  return `${shown.toFixed(digits)}${unitSuffix(unit)}`;
+  return `${shown.toFixed(digits)}${unitSuffix(unit, units)}`;
 }

@@ -3,21 +3,21 @@
 /**
  * Where a history layer's hours came from (spec.md 4.10, M55).
  */
-export type HistoryOrigin = { 
+export type HistoryOrigin = {
 /**
  * The archive's identifier, as `ve_zarr::Archive::id` spells it.
  */
-archive: string, 
+archive: string,
 /**
  * And what it is called, or the identifier itself if this build has
  * never heard of it — a project may name an archive a later version
  * added.
  */
-label: string, 
+label: string,
 /**
  * First hour asked for, in Unix seconds.
  */
-start_unix_s: number, 
+start_unix_s: number,
 /**
  * Last hour asked for.
  */

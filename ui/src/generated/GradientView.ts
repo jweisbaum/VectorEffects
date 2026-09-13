@@ -3,19 +3,19 @@
 /**
  * One gradient on the wire.
  */
-export type GradientView = { 
+export type GradientView = {
 /**
  * What the document stores, e.g. `"viridis"`.
  */
-id: string, 
+id: string,
 /**
  * What the settings offer.
  */
-label: string, 
+label: string,
 /**
  * A sentence on what it is for.
  */
-note: string, 
+note: string,
 /**
  * Stops as `0.0`–`1.0` RGB, calm first, evenly spaced across the range.
  */

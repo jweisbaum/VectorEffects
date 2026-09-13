@@ -5,11 +5,11 @@ import type { HistoryOrigin } from "./HistoryOrigin";
 /**
  * What the panel says about a layer's imported field (spec.md 4.8).
  */
-export type GribLayerInfo = { 
+export type GribLayerInfo = {
 /**
  * The file the field is read from.
  */
-path: string, 
+path: string,
 /**
  * Where the hours came from, for a history layer (spec.md 4.10, M55).
  *
@@ -19,32 +19,32 @@ path: string,
  * as the layer telling you. `None` for an imported forecast, whose
  * origin is the file the user chose and nothing more.
  */
-history: HistoryOrigin | null, 
+history: HistoryOrigin | null,
 /**
  * `"wind"` or `"current"`.
  */
-field_kind: string, 
+field_kind: string,
 /**
  * Whether the file was read; false when it is missing or unreadable,
  * in which case the layer contributes nothing.
  */
-loaded: boolean, 
+loaded: boolean,
 /**
  * Time slices the file holds, or 0 when not loaded.
  */
-frame_count: number, 
+frame_count: number,
 /**
  * Hours from the first slice to the last, or 0 when not loaded.
  */
-span_hours: number, 
+span_hours: number,
 /**
  * The band of speeds the layer keeps, in m/s, if it filters (spec.md 4.8).
  */
-speed_min_mps: number | null, 
+speed_min_mps: number | null,
 /**
  * The top of that band.
  */
-speed_max_mps: number | null, 
+speed_max_mps: number | null,
 /**
  * The fastest speed the file holds, in m/s, over every message.
  *
@@ -52,7 +52,7 @@ speed_max_mps: number | null,
  * field, and a scale that ended at a number the file never reaches would
  * spend most of its travel on nothing.
  */
-speed_ceiling_mps: number, 
+speed_ceiling_mps: number,
 /**
  * Which of the project's steps the file has a message for.
  *
@@ -61,7 +61,7 @@ speed_ceiling_mps: number,
  * not say which those were would leave the user to work it out from a
  * field that comes and goes. The timeline marks them.
  */
-covered_steps: Array<boolean>, 
+covered_steps: Array<boolean>,
 /**
  * What each of the project's steps actually shows, after the user's
  * frame overrides (M20).

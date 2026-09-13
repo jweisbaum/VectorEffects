@@ -3,55 +3,55 @@
 /**
  * What the frontend needs to know about the open project.
  */
-export type ProjectSummary = { 
+export type ProjectSummary = {
 /**
  * Display name.
  */
-name: string, 
+name: string,
 /**
  * Where it lives on disk; absent until first saved.
  */
-path: string | null, 
+path: string | null,
 /**
  * Whether there are changes not yet written to disk.
  */
-dirty: boolean, 
+dirty: boolean,
 /**
  * `"wind"` or `"current"`.
  */
-field_kind: string, 
+field_kind: string,
 /**
  * Grid spacing in degrees.
  */
-resolution_deg: number, 
+resolution_deg: number,
 /**
  * Human-readable grid spacing, e.g. `"0.25°"`.
  */
-resolution_label: string, 
+resolution_label: string,
 /**
  * Grid columns.
  */
-grid_ni: number, 
+grid_ni: number,
 /**
  * Grid rows.
  */
-grid_nj: number, 
+grid_nj: number,
 /**
  * Hours between time steps.
  */
-step_hours: number, 
+step_hours: number,
 /**
  * Number of time steps.
  */
-step_count: number, 
+step_count: number,
 /**
  * When step 0 is, as seconds since the Unix epoch, if set (spec.md 9.1).
  */
-start_unix_s: number | null, 
+start_unix_s: number | null,
 /**
  * `"from"` or `"toward"`: how directions are shown (spec.md 3.3).
  */
-direction_convention: string, 
+direction_convention: string,
 /**
  * Knots at the top of the speed colour ramp when the map shows wind
  * (spec.md 5.3, M15), and when it shows current (M29).
@@ -59,36 +59,36 @@ direction_convention: string,
  * The project's, so two people opening one file see the same map. Tiles
  * carry speed and not colour, so changing either costs no render.
  */
-wind_scale_knots: number, current_scale_knots: number, 
+wind_scale_knots: number, current_scale_knots: number,
 /**
  * The gradient the wind layers are painted with (spec.md 5.3, M42), by
  * identifier: `colour_gradients` says what the identifiers mean.
  */
-wind_gradient: string, 
+wind_gradient: string,
 /**
  * And the current layers, which start on a different one.
  */
-current_gradient: string, 
+current_gradient: string,
 /**
  * The kinds of field the visible layers hold — `"wind"`, `"current"` —
  * wind first: what an export writes, and what the map can show (M29).
  */
-kinds_present: Array<string>, 
+kinds_present: Array<string>,
 /**
  * Number of layers.
  */
-layer_count: number, 
+layer_count: number,
 /**
  * Number of objects across all layers.
  */
-object_count: number, 
+object_count: number,
 /**
  * Document revision, bumped on every change.
  *
  * Tile URLs carry it, so an edit makes previously fetched tiles
  * unreachable rather than stale.
  */
-revision: number, 
+revision: number,
 /**
  * What an image layer's picture is addressed by (spec.md 4.9, M37).
  *
@@ -96,11 +96,11 @@ revision: number,
  * its file, not on the document, so an edit must not re-address it. See
  * `OpenProject::image_token`.
  */
-image_token: number, 
+image_token: number,
 /**
  * Whether there is anything to undo.
  */
-can_undo: boolean, 
+can_undo: boolean,
 /**
  * Whether there is anything to redo.
  */

@@ -80,6 +80,9 @@ pub struct HistoryOrigin {
 #[derive(Debug, Clone, Serialize, TS)]
 #[ts(export, export_to = "LayerNode.ts")]
 pub struct LayerNode {
+    /// Speed thresholds, for every layer source.
+    #[ts(optional)]
+    pub speed_filter: Option<LayerSpeedFilter>,
     /// Stable identity.
     pub id: u64,
     /// User-editable name.
@@ -105,6 +108,18 @@ pub struct LayerNode {
     /// Which field the layer is part of — `"wind"` or `"current"`: its
     /// file's for a raster layer, none that matters for an image (M29).
     pub parameter: String,
+}
+
+/// A layer's speed threshold controls, in metres per second.
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export, export_to = "LayerSpeedFilter.ts")]
+pub struct LayerSpeedFilter {
+    /// Lower bound, or no filter.
+    pub speed_min_mps: Option<f32>,
+    /// Upper bound, or no filter.
+    pub speed_max_mps: Option<f32>,
+    /// Suggested slider limit; typed bounds may extend it.
+    pub speed_ceiling_mps: f32,
 }
 
 /// What one step of a GRIB layer shows (spec.md 4.8, M20).
@@ -270,7 +285,7 @@ pub struct PropertyView {
     pub value: PropertyValue,
     /// Display unit: `"speed"`, `"kilometres"`, `"degrees"`, `"percent"` or `"none"`.
     ///
-    /// A speed is stored in m/s and shown in knots; the frontend converts
+    /// A speed is stored in m/s and shown in the preferred speed unit; the frontend converts
     /// (`ve_core::units`).
     pub unit: String,
     /// Lower bound, for numeric properties.
@@ -343,6 +358,7 @@ pub(crate) fn unit_name(unit: ve_core::schema::Unit) -> &'static str {
         Unit::Speed => "speed",
         Unit::Kilometres => "kilometres",
         Unit::Degrees => "degrees",
+        Unit::SignedDegrees => "signed_degrees",
         Unit::Direction => "direction",
         Unit::Percent => "percent",
     }
@@ -354,6 +370,15 @@ fn tree_of(project: &Project, step: u32) -> DocumentTree {
             .layers
             .iter()
             .map(|layer| LayerNode {
+                speed_filter: Some(LayerSpeedFilter {
+                    speed_min_mps: layer.speed_range.map(|b| b.min_mps),
+                    speed_max_mps: layer.speed_range.map(|b| b.max_mps),
+                    speed_ceiling_mps: layer
+                        .raster
+                        .as_ref()
+                        .map_or(60.0, |r| r.fastest_mps())
+                        .max(layer.speed_range.map_or(0.0, |b| b.max_mps)),
+                }),
                 id: layer.id.raw(),
                 name: layer.name.clone(),
                 visible: layer.visible,
@@ -489,6 +514,19 @@ pub fn properties(state: &AppState, object: u64, step: u32) -> Result<Vec<Proper
             // it (spec.md 6.1).
             .filter(|spec| !spec.creation_only)
             .filter(|spec| ve_core::schema::is_live(object.tool, spec.id, choice_of))
+            .filter(|spec| {
+                spec.id != PropId::Resample
+                    || object.tool != ToolKind::Macro
+                    || object
+                        .capture
+                        .as_deref()
+                        .and_then(|hash| open.project.captures.get(hash))
+                        .is_some_and(|capture| {
+                            capture.has_missing_frames(f64::from(
+                                open.project.settings.step_hours.hours(),
+                            ))
+                        })
+            })
             .filter_map(|spec| {
                 let animatable = object.props.get(spec.id)?;
                 Some(PropertyView {
@@ -597,7 +635,11 @@ pub fn set_property_with(
             .clone();
 
         let value = value.into_prop(before.kind())?;
-        let after = crate::animation::written(&before, step, auto_key, value);
+        let after = if ve_core::schema::animatable(target.tool, prop) {
+            crate::animation::written(&before, step, auto_key, value)
+        } else {
+            ve_core::keyframe::Animatable::constant(value)
+        };
 
         let command = ve_core::command::Command::SetProperty {
             object: id,
@@ -1231,7 +1273,7 @@ pub fn stroke_erase(state: &AppState, stroke: EraseStroke) -> Result<ProjectSumm
     }
     let feather = stroke.feather.clamp(0.0, 1.0);
     // The eraser's own space, which its px/km choice made (M67).
-    let projected = stroke.space == StampSpace::Projected;
+    let projected = stroke.space != StampSpace::Geodesic;
 
     /// Whether anything of the object is left: its footprint, sampled on a
     /// lattice over its bounding radius, has no point the erasures leave
@@ -1240,6 +1282,15 @@ pub fn stroke_erase(state: &AppState, stroke: EraseStroke) -> Result<ProjectSumm
         let reach = flat.shape.bounding_radius_m();
         if !reach.is_finite() || reach <= 0.0 {
             return true;
+        }
+        if matches!(flat.shape, ve_render::sdf::Shape::Contours { .. }) {
+            // An animated contour can grow a thin tip or leave a tiny island
+            // between cuts. A sampling grid cannot prove those are gone.
+            // Delete only when a full-strength cut contains the entire bound.
+            return flat
+                .erased
+                .iter()
+                .any(|cut| cut.shape.distance([0.0, 0.0]) + reach <= -cut.radius_m * cut.feather);
         }
         const N: i32 = 40;
         for j in -N..=N {
@@ -1286,6 +1337,7 @@ pub fn stroke_erase(state: &AppState, stroke: EraseStroke) -> Result<ProjectSumm
             if layer.source.raster_file().is_some() {
                 let mut after = layer.erased.clone();
                 after.push(RasterErasure {
+                    projection: stroke.space.variant(),
                     chains: vec![points.clone()],
                     radius_m,
                     square: stroke.square,
@@ -1300,14 +1352,25 @@ pub fn stroke_erase(state: &AppState, stroke: EraseStroke) -> Result<ProjectSumm
                 });
             } else if !matches!(layer.source, LayerSource::Image { .. }) {
                 let stamp = FlatRasterErasure {
+                    projection: stroke.space.variant(),
                     chains: vec![points.clone()],
                     radius_m,
                     square: stroke.square,
                     projected,
                     feather: f64::from(feather),
                 };
+                let links = ve_core::follow::resolve(project, stroke.at_step);
                 for (index, object) in layer.objects.iter().enumerate() {
-                    let Some(flat) = flatten_object(object, stroke.at_step) else {
+                    let placed = ve_render::scene::place(
+                        project,
+                        object,
+                        layer.parameter(),
+                        stroke.at_step,
+                        &links,
+                    );
+                    let Some(flat) =
+                        ve_render::scene::flatten_object_at(object, stroke.at_step, placed.derived)
+                    else {
                         continue;
                     };
                     if let Some(hash) = &object.capture {
@@ -1389,51 +1452,99 @@ pub fn stroke_erase(state: &AppState, stroke: EraseStroke) -> Result<ProjectSumm
                         continue;
                     }
 
-                    // A painted object: the stamp in its own frame.
-                    let chain: Vec<[f64; 2]> =
-                        points.iter().map(|p| flat.frame.to_local(*p)).collect();
-                    let radius_local = radius_m / flat.frame.scale;
-                    let reach = radius_local * (1.0 + f64::from(feather));
-                    // Touched if any point along the stroke, sampled at half a
-                    // radius, comes within the stamp of the footprint.
-                    let mut touched = false;
-                    'chain: for pair in chain
-                        .windows(2)
-                        .chain(std::iter::once(&chain[..1.min(chain.len())]))
-                    {
-                        let (a, b) = (pair[0], *pair.get(1).unwrap_or(&pair[0]));
-                        let length = (b[0] - a[0]).hypot(b[1] - a[1]);
-                        let steps = (length / (radius_local / 2.0)).ceil().max(1.0) as usize;
-                        for k in 0..=steps {
-                            let t = k as f64 / steps as f64;
-                            let q = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
-                            if flat.shape.distance(q) <= reach {
-                                touched = true;
-                                break 'chain;
+                    let mut after = object.erased.clone();
+                    let mut cuts = Vec::new();
+                    if projected {
+                        cuts = crate::screen_erasure::cuts(
+                            &points,
+                            radius_m,
+                            stroke.square,
+                            ve_render::aeqd::Space::from_choice(stroke.space.variant()),
+                            flat.frame,
+                        );
+                        let bound = flat.shape.bounding_radius_m();
+                        cuts.retain(|cut| {
+                            let min_x = cut
+                                .contour
+                                .iter()
+                                .map(|p| p.x)
+                                .fold(f64::INFINITY, f64::min);
+                            let max_x = cut
+                                .contour
+                                .iter()
+                                .map(|p| p.x)
+                                .fold(f64::NEG_INFINITY, f64::max);
+                            let min_y = cut
+                                .contour
+                                .iter()
+                                .map(|p| p.y)
+                                .fold(f64::INFINITY, f64::min);
+                            let max_y = cut
+                                .contour
+                                .iter()
+                                .map(|p| p.y)
+                                .fold(f64::NEG_INFINITY, f64::max);
+                            min_x <= bound && max_x >= -bound && min_y <= bound && max_y >= -bound
+                        });
+                        for cut in &mut cuts {
+                            cut.feather = feather;
+                            cut.step = stroke.step;
+                        }
+                        if cuts.is_empty() {
+                            continue;
+                        }
+                    } else {
+                        // A painted object: the stamp in its own frame.
+                        let chain: Vec<[f64; 2]> =
+                            points.iter().map(|p| flat.frame.to_local(*p)).collect();
+                        let radius_local = radius_m / flat.frame.scale;
+                        let reach = radius_local * (1.0 + f64::from(feather));
+                        // Touched if any point along the stroke, sampled at half a
+                        // radius, comes within the stamp of the footprint.
+                        let mut touched = false;
+                        'chain: for pair in chain
+                            .windows(2)
+                            .chain(std::iter::once(&chain[..1.min(chain.len())]))
+                        {
+                            let (a, b) = (pair[0], *pair.get(1).unwrap_or(&pair[0]));
+                            let length = (b[0] - a[0]).hypot(b[1] - a[1]);
+                            let steps = (length / (radius_local / 2.0)).ceil().max(1.0) as usize;
+                            for k in 0..=steps {
+                                let t = k as f64 / steps as f64;
+                                let q = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+                                if flat.shape.distance(q) <= reach {
+                                    touched = true;
+                                    break 'chain;
+                                }
                             }
                         }
+                        if !touched {
+                            continue;
+                        }
+                        cuts.push(Erasure {
+                            contour: Vec::new(),
+                            chains: vec![
+                                chain
+                                    .iter()
+                                    .map(|p| LocalPoint { x: p[0], y: p[1] })
+                                    .collect(),
+                            ],
+                            radius_m: radius_local,
+                            square: stroke.square,
+                            feather,
+                            step: stroke.step,
+                        });
                     }
-                    if !touched {
-                        continue;
-                    }
-                    let mut after = object.erased.clone();
-                    after.push(Erasure {
-                        chains: vec![
-                            chain
-                                .iter()
-                                .map(|p| LocalPoint { x: p[0], y: p[1] })
-                                .collect(),
-                        ],
-                        radius_m: radius_local,
-                        square: stroke.square,
-                        feather,
-                        step: stroke.step,
-                    });
+                    after.extend(cuts);
                     // Nothing left of it, at every step, is a deletion.
                     let mut probe = object.clone();
                     probe.erased = after.clone();
                     let gone = stroke.step.is_none()
-                        && flatten_object(&probe, stroke.at_step).is_none_or(|f| fully_erased(&f));
+                        && (probe.active_range.start
+                            ..=probe.active_range.end.min(project.settings.last_step()))
+                            .all(|step| {
+                                flatten_object(&probe, step).is_none_or(|f| fully_erased(&f))
+                            });
                     if gone {
                         commands.extend(unlink_followers_of(project, object.id));
                         removals.push((

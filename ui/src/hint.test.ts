@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { currentHint, reportError, setActivity, setHint, shown } from "./hint";
+import { currentHint, retryError, reportError, setActivity, setHint, shown } from "./hint";
 
 describe("the hint store", () => {
   it("shows the hint, and an error over it until the hint changes", () => {
@@ -71,4 +71,14 @@ describe("the hint store", () => {
     expect(shown(currentHint())?.kind).toBe("error");
     setHint(null);
   });
+});
+
+it("keeps a download retry through pointer hints and consumes it once", () => {
+  let downloads = 0;
+  reportError("Download interrupted", "network", () => { downloads++; });
+  setHint("Move the brush");
+  expect(shown(currentHint())?.text).toBe("Download interrupted");
+  retryError(); retryError();
+  expect(downloads).toBe(1);
+  expect(currentHint().error).toBeNull();
 });

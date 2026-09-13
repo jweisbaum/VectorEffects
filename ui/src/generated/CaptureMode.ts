@@ -4,31 +4,31 @@ import type { CapturePhase } from "./CapturePhase";
 /**
  * What the transport shows while a capture runs.
  */
-export type CaptureMode = { 
+export type CaptureMode = {
 /**
  * Whether a capture is running. While it is, every document write is
  * refused.
  */
-active: boolean, 
+active: boolean,
 /**
  * The step it began at.
  */
-first_step: number, 
+first_step: number,
 /**
  * How many steps have been visited and therefore have a position.
  */
-placed_steps: number, 
+placed_steps: number,
 /**
  * Whether movement is being recorded.
  */
-record_movement: boolean, 
+record_movement: boolean,
 /**
  * The steps the region has been placed at, in order.
  *
  * The timeline marks them, so the user can see which frames the capture
  * has visited and which still hold the position the region was drawn at.
  */
-visited: Array<number>, 
+visited: Array<number>,
 /**
  * Where the region sits at the step that was asked about, as `[lon, lat]`.
  *
@@ -37,36 +37,36 @@ visited: Array<number>,
  * not the last one clicked. Null when no capture is running or no step was
  * named.
  */
-position: [number, number] | null, 
+position: [number, number] | null,
 /**
  * Recording, or previewing (M26).
  */
-phase: CapturePhase, 
+phase: CapturePhase,
 /**
  * The steps that hold a position key (D72). What the timeline's
  * *selection position* row draws its diamonds at.
  */
-keys: Array<number>, 
+keys: Array<number>,
 /**
  * The last step of the run, once the preview has fixed it; the first
  * step until then.
  */
-last_step: number, 
+last_step: number,
 /**
  * The revision the preview's tiles are addressed by, while previewing.
  */
-preview_revision: number | null, 
+preview_revision: number | null,
 /**
  * Where the preview is stamped, `[lon, lat]`, while previewing.
  */
-stamp: [number, number] | null, 
+stamp: [number, number] | null,
 /**
  * While previewing, each baked frame's displacement from the first, in
  * degrees east and north — the track the macro's centre follows, one
  * entry per frame, for the stamp hover to draw (M27). Empty otherwise,
  * and one entry for a macro that recorded no movement.
  */
-track: Array<[number, number]>, 
+track: Array<[number, number]>,
 /**
  * The kinds of field being recorded, wind first, or empty when no
  * capture is running (M34).

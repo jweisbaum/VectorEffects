@@ -206,7 +206,7 @@ pub struct TrackSeries {
     /// Empty for a property with a single component; otherwise which one.
     pub label: String,
     /// Display unit, in [`crate::document::PropertyView`]'s vocabulary. The
-    /// frontend converts — a speed is sampled in m/s and graphed in knots.
+    /// frontend converts — a speed is sampled in m/s and graphed in the preferred speed unit.
     pub unit: String,
     /// The value at every step of the project, in step order.
     pub values: Vec<f64>,
@@ -367,7 +367,7 @@ pub fn tracks_of(state: &AppState, object: u64, step: u32) -> Result<ObjectTrack
                 .and_then(PropValue::as_enum)
                 .unwrap_or(0)
         };
-        let tracks = schema::all_specs(target.tool)
+        let mut tracks: Vec<TrackView> = schema::all_specs(target.tool)
             // Not merely editable: keyable (M60). A mode that decides which
             // other properties are live cannot be animated, because keying it
             // changes what the object has half way along the timeline.
@@ -379,6 +379,7 @@ pub fn tracks_of(state: &AppState, object: u64, step: u32) -> Result<ObjectTrack
                 })
             })
             .collect();
+        tracks.insert(0, crate::shape_animation::track(target, step));
         Ok(ObjectTracks {
             object,
             name: target.name.clone(),
@@ -705,8 +706,7 @@ fn rewrite(
             let why = if schema::spec_for(target.tool, prop).is_some_and(|s| s.creation_only) {
                 "is fixed when the object is created"
             } else {
-                "decides which other properties the object has, so it cannot change part way \
-                 along the timeline"
+                "cannot be animated"
             };
             return Err(AppError::BadOption {
                 field: "property",
@@ -759,6 +759,93 @@ fn within(step: u32, last: u32) -> Result<()> {
 }
 
 /// Adds or replaces a key at `step`.
+#[tauri::command]
+pub fn add_constant_motion(
+    state: tauri::State<'_, AppState>,
+    object: u64,
+    step: u32,
+    direction: f64,
+    speed_mps: f64,
+    overwrite: bool,
+) -> Result<ProjectSummary> {
+    constant_motion(&state, object, step, direction, speed_mps, overwrite)
+}
+
+/// Generate one position per project frame at a constant compass bearing.
+/// Existing keys outside the segment remain intact; one undo restores all keys.
+pub fn constant_motion(
+    state: &AppState,
+    object: u64,
+    step: u32,
+    direction: f64,
+    speed_mps: f64,
+    overwrite: bool,
+) -> Result<ProjectSummary> {
+    let bad = |value: &str| AppError::BadOption {
+        field: "constant motion",
+        value: value.to_owned(),
+    };
+    if !direction.is_finite() || !speed_mps.is_finite() || speed_mps < 0.0 {
+        return Err(bad("enter a finite direction and a non-negative speed"));
+    }
+    let (seconds, end) = with_session(state, |session| {
+        let open = session.require_open()?;
+        let target = open
+            .project
+            .object(object_id(object))
+            .ok_or(AppError::Core(ve_core::CoreError::MissingObject(object)))?;
+        Ok((
+            f64::from(open.project.settings.step_hours.hours()) * 3600.0,
+            target.active_range.end.min(open.project.last_step()),
+        ))
+    })?;
+    rewrite(state, object, "Position", None, |anim, _, last| {
+        if anim.follow().is_some() {
+            return Err(bad(
+                "unlink the followed position before adding constant motion",
+            ));
+        }
+        within(step, last)?;
+        let end = anim
+            .keys()
+            .iter()
+            .find(|key| key.step > step)
+            .map_or(end, |key| key.step.min(end));
+        if end <= step {
+            return Err(bad(
+                "select a frame before the end of the object's lifetime",
+            ));
+        }
+        if !overwrite
+            && anim
+                .keys()
+                .iter()
+                .any(|key| key.step >= step && key.step <= end)
+        {
+            return Err(bad(
+                "existing position keyframes would be overwritten; confirm to continue",
+            ));
+        }
+        let start = anim
+            .value_at(step)
+            .as_lonlat()
+            .ok_or_else(|| bad("position is unavailable"))?;
+        for at in step..=end {
+            let point = ve_core::geo::rhumb_destination(
+                start,
+                ve_core::angle::Angle::new(direction),
+                speed_mps * seconds * f64::from(at - step),
+            )
+            .ok_or_else(|| {
+                bad("this course reaches a pole; reduce the speed or change direction")
+            })?;
+            anim.set_key(at, PropValue::LonLat(point), Interpolation::Linear);
+        }
+        Ok(())
+    })
+}
+
+/// Adds or replaces a key at `step`.
 ///
 /// Without a value, the key takes the property's value *at that step* — which
 /// for a step between two keys is the interpolated one, so "key this here"
@@ -782,6 +869,9 @@ pub fn key_at(
     step: u32,
     value: Option<PropertyValue>,
 ) -> Result<ProjectSummary> {
+    if property == "shape" {
+        return crate::shape_animation::key_at(state, object, step);
+    }
     rewrite(state, object, property, None, |anim, kind, last| {
         within(step, last)?;
         let value = match value {
@@ -816,6 +906,9 @@ pub fn unkey_at(
     property: &str,
     step: u32,
 ) -> Result<ProjectSummary> {
+    if property == "shape" {
+        return crate::shape_animation::unkey_at(state, object, step);
+    }
     rewrite(state, object, property, None, |anim, _, _| {
         anim.remove_key(step);
         Ok(())
@@ -849,6 +942,9 @@ pub fn move_key(
     to: u32,
     gesture: Option<String>,
 ) -> Result<ProjectSummary> {
+    if property == "shape" {
+        return crate::shape_animation::move_key(state, object, from, to, gesture);
+    }
     rewrite(state, object, property, gesture, |anim, _, last| {
         within(to, last)?;
         if !anim.move_key(from, to) {
@@ -885,6 +981,9 @@ pub fn ease_from(
     step: u32,
     interp: InterpolationView,
 ) -> Result<ProjectSummary> {
+    if property == "shape" {
+        return crate::shape_animation::ease_from(state, object, step, interp);
+    }
     rewrite(state, object, property, None, |anim, kind, _| {
         let interp = interp.into_model();
         if !interp.is_valid_for(kind) {

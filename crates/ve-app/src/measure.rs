@@ -9,7 +9,7 @@
 //! `ve_core::annotation` holds the model and `ve_core::geo` the geodesy — the
 //! polylines, the distances, the bearings, all in metres and degrees. This
 //! module is the IPC boundary, so it does the two things a boundary does:
-//! it turns a metre into "1 304 nm · 2 415 km", and it turns a gesture into an
+//! it formats distances in the global preferred unit, and it turns a gesture into an
 //! undoable command. The frontend receives finished geometry and finished text
 //! and does no measuring of its own — the same rule the readout follows
 //! (spec.md 3).
@@ -32,6 +32,7 @@ use ve_core::project::Annotations;
 use crate::commands::AppState;
 use crate::error::{AppError, Result};
 use crate::projects::with_session;
+use crate::settings::DistanceUnit;
 
 /// Metres in a nautical mile. Exact, by definition.
 const M_PER_NM: f64 = 1852.0;
@@ -152,25 +153,11 @@ pub struct NewMeasurement {
     pub count: u32,
 }
 
-/// Formats a distance the way the measurement tools show one: both units.
-///
-/// Nautical miles first, because these are navigator's tools and a passage is
-/// quoted in miles; kilometres beside them because the rest of the app is
-/// metric and the map's scale is. Spec.md 10 asks for both together and this
-/// is what "together" means.
-///
-/// The precision follows the magnitude rather than being fixed: 0.4 nm and
-/// 3 109 nm are both wanted to about four figures, and a fixed decimal gives
-/// one of them noise and the other nothing.
-fn distance(metres: f64) -> String {
-    let miles = figure(metres / M_PER_NM);
-    // Under a kilometre the metric side is metres: "0.40 km" is a worse way of
-    // writing 400 m, and a range ring at 400 m is a perfectly ordinary thing
-    // to draw round a mark.
-    if metres.abs() < 1000.0 {
-        format!("{miles} nm · {} m", figure(metres))
-    } else {
-        format!("{miles} nm · {} km", figure(metres / 1000.0))
+/// Formats a distance in the global preferred unit.
+fn distance(metres: f64, unit: DistanceUnit) -> String {
+    match unit {
+        DistanceUnit::Km => format!("{} km", figure(metres / 1000.0)),
+        DistanceUnit::Nm => format!("{} nm", figure(metres / M_PER_NM)),
     }
 }
 
@@ -217,20 +204,30 @@ fn bearing(degrees: f64) -> String {
 /// looking at two curves needs to know which is which, and the styles alone
 /// cannot say it in text. A divider's leg needs no name: there is only one
 /// kind of leg.
-fn label(kind: PathKind, distance_m: f64, bearing_deg: Option<f64>, named: bool) -> String {
+fn label(
+    kind: PathKind,
+    distance_m: f64,
+    bearing_deg: Option<f64>,
+    named: bool,
+    unit: DistanceUnit,
+) -> String {
     let prefix = match (named, kind) {
         (true, PathKind::GreatCircle) => "GC ",
         (true, PathKind::Rhumb) => "RL ",
         _ => "",
     };
     match bearing_deg {
-        Some(degrees) => format!("{prefix}{} · {}", distance(distance_m), bearing(degrees)),
-        None => format!("{prefix}{}", distance(distance_m)),
+        Some(degrees) => format!(
+            "{prefix}{} · {}",
+            distance(distance_m, unit),
+            bearing(degrees)
+        ),
+        None => format!("{prefix}{}", distance(distance_m, unit)),
     }
 }
 
 /// Everything the map needs to draw one measurement.
-fn view(annotation: &Annotation) -> MeasurementView {
+fn view(annotation: &Annotation, unit: DistanceUnit) -> MeasurementView {
     let measured = annotation.measurement.measure();
     let kind = MeasurementKind::of(annotation.measurement.kind());
     // Only a passage names its paths: it is the one measurement that draws two
@@ -251,6 +248,7 @@ fn view(annotation: &Annotation) -> MeasurementView {
                     path.distance_m,
                     path.bearing_deg,
                     named,
+                    unit,
                 ),
                 label_at: point(&path.label_at),
             })
@@ -258,8 +256,8 @@ fn view(annotation: &Annotation) -> MeasurementView {
         total: measured.total_m.map(|m| match kind {
             // A ring set's "total" is how far the outermost ring reaches, which
             // is a different sentence from a chain's running sum.
-            MeasurementKind::Rings => format!("outer {}", distance(m)),
-            _ => format!("total {}", distance(m)),
+            MeasurementKind::Rings => format!("outer {}", distance(m, unit)),
+            _ => format!("total {}", distance(m, unit)),
         }),
         total_at: measured.handles.last().map(point),
     }
@@ -284,13 +282,14 @@ pub fn measurements(state: tauri::State<'_, AppState>) -> Result<Vec<Measurement
 /// Implementation of [`measurements`].
 pub fn measurements_of(state: &AppState) -> Result<Vec<MeasurementView>> {
     with_session(state, |session| {
+        let unit = session.settings.distance_unit;
         let open = session.require_open()?;
         Ok(open
             .project
             .annotations
             .measurements
             .iter()
-            .map(view)
+            .map(|annotation| view(annotation, unit))
             .collect())
     })
 }
@@ -306,13 +305,18 @@ fn write(
     edit: impl FnOnce(&mut Vec<Annotation>) -> Result<()>,
 ) -> Result<Vec<MeasurementView>> {
     with_session(state, |session| {
+        let unit = session.settings.distance_unit;
         let open = session.require_open()?;
         let before = open.project.annotations.clone();
         let mut measurements = before.measurements.clone();
         edit(&mut measurements)?;
         let after = Annotations::of(measurements);
         if after == before {
-            return Ok(before.measurements.iter().map(view).collect());
+            return Ok(before
+                .measurements
+                .iter()
+                .map(|annotation| view(annotation, unit))
+                .collect());
         }
 
         let command = ve_core::command::Command::SetAnnotations { before, after };
@@ -331,7 +335,7 @@ fn write(
             .annotations
             .measurements
             .iter()
-            .map(view)
+            .map(|annotation| view(annotation, unit))
             .collect())
     })
 }
@@ -362,20 +366,29 @@ pub fn measurement_added(
 
 /// The measurement a leg being drawn would be, read out as the placed one
 /// will read (spec.md 10, M29): the dividers' distance and bearing follow
-/// the pointer from the first click to the second. Nothing is stored and no
-/// lock is consulted; it is the same `view` the committed measurement gets,
+/// the pointer from the first click to the second. Nothing is stored; the settings lock supplies the display unit, and it is the same `view` the committed measurement gets,
 /// so what the pointer shows is exactly what the click will keep.
 #[tauri::command]
-pub fn preview_measurement(measurement: NewMeasurement) -> Result<MeasurementView> {
-    measurement_preview(measurement)
+pub fn preview_measurement(
+    state: tauri::State<'_, AppState>,
+    measurement: NewMeasurement,
+) -> Result<MeasurementView> {
+    let unit = with_session(&state, |session| Ok(session.settings.distance_unit))?;
+    measurement_preview(measurement, unit)
 }
 
 /// Implementation of [`preview_measurement`].
-pub fn measurement_preview(measurement: NewMeasurement) -> Result<MeasurementView> {
-    Ok(view(&Annotation {
-        id: Id::from_raw(0),
-        measurement: placed(measurement)?,
-    }))
+pub fn measurement_preview(
+    measurement: NewMeasurement,
+    unit: DistanceUnit,
+) -> Result<MeasurementView> {
+    Ok(view(
+        &Annotation {
+            id: Id::from_raw(0),
+            measurement: placed(measurement)?,
+        },
+        unit,
+    ))
 }
 
 /// A measurement from what the frontend sent, checked.
@@ -591,9 +604,9 @@ mod tests {
     #[test]
     fn a_distance_carries_both_units() {
         // The passage the acceptance case measures: about 3 100 nm.
-        let text = distance(5_759_000.0);
+        let text = distance(5_759_000.0, DistanceUnit::Nm);
         assert!(text.contains("nm"), "{text}");
-        assert!(text.contains("km"), "{text}");
+        assert!(!text.contains("km"), "{text}");
         assert!(text.starts_with("3\u{2009}110"), "{text}");
     }
 
@@ -601,9 +614,9 @@ mod tests {
     fn a_short_distance_keeps_its_figures() {
         // Four figures either way: a fixed decimal gives a long passage noise
         // and a short one nothing.
-        assert_eq!(distance(1852.0), "1.00 nm · 1.85 km");
+        assert_eq!(distance(1852.0, DistanceUnit::Nm), "1.00 nm");
         // Under a kilometre the metric side is metres, not a fraction of one.
-        assert_eq!(distance(400.0), "0.22 nm · 400 m");
+        assert_eq!(distance(400.0, DistanceUnit::Km), "0.40 km");
     }
 
     #[test]
@@ -618,11 +631,31 @@ mod tests {
     fn only_a_passage_names_its_paths() {
         // The reader needs to know which curve is which, and only a passage
         // draws two.
-        assert!(label(PathKind::GreatCircle, 1000.0, Some(90.0), true).starts_with("GC "));
-        assert!(label(PathKind::Rhumb, 1000.0, Some(90.0), true).starts_with("RL "));
-        assert!(!label(PathKind::GreatCircle, 1000.0, Some(90.0), false).starts_with("GC "));
+        assert!(
+            label(
+                PathKind::GreatCircle,
+                1000.0,
+                Some(90.0),
+                true,
+                DistanceUnit::Km
+            )
+            .starts_with("GC ")
+        );
+        assert!(
+            label(PathKind::Rhumb, 1000.0, Some(90.0), true, DistanceUnit::Km).starts_with("RL ")
+        );
+        assert!(
+            !label(
+                PathKind::GreatCircle,
+                1000.0,
+                Some(90.0),
+                false,
+                DistanceUnit::Km
+            )
+            .starts_with("GC ")
+        );
         // A ring has no bearing, so its label has no course on the end.
-        assert!(!label(PathKind::Ring, 1000.0, None, false).contains('°'));
+        assert!(!label(PathKind::Ring, 1000.0, None, false, DistanceUnit::Km).contains('°'));
     }
 
     #[test]

@@ -5,11 +5,11 @@ import type { SelectionTransform } from "./SelectionTransform";
 /**
  * Where a drag would put the selection, without putting it there.
  */
-export type TransformPreview = { 
+export type TransformPreview = {
 /**
  * Where the handles go while the pointer is here.
  */
-handles: SelectionTransform, 
+handles: SelectionTransform,
 /**
  * The selection's footprints, as they would be if the drag ended here.
  */

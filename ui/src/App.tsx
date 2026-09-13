@@ -1,3 +1,4 @@
+import { UnitsProvider } from "./settings/units";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import ExportDialog from "./project/ExportDialog";
@@ -8,6 +9,8 @@ import MapView, { type MapHandle } from "./map/MapView";
 import Timeline from "./timeline/Timeline";
 import NewProjectDialog from "./project/NewProjectDialog";
 import StartScreen from "./project/StartScreen";
+import BetaGate from "./project/BetaGate";
+import Help from "./help/Help";
 import UnsavedChangesDialog from "./project/UnsavedChangesDialog";
 import { mayReplaceProject, type UnsavedChoice } from "./project/saveGuard";
 import { pickProjectToOpen, pickProjectToSave } from "./project/dialogs";
@@ -17,7 +20,7 @@ import { stillPasteChord } from "./chords";
 import type { FieldKindName } from "./kind";
 import { listen } from "@tauri-apps/api/event";
 import { api, HISTORY_LABEL, IpcError } from "./ipc";
-import { reportError, shown, useHint } from "./hint";
+import { reportError, retryError, shown, useHint } from "./hint";
 import { isBusy, useBusy } from "./busy";
 import type { HistoryProgress } from "./generated/HistoryProgress";
 import { type PanelState, loadPanels, savePanels, togglePanel } from "./panels/layout";
@@ -37,8 +40,14 @@ import type { PositionPick } from "./picking";
  * would mean inventing those values (spec.md 2).
  */
 export default function App() {
+  return <BetaGate><Help><EditorApp /></Help></BetaGate>;
+}
+
+function EditorApp() {
   const [info, setInfo] = useState<AppInfo | null>(null);
   const [project, setProject] = useState<ProjectSummary | null>(null);
+  // A failed download's saved request belongs to this opening of the project.
+  useEffect(() => reportError(null), [project?.image_token]);
   const [status, setStatus] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   // Non-null while the New Project dialog is up; the boolean is the answer the
@@ -57,6 +66,14 @@ export default function App() {
   // because transforms act on the whole selection about its collective
   // centroid (spec.md 8.2).
   const [selection, setSelection] = useState<number[]>([]);
+  const [shapeEditing, setShapeEditing] = useState<number | null>(null);
+  const exitShapeEditing = useCallback(() => setShapeEditing(null), []);
+  const toggleShapeEditing = useCallback((object: number) => {
+    setShapeEditing((current) => current === object ? null : object);
+    setSelection([object]);
+    mapRef.current?.clearRegion();
+    setPicking(null);
+  }, []);
   /**
    * Whether the timeline has a GRIB frame selected, in which case copy and
    * paste belong to it and not to the object clipboard (spec.md 4.8, M20).
@@ -105,6 +122,7 @@ export default function App() {
   const selectObjects = useCallback((ids: number[]) => {
     if (ids.length > 0) mapRef.current?.clearRegion();
     setSelection(ids);
+    setShapeEditing((current) => current !== null && ids.length === 1 && ids[0] === current ? current : null);
   }, []);
   // Which layer receives new objects, and what a plain marquee is scoped to
   // (spec.md 6.1, 8.2). Null means the top of the stack.
@@ -298,6 +316,7 @@ export default function App() {
     try {
       await api.closeProject(decision.discardUnsaved);
       setSelection([]);
+      setShapeEditing(null);
       setActiveLayer(null);
       setStep(0);
       reportError(null);
@@ -317,6 +336,7 @@ export default function App() {
   const openPath = useCallback(async (path: string, discardUnsaved: boolean) => {
     const opened = await api.openProject(path, discardUnsaved);
     setSelection([]);
+    setShapeEditing(null);
     setActiveLayer(null);
     setStep(0);
     reportError(null);
@@ -387,6 +407,7 @@ export default function App() {
           .removeObjects(selection)
           .then((next) => {
             setSelection([]);
+            setShapeEditing(null);
             setProject(next);
           })
           .catch(report);
@@ -425,6 +446,7 @@ export default function App() {
           .cutObjects(selection, step)
           .then((next) => {
             setSelection([]);
+            setShapeEditing(null);
             setProject(next);
           })
           .catch(report);
@@ -467,6 +489,7 @@ export default function App() {
   }
 
   return (
+    <UnitsProvider settings={settings}>
     <div className="app">
       <div className="titlebar">
         <span className="brand">VectorEffects</span>
@@ -600,6 +623,8 @@ export default function App() {
           viewSlot={viewSlot}
           activeKind={activeKind}
           libraryRevision={libraryRevision}
+          shapeEditing={shapeEditing}
+          onExitShapeEditing={exitShapeEditing}
         />
 
         {panels.right ? (
@@ -657,6 +682,8 @@ export default function App() {
         settings={settings}
         capture={recording}
         onCapture={(mode) => mapRef.current?.setCapture(mode)}
+        shapeEditing={shapeEditing}
+        onShapeEditing={toggleShapeEditing}
       />
 
       {/*
@@ -707,6 +734,7 @@ export default function App() {
           onCreated={(created) => {
             setCreating(null);
             setSelection([]);
+            setShapeEditing(null);
             setActiveLayer(null);
             setStep(0);
             reportError(null);
@@ -749,6 +777,7 @@ export default function App() {
         </button>
       </div>
     </div>
+    </UnitsProvider>
   );
 }
 
@@ -888,12 +917,11 @@ function StatusHint({ status }: { status: string | null }) {
   if (line === null) return <span className="hint">{activity}</span>;
   return (
     <span
-      className={line.kind === "error" ? "hint error" : "hint muted"}
+      className={`${line.kind === "error" ? "hint error" : "hint muted"}${line.kind === "error" && state.retry ? " has-retry" : ""}`}
       title={line.detail ?? undefined}
     >
-      {activity}
-      {activity && " · "}
-      {line.text}
+      <span className="hint-message">{activity}{activity && " · "}{line.text}</span>
+      {line.kind === "error" && state.retry && <button className="status-retry" onClick={retryError}>Retry download</button>}
     </span>
   );
 }

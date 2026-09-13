@@ -514,3 +514,16 @@ function shapeRecorder(): {
       rects.some((box) => inRect(box, x, y)) || rings.some((ring) => inPolygon(ring, x, y)),
   };
 }
+
+it("keeps a 100 px tool circular in all projections at every latitude", () => {
+  for (const projection of ["equirectangular", "mercator", "miller"] as const) {
+    const space = projection === "equirectangular" ? "projected" : projection;
+    for (const lat of [-75, 0, 60, 75]) {
+      const camera = { centerLon: 0, centerLat: lat, pxPerDeg: 8, projection };
+      const radiusKm = kmFromPixels(camera, lat, 50, space);
+      const radius = footprintRadii(camera, lat, radiusKm, space);
+      expect(radius.rx).toBeCloseTo(50, 9);
+      expect(radius.ry).toBeCloseTo(50, 9);
+    }
+  }
+});

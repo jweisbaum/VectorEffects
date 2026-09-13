@@ -6,11 +6,11 @@ import type { ProjectSummary } from "./ProjectSummary";
  * user holding (M29) — the new object, or the one the gesture merged into,
  * since that is the object that now has the stroke in it.
  */
-export type Created = { 
+export type Created = {
 /**
  * The document after the gesture.
  */
-project: ProjectSummary, 
+project: ProjectSummary,
 /**
  * The object the gesture made or grew, which becomes the selection.
  */

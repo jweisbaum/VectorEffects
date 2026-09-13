@@ -96,6 +96,8 @@ pub enum BaselineOutline {
     },
     /// A closed ring, in local metres: a filled shape's own boundary.
     Ring(Vec<Local>),
+    /// Animated boundaries, including holes.
+    Contours(Vec<Vec<Local>>),
 }
 
 /// How many points a preview outline sends per chain.
@@ -149,6 +151,7 @@ impl BaselineOutline {
                 [-half_width_m, *half_height_m],
             ]),
             Shape::Polygon { ring } => Self::Ring(ring.clone()),
+            Shape::Contours { rings, .. } => Self::Contours(rings.clone()),
         }
     }
 }
@@ -197,6 +200,11 @@ pub enum ObjectOutline {
         square: bool,
         /// Which space the stamp is a circle in (spec.md 3.5).
         space: StampSpace,
+    },
+    /// Closed animated boundaries, filled using the even/odd rule.
+    Contours {
+        /// Outer rings and holes.
+        rings: Vec<Vec<[f64; 2]>>,
     },
     /// Fill this closed ring of `[lon, lat]` points.
     Ring {
@@ -504,9 +512,14 @@ fn outline_of(outline: &BaselineOutline, frame: &Frame) -> ObjectOutline {
             space: match frame.space {
                 Space::Geodesic => StampSpace::Geodesic,
                 Space::Projected => StampSpace::Projected,
+                Space::Mercator => StampSpace::Mercator,
+                Space::Miller => StampSpace::Miller,
             },
         },
         BaselineOutline::Ring(ring) => ObjectOutline::Ring { points: lift(ring) },
+        BaselineOutline::Contours(rings) => ObjectOutline::Contours {
+            rings: rings.iter().map(|r| lift(r)).collect(),
+        },
     }
 }
 
@@ -662,6 +675,8 @@ fn baseline_of(
             space: flat.frame.space,
             reach_m: flat.cap_radius_m,
             geometry: object.geometry.clone(),
+            shape_animation: object.shape_animation.clone(),
+            erased: object.erased.clone(),
             position: stored(PropId::Position),
             rotation: stored(PropId::RotationDeg),
             scale: stored(PropId::ScalePct),
@@ -992,6 +1007,39 @@ fn anchor_commands(gesture: &TransformGesture, pointer: LonLat) -> Vec<Command> 
             Geometry::Disc { .. } | Geometry::Rect { .. } => None,
         };
 
+        if let Some(animation) = &item.shape_animation {
+            let mut moved = animation.clone();
+            let reframe_point = reframe;
+            for p in moved.rings.iter_mut().flatten() {
+                p.base = reframe_point(p.base);
+                for k in p.keys.values_mut() {
+                    k.point = reframe_point(k.point);
+                }
+            }
+            commands.push(Command::SetShapeAnimation {
+                object: item.object,
+                before: Some(animation.clone()),
+                after: Some(moved),
+            });
+        }
+        if !item.erased.is_empty() {
+            let mut moved = item.erased.clone();
+            for cut in &mut moved {
+                for p in cut
+                    .chains
+                    .iter_mut()
+                    .flatten()
+                    .chain(cut.contour.iter_mut())
+                {
+                    *p = reframe(*p);
+                }
+            }
+            commands.push(Command::SetErasures {
+                object: item.object,
+                before: item.erased.clone(),
+                after: moved,
+            });
+        }
         commands.push(set_position(gesture, item, pointer));
         if let Some(geometry) = geometry {
             commands.push(Command::SetGeometry {

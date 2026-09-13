@@ -3,31 +3,31 @@
 /**
  * What to export and where.
  */
-export type ExportRequest = { 
+export type ExportRequest = {
 /**
  * Destination path.
  */
-path: string, 
+path: string,
 /**
  * Forecast reference year.
  */
-year: number, 
+year: number,
 /**
  * Month, 1-12.
  */
-month: number, 
+month: number,
 /**
  * Day, 1-31.
  */
-day: number, 
+day: number,
 /**
  * Hour, 0-23.
  */
-hour: number, 
+hour: number,
 /**
  * Originating centre code. 255 means missing, which is the honest default.
  */
-centre: number, 
+centre: number,
 /**
  * Bits per packed value: 8, 12, 16 or 24 (spec.md 12.3, M19).
  *

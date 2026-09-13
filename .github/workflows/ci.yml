@@ -2,8 +2,11 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: ["**"]
   pull_request:
+
+permissions:
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
@@ -18,20 +21,21 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest, ubuntu-latest]
+        os: [macos-15-intel, macos-15, windows-2022, ubuntu-22.04]
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Linux system dependencies
-        if: matrix.os == 'ubuntu-latest'
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev \
             libxdo-dev libssl-dev patchelf build-essential file
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: "1.97"
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
 
@@ -45,7 +49,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.97"
       - uses: Swatinem/rust-cache@v2
 
       # An *independent* decoder. The in-repo reader checks the writer against
@@ -54,10 +60,10 @@ jobs:
       - name: Install ecCodes
         run: |
           sudo apt-get update
-          sudo apt-get install -y libeccodes-tools python3-eccodes python3-numpy
+          sudo apt-get install -y libeccodes-tools python3-eccodes python3-numpy libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev libxdo-dev libssl-dev patchelf build-essential file
 
       - name: Emit a sample from the real pipeline
-        run: cargo run --release -p ve-app --example export_sample -- sample.grib2
+        run: cargo run --release -p ve-app --example export_sample -- sample.grib2 empty.grib2
 
       - name: ecCodes must parse every message without warnings
         run: |
@@ -66,7 +72,9 @@ jobs:
           test "$(grib_count sample.grib2)" = "6"
 
       - name: Decoded values must match what was painted
-        run: python3 tools/check_grib.py sample.grib2
+        run: |
+          python3 tools/check_grib.py sample.grib2
+          python3 tools/check_grib.py empty.grib2 --empty
 
   bindings:
     name: typescript bindings are current
@@ -79,7 +87,9 @@ jobs:
           sudo apt-get install -y \
             libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev \
             libxdo-dev libssl-dev patchelf build-essential file
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.97"
       - uses: Swatinem/rust-cache@v2
       - run: cargo run -p ve-app --bin export-bindings
       # Bindings are generated from the Rust types and committed. If this diff

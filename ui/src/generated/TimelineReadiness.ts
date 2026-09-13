@@ -4,12 +4,12 @@ import type { StepReadiness } from "./StepReadiness";
 /**
  * Readiness of every step, for one viewport at one revision.
  */
-export type TimelineReadiness = { 
+export type TimelineReadiness = {
 /**
  * The revision the answer describes. A frontend holding an older one
  * knows a frame it saw as solid may now be stale (spec.md 9.5).
  */
-revision: number, 
+revision: number,
 /**
  * One entry per step, in step order.
  */

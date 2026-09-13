@@ -8,15 +8,15 @@
  * mapping lives here so the frontend cannot send a gesture `create_object`
  * would refuse.
  */
-export type GestureSelector = { "kind": "always", 
+export type GestureSelector = { "kind": "always",
 /**
  * The gesture's tag, as `Gesture` spells it.
  */
-gesture: string, } | { "kind": "by_choice", 
+gesture: string, } | { "kind": "by_choice",
 /**
  * The property that decides.
  */
-on: string, 
+on: string,
 /**
  * One gesture tag per variant of `on`, in variant order.
  */

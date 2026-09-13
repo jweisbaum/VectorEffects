@@ -3,11 +3,11 @@
 /**
  * A field sample at one position, for the cursor readout.
  */
-export type FieldSample = { 
+export type FieldSample = {
 /**
  * Speed in metres per second.
  */
-speed_mps: number, 
+speed_mps: number,
 /**
  * Azimuth the vector points toward, degrees clockwise from north.
  *
@@ -15,13 +15,13 @@ speed_mps: number,
  * convention; no code below this boundary sees a "from" bearing
  * (spec.md 3.3).
  */
-azimuth_toward_deg: number, 
+azimuth_toward_deg: number,
 /**
  * Whether anything wrote the cell (M31, D58): a calm cell some layer
  * wrote is defined; one nothing wrote is not, whatever the map shows
  * beneath it.
  */
-defined: boolean, 
+defined: boolean,
 /**
  * The kind of the layer the cell shows — `wind` or `current` — when
  * the composite was sampled; the kind asked for otherwise.

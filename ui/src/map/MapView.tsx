@@ -1,3 +1,6 @@
+import { hitShapePoint, movedShapePoint, type ShapePointHit } from "./shapeEditing";
+import type { ShapeControls } from "../generated/ShapeControls";
+import { useUnits, type DisplayUnits } from "../settings/units";
 import {
   type Ref,
   useCallback,
@@ -65,11 +68,11 @@ import {
   extendLatticeUnderStroke,
   freshLattice,
   glyphGeometry,
-  glyphSizeScale,
   type LatticeProgress,
   latticeUnder,
-  mapGlyphLayout,
 } from "./glyph";
+import { GLYPH_SUBDIVISIONS, spacedGlyphs } from "./glyphPlacement";
+import { DEFAULT_GLYPHS, glyphDisplayLayout, glyphOpacity } from "./glyphAppearance";
 import {
   DEFAULT_PROJECTION,
   PROJECTIONS,
@@ -91,7 +94,7 @@ import { showsHoverIndicator, showsMagnifier } from "./hover";
 import { KIND_LABELS, KINDS, type FieldKindName, kindOf } from "../kind";
 import { trackKeyframes } from "./macroTrack";
 import { legendKnots } from "./legend";
-import { rampCss, rampStops } from "./ramp";
+import { rampColour, rampCss, rampStops } from "./ramp";
 import { parseBasemap } from "./format";
 import { marqueeBounds } from "./marquee";
 import {
@@ -185,7 +188,7 @@ import { knownGradients, loadGradients, stopsOf } from "../gradients";
 interface Readout {
   lon: number;
   lat: number;
-  /** Speed in knots, the only unit shown (`ve_core::units`). */
+  /** Speed in knots internally; readouts use the global speed preference. */
   speedKnots: number;
   /** Direction, already converted to the project's convention. */
   directionDeg: number;
@@ -271,7 +274,7 @@ function glyphStyleOf(kind: FieldKindName): "arrow" | "barb" {
 /** The range of speeds a kind's last frame drew, in m/s, or null for none. */
 type SeenRange = { min: number; max: number } | null;
 
-/** A kind's colour ramp, in m/s for the shader and whole knots for the legend. */
+/** A kind's colour ramp, in m/s for the shader and display units for the legend. */
 interface Ramp {
   min: number;
   max: number;
@@ -280,19 +283,19 @@ interface Ramp {
   auto: boolean;
 }
 
-function rampOf(scaleKnots: number, seen: SeenRange): Ramp {
+function rampOf(scaleKnots: number, seen: SeenRange, units: DisplayUnits): Ramp {
   if (seen === null) {
     return {
       min: 0,
       max: mpsFromKnots(scaleKnots),
       minKnots: "0",
-      maxKnots: String(scaleKnots),
+      maxKnots: legendKnots(units.speedFromKnots(scaleKnots), units.speedFromKnots(scaleKnots)),
       auto: false,
     };
   }
   const max = Math.max(seen.max, seen.min + AUTO_SCALE_MIN_SPAN_MPS);
-  const lowKnots = knotsFromMps(seen.min);
-  const highKnots = knotsFromMps(max);
+  const lowKnots = units.speedFromMps(seen.min);
+  const highKnots = units.speedFromMps(max);
   const span = highKnots - lowKnots;
   return {
     min: seen.min,
@@ -330,6 +333,7 @@ const NUDGE_PX_CSS = 3;
 
 /** The cursor readout: position, field, zoom. */
 function MapReadout({ store, convention }: { store: ReadoutStore; convention: string }) {
+  const units = useUnits();
   const { sample, zoomPercent } = useSyncExternalStore(store.subscribe, store.get);
   return (
     <div className="map-readout">
@@ -340,7 +344,7 @@ function MapReadout({ store, convention }: { store: ReadoutStore; convention: st
           {sample.defined ? (
             <>
               <span className="muted">{sample.kind === "wind" ? "wind" : "current"}</span>
-              <span className="accent">{sample.speedKnots.toFixed(1)} kt</span>
+              <span className="accent">{units.speedFromKnots(sample.speedKnots).toFixed(1)} {units.speedUnit}</span>
               <span>
                 {Math.round(sample.directionDeg)}° ({convention})
               </span>
@@ -401,14 +405,6 @@ const HOVER_TOOLS: ReadonlySet<string> = new Set([
 ]);
 /** Hit radius of a transform handle, in CSS pixels. */
 const HANDLE_RADIUS_CSS = 6;
-
-/**
- * Ink for preview glyphs.
- *
- * The renderer's `GLYPH` colour, as CSS: the preview's barbs and the map's are
- * the same mark and should not read as two different things.
- */
-const GLYPH_INK = "rgba(240, 247, 255, 0.9)";
 
 /**
  * Floor under a preview's opacity.
@@ -513,8 +509,12 @@ export default function MapView({
   viewSlot,
   activeKind,
   libraryRevision,
+  shapeEditing = null,
+  onExitShapeEditing,
 }: {
   ref?: Ref<MapHandle>;
+  shapeEditing?: number | null;
+  onExitShapeEditing?: () => void;
   /**
    * The title bar's centre, which the view controls — the capture and
    * measure tools, glyphs, projection, graticule, undo and redo — are
@@ -569,8 +569,10 @@ export default function MapView({
   /** Whether a drag keys the current step rather than the base (spec.md 9.3). */
   autoKey: boolean;
 }) {
+  const units = useUnits();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const rendererRef = useRef<MapRenderer | null>(null);
+  const glyphSettingsRef = useRef(settings?.glyphs ?? DEFAULT_GLYPHS);
   const tilesRef = useRef<TileCache | null>(null);
   /** Textures for the image layers (spec.md 4.9, M18). */
   const imagesRef = useRef<ImageCache | null>(null);
@@ -887,7 +889,47 @@ export default function MapView({
     setActivity(pending > 0 ? `rendering ${pending}…` : null);
     return () => setActivity(null);
   }, [pending]);
-  const [tool, setTool] = useState<ActiveTool>(HAND);
+  const [tool, setActiveTool] = useState<ActiveTool>(HAND);
+  const setTool = useCallback((next: ActiveTool) => {
+    onExitShapeEditing?.();
+    setActiveTool(next);
+  }, [onExitShapeEditing]);
+  const shapeControls = useRef<ShapeControls | null>(null);
+  const shapeDrag = useRef<{ hit: ShapePointHit; before: ShapeControls; pointer: number; moved: boolean } | null>(null);
+  const shapeModeRef = useRef(shapeEditing);
+  shapeModeRef.current = shapeEditing;
+  useEffect(() => {
+    if (shapeEditing !== null) setActiveTool(HAND);
+  }, [shapeEditing]);
+  useEffect(() => {
+    let cancelled = false;
+    shapeControls.current = null;
+    shapeDrag.current = null;
+    drawOverlayRef.current();
+    if (shapeEditing !== null) {
+      void api.shapeControls(shapeEditing, step).then((controls) => {
+        if (cancelled) return;
+        shapeControls.current = controls;
+        drawOverlayRef.current();
+      }).catch((error: unknown) => {
+        if (cancelled) return;
+        onExitShapeEditing?.();
+        reportError(String(error));
+      });
+    }
+    return () => { cancelled = true; };
+  }, [shapeEditing, step, project.revision, onExitShapeEditing]);
+  useEffect(() => {
+    const cancel = () => {
+      const drag = shapeDrag.current;
+      if (!drag) return;
+      shapeControls.current = drag.before;
+      shapeDrag.current = null;
+      drawOverlayRef.current();
+    };
+    window.addEventListener("blur", cancel);
+    return () => window.removeEventListener("blur", cancel);
+  }, []);
   /*
     The selected region, and how the select tool draws one (spec.md 8.2, M14).
     Session state: not document, not history — a region is a way of pointing,
@@ -1061,15 +1103,8 @@ export default function MapView({
    */
   const settlingDrag = useRef<(TransformPreview & Settling) | null>(null);
   /**
-   * The frame under the selection when the drag began, and where it was
-   * (M84).
-   *
-   * The drag carries these pixels rather than leaving the object behind while
-   * only its edge moves; see `map/ghost.ts` for why the field itself cannot
-   * follow the pointer. Taken inside a GL frame — the drawing buffer is not
-   * preserved, so a copy made anywhere else is blank — and kept for the whole
-   * drag, since the source cannot change while the document is not being
-   * written.
+   * A transparent rendering of the selected objects at the start of a drag.
+   * Kept until the drag commits and the replacement tiles arrive.
    */
   const ghost = useRef<{
     image: HTMLCanvasElement;
@@ -1216,8 +1251,8 @@ export default function MapView({
     current: null,
   });
   const ramps: Record<FieldKindName, Ramp> = {
-    wind: rampOf(project.wind_scale_knots, autoScale ? seenRanges.wind : null),
-    current: rampOf(project.current_scale_knots, autoScale ? seenRanges.current : null),
+    wind: rampOf(project.wind_scale_knots, autoScale ? seenRanges.wind : null, units),
+    current: rampOf(project.current_scale_knots, autoScale ? seenRanges.current : null, units),
   };
   // The active layer's ramp, which a gesture's preview paints with.
   const rampMin = ramps[activeKind].min;
@@ -1372,14 +1407,7 @@ export default function MapView({
     [],
   );
 
-  /**
-   * Copies the frame under the selection, so the drag can carry it (M84).
-   *
-   * The square is taken from the reach the handles already carry, which is
-   * defined as covering every member's footprint — no path, no union, and a
-   * selection of twenty objects costs the same as one. Called from `draw` and
-   * from nowhere else: see the note there about the drawing buffer.
-   */
+  /** Render only the selected objects into a transparent, bounded drag image. */
   const takeGhost = useCallback(() => {
     const canvas = canvasRef.current;
     const placement = committedTransformRef.current;
@@ -1395,27 +1423,44 @@ export default function MapView({
     image.height = region.height;
     const context = image.getContext("2d");
     if (context === null) return;
-    context.drawImage(
-      canvas,
-      region.left,
-      region.top,
-      region.width,
-      region.height,
-      0,
-      0,
-      region.width,
-      region.height,
-    );
-    ghost.current = {
-      image,
-      left: region.left,
-      top: region.top,
-      from: {
-        pivot: at,
-        rotationDeg: placement.rotation_deg,
-        radiusM: placement.radius_m,
-      },
-    };
+    ghostWanted.current = false;
+    const source = ghostSource.current;
+    const projection = projectionFor(camera);
+    const scale = Math.min(1, 384 / Math.max(region.width, region.height));
+    const width = Math.max(1, Math.ceil(region.width * scale));
+    const height = Math.max(1, Math.ceil(region.height * scale));
+    const west = camera.centerLon + (region.left - view.width / 2) / camera.pxPerDeg;
+    const north = projection.yOf(camera.centerLat) - (region.top - view.height / 2) / camera.pxPerDeg;
+    void api.selectionPreview({
+      objects: source.map((o) => o.object), step: stepRef.current, revision: projectRef.current.revision,
+      west, north, across: region.width / camera.pxPerDeg, down: region.height / camera.pxPerDeg,
+      space: projection.mode + 1, width, height,
+    }).then((bytes) => {
+      if (ghostSource.current !== source) return;
+      const data = new Float32Array(bytes);
+      const pixels = new ImageData(width, height);
+      const summary = projectRef.current;
+      const gradients = { wind: stopsOf(gradientsRef.current, summary.wind_gradient), current: stopsOf(gradientsRef.current, summary.current_gradient) };
+      for (let i = 0; i < width * height; i++) {
+        const at = i * 4;
+        const kind = data[at + 3]! > 0.5 ? "wind" : "current";
+        const ramp = rampRef.current[kind];
+        const speed = Math.hypot(data[at]!, data[at + 1]!);
+        const color = rampColour((speed - ramp.min) / Math.max(0.001, ramp.max - ramp.min), gradients[kind]);
+        for (let channel = 0; channel < 3; channel++) pixels.data[at + channel] = Math.round(color[channel]! * 255);
+        pixels.data[at + 3] = Math.round(data[at + 2]! * 230);
+      }
+      const small = document.createElement("canvas");
+      small.width = width; small.height = height;
+      small.getContext("2d")?.putImageData(pixels, 0, 0);
+      context.drawImage(small, 0, 0, image.width, image.height);
+      ghost.current = { image, left: region.left, top: region.top,
+        from: { pivot: at, rotationDeg: placement.rotation_deg, radiusM: placement.radius_m },
+      };
+      drawOverlayRef.current();
+    }).catch((error: unknown) => {
+      void api.frontendLog("warn", `Selection preview: ${String(error)}`);
+    });
   }, []);
 
   const draw = useCallback(() => {
@@ -1448,6 +1493,7 @@ export default function MapView({
       },
       gradients: gradientStops(projectRef.current),
       showGlyphs: showGlyphsRef.current,
+      glyphs: glyphSettingsRef.current,
       showGraticule: showGraticuleRef.current,
       pixelRatio: window.devicePixelRatio || 1,
       // The gesture's own operation while it is being drawn, and the one it
@@ -1615,15 +1661,11 @@ export default function MapView({
     ) {
       settlingDrag.current = null;
       ghost.current = null;
+      ghostSource.current = [];
       ghostWanted.current = false;
     }
 
-    // The drag's ghost, taken from the frame just rendered (M84).
-    //
-    // **Here and nowhere else.** The GL context is created without
-    // `preserveDrawingBuffer`, so the drawing buffer is defined only until the
-    // compositor takes it: a copy made from an overlay redraw of its own — and
-    // every pointer report asks for one — comes out blank.
+    // Start the selected-object preview once this frame establishes the view.
     if (ghostWanted.current && ghost.current === null) takeGhost();
 
     // The overlay is drawn as part of the same frame, from the same camera.
@@ -2025,7 +2067,10 @@ export default function MapView({
         // hides all of it.
         imageLayersRef.current = tree.layers
           .filter((layer) => layer.visible)
-          .flatMap((layer) => (layer.image ? [layer.image] : []));
+          .flatMap((layer) => (layer.image ? [{ ...layer.image,
+            speedRange: layer.speed_filter?.speed_min_mps != null && layer.speed_filter.speed_max_mps != null
+              ? [layer.speed_filter.speed_min_mps, layer.speed_filter.speed_max_mps] as [number, number] : undefined,
+          }] : []));
         layerSourcesRef.current = new Map(
           tree.layers.map((layer) => [layer.id, layer.source as LayerSourceName]),
         );
@@ -2073,7 +2118,7 @@ export default function MapView({
     return () => {
       live = false;
     };
-  }, [project, requestOverlay]);
+  }, [project, requestOverlay, units.distanceUnit]);
 
   /** Takes a new set of measurements from the backend and redraws. */
   const tookMeasurements = useCallback(
@@ -2186,6 +2231,7 @@ export default function MapView({
       // first press is what a half-drawn polygon needs, and dropping the tool
       // as well would be two steps at once.
       if (event.key === "Escape") {
+        if (shapeModeRef.current !== null) { onExitShapeEditing?.(); return; }
         if (gestureRef.current) {
           gestureRef.current = null;
           nodeDrag.current = false;
@@ -2487,6 +2533,12 @@ export default function MapView({
 
   // Mirror display state into the refs `draw` reads, then redraw.
   useEffect(() => {
+    glyphSettingsRef.current = settings?.glyphs ?? DEFAULT_GLYPHS;
+    requestDraw();
+  }, [requestDraw, settings?.glyphs]);
+
+  // Mirror display state into the refs `draw` reads, then redraw.
+  useEffect(() => {
     const changed = stepRef.current !== step || showGlyphsRef.current !== showGlyphs || showGraticuleRef.current !== showGraticule;
     showGlyphsRef.current = showGlyphs;
     showGraticuleRef.current = showGraticule;
@@ -2515,9 +2567,9 @@ export default function MapView({
       // The map's lattice, and this kind's length on it (M31), held to the
       // size the style asks for where the lattice is wider than it wanted
       // (M33) — the same cap the map's own glyphs take.
-      const { spacing } = mapGlyphLayout(camera.pxPerDeg, dpr);
-      const lengthPx = spacing * glyphSizeScale(glyphStyle, spacing, dpr);
-      const width = Math.max(1, 1.8 * dpr);
+      const appearance = glyphSettingsRef.current[glyphStyle];
+      const { lengthPx } = glyphDisplayLayout(glyphStyle, camera.pxPerDeg, dpr, appearance);
+      const width = appearance.stroke_width_px * dpr;
 
       const strokes = new Path2D();
       const fills = new Path2D();
@@ -2531,6 +2583,7 @@ export default function MapView({
           lengthPx,
           lat,
           width,
+          appearance.size_percent / 100,
         );
 
         const trace = (
@@ -2551,11 +2604,22 @@ export default function MapView({
       }
 
       context.save();
-      context.strokeStyle = GLYPH_INK;
-      context.fillStyle = GLYPH_INK;
+      context.globalAlpha *= glyphOpacity(appearance, knots / 1.9438444924406046);
       context.lineWidth = width;
       context.lineCap = "round";
       context.lineJoin = "round";
+      if (appearance.shadow.enabled) {
+        context.save();
+        context.globalAlpha *= appearance.shadow.opacity_percent / 100;
+        context.translate(appearance.shadow.offset_x_px * dpr, appearance.shadow.offset_y_px * dpr);
+        context.strokeStyle = appearance.shadow.color;
+        context.fillStyle = appearance.shadow.color;
+        context.stroke(strokes);
+        context.fill(fills);
+        context.restore();
+      }
+      context.strokeStyle = appearance.color;
+      context.fillStyle = appearance.color;
       context.stroke(strokes);
       context.fill(fills);
       context.restore();
@@ -2583,7 +2647,9 @@ export default function MapView({
       // Every piece is its own subpath, so filling once merges overlapping
       // footprints into a single silhouette instead of drawing a chain of
       // outlines on top of each other -- and leaves a ring its hole.
-      const { stepDeg } = mapGlyphLayout(camera.pxPerDeg, dpr);
+      const { stepDeg } = glyphDisplayLayout(glyphStyle, camera.pxPerDeg, dpr, glyphSettingsRef.current[glyphStyle]);
+      const fineStep = stepDeg / GLYPH_SUBDIVISIONS;
+      const candidateLimit = MAX_PREVIEW_GLYPHS * GLYPH_SUBDIVISIONS ** 2;
       const footprint = preview.footprint;
       let covered: Array<[number, number]>;
 
@@ -2612,8 +2678,8 @@ export default function MapView({
         context.fill(entry.path);
         if (!showGlyphs) return;
         covered = extendLatticeUnderStroke(
-          footprint.points, entry.lattice, footprint.radiusKm, stepDeg,
-          MAX_PREVIEW_GLYPHS, footprint.shape, footprint.space,
+          footprint.points, entry.lattice, footprint.radiusKm, fineStep,
+          candidateLimit, footprint.shape, footprint.space,
         );
       } else {
         const region = new Path2D();
@@ -2621,8 +2687,11 @@ export default function MapView({
         context.fillStyle = preview.paint;
         context.fill(region);
         if (!showGlyphs) return;
-        covered = latticeUnder(footprint, stepDeg, MAX_PREVIEW_GLYPHS);
+        covered = latticeUnder(footprint, fineStep, candidateLimit);
       }
+      covered = spacedGlyphs(covered.map(([lon, lat]) => ({
+        lon: camera.centerLon + normalizeLon(lon - camera.centerLon), lat,
+      })), stepDeg, camera).slice(0, MAX_PREVIEW_GLYPHS).map(({ lon, lat }) => [lon, lat]);
       // A footprint narrower than the lattice can cover no point at all. It
       // still has a direction, and a preview showing none of it is worse than
       // one glyph off the lattice, so a point on the shape stands in.
@@ -2682,7 +2751,7 @@ export default function MapView({
       // away. The colour is for what is drawn; what is erased takes this.
       const ERASING = "#000";
       context.save();
-      if (outline.kind === "ring") {
+      if (outline.kind === "ring" || outline.kind === "contours") {
         context.strokeStyle = colour;
         context.lineWidth = width;
         context.stroke(maskPath(outline));
@@ -2749,7 +2818,7 @@ export default function MapView({
       context.save();
       context.fillStyle = "rgba(255, 214, 102, 0.14)";
       for (const outline of outlines) {
-        context.fill(maskPath(outline, Math.max(1, 1.5 * dpr) / 2));
+        context.fill(maskPath(outline, Math.max(1, 1.5 * dpr) / 2), outline.kind === "contours" ? "evenodd" : "nonzero");
       }
       context.restore();
     },
@@ -2881,6 +2950,28 @@ export default function MapView({
       return;
     }
 
+    if (shapeEditing !== null) {
+      const controls = shapeControls.current;
+      if (controls && controls.object === shapeEditing && controls.step === step) {
+        const outline: ObjectOutline = { kind: "contours", rings: controls.rings };
+        const cuts = outlineList.find((o) => o.object === shapeEditing)?.erased ?? [];
+        drawEdgeBand(context, outline, "#ffd666", 1.5, dpr, cuts);
+        for (let r = 0; r < controls.rings.length; r++) {
+          for (let p = 0; p < controls.rings[r]!.length; p++) {
+            const [lon, lat] = controls.rings[r]![p]!;
+            const at = toScreen(camera, view, { lon, lat });
+            context.beginPath();
+            context.arc(at.x, at.y, 4 * dpr, 0, Math.PI * 2);
+            context.fillStyle = controls.keyed[r]?.[p] ? "#ffd666" : "#1c2638";
+            context.strokeStyle = "#ffd666";
+            context.lineWidth = 1.5 * dpr;
+            context.fill(); context.stroke();
+          }
+        }
+      }
+      return;
+    }
+
     // Object edges (spec.md 6.1, 6.2, 6.3): the one under the pointer, and any
     // selected object with no field of its own to show where it is.
     //
@@ -2931,10 +3022,8 @@ export default function MapView({
     // still hold the object where it was: without this the outline follows the
     // pointer and the object sits still, which for a macro — where the edge
     // and the field inside it are visibly two different things — reads as the
-    // drag doing nothing. So the frame under the selection is copied when the
-    // drag begins and drawn back through the drag's own transform: an
-    // approximation of the re-render, which is what a preview is allowed to be
-    // (invariant 3), held until the real one lands.
+    // drag doing nothing. Evaluate the selected objects when the drag begins
+    // and transform that transparent image until the committed tiles arrive.
     //
     // **After the edge bands, never before.** A band is made by knocking an
     // inset copy out of a filled footprint with `destination-out`, which would
@@ -2962,10 +3051,7 @@ export default function MapView({
       // over the edge that is showing where it lands.
       for (const outline of live.outlines) arriving.addPath(maskPath(outline, 1.5 * dpr));
       context.clip(arriving);
-      // A copy of the *frame*, which is the field over whatever was under it,
-      // so the ground it was lifted from comes with it wherever the field is
-      // thin. Slightly transparent, so that reads as a preview rather than as
-      // a patch of the wrong coastline pasted over the right one.
+      // Keep the selected field slightly translucent to identify the preview.
       context.globalAlpha = 0.85;
       context.transform(matrix[0], matrix[1], matrix[2], matrix[3], matrix[4], matrix[5]);
       context.drawImage(carried.image, carried.left, carried.top);
@@ -2996,12 +3082,12 @@ export default function MapView({
       context.fill();
       // How far the pull is, beside its head (spec.md 6.3, M17): a push is
       // aimed by eye, and the number says what the eye chose.
-      const km = distanceM(pull.from, pull.to) / 1000;
+      const distance = units.distanceFromKm(distanceM(pull.from, pull.to) / 1000);
       context.font = `${11 * dpr}px system-ui, sans-serif`;
       context.textAlign = "left";
       context.textBaseline = "bottom";
       context.fillText(
-        `${km >= 100 ? Math.round(km) : km.toFixed(1)} km`,
+        `${distance >= 100 ? Math.round(distance) : distance.toFixed(1)} ${units.distanceUnit}`,
         to.x + 8 * dpr,
         to.y - 8 * dpr,
       );
@@ -3526,7 +3612,7 @@ export default function MapView({
         context.font = `${11 * dpr}px system-ui, sans-serif`;
         context.textAlign = "left";
         context.textBaseline = "top";
-        const text = `${sample.speedKnots.toFixed(1)} kt · ${Math.round(sample.directionDeg)}°`;
+        const text = `${units.speedFromKnots(sample.speedKnots).toFixed(1)} ${units.speedUnit} · ${Math.round(sample.directionDeg)}°`;
         const x = cursor.x + radius + 6 * dpr;
         const y = cursor.y - 7 * dpr;
         const width = context.measureText(text).width;
@@ -3538,6 +3624,8 @@ export default function MapView({
       context.restore();
     }
   }, [
+    shapeEditing,
+    step,
     drawDragOutlines,
     drawMacroFootprint,
     drawGlyphs,
@@ -3563,6 +3651,7 @@ export default function MapView({
     selection,
     region,
     regionMode,
+    units,
   ]);
 
   useEffect(() => {
@@ -3669,7 +3758,7 @@ export default function MapView({
       drag.points,
       drag.radiusKm,
       eraserRef.current.shape,
-      spaceFor(eraserRef.current.unit),
+      spaceFor(eraserRef.current.unit, cameraRef.current),
     );
     context.fillStyle = "#fff";
     context.fill(path);
@@ -3713,9 +3802,7 @@ export default function MapView({
     (kind: TransformKind, geo: { lon: number; lat: number }) => {
       handleDrag.current = { kind, pointer: geo, asking: false, queued: null };
       dragPreview.current = null;
-      // The drag carries the pixels under the selection (M84). The copy itself
-      // has to wait for a GL frame; what is recorded here is that one is
-      // wanted, and what it will be lifted out of.
+      // Snapshot the selected identities for the asynchronous field preview.
       //
       // Not for a repin, which leaves the geometry where it is on the ground —
       // nothing moves, so nothing should look as though it has. And not for a
@@ -3723,6 +3810,7 @@ export default function MapView({
       // report none, and a ghost built from them would orbit the pivot without
       // turning. Both of those keep the outline-only preview they had.
       ghost.current = null;
+      ghostSource.current = [];
       ghostWanted.current = kind !== "anchor" && !(kind === "rotate" && selection.length > 1);
       ghostSource.current = outlineList.filter((o) => selection.includes(o.object));
       requestDraw();
@@ -3733,6 +3821,7 @@ export default function MapView({
         .catch((err: unknown) => {
           handleDrag.current = null;
           ghost.current = null;
+          ghostSource.current = [];
           ghostWanted.current = false;
           void api.frontendLog("error", `transform failed to start: ${String(err)}`);
         });
@@ -3807,6 +3896,7 @@ export default function MapView({
           // Nothing moved, so nothing should keep looking moved.
           settlingDrag.current = null;
           ghost.current = null;
+          ghostSource.current = [];
           ghostWanted.current = false;
           drawOverlayRef.current();
           void api.frontendLog("error", `drag failed: ${String(err)}`);
@@ -3840,7 +3930,7 @@ export default function MapView({
     for (let i = operatorOutlinesRef.current.length - 1; i >= 0; i -= 1) {
       const entry = operatorOutlinesRef.current[i];
       if (entry === undefined || entry.tool !== "warp") continue;
-      if (!context.isPointInPath(maskPath(entry.outline), point.x, point.y)) continue;
+      if (!context.isPointInPath(maskPath(entry.outline), point.x, point.y, entry.outline.kind === "contours" ? "evenodd" : "nonzero")) continue;
       return { object: entry.object, anchor: { lon: entry.anchor[0], lat: entry.anchor[1] } };
     }
     return null;
@@ -3863,6 +3953,10 @@ export default function MapView({
     ) => {
       const canvas = canvasRef.current;
       if (!canvas) return;
+      if (shapeModeRef.current !== null) {
+        canvas.style.cursor = shapeDrag.current ? "grabbing" : panning ? "grab" : "crosshair";
+        return;
+      }
       // What the tool would do to a layer, and whether this layer takes it
       // (M51). The eraser is an edit and has no schema of its own; a tool
       // that draws nothing is nobody's business.
@@ -3914,10 +4008,22 @@ export default function MapView({
     event.currentTarget.setPointerCapture(event.pointerId);
     const point = toDevice(event);
 
+    if (shapeEditing !== null && picking === null) {
+      const controls = shapeControls.current;
+      const hit = controls && hitShapePoint(controls,
+        ([lon, lat]) => toScreen(cameraRef.current, viewRef.current, { lon, lat }),
+        point, 9 * (window.devicePixelRatio || 1));
+      if (hit && controls && event.button === 0) {
+        shapeDrag.current = { hit, before: controls, pointer: event.pointerId, moved: false };
+      } else { dragging.current = point; }
+      return;
+    }
+
     // A pick armed in the inspector takes the click ahead of every tool: the
     // user asked for this one place, and painting or panning instead would
     // both lose the click and do something they did not ask for.
     if (picking !== null) {
+      onExitShapeEditing?.();
       const geo = unproject(cameraRef.current, viewRef.current, point);
       onPicked();
       void api
@@ -4364,6 +4470,15 @@ export default function MapView({
   const onPointerMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
     const point = toDevice(event);
     cursorRef.current = point;
+
+    const pointDrag = shapeDrag.current;
+    if (pointDrag && pointDrag.pointer === event.pointerId) {
+      const geo = unproject(cameraRef.current, viewRef.current, point);
+      shapeControls.current = movedShapePoint(pointDrag.before, pointDrag.hit, [geo.lon, geo.lat]);
+      pointDrag.moved = true;
+      drawOverlayRef.current();
+      return;
+    }
 
     // The cursor says what a click here would do: a bucket inside a selected
     // region with a tool that fills one — the same predicate the click uses —
@@ -4989,9 +5104,27 @@ export default function MapView({
   );
 
   const endDrag = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    const pointDrag = shapeDrag.current;
+    if (pointDrag?.pointer === event.pointerId) shapeDrag.current = null;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
+
+    if (pointDrag && pointDrag.pointer === event.pointerId) {
+      const shown = shapeControls.current;
+      const to = shown?.rings[pointDrag.hit.ring]?.[pointDrag.hit.point];
+      if (event.type === "pointerup" && pointDrag.moved && to && shapeModeRef.current === pointDrag.before.object) {
+        void api.moveShapePoint(pointDrag.before.object, pointDrag.before.step,
+          pointDrag.hit.ring, pointDrag.hit.point, to[0], to[1], pointDrag.before.revision)
+          .then(onProjectChanged).catch((error: unknown) => {
+            shapeControls.current = pointDrag.before;
+            drawOverlayRef.current();
+            reportError(String(error));
+          });
+      } else { shapeControls.current = pointDrag.before; drawOverlayRef.current(); }
+      return;
+    }
+    if (shapeEditing !== null) { dragging.current = null; pressOrigin.current = null; return; }
 
     // In a macro preview a press that barely moved is a click, which places a
     // copy; one that travelled was a pan and places nothing (M33).
@@ -5027,7 +5160,7 @@ export default function MapView({
               points: drag.points,
               radiusKm: drag.radiusKm,
               shape: brush.shape,
-              space: spaceFor(brush.unit),
+              space: spaceFor(brush.unit, cameraRef.current),
             },
             paint: "transparent",
             knots: 0,
@@ -5046,7 +5179,7 @@ export default function MapView({
           points: drag.points,
           radius_km: drag.radiusKm,
           square: brush.shape === "square",
-          space: spaceFor(brush.unit),
+          space: spaceFor(brush.unit, cameraRef.current),
           feather: brush.feather,
           step: drag.step,
           at_step: stepRef.current,
@@ -5565,6 +5698,13 @@ export default function MapView({
         onPointerMove={onPointerMove}
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
+        onLostPointerCapture={(event) => {
+          const drag = shapeDrag.current;
+          if (drag?.pointer !== event.pointerId) return;
+          shapeControls.current = drag.before;
+          shapeDrag.current = null;
+          drawOverlayRef.current();
+        }}
         onWheel={onWheel}
       />
 
@@ -5573,6 +5713,9 @@ export default function MapView({
       {error === null && !ready && <div className="map-status">Loading basemap…</div>}
       {previewing && <div className="map-preview-frame" aria-hidden="true" />}
       {previewing && <div className="map-preview-badge">Macro Preview</div>}
+      {shapeEditing !== null && <div className="shape-edit-hint" role="status">
+        Shape animation · Drag a dot to key frame {step}. Choose a tool or press Escape to finish.
+      </div>}
 
       <div className="map-toolbar">
         <div className="tools" role="group" aria-label="Tool">
@@ -5582,11 +5725,11 @@ export default function MapView({
             for anyone who hovers.
           */}
           <button
-            className={tool === HAND ? "icon active" : "icon"}
+            className={tool === HAND && shapeEditing === null ? "icon active" : "icon"}
             disabled={recording !== null}
             onClick={() => setTool(HAND)}
             aria-label="Hand"
-            aria-pressed={tool === HAND}
+            aria-pressed={tool === HAND && shapeEditing === null}
             title={`Hand (${chord("hand")}) · pan, select and transform · shift-drag for a rubber band, add cmd to reach across layers · cmd-click to add or remove one object`}
           >
             <ToolIcon tool={HAND} />
@@ -5610,7 +5753,7 @@ export default function MapView({
           {/*
             The eraser (spec.md 8.1, M28). Not in the backend's palette: it
             makes no object, it takes them away — from every frame, or with
-            Ctrl from this one, through the Enabled switch.
+            Shift from this one, by removing the geometry it covers.
           */}
           <button
             className={tool === ERASE ? "icon active" : "icon"}
@@ -5618,7 +5761,7 @@ export default function MapView({
             onClick={() => setTool(ERASE)}
             aria-label="Erase"
             aria-pressed={tool === ERASE}
-            title={`Erase (${chord("erase")}) · drag over objects in the active layer to remove them · hold Ctrl to remove them from this frame only`}
+            title={`Erase (${chord("erase")}) · drag to erase geometry in the active layer · hold Shift to erase from this frame only`}
           >
             <ToolIcon tool={ERASE} />
           </button>
@@ -5858,12 +6001,12 @@ export default function MapView({
             <label>
               Size
               <NumberField
-                min={1}
-                max={eraser.unit === "px" ? 2000 : 20000}
+                min={eraser.unit === "px" ? 1 : units.distanceFromKm(1)}
+                max={eraser.unit === "px" ? 2000 : units.distanceFromKm(20000)}
                 step={eraser.unit === "px" ? 5 : 50}
-                value={eraser.size}
-                format={(v) => String(Math.round(v))}
-                onCommit={(size) => setEraser({ ...eraser, size })}
+                value={eraser.unit === "px" ? eraser.size : units.distanceFromKm(eraser.size)}
+                format={(v) => String(Math.round(v * 100) / 100)}
+                onCommit={(size) => setEraser({ ...eraser, size: eraser.unit === "px" ? size : units.distanceToKm(size) })}
               />
               <select
                 value={eraser.unit}
@@ -5871,9 +6014,9 @@ export default function MapView({
                   setEraser({ ...eraser, unit: e.target.value === "px" ? "px" : "km" });
                   releaseFocus(e);
                 }}
-                title="px cuts a stamp on the map — the same size on screen at any latitude; km cuts one on the ground. The choice is made where the stroke begins and holds for the whole stroke."
+                title="px cuts a stamp on the map — the same size on screen at any latitude; a ground distance cuts one on the ground. The choice is made where the stroke begins and holds for the whole stroke."
               >
-                <option value="km">km</option>
+                <option value="km">{units.distanceUnit}</option>
                 <option value="px">px</option>
               </select>
             </label>
@@ -5958,21 +6101,22 @@ export default function MapView({
             {measureKind === "rings" && (
               <>
                 <label>
-                  Interval
+                  Interval ({units.distanceUnit})
                   <NumberField
-                    value={ringIntervalKm}
-                    min={0.1}
+                    value={units.distanceFromKm(ringIntervalKm)}
+                    min={units.distanceFromKm(0.1)}
                     step={10}
                     onCommit={(value: number) => {
-                      setRingIntervalKm(value);
+                      const km = units.distanceToKm(value);
+                      setRingIntervalKm(km);
                       if (activeRings !== null) {
                         void api
-                          .setMeasurementRings(activeRings, value, ringCount)
+                          .setMeasurementRings(activeRings, km, ringCount)
                           .then(tookMeasurements)
                           .catch(() => undefined);
                       }
                     }}
-                    title="Spacing between rings, in kilometres"
+                    title={`Spacing between rings, in ${units.distanceUnit}`}
                   />
                 </label>
                 <label>
@@ -6207,7 +6351,7 @@ export default function MapView({
                     auto
                   </span>
                 )}
-                <span>{ramps[kind].maxKnots} kt</span>
+                <span>{ramps[kind].maxKnots} {units.speedUnit}</span>
               </div>
             </div>
           ))}

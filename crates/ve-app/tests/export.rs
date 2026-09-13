@@ -145,11 +145,11 @@ fn a_painted_stroke_reaches_the_exported_file() {
         v.values[index]
     );
 
-    // And away from the stroke the field is calm, not filled in.
+    // Away from the stroke the field is undefined, distinct from a painted calm.
     let far = 10 * 360 + 180;
     assert!(
-        u.values[far].abs() < 0.01 && v.values[far].abs() < 0.01,
-        "should be calm"
+        u.values[far].is_nan() && v.values[far].is_nan(),
+        "should be undefined"
     );
 }
 
@@ -392,8 +392,8 @@ fn an_empty_project_exports_almost_nothing() {
         export::run(&project, &request(&path), &AtomicBool::new(false), |_| {}).expect("export");
 
     assert!(
-        result.bytes < 2_000,
-        "a calm field should be tiny, got {}",
+        result.bytes < 35_000,
+        "an empty field needs only bitmaps and headers, got {}",
         result.bytes
     );
 
@@ -401,7 +401,7 @@ fn an_empty_project_exports_almost_nothing() {
     let decoded = messages(&std::fs::read(&path).expect("read"));
     assert_eq!(decoded.len(), 4);
     assert_eq!(decoded[0].values.len(), 360 * 181);
-    assert!(decoded[0].values.iter().all(|v| *v == 0.0));
+    assert!(decoded[0].values.iter().all(|v| v.is_nan()));
 }
 
 #[test]
@@ -423,7 +423,7 @@ fn an_invalid_reference_time_is_refused_before_writing() {
 }
 
 #[test]
-fn the_size_estimate_is_in_the_right_ballpark() {
+fn the_size_estimate_bounds_a_sparse_export() {
     let root = TempRoot::new("estimate");
     let state = app(&root);
     projects::create(&state, new_project("wind"), false).expect("create");
@@ -453,11 +453,44 @@ fn the_size_estimate_is_in_the_right_ballpark() {
         export::run(&project, &request(&path), &AtomicBool::new(false), |_| {}).expect("export");
 
     assert_eq!(estimate.messages, actual.messages);
-    let ratio = estimate.bytes as f64 / actual.bytes as f64;
     assert!(
-        (0.9..1.2).contains(&ratio),
-        "estimate {} vs actual {} (ratio {ratio:.2})",
-        estimate.bytes,
-        actual.bytes
+        actual.bytes < estimate.bytes,
+        "missing cells need no packed value"
     );
+    assert!(
+        actual.bytes > u64::from(actual.messages) * (360_u64 * 181).div_ceil(8),
+        "each sparse message includes a bitmap"
+    );
+}
+
+#[test]
+fn painted_calm_remains_defined_beside_missing_cells() {
+    let root = TempRoot::new("defined-calm");
+    let state = app(&root);
+    projects::create(&state, new_project("wind"), false).unwrap();
+    edit::paint(
+        &state,
+        BrushStroke {
+            points: vec![[0.0, 0.0]],
+            size_km: 500.0,
+            speed_mps: 0.0,
+            feather: 0.0,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let project = state
+        .session
+        .lock()
+        .unwrap()
+        .require_open()
+        .unwrap()
+        .project
+        .clone();
+    let path = root.0.join("calm.grib2");
+    export::run(&project, &request(&path), &AtomicBool::new(false), |_| {}).unwrap();
+    for message in messages(&std::fs::read(path).unwrap()) {
+        assert_eq!(message.values[90 * 360], 0.0);
+        assert!(message.values[10 * 360 + 180].is_nan());
+    }
 }

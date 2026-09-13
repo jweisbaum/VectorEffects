@@ -1,28 +1,17 @@
-//! Display unit conversion.
+//! Canonical conversions used by wind barbs and legacy colour-scale fields.
 //!
-//! **Speed is stored in metres per second and shown in knots, always.**
-//!
-//! m/s is what GRIB2 encodes, so it is what the document holds and what the
-//! evaluator works in. Knots is what the audience for this tool reads: a
-//! sailing forecast and a wind barb are both in knots, and a barb is
-//! *defined* in 5-knot increments.
-//!
-//! The unit is not configurable. An earlier draft made it a project setting,
-//! which bought nothing — nobody wants half their speeds in km/h — and cost a
-//! branch at every display site plus a field in the file format.
-//!
-//! Conversion happens at the UI boundary and nowhere else, the same discipline
-//! as the direction convention (spec.md 3.3, 3.4).
+//! Vector data remains in m/s. Global UI preferences select kt, mph, or km/h
+//! at the view boundary; wind-barb flags always encode 5-knot increments.
 
 /// Knots per metre per second.
 pub const KNOTS_PER_MPS: f64 = 1.943_844_492_440_605;
 
-/// Converts a stored speed into the displayed unit.
+/// Converts a stored speed to knots.
 pub fn knots_from_mps(mps: f64) -> f64 {
     mps * KNOTS_PER_MPS
 }
 
-/// Converts an entered speed into the stored unit.
+/// Converts knots to the stored m/s unit.
 pub fn mps_from_knots(knots: f64) -> f64 {
     knots / KNOTS_PER_MPS
 }

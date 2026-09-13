@@ -172,6 +172,10 @@ pub struct TransformBaseline {
     pub reach_m: f64,
     /// Its geometry when the drag began, for anchor moves.
     pub geometry: ve_core::document::Geometry,
+    /// Animated perimeter, retained when moving the anchor.
+    pub shape_animation: Option<ve_core::shape_animation::ShapeAnimation>,
+    /// Destructive cuts, reframed with the object on anchor moves.
+    pub erased: Vec<ve_core::document::Erasure>,
     /// Its footprint in local units, for the drag preview.
     ///
     /// Captured once, at pointer-down: the document does not change during a

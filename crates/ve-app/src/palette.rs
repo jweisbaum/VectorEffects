@@ -44,7 +44,7 @@ pub struct ToolOptionSpec {
     /// The label shown beside the control.
     pub label: String,
     /// Display unit: `"speed"`, `"kilometres"`, `"degrees"`, `"direction"`,
-    /// `"percent"` or `"none"`. A speed is stored in m/s and shown in knots; a
+    /// `"percent"` or `"none"`. A speed is stored in m/s and shown in the preferred speed unit; a
     /// `direction` is a flow direction and shown in the project's convention,
     /// where `degrees` is a geometric bearing and is not converted (spec.md 3.3).
     pub unit: String,
@@ -204,6 +204,7 @@ fn unit_name(unit: Unit) -> &'static str {
         Unit::Speed => "speed",
         Unit::Kilometres => "kilometres",
         Unit::Degrees => "degrees",
+        Unit::SignedDegrees => "signed_degrees",
         Unit::Direction => "direction",
         Unit::Percent => "percent",
     }

@@ -72,6 +72,7 @@ fn disc(anchor: LonLat, diameter_km: f32, speed: f32) -> Object {
 
 fn scene_of(objects: Vec<Object>) -> Scene {
     Scene {
+        speed_ranges: Default::default(),
         rasters: Vec::new(),
         objects: objects
             .iter()
@@ -444,12 +445,14 @@ fn a_circle_flows_purely_about_its_centre() {
         let (speed, azimuth) = ve_core::vector::speed_azimuth_from_uv(uv);
         assert!(speed > 1.0, "the disc paints nothing at {bearing}");
 
-        // The outward bearing at this point, and the flow's angle to it.
-        let outward = anchor.initial_bearing(at).degrees();
-        let off = ((azimuth.degrees() - outward + 540.0) % 360.0) - 180.0;
+        // A tangent must be perpendicular to the radius *at the sample*.
+        // The initial bearing at the centre uses a different north on a
+        // sphere, and is not the outward radial direction at this point.
+        let inward = at.initial_bearing(anchor).degrees();
+        let off = ((azimuth.degrees() - inward + 540.0) % 360.0) - 180.0;
         assert!(
             (off.abs() - 90.0).abs() < 1.0,
-            "at {bearing} the flow is {off} degrees off the outward bearing, \
+            "at {bearing} the flow is {off} degrees off the radius, \
              not the 90 a pure rotation makes"
         );
     }
@@ -890,6 +893,7 @@ fn atlantic(u: f32, v: f32) -> Arc<RasterGrid> {
 #[test]
 fn an_imported_field_is_sampled_bilinearly_between_its_nodes() {
     let scene = Scene {
+        speed_ranges: Default::default(),
         objects: Vec::new(),
         rasters: vec![FlatRaster {
             erased: Vec::new(),
@@ -920,6 +924,7 @@ fn an_imported_field_overwrites_what_is_beneath_and_yields_to_what_is_above() {
 
     // Raster above the stroke: the raster wins.
     let above = Scene {
+        speed_ranges: Default::default(),
         objects: vec![painted.clone()],
         rasters: vec![FlatRaster {
             erased: Vec::new(),
@@ -936,6 +941,7 @@ fn an_imported_field_overwrites_what_is_beneath_and_yields_to_what_is_above() {
     // Raster beneath the stroke: the stroke wins inside its footprint, and
     // the raster shows through outside it.
     let beneath = Scene {
+        speed_ranges: Default::default(),
         objects: vec![painted],
         rasters: vec![FlatRaster {
             erased: Vec::new(),
@@ -962,6 +968,7 @@ fn a_raster_beneath_a_clone_stamp_is_what_the_stamp_copies() {
     let source = ll(-30.0, 40.0);
     let stamp = flatten_object(&clone(anchor, source, 500.0), STEP).unwrap();
     let scene = Scene {
+        speed_ranges: Default::default(),
         objects: vec![stamp],
         rasters: vec![FlatRaster {
             erased: Vec::new(),
@@ -1190,6 +1197,7 @@ fn an_erasure_removes_what_it_covers_and_nothing_else() {
     let anchor = ll(0.0, 0.0);
     let mut object = brush(anchor, vec![[0.0, 0.0]], 4000.0, 12.0, 90.0);
     object.erased.push(ve_core::document::Erasure {
+        contour: Vec::new(),
         chains: vec![vec![LocalPoint {
             x: 1_000_000.0,
             y: 0.0,
@@ -1225,6 +1233,7 @@ fn a_step_erasure_applies_at_its_step_alone() {
     let anchor = ll(0.0, 0.0);
     let mut object = brush(anchor, vec![[0.0, 0.0]], 4000.0, 12.0, 90.0);
     object.erased.push(ve_core::document::Erasure {
+        contour: Vec::new(),
         chains: vec![vec![LocalPoint { x: 0.0, y: 0.0 }]],
         radius_m: 3_000_000.0,
         square: true,
@@ -1232,6 +1241,7 @@ fn a_step_erasure_applies_at_its_step_alone() {
         step: Some(3),
     });
     let at = |step: u32| Scene {
+        speed_ranges: Default::default(),
         rasters: Vec::new(),
         objects: flatten_object(&object, step).into_iter().collect(),
     };
@@ -1379,5 +1389,63 @@ fn a_modifier_fades_to_nothing_at_the_edge_of_its_feather() {
     assert!(
         half > 20.5 && half < 39.5,
         "the feather should ramp, not switch: {half} m/s"
+    );
+}
+
+#[test]
+fn selection_preview_excludes_overlapping_unselected_objects() {
+    let mut project = Project::new(
+        "Selection",
+        ProjectSettings::new(FieldKind::Wind, Resolution::Deg1, StepHours::H1, 3),
+    );
+    let selected = disc(ll(0.0, 0.0), 1000.0, 20.0);
+    let id = selected.id;
+    project.layers[0].objects = vec![
+        selected,
+        disc(ll(0.0, 0.0), 400.0, 50.0),
+        disc(ll(6.0, 0.0), 400.0, 30.0),
+    ];
+    let scenes = ve_render::scene::selection_scenes(&project, 0, &[id]);
+    let at = ve_render::cpu::selection_sample(&scenes, ll(0.0, 0.0));
+    assert!((at.uv.u.hypot(at.uv.v) - 20.0).abs() < 0.001);
+    assert_eq!(at.coverage, 1.0);
+    assert_eq!(
+        ve_render::cpu::selection_sample(&scenes, ll(6.0, 0.0)).coverage,
+        0.0
+    );
+}
+
+#[test]
+fn a_painted_layers_speed_band_applies_after_its_modifiers() {
+    let mut project = Project::new(
+        "Threshold",
+        ProjectSettings::new(FieldKind::Wind, Resolution::Deg1, StepHours::H1, 3),
+    );
+    project.layers[0]
+        .objects
+        .push(disc(ll(0.0, 0.0), 1000.0, 20.0));
+    let mut gain = Object::new(ToolKind::Intensity, "Double", 3);
+    gain.geometry = Geometry::Disc {
+        radius_m: Some(500_000.0),
+    };
+    set(&mut gain, PropId::Position, PropValue::LonLat(ll(0.0, 0.0)));
+    set_num(&mut gain, PropId::Gain, 100.0);
+    set_num(&mut gain, PropId::Feather, 0.0);
+    project.layers[0].objects.push(gain);
+    project.layers[0].speed_range = Some(ve_core::document::SpeedRange {
+        min_mps: 30.0,
+        max_mps: 45.0,
+    });
+    let scene = flatten(&project, 0);
+    assert!((speed_at(&scene, ll(0.0, 0.0)) - 40.0).abs() < 0.001);
+    project.layers[0].speed_range.as_mut().unwrap().max_mps = 35.0;
+    let filtered = flatten(&project, 0);
+    assert_eq!(
+        ve_render::cpu::composite(&filtered, ll(0.0, 0.0)).coverage,
+        0.0
+    );
+    assert_ne!(
+        ve_render::cache::scene_hash(&scene),
+        ve_render::cache::scene_hash(&filtered)
     );
 }

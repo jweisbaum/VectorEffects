@@ -16,7 +16,7 @@ import type { BrushShape } from "../generated/BrushShape";
 import type { StampSpace } from "../generated/StampSpace";
 import { barbElements, CALM_KNOTS } from "./barbs";
 import { glyphStepDegrees, normalizeLon } from "./camera";
-import { cosLat, type Footprint, KM_PER_DEGREE } from "./footprint";
+import { stampProjection, cosLat, type Footprint, KM_PER_DEGREE } from "./footprint";
 
 /** A point in local screen coordinates, y down. */
 export type Point = readonly [number, number];
@@ -75,10 +75,11 @@ export function barbGeometry(
   lengthPx: number,
   lat: number,
   strokeWidth: number,
+  calmScale = 1,
 ): GlyphGeometry {
   if (!Number.isFinite(knots) || knots < CALM_KNOTS) {
     // Calm: a small open square at the station, as the shader draws it.
-    const r = Math.max(2, strokeWidth * 2);
+    const r = Math.max(2, strokeWidth * 2) * calmScale;
     return {
       lines: [[[-r, -r], [r, -r], [r, r], [-r, r], [-r, -r]]],
       fills: [],
@@ -141,9 +142,10 @@ export function glyphGeometry(
   lengthPx: number,
   lat: number,
   strokeWidth: number,
+  calmScale = 1,
 ): GlyphGeometry {
   return style === "barb"
-    ? barbGeometry(azimuthTowardDeg, knots, lengthPx, lat, strokeWidth)
+    ? barbGeometry(azimuthTowardDeg, knots, lengthPx, lat, strokeWidth, calmScale)
     : arrowGeometry(azimuthTowardDeg, lengthPx);
 }
 
@@ -243,10 +245,12 @@ export function extendLatticeUnderStroke(
     if (progress.stamps++ >= MAX_STAMPS) return false;
     // A geodesic footprint spans more longitude the further from the equator; a
     // projected one is the same in both axes by construction (spec.md 3.5).
-    const radiusLon = space === "projected" ? radiusDeg : radiusDeg / cosLat(lat);
+    const projection = stampProjection(space);
+    const centreY = projection.yOf(lat);
+    const radiusLon = space !== "geodesic" ? radiusDeg : radiusDeg / cosLat(lat);
 
-    const rowFrom = Math.max(0, Math.ceil((90 - (lat + radiusDeg)) / stepDeg));
-    const rowTo = Math.min(lastRow, Math.floor((90 - (lat - radiusDeg)) / stepDeg));
+    const rowFrom = Math.max(0, Math.ceil((90 - projection.latOf(centreY + radiusDeg)) / stepDeg));
+    const rowTo = Math.min(lastRow, Math.floor((90 - projection.latOf(centreY - radiusDeg)) / stepDeg));
     const colFrom = Math.ceil((lon - radiusLon + 180) / stepDeg);
     const colTo = Math.floor((lon + radiusLon + 180) / stepDeg);
 
@@ -260,7 +264,7 @@ export function extendLatticeUnderStroke(
         if (seen.has(key)) continue;
 
         const pointLon = -180 + wrapped * stepDeg;
-        const dLat = pointLat - lat;
+        const dLat = projection.yOf(pointLat) - centreY;
         const dLon = normalizeLon(pointLon - lon);
         // The square stamp covers its whole box; the round one only its inside.
         const inside =
@@ -376,13 +380,15 @@ export function glyphSizeScale(
 }
 
 /**
- * The lattice the map draws its glyphs on (M31): one lattice for both kinds,
- * spaced for a barb, which needs the room; an arrow on it is drawn at its
- * own length. The gesture preview draws on the same lattice, or its glyphs
- * would sit beside the map's rather than on them.
+ * The common baseline lattice (M31), with a per-style density preference.
+ * Equal densities share sites; differing densities remain globe-anchored and
+ * are spaced together at field boundaries. The gesture preview uses the same
+ * density as its style on the map.
  */
-export function mapGlyphLayout(pxPerDeg: number, pixelRatio: number): GlyphLayout {
-  return glyphLayout("barb", pxPerDeg, pixelRatio);
+export function mapGlyphLayout(pxPerDeg: number, pixelRatio: number, densityPercent = 100): GlyphLayout {
+  const stepDeg = glyphStepDegrees(pxPerDeg, GLYPH_TARGET_PX.barb * pixelRatio / Math.sqrt(densityPercent / 100));
+  const spacing = stepDeg * pxPerDeg;
+  return { stepDeg, spacing, lengthPx: spacing * glyphSizeScale("barb", spacing, pixelRatio) };
 }
 
 /**
@@ -399,9 +405,10 @@ function coversPoint(
   lat: number,
 ): boolean {
   const [centreLon, centreLat] = footprint.centre;
-  const dLat = lat - centreLat;
+  const projection = stampProjection(footprint.space);
+  const dLat = projection.yOf(lat) - projection.yOf(centreLat);
   const dLon = normalizeLon(lon - centreLon);
-  const scale = footprint.space === "projected" ? 1 : 1 / cosLat(centreLat);
+  const scale = footprint.space !== "geodesic" ? 1 : 1 / cosLat(centreLat);
 
   if (footprint.kind === "rect") {
     const halfLat = footprint.halfHeightKm / KM_PER_DEGREE;
@@ -510,10 +517,11 @@ export function latticeUnder(
       footprint.kind === "rect"
         ? footprint.halfHeightKm / KM_PER_DEGREE
         : reachKm / KM_PER_DEGREE;
-    const scale = footprint.space === "projected" ? 1 : 1 / cosLat(centreLat);
+    const scale = footprint.space !== "geodesic" ? 1 : 1 / cosLat(centreLat);
     const reachLon = (reachKm / KM_PER_DEGREE) * scale;
-    south = centreLat - reachLat;
-    north = centreLat + reachLat;
+    const projection = stampProjection(footprint.space);
+    south = projection.latOf(projection.yOf(centreLat) - reachLat);
+    north = projection.latOf(projection.yOf(centreLat) + reachLat);
     west = centreLon - reachLon;
     east = centreLon + reachLon;
     inside = (lon, lat) => coversPoint(footprint, lon, lat);

@@ -6,6 +6,7 @@
  * place `invoke` is called, so every IPC failure is normalised into one type.
  */
 import { invoke } from "@tauri-apps/api/core";
+import type { SelectionPreviewRequest } from "./generated/SelectionPreviewRequest";
 
 import { beginBusy } from "./busy";
 
@@ -19,6 +20,7 @@ import type { GradientView } from "./generated/GradientView";
 import type { NewProjectRequest } from "./generated/NewProjectRequest";
 import type { BrushStroke } from "./generated/BrushStroke";
 import type { NewObject } from "./generated/NewObject";
+import type { ShapeControls } from "./generated/ShapeControls";
 import type { ObjectTracks } from "./generated/ObjectTracks";
 import type { InterpolationView } from "./generated/InterpolationView";
 import type { OperatorOutline } from "./generated/OperatorOutline";
@@ -36,6 +38,8 @@ import type { EraseStroke } from "./generated/EraseStroke";
 import type { ClipboardKind } from "./generated/ClipboardKind";
 import type { AutosaveMode } from "./generated/AutosaveMode";
 import type { AppSettings } from "./generated/AppSettings";
+import type { GlyphSetting } from "./generated/GlyphSetting";
+import type { GlyphStyle } from "./generated/GlyphStyle";
 import type { CaptureMode } from "./generated/CaptureMode";
 import type { CaptureState } from "./generated/CaptureState";
 import type { MacroLibrary } from "./generated/MacroLibrary";
@@ -128,6 +132,11 @@ async function call<T>(command: string, args?: Record<string, unknown>): Promise
 export const api = {
   /** Build and installation facts for the About panel. */
   appInfo: () => call<AppInfo>("app_info"),
+  betaStatus: () => call<string | null>("beta_status"),
+  selectionPreview: async (request: SelectionPreviewRequest): Promise<ArrayBuffer> => {
+    const data = await call<ArrayBuffer | number[]>("selection_preview", { request });
+    return data instanceof ArrayBuffer ? data : new Uint8Array(data).buffer;
+  },
 
   /** The bundled basemap asset, as raw bytes. */
   basemap: async (): Promise<ArrayBuffer> => {
@@ -269,6 +278,9 @@ export const api = {
   // --- Animation (spec.md 9) ---
 
   /** An object's tracks: base, keys and allowed easings per property. */
+  shapeControls: (object: number, step: number) => call<ShapeControls>("shape_controls", { object, step }),
+  moveShapePoint: (object: number, step: number, ring: number, point: number, lon: number, lat: number, revision: number) =>
+    call<ProjectSummary>("move_shape_point", { object, step, ring, point, lon, lat, revision }),
   objectTracks: (object: number, step: number) =>
     call<ObjectTracks>("object_tracks", { object, step }),
 
@@ -510,6 +522,8 @@ export const api = {
    */
   setMotion: (object: number, property: string, on: boolean) =>
     call<ProjectSummary>("set_motion", { object, property, on }),
+  addConstantMotion: (object: number, step: number, direction: number, speedMps: number, overwrite: boolean) =>
+    call<ProjectSummary>("add_constant_motion", { object, step, direction, speedMps, overwrite }),
 
   /**
    * Makes one object's position or rotation follow another's, or clears the
@@ -542,11 +556,15 @@ export const api = {
   clipboardKind: () => call<ClipboardKind>("clipboard_kind"),
   /** The application's settings: shortcuts, display defaults, macros (M15). */
   appSettings: () => call<AppSettings>("app_settings", {}),
+  setGlyphAppearance: (style: GlyphStyle, setting: GlyphSetting) =>
+    call<AppSettings>("set_glyph_appearance", { style, setting }),
   /** Rebinds one shortcut. A collision or a reserved key is refused. */
   setShortcut: (binding: Shortcut) => call<AppSettings>("set_shortcut", { binding }),
   /** Puts every shortcut back to its default. */
   resetShortcuts: () => call<AppSettings>("reset_shortcuts", {}),
   /** The colour-ramp top a *new* project of each kind gets, in knots. */
+  setDisplayUnits: (distanceUnit: AppSettings["distance_unit"], speedUnit: AppSettings["speed_unit"]) =>
+    call<AppSettings>("set_display_units", { distanceUnit, speedUnit }),
   setDefaultScales: (windKnots: number, currentKnots: number) =>
     call<AppSettings>("set_default_scales", { windKnots, currentKnots }),
   // --- Crash recovery (spec.md 4.2, M10) ---

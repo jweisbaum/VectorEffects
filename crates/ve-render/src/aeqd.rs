@@ -70,6 +70,48 @@ pub enum Space {
     /// happens to be showing: the space is frozen into the object and reaches
     /// the export, so it cannot depend on a view setting (spec §5.1, D63).
     Projected,
+    /// Mercator map metres, frozen when a pixel tool creates the object.
+    Mercator,
+    /// Miller map metres, frozen when a pixel tool creates the object.
+    Miller,
+}
+
+impl Space {
+    /// Stable index shared with the schema, file format, and compute shader.
+    pub fn from_choice(index: u8) -> Self {
+        match index {
+            1 => Self::Projected,
+            2 => Self::Mercator,
+            3 => Self::Miller,
+            _ => Self::Geodesic,
+        }
+    }
+
+    /// Latitude in equatorial projected degrees.
+    pub fn y_of(self, lat: f64) -> f64 {
+        let (lat, factor) = match self {
+            Self::Mercator => (lat.clamp(-89.999, 89.999), 1.0),
+            Self::Miller => (lat.clamp(-90.0, 90.0), 0.8),
+            _ => return lat,
+        };
+        ((std::f64::consts::FRAC_PI_4 + factor * lat.to_radians() / 2.0)
+            .tan()
+            .ln()
+            / factor)
+            .to_degrees()
+    }
+
+    /// Inverse of the frozen cylindrical projection.
+    pub fn lat_of(self, y: f64) -> f64 {
+        let factor = match self {
+            Self::Mercator => 1.0,
+            Self::Miller => 0.8,
+            _ => return y.clamp(-90.0, 90.0),
+        };
+        ((2.0 * (factor * y.to_radians()).exp().atan() - std::f64::consts::FRAC_PI_2) / factor)
+            .to_degrees()
+            .clamp(-90.0, 90.0)
+    }
 }
 
 /// An object's local frame: azimuthal-equidistant, or projected.
@@ -112,11 +154,12 @@ impl Frame {
     /// Returns metres in unscaled geometry units, so the result can be compared
     /// directly against the object's stored geometry.
     pub fn to_local(&self, position: LonLat) -> Local {
-        if self.space == Space::Projected {
+        if self.space != Space::Geodesic {
             // Map space: the offset in degrees, scaled to metres. No cosine, so
             // a circle here is a circle on the map wherever the object sits.
             let east = normalize_lon(position.lon - self.anchor.lon) * M_PER_DEGREE;
-            let north = (position.lat - self.anchor.lat) * M_PER_DEGREE;
+            let north =
+                (self.space.y_of(position.lat) - self.space.y_of(self.anchor.lat)) * M_PER_DEGREE;
             return self.unrotate([east / self.scale, north / self.scale]);
         }
         let distance = self.anchor.distance_m(position);
@@ -131,10 +174,12 @@ impl Frame {
 
     /// Lifts a local point back to a geographic position.
     pub fn to_global(&self, local: Local) -> LonLat {
-        if self.space == Space::Projected {
+        if self.space != Space::Geodesic {
             let [east, north] = self.rotate(local);
             let lon = self.anchor.lon + east * self.scale / M_PER_DEGREE;
-            let lat = self.anchor.lat + north * self.scale / M_PER_DEGREE;
+            let lat = self
+                .space
+                .lat_of(self.space.y_of(self.anchor.lat) + north * self.scale / M_PER_DEGREE);
             // Latitude is clamped rather than wrapped: a shape reaching past a
             // pole flattens against it, which is what it looks like on the map.
             // `new` normalises the longitude and only rejects non-finite input.
@@ -492,5 +537,28 @@ mod tests {
     fn reach_accounts_for_scale() {
         let frame = Frame::new(ll(0.0, 0.0), 0.0, 300.0);
         close(frame.reach_m(100_000.0), 300_000.0, 1e-6);
+    }
+}
+
+#[cfg(test)]
+mod cylindrical_tests {
+    use super::*;
+    #[test]
+    fn pixel_perimeters_are_circular_at_every_latitude_in_their_projection() {
+        for space in [Space::Projected, Space::Mercator, Space::Miller] {
+            for lat in [-75.0, 0.0, 60.0, 75.0] {
+                let frame = Frame::in_space(LonLat::new(179.0, lat).unwrap(), 0.0, 100.0, space);
+                for i in 0..64 {
+                    let t = f64::from(i) * std::f64::consts::TAU / 64.0;
+                    let local = [t.cos() * M_PER_DEGREE, t.sin() * M_PER_DEGREE];
+                    let global = frame.to_global(local);
+                    let x = normalize_lon(global.lon - frame.anchor.lon);
+                    let y = space.y_of(global.lat) - space.y_of(lat);
+                    assert!((x.hypot(y) - 1.0).abs() < 1e-9);
+                    let back = frame.to_local(global);
+                    assert!((back[0] - local[0]).hypot(back[1] - local[1]) < 1e-6);
+                }
+            }
+        }
     }
 }

@@ -4,24 +4,24 @@ import type { ShortcutAction } from "./ShortcutAction";
 /**
  * One binding: an action, the key that performs it, and its modifiers.
  */
-export type Shortcut = { 
+export type Shortcut = {
 /**
  * What it does.
  */
-action: ShortcutAction, 
+action: ShortcutAction,
 /**
  * For [`ShortcutAction::Tool`], the tool's wire name; empty otherwise.
  */
-tool: string, 
+tool: string,
 /**
  * The key, as the browser's `KeyboardEvent.key` lowercased: a letter, or
  * a name like `arrowleft` or `" "`.
  */
-key: string, 
+key: string,
 /**
  * Whether the binding wants shift held.
  */
-shift: boolean, 
+shift: boolean,
 /**
  * Whether the binding wants alt (option) held.
  *
@@ -30,7 +30,7 @@ shift: boolean,
  * window does not own. The chord spelling grows one word and the table
  * stays one table with one collision rule.
  */
-alt: boolean, 
+alt: boolean,
 /**
  * Whether the binding wants the command key held — `Cmd` on a Mac,
  * `Ctrl` elsewhere (M47).

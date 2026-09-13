@@ -254,6 +254,92 @@ fn one_advance_costs() {
     println!();
 }
 
+/// Both panels request the document tree on every advance. Imported fields
+/// must not make that metadata query proportional to the number of samples.
+#[test]
+#[ignore = "timing-sensitive; run with --release --nocapture"]
+fn imported_layer_metadata_does_not_scale_with_grid_size() {
+    use ve_core::document::Layer;
+    use ve_core::project::FieldKind;
+    use ve_core::raster::{RasterFrame, RasterGrid, RasterSequence};
+
+    let (_root, state) = project("raster-metadata", 24);
+    for history in [false, true] {
+        let mut timings = Vec::new();
+        for (ni, nj, spacing) in [(4, 3, 90.0), (1440, 721, 0.25)] {
+            let sequence = Arc::new(
+                RasterSequence::new(
+                    FieldKind::Wind,
+                    (0..24)
+                        .map(|step| RasterFrame {
+                            offset_hours: f64::from(step),
+                            valid_unix_s: i64::from(step) * 3600,
+                            grid: Arc::new(
+                                RasterGrid::new(
+                                    ni,
+                                    nj,
+                                    0.0,
+                                    90.0,
+                                    spacing,
+                                    spacing,
+                                    vec![[step as f32, 0.0]; (ni * nj) as usize],
+                                )
+                                .unwrap(),
+                            ),
+                        })
+                        .collect(),
+                )
+                .unwrap(),
+            );
+            let layer = if history {
+                Layer::from_history(
+                    "History",
+                    "wind.grib2".into(),
+                    sequence,
+                    "era5-wind",
+                    0,
+                    23 * 3600,
+                )
+            } else {
+                Layer::from_grib("GRIB", "wind.grib2".into(), sequence, true)
+            };
+            state
+                .session
+                .lock()
+                .unwrap()
+                .open
+                .as_mut()
+                .unwrap()
+                .project
+                .layers = vec![layer];
+            // The first request is included: there must be no lazy full-grid
+            // scan on the webview thread, even just once after import/reopen.
+            let mut samples = Vec::new();
+            for step in 0..8 {
+                let at = Instant::now();
+                let tree = ve_app::document::tree(&state, step).unwrap();
+                samples.push(at.elapsed().as_micros());
+                let info = tree.layers[0].grib.as_ref().unwrap();
+                assert_eq!(info.speed_ceiling_mps, 23.0);
+                assert_eq!(
+                    tree.layers[0].source,
+                    if history { "zarr" } else { "raster" }
+                );
+                assert!(info.steps.iter().all(|step| step.shown));
+            }
+            timings.push(*samples.iter().max().unwrap());
+        }
+        println!(
+            "history={history}: tiny {} us, 0.25° {} us",
+            timings[0], timings[1]
+        );
+        assert!(
+            timings[1] <= (timings[0] * 20).max(5_000),
+            "metadata must not rescan 24 full grids on every playhead change: {timings:?} us"
+        );
+    }
+}
+
 /// The budget is stated "with frames pre-rendered", so the interesting case is
 /// the one where every tile is already in the cache. Moving the playhead one
 /// step changes nothing about what the cache holds, so an advance over a

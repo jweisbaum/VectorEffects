@@ -6,38 +6,38 @@ import type { SliderView } from "./SliderView";
 /**
  * One option a tool offers, described well enough to render.
  */
-export type ToolOptionSpec = { 
+export type ToolOptionSpec = {
 /**
  * The property id, spelled as `create_object` expects it.
  */
-property: string, 
+property: string,
 /**
  * The label shown beside the control.
  */
-label: string, 
+label: string,
 /**
  * Display unit: `"speed"`, `"kilometres"`, `"degrees"`, `"direction"`,
- * `"percent"` or `"none"`. A speed is stored in m/s and shown in knots; a
+ * `"percent"` or `"none"`. A speed is stored in m/s and shown in the preferred speed unit; a
  * `direction` is a flow direction and shown in the project's convention,
  * where `degrees` is a geometric bearing and is not converted (spec.md 3.3).
  */
-unit: string, 
+unit: string,
 /**
  * The value the tool starts at.
  */
-default: PropertyValue, 
+default: PropertyValue,
 /**
  * Lower bound, for numeric options.
  */
-min: number | null, 
+min: number | null,
 /**
  * Upper bound, for numeric options.
  */
-max: number | null, 
+max: number | null,
 /**
  * Variant names, for choices.
  */
-variants: Array<string>, 
+variants: Array<string>,
 /**
  * Whether the option is fixed once the object exists.
  *
@@ -45,11 +45,11 @@ variants: Array<string>,
  * the *tool* must offer, since it is the only chance to set it. It is the
  * inspector that leaves it out (spec.md 6.1).
  */
-creation_only: boolean, 
+creation_only: boolean,
 /**
  * What makes this option inert, if anything.
  */
-depends_on: Array<OptionDependency>, 
+depends_on: Array<OptionDependency>,
 /**
  * Edited by a centred slider rather than a typed number (M29).
  */

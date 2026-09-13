@@ -175,16 +175,16 @@ They are specified in full in `spec.md` §3.
 | Direction storage | **Azimuth-toward**, degrees clockwise from north, `[0, 360)`. Always. |
 | Direction display | Converted at the IPC boundary only. No domain code below IPC sees a "from" bearing. |
 | Components | `u = speed·sin(az)` eastward, `v = speed·cos(az)` northward |
-| Speed | m/s in storage and export, **always knots in the UI**. Not configurable. Convert only at the IPC boundary, via `ve_core::units`. |
+| Speed | m/s in storage and export, **kt, mph, or km/h in the UI**, selected in global Settings. Convert at the view boundary; wind barbs still encode 5-knot increments. |
 | Sizes | Stored in **km**, measured north-south. Pixel inputs resolve to km at object creation, never later. |
-| px sizes | A size in px also selects `stamp_space: projected` — a shape on the map, not on the ground (spec §3.5). km selects `geodesic`. The unit is not just a conversion. |
+| px sizes | A size in px freezes the active projection in `stamp_space` — a shape on the map, not on the ground (spec §3.5). km selects `geodesic`. The unit is not just a conversion. |
 | Time | UTC only |
 | Angle interpolation | Shortest arc, always |
-| Geometry frame | Object-local AEQD, metres. Never lat/lon degree space — **except** an object with `stamp_space: projected`, which is *defined* on the map and whose frame is therefore map space, in north-equivalent metres (spec §7.2). Anything else in degree space is a bug. |
+| Geometry frame | Object-local AEQD, metres. Never lat/lon degree space — **except** an object with a projected stamp space, which is *defined* on the map and whose frame is therefore map space, in north-equivalent metres (spec §7.2). Anything else in degree space is a bug. |
 | Directions | Always true azimuths from geographic bearings, **never** from a local frame angle. An AEQD frame preserves bearings only from its centre; local grid north drifts by tens of degrees a few thousand km out. See `aeqd.rs`. |
 | Z-order | Layer order, then object order within layer. Index 0 = bottom. |
 | Determinism | No `HashMap` iteration in any evaluation or export path. Use `Vec` or `IndexMap`. |
-| Project settings | The map takes its timeline length, direction convention, colour scale and glyph styles from `ProjectSummary`, never from constants. Nothing renders without an open project. |
+| Display settings | The map takes timeline length, direction convention and colour scale from `ProjectSummary`, and glyph appearance from `AppSettings`. Nothing renders without an open project. |
 | Creation layer | Every path that adds an object — create, paste, paste_capture, insert_macro, duplicate, move_object — resolves its layer through `document::creation_layer`, which refuses an imported or locked layer (D66). A new path that picks `layers.last()` itself is the bug. |
 | One clipboard | `copy_objects` drops the held capture and `capture_region` drops the object clipboard; the frontend asks `clipboard_kind` on paste. Never a second flag in the frontend remembering which was copied. |
 | Move gesture | `motion_of` carries the **pressed point** to the pointer, never the pivot: a body grabbed away from the centroid must not jump. |
@@ -255,7 +255,7 @@ must be declined in `gpu::supports` — one line, and a test that says so.
 came from a bug in the brush, and the brush is only the tool that exists first.
 The ones that are actual code in a new tool, rather than free:
 
-- **A size in px must select `stamp_space: projected`**, km `geodesic`. Free in
+- **A size in px must freeze the active projection in `stamp_space`**, km `geodesic`. Free in
   the schema — the property is shared — but the tool's option bar has to send it
   and its preview has to draw it, or px paints an ellipse again.
 - **The gesture preview draws the field**: the ramp colour for the speed and
@@ -870,3 +870,15 @@ Raise these rather than picking a default:
 - Reopening anything in `spec.md` §15 or the decisions log in `plan.md` §5.
   Those are settled, with recorded reasoning; if implementation reveals one was
   wrong, say so explicitly rather than quietly diverging.
+
+
+## September 2026 beta contract
+
+Pixel stamps freeze the active cylindrical projection, including Mercator and
+Miller. Legacy Projected remains equirectangular. Layer thresholds apply to final
+layer vectors; image thresholds use the displayed vector field. Export coverage
+as GRIB missing-value bitmaps and retain genuinely calm zeros. The system-local
+January 1, 2027 expiry gate must remain enforced in both the UI and native IPC.
+Help images are bundled assets generated with `tools/webdriver/help.mjs` using
+isolated automation storage. Never ship the WebDriver feature. Publishing and
+four-platform verification follow `docs/github-release-plan.md`.

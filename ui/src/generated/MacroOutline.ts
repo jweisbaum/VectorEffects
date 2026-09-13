@@ -7,19 +7,19 @@
  * measures in (D28, D55); this is that shape read back into the degrees the
  * map draws in, which is what `Region` on the frontend is made of.
  */
-export type MacroOutline = { "kind": "rect", 
+export type MacroOutline = { "kind": "rect",
 /**
  * Half-extent east-west.
  */
-half_width_deg: number, 
+half_width_deg: number,
 /**
  * Half-extent north-south.
  */
-half_height_deg: number, } | { "kind": "disc", 
+half_height_deg: number, } | { "kind": "disc",
 /**
  * Radius.
  */
-radius_deg: number, } | { "kind": "polygon", 
+radius_deg: number, } | { "kind": "polygon",
 /**
  * Vertices in order, `[dx, dy]`.
  */

@@ -41,6 +41,7 @@ use zarrs::group::Group;
 use zarrs::storage::ReadableStorage;
 
 use crate::error::{Result, ZarrError};
+use crate::parallel::try_join;
 use crate::source::{
     Field, FieldSource, NI, NJ, POINTS_PER_STEP, Step, Variable, step_at_hour, steps_between,
 };
@@ -146,8 +147,7 @@ impl Era5Store {
     /// Opens the store and validates its layout.
     pub fn open(url: &str) -> Result<Self> {
         let store = open_http(url)?;
-        let u = open_array(&store, U_PATH)?;
-        let v = open_array(&store, V_PATH)?;
+        let (u, v) = try_join(|| open_array(&store, U_PATH), || open_array(&store, V_PATH))?;
 
         for (path, array) in [(U_PATH, &u), (V_PATH, &v)] {
             match array.shape() {
@@ -167,13 +167,23 @@ impl Era5Store {
             )));
         }
 
-        let lat = read_axis_f32(&store, "/latitude", "the latitude coordinate")?;
+        let ((lat, lon), (axis, extent)) = try_join(
+            || {
+                try_join(
+                    || read_axis_f32(&store, "/latitude", "the latitude coordinate"),
+                    || read_axis_f32(&store, "/longitude", "the longitude coordinate"),
+                )
+            },
+            || {
+                try_join(
+                    || read_time_axis(&store, "/time", u.shape()[0]),
+                    || Extent::read(&store),
+                )
+            },
+        )?;
         check_axis("latitude", &lat, NJ as usize, 90.0, -0.25)?;
-        let lon = read_axis_f32(&store, "/longitude", "the longitude coordinate")?;
         check_axis("longitude", &lon, NI as usize, 0.0, 0.25)?;
 
-        let axis = read_time_axis(&store, "/time", u.shape()[0])?;
-        let extent = Extent::read(&store)?;
         let (base, times) = clamp_axis(&axis, &extent)?;
         let provisional_from = extent.provisional_from().filter(|t| {
             times
@@ -283,6 +293,61 @@ impl FieldSource for Era5Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn component(path: &str, value: Option<f32>) -> ReadArray {
+        use std::sync::Arc;
+        use zarrs::array::{Array, ArrayBuilder, data_type};
+        use zarrs::storage::store::MemoryStore;
+
+        let store = Arc::new(MemoryStore::new());
+        let array = ArrayBuilder::new(
+            vec![2, NJ, NI],
+            vec![1, NJ, NI],
+            data_type::float32(),
+            f32::NAN,
+        )
+        .build(store.clone(), path)
+        .expect("fixture array");
+        array.store_metadata().expect("metadata");
+        if let Some(value) = value {
+            array
+                .store_chunk(&[1, 0, 0], vec![value; (NI * NJ) as usize])
+                .expect("fixture chunk");
+        }
+        let readable: ReadableStorage = store;
+        Array::open(readable, path).expect("readable fixture")
+    }
+
+    #[test]
+    fn component_reads_keep_their_values_and_absolute_hour() {
+        let time = utc(2024, 1, 1, 0);
+        let source = Era5Store {
+            u: component(U_PATH, Some(-3.0)),
+            v: component(V_PATH, Some(4.0)),
+            times: vec![time.hours_since_unix_epoch()],
+            base: 1,
+            provisional_from: None,
+        };
+        let step = source.step_at(time).expect("hour exists");
+        let fields = source.read_step(&step).expect("complete vector");
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].variable, Variable::Wind10m);
+        assert!(fields[0].u.iter().all(|&v| v == -3.0));
+        assert!(fields[0].v.iter().all(|&v| v == 4.0));
+
+        // A successful u read cannot hide a missing v chunk.
+        let source = Era5Store {
+            v: component(V_PATH, None),
+            ..source
+        };
+        assert!(
+            source
+                .read_step(&step)
+                .expect_err("incomplete vector")
+                .to_string()
+                .contains("not fully written")
+        );
+    }
 
     fn utc(year: i32, month: u8, day: u8, hour: u8) -> Utc {
         Utc {

@@ -3,15 +3,15 @@
 /**
  * What reducing the timeline would delete (spec.md 4.1).
  */
-export type ShrinkImpact = { 
+export type ShrinkImpact = {
 /**
  * Keyframes past the new end.
  */
-keyframes: number, 
+keyframes: number,
 /**
  * Objects whose lifetime will be clamped.
  */
-clamped_ranges: number, 
+clamped_ranges: number,
 /**
  * Every object touched, by name.
  */

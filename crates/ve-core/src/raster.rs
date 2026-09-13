@@ -386,6 +386,8 @@ pub struct RasterSequence {
     pub frames: Vec<RasterFrame>,
     /// BLAKE3 over the frames' hashes and offsets.
     pub hash: [u8; 32],
+    /// Speed-filter ceiling, computed while loading the immutable samples.
+    fastest_mps: f32,
 }
 
 impl PartialEq for RasterSequence {
@@ -419,10 +421,17 @@ impl RasterSequence {
             hasher.update(&frame.offset_hours.to_le_bytes());
             hasher.update(&frame.grid.hash);
         }
+        let fastest_mps = frames
+            .iter()
+            .flat_map(|frame| frame.grid.uv.iter())
+            .filter(|uv| !is_missing(uv[0]) && !is_missing(uv[1]))
+            .map(|uv| uv[0].hypot(uv[1]))
+            .fold(0.0, f32::max);
         Ok(Self {
             kind,
             frames,
             hash: *hasher.finalize().as_bytes(),
+            fastest_mps,
         })
     }
 
@@ -452,16 +461,12 @@ impl RasterSequence {
     ///
     /// What a speed filter's scale runs to (spec.md 4.8): a filter is set by
     /// looking at the field, and a scale ending at a number the file never
-    /// reaches spends most of its travel on nothing. Computed over every node
-    /// of every message, which is a pass over the data — the caller is the
-    /// layer panel, not the evaluator.
+    /// reaches spends most of its travel on nothing. Computed once when the
+    /// sequence is loaded: both the layer panel and timeline request it on
+    /// every playhead change, so rescanning the grids here blocks playback
+    /// even when all of its rendered frames are already resident.
     pub fn fastest_mps(&self) -> f32 {
-        self.frames
-            .iter()
-            .flat_map(|frame| frame.grid.uv.iter())
-            .filter(|uv| !is_missing(uv[0]) && !is_missing(uv[1]))
-            .map(|uv| uv[0].hypot(uv[1]))
-            .fold(0.0, f32::max)
+        self.fastest_mps
     }
 
     /// Hours spanned, first message to last.
@@ -584,6 +589,63 @@ mod tests {
             })
             .collect();
         RasterSequence::new(FieldKind::Wind, frames).expect("valid")
+    }
+
+    #[test]
+    fn the_speed_ceiling_covers_every_frame_and_ignores_missing_components() {
+        let frames: Vec<_> = [
+            vec![
+                [MISSING, 100.0],
+                [100.0, MISSING],
+                [-5.0, -12.0],
+                [0.0, 0.0],
+            ],
+            vec![[3.0, 4.0]; 4],
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(step, uv)| RasterFrame {
+            offset_hours: step as f64,
+            valid_unix_s: step as i64 * 3600,
+            grid: Arc::new(RasterGrid::new(2, 2, 0.0, 1.0, 1.0, 1.0, uv).unwrap()),
+        })
+        .collect();
+        for kind in [FieldKind::Wind, FieldKind::Current] {
+            let sequence = RasterSequence::new(kind, frames.clone()).unwrap();
+            assert_eq!(sequence.fastest_mps(), 13.0);
+            assert_eq!(sequence.clone().fastest_mps(), 13.0);
+            // A replacement import calculates its own ceiling, even when it
+            // has the same field kind and forecast times as the earlier one.
+            let mut replacement = frames[1..].to_vec();
+            replacement[0].offset_hours = 0.0;
+            assert_eq!(
+                RasterSequence::new(kind, replacement)
+                    .unwrap()
+                    .fastest_mps(),
+                5.0
+            );
+        }
+    }
+
+    #[test]
+    fn missing_or_calm_sequences_have_a_zero_speed_ceiling() {
+        for sample in [
+            [MISSING, MISSING],
+            [MISSING, 10.0],
+            [10.0, MISSING],
+            [0.0, 0.0],
+        ] {
+            let sequence = RasterSequence::new(
+                FieldKind::Wind,
+                vec![RasterFrame {
+                    offset_hours: 0.0,
+                    valid_unix_s: 0,
+                    grid: Arc::new(grid(2, 2, 0.0, 1.0, 1.0, |_, _| sample)),
+                }],
+            )
+            .unwrap();
+            assert_eq!(sequence.fastest_mps(), 0.0);
+        }
     }
 
     #[test]

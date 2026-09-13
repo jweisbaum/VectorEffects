@@ -24,6 +24,7 @@ pub mod project;
 pub mod raster;
 pub mod regrid;
 pub mod schema;
+pub mod shape_animation;
 pub mod units;
 pub mod value;
 pub mod vector;

@@ -20,6 +20,8 @@
  * stop landing where the field is.
  */
 
+import { GLYPH_SIZE_SCALE, GLYPH_TARGET_PX } from "./glyph";
+
 /** Shared projection helper, prefixed to every vertex shader. */
 const PROJECTION = `
 uniform vec3 uCamera;      // centreLon, centreY, pxPerDeg
@@ -114,23 +116,41 @@ ${PROJECTION}
 uniform vec3 uPlaceLon;     // lon = x*u + y*v + z, with u and v in 0..1
 uniform vec3 uPlaceLat;     // and the same for the latitude
 out vec2 vUV;
+out vec2 vGeo;
 void main() {
   vUV = aCell;
   vec2 lonLat = vec2(
     uPlaceLon.x * aCell.x + uPlaceLon.y * aCell.y + uPlaceLon.z,
     uPlaceLat.x * aCell.x + uPlaceLat.y * aCell.y + uPlaceLat.z
   );
+  vGeo = lonLat;
   gl_Position = screenToClip(geoToScreen(lonLat));
 }
 `;
 
 export const IMAGE_FRAG = `#version 300 es
 precision highp float;
+precision highp int;
 in vec2 vUV;
+in vec2 vGeo;
 uniform sampler2D uImage;
 uniform float uOpacity;
+uniform bool uFiltered;
+uniform vec2 uSpeedRange;
+uniform highp sampler2D uFilterTile;
+uniform vec4 uFilterGeo;
+uniform float uSpeedScale;
 out vec4 fragColor;
 void main() {
+  if (uFiltered) {
+    float lon = mod(vGeo.x + 180.0, 360.0) - 180.0;
+    vec2 uv = vec2((lon - uFilterGeo.x) / uFilterGeo.z, (uFilterGeo.y - vGeo.y) / uFilterGeo.w);
+    if (any(lessThan(uv, vec2(0.0))) || any(greaterThanEqual(uv, vec2(1.0)))) discard;
+    uvec4 b = uvec4(texture(uFilterTile, uv) * 255.0 + 0.5);
+    uint w = b.r | (b.g << 8u) | (b.b << 16u) | (b.a << 24u);
+    float speed = float(w & 16383u) / 16383.0 * uSpeedScale;
+    if (((w >> 26u) & 31u) == 0u || speed < uSpeedRange.x || speed > uSpeedRange.y) discard;
+  }
   vec4 texel = texture(uImage, vUV);
   // The image's own alpha is kept and scaled: a chart scan with a transparent
   // margin must not gain an opaque one on the way to the screen.
@@ -476,10 +496,9 @@ void main() {
 /**
  * Direction glyphs, instanced.
  *
- * One draw call per visible tile. Instances form a lattice in *screen* space
- * across that tile's rectangle, so spacing stays constant as you zoom instead
- * of clumping or thinning out. Each instance reads its own vector straight from
- * the tile texture, so glyph layout costs no CPU round-trip.
+ * One draw call per visible tile. Stations use a globe-anchored lattice, with
+ * finer sites filling gaps in sparse fields. Each instance reads its vector
+ * straight from the tile texture; the CPU retains coverage and kind bits only.
  *
  * Geometry is built from `gl_VertexID` against a fixed 54-vertex budget:
  * 6 for the shaft, then eight 6-vertex slots for barb flags. Unused slots
@@ -489,11 +508,8 @@ void main() {
 export const GLYPH_VERT = `#version 300 es
 precision highp float;
 ${PROJECTION}
+layout(location = 0) in vec2 aStation; // longitude, latitude
 uniform vec4 uTileGeo;      // west, north, spanX, spanY
-uniform vec2 uGlyphOrigin;  // longitude, latitude of the first lattice point
-uniform float uGlyphStep;   // lattice spacing, degrees
-uniform vec2 uGrid;         // columns, rows
-uniform float uSpacing;     // lattice spacing, screen px (step * pxPerDeg)
 uniform sampler2D uTile;
 // The same tile without the layer being edited, and whether it is bound
 // (M44): a glyph belonging to another layer must not turn under a modifier
@@ -501,13 +517,25 @@ uniform sampler2D uTile;
 uniform sampler2D uBelow;
 uniform highp int uEditScoped;
 uniform float uSpeedScale;
-uniform float uSizeScaleArrow; // glyph length as a fraction of spacing, by style
-uniform float uSizeScaleBarb;
+uniform float uLengthArrow;
+uniform float uLengthBarb;
+uniform float uStrokeArrow;
+uniform float uStrokeBarb;
+uniform vec4 uColorArrow;
+uniform vec4 uColorBarb;
+uniform highp int uFadeArrow;
+uniform highp int uFadeBarb;
+uniform highp int uShadowPass;
+uniform vec4 uShadowArrow;
+uniform vec4 uShadowBarb;
+uniform vec2 uShadowOffsetArrow;
+uniform vec2 uShadowOffsetBarb;
 uniform float uPixelRatio;  // device pixels per CSS pixel; keeps strokes even
 ${TEXEL}
 ${OPERATOR}
 out float vShade;
 out float vFade;
+flat out vec4 vColor;
 
 const float DEG = 0.017453292519943295;
 
@@ -517,15 +545,8 @@ vec2 rotate(vec2 v, float radians) {
 }
 
 void main() {
-  int cols = int(uGrid.x);
-  int col = gl_InstanceID % cols;
-  int row = gl_InstanceID / cols;
-
-  // The lattice is anchored to the globe, not to this tile, so points are
-  // continuous across tile edges. Anchoring per tile leaves a gap of
-  // tileWidth modulo spacing at every boundary, which reads as clustered glyphs.
-  float lon = uGlyphOrigin.x + float(col) * uGlyphStep;
-  float lat = uGlyphOrigin.y - float(row) * uGlyphStep;
+  float lon = aStation.x;
+  float lat = aStation.y;
 
   vec2 uv = vec2((lon - uTileGeo.x) / uTileGeo.z, (uTileGeo.y - lat) / uTileGeo.w);
   if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
@@ -580,19 +601,29 @@ void main() {
   // arrow, always.
   bool barb = wordIsWind(word);
 
-  vShade = clamp(speed / 25.0, 0.25, 1.0);
+  bool fade = (barb ? uFadeBarb : uFadeArrow) == 1;
+  vShade = fade ? clamp(speed / 25.0, 0.25, 1.0) : 1.0;
+  vec4 ink = barb ? uColorBarb : uColorArrow;
+  vColor = ink;
+  if (uShadowPass == 1) {
+    vColor = barb ? uShadowBarb : uShadowArrow;
+    vColor.a *= ink.a;
+    if (vColor.a <= 0.0) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
+    station += barb ? uShadowOffsetBarb : uShadowOffsetArrow;
+  }
 
   // Screen space is y-down, so north is -y. Azimuth is clockwise from north.
   float az = azimuth * DEG;
   vec2 toward = vec2(sin(az), -cos(az));
-  float length_px = uSpacing * (barb ? uSizeScaleBarb : uSizeScaleArrow);
+  float length_px = barb ? uLengthBarb : uLengthArrow;
+  float stroke_px = barb ? uStrokeBarb : uStrokeArrow;
 
   vec2 offset = vec2(0.0);
   int id = gl_VertexID;
 
   if (!barb) {
     // ---- Arrow: shaft quad plus a head triangle ----
-    float halfW = 0.9 * uPixelRatio;
+    float halfW = stroke_px * 0.5;
     vec2 side = vec2(-toward.y, toward.x);
     vec2 tail = -toward * length_px * 0.5;
     vec2 head = toward * length_px * 0.5;
@@ -626,7 +657,8 @@ void main() {
     if (knots < 2.5) {
       // Calm: a small open square at the station.
       if (id >= 6) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
-      float r = 2.0 * uPixelRatio;
+      float sizeScale = uLengthBarb / (${(GLYPH_TARGET_PX.barb * GLYPH_SIZE_SCALE.barb).toFixed(2)} * uPixelRatio);
+      float r = max(2.0 * uPixelRatio, stroke_px) * sizeScale;
       vec2 quad[6] = vec2[6](
         vec2(-r, -r), vec2(r, -r), vec2(-r, r),
         vec2(-r, r), vec2(r, -r), vec2(r, r)
@@ -649,7 +681,7 @@ void main() {
       vec2 side = vec2(-shaftDir.y, shaftDir.x) * handed;
 
       if (id < 6) {
-        float halfW = 0.9 * uPixelRatio;
+        float halfW = stroke_px * 0.5;
         vec2 perp = vec2(-shaftDir.y, shaftDir.x) * halfW;
         vec2 quad[6] = vec2[6](
           perp, -perp, tip + perp,
@@ -675,7 +707,7 @@ void main() {
         } else {
           float len = slot < pennants + fulls ? flagLen : flagLen * 0.5;
           vec2 end = anchor + flagDir * len;
-          vec2 perp = normalize(vec2(-flagDir.y, flagDir.x)) * 0.9 * uPixelRatio;
+          vec2 perp = normalize(vec2(-flagDir.y, flagDir.x)) * stroke_px * 0.5;
           vec2 quad[6] = vec2[6](
             anchor + perp, anchor - perp, end + perp,
             end + perp, anchor - perp, end - perp
@@ -694,11 +726,11 @@ export const GLYPH_FRAG = `#version 300 es
 precision highp float;
 in float vShade;
 in float vFade;
-uniform vec4 uColor;
+flat in vec4 vColor;
 out vec4 fragColor;
 // The glyphs follow the field they describe: a glyph left standing over an
 // masked patch would be pointing at a wind that is no longer there.
-void main() { fragColor = vec4(uColor.rgb, uColor.a * vShade * vFade); }
+void main() { fragColor = vec4(vColor.rgb, vColor.a * vShade * vFade); }
 `;
 
 /**

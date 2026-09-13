@@ -25,6 +25,7 @@ pub mod era5;
 pub mod error;
 pub mod globcurrent;
 pub mod http;
+mod parallel;
 pub mod regrid;
 pub mod source;
 pub mod store;

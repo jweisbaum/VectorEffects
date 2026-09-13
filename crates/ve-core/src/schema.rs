@@ -196,6 +196,10 @@ pub enum PropId {
     DirectionMode,
     /// The point vectors aim at in `toward_point` mode.
     Target,
+    /// Great-circle or rhumb-line bearing to the target.
+    TargetPath,
+    /// Clockwise angle added to the target direction, in degrees.
+    TargetAngle,
 
     // --- Field shaping ---
     /// Edge falloff, 0 to 1.
@@ -226,6 +230,8 @@ pub enum PropId {
     FillMode,
     /// Clockwise or counter-clockwise.
     RotationSense,
+    /// Tilt from the tangent: -90 inward, 0 tangent, 90 outward.
+    CircleAngle,
 
     // --- Shape fill ---
     /// Constant vector, or a gradient.
@@ -304,13 +310,14 @@ pub enum PropId {
 pub enum Unit {
     /// Dimensionless.
     None,
-    /// Stored in metres per second, always displayed in knots
-    /// (`crate::units`).
+    /// Stored in metres per second; the UI applies its global speed preference.
     Speed,
     /// Kilometres. Pixel input resolves to this at creation (spec.md 3.5).
     Kilometres,
     /// Degrees. A geometric bearing: an object's rotation, a gradient's axis.
     Degrees,
+    /// A signed angle offset, without wrapping at zero.
+    SignedDegrees,
     /// Degrees, and a **flow** direction.
     ///
     /// Stored as an azimuth-toward like every other direction (spec.md 3.3),
@@ -552,7 +559,7 @@ pub const EDGE_MODES: &[&str] = &["blend", "replace"];
 pub const BRUSH_SHAPES: &[&str] = &["circle", "square"];
 /// Variants of [`PropId::StampSpace`]. Index 0 keeps existing objects on the
 /// ground, which is what they were painted as.
-pub const STAMP_SPACES: &[&str] = &["geodesic", "projected"];
+pub const STAMP_SPACES: &[&str] = &["geodesic", "projected", "mercator", "miller"];
 /// Variants of [`PropId::FillMode`].
 pub const FILL_MODES: &[&str] = &["filled", "perimeter", "filled_gradient"];
 /// Variants of [`PropId::RotationSense`].
@@ -563,7 +570,7 @@ pub const VECTOR_MODES: &[&str] = &["constant", "gradient"];
 /// is the only one with no size to drag out.
 pub const SHAPE_SOURCES: &[&str] = &["polygon", "square", "rectangle", "circle"];
 /// Variants of [`PropId::Resample`] (spec.md 8.7).
-pub const RESAMPLE_MODES: &[&str] = &["hold", "interpolate"];
+pub const RESAMPLE_MODES: &[&str] = &["Repeat Frames", "Interpolate", "Empty Frames"];
 /// Variants of [`PropId::CurveKind`].
 pub const CURVE_KINDS: &[&str] = &["polyline", "bezier"];
 /// Variants of [`PropId::OffsetMode`].
@@ -760,6 +767,20 @@ const BRUSH: &[PropSpec] = &[
     choice(PropId::DirectionMode, "Direction mode", 0, DIRECTION_MODES),
     dir(PropId::Direction, "Direction", 0.0),
     pos(PropId::Target, "Target"),
+    choice(
+        PropId::TargetPath,
+        "Direction to target",
+        0,
+        &["great_circle", "rhumb_line"],
+    ),
+    num(
+        PropId::TargetAngle,
+        "Angle relative to target",
+        0.0,
+        -180.0,
+        180.0,
+        Unit::SignedDegrees,
+    ),
     num(PropId::Feather, "Feather", 0.2, 0.0, 1.0, Unit::None),
     // No `divergence` or `curl`: the brush paints a flow along a stroke, and a
     // radial or rotational component belongs to the tools that have a centre to
@@ -802,12 +823,19 @@ const CIRCLE: &[PropSpec] = &[
         Unit::Speed,
     ),
     choice(PropId::RotationSense, "Rotation", 0, ROTATION_SENSES),
+    num(
+        PropId::CircleAngle,
+        "Angle from tangent",
+        0.0,
+        -90.0,
+        90.0,
+        Unit::SignedDegrees,
+    ),
     // The same property the brush uses, deliberately: "px" must mean one
     // thing across the catalogue (spec.md 3.5, 6.1).
     frozen(choice(PropId::StampSpace, "Stamp space", 0, STAMP_SPACES)),
     num(PropId::Feather, "Feather", 0.2, 0.0, 1.0, Unit::None),
-    // No `divergence` or `curl`: no tool has them (spec.md 6.2, 7.5). A circle
-    // turns about its centre and that is the whole of its flow.
+    // The tangent tilt is a direction, preserving the chosen speed.
 ];
 
 const SHAPE_FILL: &[PropSpec] = &[
@@ -843,6 +871,20 @@ const SHAPE_FILL: &[PropSpec] = &[
     choice(PropId::DirectionMode, "Direction mode", 0, DIRECTION_MODES),
     dir(PropId::Direction, "Direction", 0.0),
     pos(PropId::Target, "Target"),
+    choice(
+        PropId::TargetPath,
+        "Direction to target",
+        0,
+        &["great_circle", "rhumb_line"],
+    ),
+    num(
+        PropId::TargetAngle,
+        "Angle relative to target",
+        0.0,
+        -180.0,
+        180.0,
+        Unit::SignedDegrees,
+    ),
     num(PropId::Feather, "Feather", 0.1, 0.0, 1.0, Unit::None),
 ];
 
@@ -869,7 +911,12 @@ const SHAPE_FILL: &[PropSpec] = &[
 /// project wants different answers.
 const MACRO: &[PropSpec] = &[
     frozen(choice(PropId::StampSpace, "Stamp space", 1, STAMP_SPACES)),
-    choice(PropId::Resample, "Between frames", 0, RESAMPLE_MODES),
+    choice(
+        PropId::Resample,
+        "Interpolation strategy",
+        0,
+        RESAMPLE_MODES,
+    ),
     flag(PropId::LoopMacro, "Loop", false),
     num(PropId::Feather, "Feather", 0.0, 0.0, 1.0, Unit::None),
 ];
@@ -977,6 +1024,8 @@ const BRUSH_DEPENDENCIES: &[Dependency] = &[
     // Mode 0 is the constant bearing; 1 and 2 aim at a target instead.
     dep(PropId::Direction, PropId::DirectionMode, &[0]),
     dep(PropId::Target, PropId::DirectionMode, &[1, 2]),
+    dep(PropId::TargetPath, PropId::DirectionMode, &[1, 2]),
+    dep(PropId::TargetAngle, PropId::DirectionMode, &[1, 2]),
 ];
 
 /// Which of the circle stamp's properties depend on its fill mode.
@@ -1005,6 +1054,8 @@ const SHAPE_FILL_DEPENDENCIES: &[Dependency] = &[
     dep(PropId::DirectionMode, PropId::VectorMode, &[0]),
     dep(PropId::Direction, PropId::VectorMode, &[0]),
     dep(PropId::Target, PropId::VectorMode, &[0]),
+    dep(PropId::TargetPath, PropId::VectorMode, &[0]),
+    dep(PropId::TargetAngle, PropId::VectorMode, &[0]),
     dep(PropId::SpeedStart, PropId::VectorMode, &[1]),
     dep(PropId::SpeedEnd, PropId::VectorMode, &[1]),
     dep(PropId::DirectionStart, PropId::VectorMode, &[1]),
@@ -1013,6 +1064,8 @@ const SHAPE_FILL_DEPENDENCIES: &[Dependency] = &[
     // ...and inside the constant branch, the same rule the brush has.
     dep(PropId::Direction, PropId::DirectionMode, &[0]),
     dep(PropId::Target, PropId::DirectionMode, &[1, 2]),
+    dep(PropId::TargetPath, PropId::DirectionMode, &[1, 2]),
+    dep(PropId::TargetAngle, PropId::DirectionMode, &[1, 2]),
     // No rule on `stamp_space`. A freehand polygon was hidden from it until
     // M57, on the grounds that it has no size to measure — but the space is
     // not only a unit for a number. It is which plane the shape is *in*: a
@@ -1078,9 +1131,11 @@ pub fn dependencies(tool: ToolKind) -> &'static [Dependency] {
 /// change of the scale, the object would also paint a flow of its own on top
 /// of the flow it is a recording of. The `patch` is the same kind of object
 /// and is left alone until someone says the same of it.
+/// **`macro.resample`.** One strategy applies to the entire recording.
 const NEVER_KEYED: &[(ToolKind, PropId)] = &[
     (ToolKind::ShapeFill, PropId::VectorMode),
     (ToolKind::Macro, PropId::ScalePct),
+    (ToolKind::Macro, PropId::Resample),
 ];
 
 /// Whether `id` can carry keyframes on `tool` (M60).
@@ -1272,6 +1327,13 @@ impl PropertyMap {
     /// Called after loading an older project: a property added in a later
     /// version simply appears at its default, with no bespoke migration step.
     pub fn backfill(&mut self, tool: ToolKind) -> usize {
+        // Older macros could key their resampling mode. Keep the opening
+        // strategy as a constant when loading those recordings.
+        if tool == ToolKind::Macro
+            && let Some(value) = self.0.get(&PropId::Resample).map(|a| a.value_at(0))
+        {
+            self.0.insert(PropId::Resample, Animatable::constant(value));
+        }
         let mut added = 0;
         for spec in all_specs(tool) {
             self.0.entry(spec.id).or_insert_with(|| {
@@ -1500,6 +1562,19 @@ mod tests {
             }
             assert!(animatable(tool, PropId::ScalePct), "{tool:?}");
         }
+    }
+
+    #[test]
+    fn older_macro_strategy_keys_become_one_constant_strategy() {
+        let mut props = PropertyMap::for_tool(ToolKind::Macro);
+        let strategy = props.get_mut(PropId::Resample).expect("strategy");
+        strategy.set_key(0, PropValue::Enum(1), Interpolation::Step);
+        strategy.set_key(3, PropValue::Enum(0), Interpolation::Step);
+        props.backfill(ToolKind::Macro);
+        assert!(!animatable(ToolKind::Macro, PropId::Resample));
+        let strategy = props.get(PropId::Resample).expect("strategy");
+        assert!(!strategy.is_animated());
+        assert_eq!(strategy.value_at(3), PropValue::Enum(1));
     }
 
     /// The shape fill's vector mode is edited and never keyed (M60), and the

@@ -4,19 +4,19 @@ import type { PathKind } from "./PathKind";
 /**
  * One drawn line of a measurement, ready for the overlay.
  */
-export type MeasuredPathView = { 
+export type MeasuredPathView = {
 /**
  * Which path this is, and therefore how it is drawn.
  */
-kind: PathKind, 
+kind: PathKind,
 /**
  * The polyline, as `[lon, lat]`.
  */
-points: Array<[number, number]>, 
+points: Array<[number, number]>,
 /**
  * What to write beside it, already in the units the UI shows.
  */
-label: string, 
+label: string,
 /**
  * Where to write it.
  */

@@ -88,6 +88,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "wrote {}: {} bytes, {} messages in {} ms",
         result.path, result.bytes, result.messages, result.elapsed_ms
     );
+    // An optional second output checks the all-missing packing case with the
+    // same independent decoder as the painted sample.
+    if let Some(empty_path) = std::env::args().nth(2) {
+        let mut empty = project.clone();
+        for layer in &mut empty.layers {
+            layer.objects.clear();
+        }
+        export::run(
+            &empty,
+            &ExportRequest {
+                path: empty_path,
+                year: 2026,
+                month: 9,
+                day: 2,
+                hour: 0,
+                centre: 255,
+                bits: 16,
+            },
+            &AtomicBool::new(false),
+            |_| {},
+        )?;
+    }
     let _ = std::fs::remove_dir_all(&root);
     Ok(())
 }

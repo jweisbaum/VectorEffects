@@ -62,7 +62,7 @@ fn object(rng: &mut Rng) -> FlatObject {
     };
     let extent = rng.range(200_000.0, 2_000_000.0);
 
-    let shape = match rng.index(10) {
+    let shape = match rng.index(11) {
         0 => Shape::Disc { radius_m: extent },
         1 => Shape::Annulus {
             radius_m: extent,
@@ -107,6 +107,26 @@ fn object(rng: &mut Rng) -> FlatObject {
                 vec![[extent * 0.4, -extent * 0.2], [extent, 0.0]],
             ],
             half_size_m: extent * 0.2,
+        },
+        10 => Shape::Contours {
+            rings: vec![
+                vec![
+                    [-extent, -extent],
+                    [extent, -extent],
+                    [extent * 0.8, extent],
+                    [-extent, extent],
+                ],
+                vec![
+                    [-extent * 0.3, -extent * 0.3],
+                    [extent * 0.3, -extent * 0.3],
+                    [extent * 0.3, extent * 0.3],
+                    [-extent * 0.3, extent * 0.3],
+                ],
+            ],
+            source: Box::new(Shape::Capsule {
+                chains: vec![vec![[0.0, 0.0], [extent * 0.5, 0.0]]],
+                radius_m: extent,
+            }),
         },
         8 => Shape::Polygon {
             ring: vec![
@@ -158,16 +178,14 @@ fn object(rng: &mut Rng) -> FlatObject {
 
     let direction = match rng.index(6) {
         0 => DirectionMode::Constant(Angle::new(rng.range(0.0, 360.0))),
-        1 => DirectionMode::Toward(LonLat {
-            lon: rng.range(-179.0, 179.0),
-            lat: rng.range(-80.0, 80.0),
-        }),
-        // The reciprocal of `Toward`, and the case where a backend that added
-        // 180 degrees to the wrong end of the great circle would show up.
-        4 => DirectionMode::Away(LonLat {
-            lon: rng.range(-179.0, 179.0),
-            lat: rng.range(-80.0, 80.0),
-        }),
+        mode @ (1 | 4) => DirectionMode::Target {
+            target: LonLat {
+                lon: rng.range(-179.0, 179.0),
+                lat: rng.range(-80.0, 80.0),
+            },
+            rhumb: mode == 4,
+            offset: rng.range(-180.0, 360.0),
+        },
         2 => DirectionMode::Axis {
             start: Angle::new(rng.range(0.0, 360.0)),
             end: Angle::new(rng.range(0.0, 360.0)),
@@ -181,6 +199,7 @@ fn object(rng: &mut Rng) -> FlatObject {
         },
         _ => DirectionMode::Tangential {
             clockwise: rng.next() > 0.5,
+            angle: rng.range(-90.0, 90.0),
         },
     };
 
@@ -202,11 +221,12 @@ fn object(rng: &mut Rng) -> FlatObject {
     // local frame in different languages, so an object whose frame is projected
     // on one side and geodesic on the other, or rotated the other way round,
     // shows up here and nowhere else.
-    let space = if rng.next() > 0.667 {
-        Space::Projected
-    } else {
-        Space::Geodesic
-    };
+    let space = [
+        Space::Geodesic,
+        Space::Projected,
+        Space::Mercator,
+        Space::Miller,
+    ][rng.index(4)];
 
     // A quarter of the objects modify what is beneath them instead of painting
     // a field of their own (spec.md 6.3). Only the three that transform the
@@ -362,7 +382,11 @@ fn scene(rng: &mut Rng, count: usize) -> Scene {
     } else {
         Vec::new()
     };
-    Scene { objects, rasters }
+    Scene {
+        objects,
+        rasters,
+        speed_ranges: Default::default(),
+    }
 }
 
 fn samples(rng: &mut Rng, scene: &Scene, count: usize) -> Vec<LonLat> {
@@ -713,4 +737,55 @@ fn an_empty_scene_is_calm_on_both_backends() {
             .evaluate(&Scene::default(), &points)
             .expect("cpu")
     );
+}
+
+#[test]
+fn painted_layer_thresholds_use_modified_speed_on_both_backends() {
+    let Ok(gpu) = GpuEvaluator::new() else {
+        println!("no GPU available; skipping threshold comparison");
+        return;
+    };
+    let mut base = object(&mut Rng(19));
+    base.frame = Frame {
+        anchor: LonLat {
+            lon: 0.0,
+            lat: 75.0,
+        },
+        rotation_deg: 0.0,
+        scale: 1.0,
+        space: Space::Mercator,
+    };
+    base.shape = Shape::Disc {
+        radius_m: 100_000.0,
+    };
+    base.cap_radius_m = 100_000.0;
+    base.layer = 0;
+    base.modifier = None;
+    base.motion = Motion::default();
+    base.speed = SpeedMode::Constant(20.0);
+    base.direction = DirectionMode::Constant(Angle::new(90.0));
+    base.feather = 0.0;
+    base.invert = false;
+    base.erases = false;
+    let mut gain = base.clone();
+    gain.modifier = Some(Modifier::Gain(1.0));
+    let point = base.frame.anchor;
+    let mut scene = Scene {
+        objects: vec![base, gain],
+        ..Scene::default()
+    };
+    for (maximum, expected) in [(45.0, 40.0), (35.0, 0.0)] {
+        scene.speed_ranges.insert(
+            0,
+            ve_core::document::SpeedRange {
+                min_mps: 30.0,
+                max_mps: maximum,
+            },
+        );
+        let cpu = CpuEvaluator.evaluate(&scene, &[point]).expect("CPU");
+        let actual = gpu.evaluate(&scene, &[point]).expect("GPU");
+        for samples in [cpu, actual] {
+            assert!((f64::from(samples[0].u.hypot(samples[0].v)) - expected).abs() < 0.01);
+        }
+    }
 }

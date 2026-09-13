@@ -47,13 +47,7 @@ export function formatBytes(bytes: number): string {
  */
 export const KNOTS_PER_MPS = 1.943844492440605;
 
-/**
- * Converts a stored speed to the displayed one.
- *
- * Speed is stored in m/s — what GRIB2 encodes — and shown in knots, always.
- * Not configurable: a sailing forecast and a wind barb are both in knots,
- * and a barb is defined in 5-knot increments.
- */
+/** Converts canonical m/s to knots for physical barbs and legacy scale fields. */
 export function knotsFromMps(mps: number): number {
   return mps * KNOTS_PER_MPS;
 }

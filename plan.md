@@ -2,6 +2,39 @@
 
 **Companion to** `spec.md`. Section references below point into it.
 
+**2026-09-13: arrow and wind-barb appearance settings.** Independent size,
+stroke width, color, opacity, density, speed fading, and configurable drop
+shadows now live in Settings, with visual samples and per-style reset.
+Preferences persist through typed atomic property edits. Map glyphs and drawing
+previews share the settings; mixed densities retain spacing across field-kind
+boundaries. Appearance changes do not alter the document or field tiles.
+Verified: 733 UI tests, both Rust settings suites, workspace clippy, formatting,
+production build, offline checks, and WebKit rendering/layout checks. Custom
+mixed styles with shadows measured 1 ms median / 2 ms p95 while panning the
+1200×900 fixture; these are isolated draw timings.
+
+**2026-09-13: even glyph coverage in narrow fields.** The ordinary lattice can
+miss entire arcs of a thin ring. Covered half/quarter-step sites now fill gaps,
+with spacing enforced across tile boundaries and in drawing previews. Compact
+coverage masks and cached layouts keep changing wind vectors from repeating
+placement work. Regression tests exercise ring alignment, thin strokes, holes,
+tile seams, the dateline, and polar projections. `tools/webdriver/glyphs.mjs`
+compares actual WebGL screenshots and draw costs against the pre-fix renderer.
+Verified: 725 frontend tests, production build, and WebKit shader compilation
+and screenshots. At 1200×900, cached full-field draws measured 1 ms median
+before and after; panning measured 1 ms median / 2 ms p95 after the change.
+The thin-ring case measured 1 ms median / 3 ms p95 while panning. These are
+isolated renderer timings, not an end-to-end playback throughput measurement.
+
+**2026-09-13: macro interpolation, direction controls, and display units.**
+Macros offer non-animated Repeat Frames, Empty Frames, and Interpolate when
+project steps fall between captured frames. Interpolation blends u/v separately
+and moves the recorded footprint. Target modes offer great-circle/rhumb-line
+bearings with a signed offset; circles offer −90° inward through +90° outward.
+Global km/nm and kt/mph/km/h preferences convert inputs and readouts while
+preserving document units. Checks cover recorded gaps and movement, render and
+preview directions, saved preferences, and converted controls.
+
 **Status:** M0 through M7 complete and verified by test (2026-09-03). **The
 walking skeleton is closed**: a new project, a painted stroke, and a GRIB2 file
 that ecCodes parses and whose values decode to exactly what was painted. **The
@@ -4542,6 +4575,40 @@ what the report says.
 at this link's ~1.9 MB/s, and both archives are ticked by default, so it
 fetches twice what one would.
 
+**2026-09-13 follow-up — faster archive setup and current reads.** Both
+readers now open independent component metadata and coordinate axes in
+bounded parallel groups. GlobCurrent opens MY and NRT together and reads
+u/v concurrently within each hour. Four hours remain in flight. ERA5 keeps
+four component requests: the experiment with eight did not improve its
+transfer throughput on this connection. The helper joins both operations
+even on error, preserving complete-vector validation and request lifetime.
+
+Measured with the opt-in `cargo run -p ve-zarr --release --example
+history_download -- <archive> 4 4`. Two fresh-process runs per archive and
+implementation, reading 2024-01-01 00:00–03:00 UTC. These timings include
+metadata, field download, decoding and current regridding; they exclude
+GRIB packing and layer construction.
+
+| Stage | Before (seconds) | After (seconds) |
+|---|---:|---:|
+| Wind archive setup | 1.81–3.38 | 1.14–1.36 |
+| Wind setup + four hours | 8.24–9.67 | 8.82–10.04 |
+| Current archive setup | 10.40–11.05 | 2.32–2.35 |
+| Current setup + four hours | 12.88–13.85 | 4.74–4.92 |
+
+Current reads finished about 64% sooner on average. Wind setup improved,
+but variable transfer throughput dominated the total; these measurements
+do not establish a total wind-download speedup. Long ranges still depend
+on the connection and archive bandwidth. Regression coverage checks that
+independent reads can progress together, either component's failure rejects
+the pair, and ERA5 preserves vector components and absolute hour indexing
+while refusing unwritten chunks.
+
+Validation: `VE_FORCE_CPU=1 cargo test --workspace` passed 1,077 tests
+across 53 suites (13 existing optional tests ignored), including the 54
+archive-reader tests. All 733 UI tests, UI type checking, workspace Clippy,
+formatting and the offline invariant check passed.
+
 ### M40 — An erase preview takes one layer, not the stack
 
 **Goal:** the user's report of 2026-09-07: erasing on a layer that is not
@@ -4867,3 +4934,25 @@ supplied one and is otherwise asked at export (D69); autosave is a
 three-way option (D70). The other four (D65, D68, D71, D72) are
 implementation choices with one sensible answer, recorded so they are not
 re-derived. Nothing blocks M23.
+
+### Shape animation editing
+
+- Timeline mode toggles perimeter controls for existing create and edit objects.
+- Independently keyed local vertices; aggregate Shape track uses normal key editing.
+- Shared CPU/GPU contour coverage, holes, separate stroke parts, outlines and hit tests.
+- Destructive erasures apply after animation; whole-object deletion checks all frames.
+- Shape keys are saved and restored through history, clipboard timing and timeline resize.
+
+
+### September 2026 beta corrections and release preparation
+
+The requested beta corrections supersede the old equirectangular-only pixel
+stamp and imported-raster-only speed filter decisions. Pixel tools capture the
+active projection; all vector layer speed bands apply after layer edits. Image
+bands use the displayed vector field. GRIB bitmaps preserve missing coverage.
+Selected-object previews, constant motion, history retry, recent-file filtering,
+the January 1, 2027 expiry gate, and bundled Help are part of this batch.
+
+The verification checklist is `docs/beta-improvements.md`; the four-platform
+publishing and signing plan is `docs/github-release-plan.md`. Publishing is
+separate from the local commit and requires working GitHub credentials.

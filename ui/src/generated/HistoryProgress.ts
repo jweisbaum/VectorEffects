@@ -8,15 +8,15 @@
  * before the first byte moves, so the bar is a real fraction rather than an
  * animation.
  */
-export type HistoryProgress = { 
+export type HistoryProgress = {
 /**
  * Which archive is being read, as [`Archive::label`] names it.
  */
-archive: string, 
+archive: string,
 /**
  * Steps fetched so far, across every archive of this import.
  */
-done: number, 
+done: number,
 /**
  * Steps this import will fetch in total, across every archive.
  */

@@ -20,7 +20,11 @@ square: boolean,
 /**
  * Which space the stamp is a circle in (spec.md 3.5).
  */
-space: StampSpace, } | { "kind": "ring", 
+space: StampSpace, } | { "kind": "contours", 
+/**
+ * Outer rings and holes.
+ */
+rings: Array<Array<[number, number]>>, } | { "kind": "ring", 
 /**
  * The ring, in order; the closing edge is implied.
  */

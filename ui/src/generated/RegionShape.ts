@@ -6,27 +6,27 @@
  * Degrees throughout, because a region is map space: it is drawn on the map,
  * and what is made from one is a projected stamp (D28, D55).
  */
-export type RegionShape = { "kind": "rect", 
+export type RegionShape = { "kind": "rect",
 /**
  * Centre, `[lon, lat]`.
  */
-centre: [number, number], 
+centre: [number, number],
 /**
  * Half-extent east-west, in degrees.
  */
-half_width_deg: number, 
+half_width_deg: number,
 /**
  * Half-extent north-south, in degrees.
  */
-half_height_deg: number, } | { "kind": "disc", 
+half_height_deg: number, } | { "kind": "disc",
 /**
  * Centre, `[lon, lat]`.
  */
-centre: [number, number], 
+centre: [number, number],
 /**
  * Radius in degrees.
  */
-radius_deg: number, } | { "kind": "polygon", 
+radius_deg: number, } | { "kind": "polygon",
 /**
  * Vertices in order, `[lon, lat]`. Closed implicitly.
  */

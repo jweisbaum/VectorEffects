@@ -3,19 +3,19 @@
 /**
  * A snapshot the start screen can offer back.
  */
-export type Autosave = { 
+export type Autosave = {
 /**
  * The project id, which is also the snapshot's file stem.
  */
-id: number, 
+id: number,
 /**
  * The project's display name.
  */
-name: string, 
+name: string,
 /**
  * Where it lived, if it had been saved; null for a project never saved.
  */
-original_path: string | null, 
+original_path: string | null,
 /**
  * When the snapshot was taken, seconds since the epoch.
  */

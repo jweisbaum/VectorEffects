@@ -5,30 +5,30 @@ import type { Tool } from "./Tool";
 /**
  * One object's footprint, for the map to draw (spec.md 6.1, 6.2, 6.3).
  */
-export type OperatorOutline = { 
+export type OperatorOutline = {
 /**
  * Which object.
  */
-object: number, 
+object: number,
 /**
  * Which tool drew it, so the map can say what it has found.
  */
-tool: Tool, 
+tool: Tool,
 /**
  * Whether it covers everything *but* its footprint. Masks only.
  */
-inverted: boolean, 
+inverted: boolean,
 /**
  * Its anchor, as `[lon, lat]`.
  *
  * The end of a warp's push that a pull does not move (spec.md 6.3), and
  * the frame every one of these outlines was lifted through.
  */
-anchor: [number, number], 
+anchor: [number, number],
 /**
  * Where its edge is.
  */
-outline: ObjectOutline, 
+outline: ObjectOutline,
 /**
  * What the eraser has taken out of it at this step (M33), in the same
  * geographic terms.

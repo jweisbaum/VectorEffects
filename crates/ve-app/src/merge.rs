@@ -105,6 +105,9 @@ fn merged_geometry(
     positions: &[LonLat],
     reach_m: f64,
 ) -> Option<Geometry> {
+    if candidate.shape_animation.is_some() || stroke.shape_animation.is_some() {
+        return None;
+    }
     if candidate.tool != stroke.tool || candidate.active_range != stroke.active_range {
         return None;
     }

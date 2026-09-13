@@ -94,6 +94,26 @@ pub fn decode(bytes: &[u8]) -> Decoded {
         data: s7[5..].to_vec(),
         count,
     };
+    let values = unpack(&packed);
+    let s6 = sections[&6];
+    let values = if s6[5] == 0 {
+        let mut present = values.into_iter();
+        let count = (u32_at(s3, 30) * u32_at(s3, 34)) as usize;
+        let expanded = (0..count)
+            .map(|at| {
+                if s6[6 + at / 8] & (1 << (7 - at % 8)) != 0 {
+                    present.next().expect("bitmap value")
+                } else {
+                    f32::NAN
+                }
+            })
+            .collect();
+        assert!(present.next().is_none(), "all packed values used");
+        expanded
+    } else {
+        assert_eq!(s6[5], 255, "supported bitmap");
+        values
+    };
 
     Decoded {
         bits: packed.bits,
@@ -123,6 +143,6 @@ pub fn decode(bytes: &[u8]) -> Decoded {
         di: u32_at(s3, 63),
         dj: u32_at(s3, 67),
         scanning_mode: s3[71],
-        values: unpack(&packed),
+        values,
     }
 }

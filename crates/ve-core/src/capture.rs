@@ -110,7 +110,7 @@ pub struct Capture {
     pub x0_deg: f64,
     /// And northward. Rows run **north to south**, as every lattice here does.
     pub y0_deg: f64,
-    /// Hours between frames; zero for a still capture.
+    /// Seconds between frames; zero for a still capture.
     pub seconds_per_frame: f64,
     /// The region's own shape, so a capture means something without an object
     /// around it — which is what a macro is (M16).
@@ -515,6 +515,8 @@ pub enum Resample {
     /// The two nearest frames blended, `u` and `v` linearly, undefined where
     /// either is.
     Interpolate,
+    /// Only recorded timestamps have data.
+    Empty,
 }
 
 /// Which frame, or pair of frames, a macro shows at an elapsed time.
@@ -556,6 +558,7 @@ impl Capture {
                 // Inside the wrap-around gap: blend the last frame back to the
                 // first, or hold the last.
                 return Some(match resample {
+                    Resample::Empty => return None,
                     Resample::Hold => FramePick {
                         frame: self.frames.len() - 1,
                         next: self.frames.len() - 1,
@@ -576,7 +579,8 @@ impl Capture {
             .rposition(|frame| frame.offset_hours <= t + 1e-9)
             .unwrap_or(0);
         Some(match resample {
-            Resample::Hold => FramePick {
+            Resample::Empty if (self.frames[at].offset_hours - t).abs() > 1e-9 => return None,
+            Resample::Empty | Resample::Hold => FramePick {
                 frame: at,
                 next: at,
                 blend: 0.0,
@@ -598,13 +602,23 @@ impl Capture {
         })
     }
 
+    /// Whether any project timestamp falls strictly between recorded frames.
+    pub fn has_missing_frames(&self, step_hours: f64) -> bool {
+        step_hours > 0.0
+            && self.frames.windows(2).any(|pair| {
+                let next_step =
+                    ((pair[0].offset_hours / step_hours + 1e-9).floor() + 1.0) * step_hours;
+                next_step < pair[1].offset_hours - 1e-9
+            })
+    }
+
     /// The displacement a pick implies, in degrees of the map.
     pub fn displacement(&self, pick: FramePick) -> (f64, f64) {
         let a = &self.frames[pick.frame];
         let b = &self.frames[pick.next];
         let t = f64::from(pick.blend);
         (
-            a.dx_deg + (b.dx_deg - a.dx_deg) * t,
+            a.dx_deg + crate::geo::normalize_lon(b.dx_deg - a.dx_deg) * t,
             a.dy_deg + (b.dy_deg - a.dy_deg) * t,
         )
     }
@@ -878,12 +892,48 @@ mod resample_tests {
     fn every_sixth_hour_lands_on_a_frame() {
         let capture = capture();
         for (hours, frame) in [(0.0, 0usize), (6.0, 1), (12.0, 2)] {
-            for mode in [Resample::Hold, Resample::Interpolate] {
+            for mode in [Resample::Hold, Resample::Empty, Resample::Interpolate] {
                 let pick = capture.pick(hours, mode, false).expect("a frame");
                 assert_eq!(pick.frame, frame, "{hours} h in {mode:?}");
                 assert!(pick.blend.abs() < 1e-6 || pick.frame == pick.next);
             }
         }
+    }
+
+    #[test]
+    fn empty_frames_skip_hourly_gaps_including_the_loop_seam() {
+        let capture = capture();
+        for hour in 0..36 {
+            let pick = capture.pick(f64::from(hour), Resample::Empty, true);
+            assert_eq!(pick.is_some(), hour % 6 == 0, "hour {hour}");
+        }
+        assert!(capture.has_missing_frames(1.0));
+        assert!(capture.has_missing_frames(3.0));
+        assert!(!capture.has_missing_frames(6.0));
+        assert!(!capture.has_missing_frames(12.0));
+        assert!(
+            capture.has_missing_frames(7.0),
+            "non-aligned project steps also have gaps"
+        );
+    }
+
+    #[test]
+    fn interpolation_blends_components_and_moves_across_the_longitude_seam() {
+        let mut capture = capture();
+        capture.frames[0].uv[0] = [12.0, -6.0];
+        capture.frames[1].uv[0] = [-6.0, 12.0];
+        capture.frames[0].dx_deg = 179.0;
+        capture.frames[1].dx_deg = -179.0;
+        capture.frames[1].dy_deg = 6.0;
+        let pick = capture
+            .pick(2.0, Resample::Interpolate, false)
+            .expect("intermediate frame");
+        let sample = capture.sample_pick(pick, 0, 0.0, 0.0).expect("uv");
+        assert!((sample[0] - 6.0).abs() < 1e-5);
+        assert!(sample[1].abs() < 1e-5);
+        let (dx, dy) = capture.displacement(pick);
+        assert!((dx - (179.0 + 2.0 / 3.0)).abs() < 1e-5);
+        assert!((dy - 2.0).abs() < 1e-5);
     }
 
     /// Past the last frame there is nothing, unless the macro loops.

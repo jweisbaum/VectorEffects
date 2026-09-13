@@ -3,15 +3,15 @@
 /**
  * A tile address on the wire.
  */
-export type TileAddress = { 
+export type TileAddress = {
 /**
  * Zoom level.
  */
-z: number, 
+z: number,
 /**
  * Column.
  */
-x: number, 
+x: number,
 /**
  * Row.
  */

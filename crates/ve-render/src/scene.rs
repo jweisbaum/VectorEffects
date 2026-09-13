@@ -50,15 +50,15 @@ pub enum SpeedMode {
 pub enum DirectionMode {
     /// One bearing everywhere.
     Constant(Angle),
-    /// Every vector aims at a fixed position.
-    Toward(LonLat),
-    /// Every vector aims directly away from a fixed position, so the field
-    /// radiates outward from it.
-    ///
-    /// The opposite tangent to the same great circle, not the bearing measured
-    /// at the point itself: at a cell, "away" is exactly the reciprocal of
-    /// "toward", and the two therefore cancel to calm if stacked.
-    Away(LonLat),
+    /// A bearing to a target, optionally along a rhumb line and offset clockwise.
+    Target {
+        /// Geographic target.
+        target: LonLat,
+        /// Whether to use the constant rhumb-line bearing.
+        rhumb: bool,
+        /// Clockwise offset; includes 180 degrees for away mode.
+        offset: f64,
+    },
     /// Ramps between two bearings along the gradient axis.
     Axis {
         /// Bearing at the start of the ramp.
@@ -71,16 +71,12 @@ pub enum DirectionMode {
         /// Added to the path's bearing.
         offset: Angle,
     },
-    /// Flow around the anchor: the circle tool's rotation.
-    ///
-    /// A direction mode of its own rather than a component added to a base
-    /// bearing: a circle has no bearing to add to, so "rotating" would have
-    /// meant "north, plus a turn", and came out drifting northward. This is the
-    /// whole of a circle's flow — no tool has a radial or tangential component
-    /// on top of its direction any more (spec.md 7.5).
+    /// Flow around the anchor, tilted inward or outward from the tangent.
     Tangential {
         /// True for clockwise, false for counter-clockwise.
         clockwise: bool,
+        /// -90 inward, 0 tangent, 90 outward, independently of rotation sense.
+        angle: f64,
     },
 }
 
@@ -286,6 +282,8 @@ pub struct FlatRasterErasure {
     /// Whether the stamp is a circle on the map rather than on the ground
     /// (spec.md 3.5, M67).
     pub projected: bool,
+    /// Frozen cylindrical projection, or zero for the legacy flag.
+    pub projection: u8,
     /// Edge falloff, 0 to 1.
     pub feather: f64,
 }
@@ -426,10 +424,24 @@ pub struct FlatRaster {
 /// where one accumulation ends and the next begins.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Scene {
+    /// Inclusive speed thresholds applied after each layer's objects.
+    pub speed_ranges: std::collections::BTreeMap<u32, SpeedRange>,
     /// Objects, bottom of the stack first.
     pub objects: Vec<FlatObject>,
     /// Imported fields, in increasing `z`.
     pub rasters: Vec<FlatRaster>,
+}
+
+impl Scene {
+    /// A layer's band; the raster fallback supports independently built scenes.
+    pub fn speed_band(&self, layer: u32) -> Option<SpeedRange> {
+        self.speed_ranges.get(&layer).copied().or_else(|| {
+            self.rasters
+                .iter()
+                .find(|r| r.layer == layer)
+                .and_then(|r| r.speed_range)
+        })
+    }
 }
 
 /// Maximum error when turning a Bézier segment into a polyline, in metres.
@@ -647,6 +659,7 @@ fn direction_of(object: &Object, step: u32, rotation: f64) -> DirectionMode {
         ToolKind::Circle => DirectionMode::Tangential {
             // Variant 0 is clockwise.
             clockwise: choice(object, PropId::RotationSense, step) == 0,
+            angle: number(object, PropId::CircleAngle, step).unwrap_or(0.0),
         },
         ToolKind::Curve => {
             // Mode 1 is relative to the path tangent; 0 is an absolute bearing.
@@ -665,12 +678,15 @@ fn direction_of(object: &Object, step: u32, rotation: f64) -> DirectionMode {
                 end: constant(PropId::DirectionEnd),
             }
         }
-        // Aim modes 1 and 2 both point every vector along the great circle
-        // through a target: mode 1 at it, mode 2 directly away from it. With no
+        // Aim modes 1 and 2 resolve a bearing to a target: mode 1 at it, mode 2 directly away from it. With no
         // target there is nothing to aim at, so the constant bearing stands in.
         _ if aim == 1 || aim == 2 => match position(object, PropId::Target, step) {
-            Some(target) if aim == 1 => DirectionMode::Toward(target),
-            Some(target) => DirectionMode::Away(target),
+            Some(target) => DirectionMode::Target {
+                target,
+                rhumb: choice(object, PropId::TargetPath, step) == 1,
+                offset: number(object, PropId::TargetAngle, step).unwrap_or(0.0)
+                    + if aim == 2 { 180.0 } else { 0.0 },
+            },
             None => DirectionMode::Constant(constant(PropId::Direction)),
         },
         _ => DirectionMode::Constant(constant(PropId::Direction)),
@@ -692,11 +708,7 @@ fn modifier_of(object: &Object, step: u32) -> Option<Modifier> {
         let anchor = position(object, PropId::Position, step)?;
         let rotation = bearing(object, PropId::RotationDeg, step).map_or(0.0, |a| a.degrees());
         let scale_pct = number(object, PropId::ScalePct, step).unwrap_or(100.0);
-        let space = if choice(object, PropId::StampSpace, step) == 1 {
-            Space::Projected
-        } else {
-            Space::Geodesic
-        };
+        let space = Space::from_choice(choice(object, PropId::StampSpace, step));
         Some(Frame::in_space(anchor, rotation, scale_pct, space))
     }
 
@@ -776,14 +788,26 @@ pub fn flatten_object_at(object: &Object, step: u32, derived: Derived) -> Option
     // Space 1 is the map-space stamp. Tools that declare no `StampSpace` read
     // 0 and stay on the ground, which is what every object was before the
     // property existed (spec.md 3.5).
-    let space = if choice(object, PropId::StampSpace, step) == 1 {
-        Space::Projected
-    } else {
-        Space::Geodesic
-    };
+    let space = Space::from_choice(choice(object, PropId::StampSpace, step));
     let frame = Frame::in_space(anchor, rotation, scale_pct, space);
 
-    let (shape, path) = shape_of(object, step)?;
+    let (mut shape, path) = shape_of(object, step)?;
+    if let Some(animation) = &object.shape_animation {
+        let scale = shape.animation_reference_m() / animation.reference_size_m.max(1e-9);
+        let rings = animation
+            .at(step)
+            .iter()
+            .map(|r| {
+                r.iter()
+                    .map(|p| shape.rescale_perimeter_point([p.x, p.y], scale))
+                    .collect()
+            })
+            .collect();
+        shape = Shape::Contours {
+            rings,
+            source: Box::new(shape),
+        };
+    }
     if shape.is_empty() {
         return None;
     }
@@ -802,7 +826,11 @@ pub fn flatten_object_at(object: &Object, step: u32, derived: Derived) -> Option
                     .map(|chain| chain.iter().map(|p| [p.x, p.y]).collect())
                     .collect();
                 FlatErasure {
-                    shape: if erasure.square {
+                    shape: if !erasure.contour.is_empty() {
+                        Shape::Polygon {
+                            ring: erasure.contour.iter().map(|p| [p.x, p.y]).collect(),
+                        }
+                    } else if erasure.square {
                         Shape::SweptSquare {
                             chains,
                             half_size_m: erasure.radius_m,
@@ -875,7 +903,8 @@ pub fn covers(object: &FlatObject, position: LonLat) -> bool {
     if object.frame.distance_m(position) > object.cap_radius_m {
         return false;
     }
-    object.shape.distance(object.frame.to_local(position)) <= 0.0
+    let local = object.frame.to_local(position);
+    object.shape.distance(local) <= 0.0 && crate::cpu::erased_factor(&object.erased, local) > 0.02
 }
 
 /// The object's own movement at a step, for the tracks it was told to use
@@ -1115,10 +1144,10 @@ fn capture_of(
     // holding a measurement forward is about a forecast, and this is not one.
     let hours_per_step = f64::from(project.settings.step_hours.hours());
     let elapsed = f64::from(step.saturating_sub(object.active_range.start)) * hours_per_step;
-    let resample = if choice(object, PropId::Resample, step) == 1 {
-        Resample::Interpolate
-    } else {
-        Resample::Hold
+    let resample = match choice(object, PropId::Resample, 0) {
+        1 => Resample::Interpolate,
+        2 => Resample::Empty,
+        _ => Resample::Hold,
     };
     let looping = object
         .props
@@ -1205,6 +1234,9 @@ fn flatten_where(project: &Project, step: u32, wanted: impl Fn(&Layer) -> bool) 
         .enumerate()
     {
         let layer_index = index as u32;
+        if let Some(band) = layer.speed_range {
+            scene.speed_ranges.insert(layer_index, band);
+        }
         let kind = layer.parameter();
         if let Some(frame) = layer.imported_frame(&project.settings, step) {
             scene.rasters.push(FlatRaster {
@@ -1222,6 +1254,7 @@ fn flatten_where(project: &Project, step: u32, wanted: impl Fn(&Layer) -> bool) 
                         radius_m: erasure.radius_m,
                         square: erasure.square,
                         projected: erasure.projected,
+                        projection: erasure.projection,
                         feather: f64::from(erasure.feather).clamp(0.0, 1.0),
                     })
                     .collect(),
@@ -1238,6 +1271,13 @@ fn flatten_where(project: &Project, step: u32, wanted: impl Fn(&Layer) -> bool) 
                 // GRIB layer whose file has gone. `place` is also what moves a
                 // macro that recorded a moving region.
                 let placed = place(project, object, kind, step, &links.at);
+                // A missing recording frame is transparent. Falling back to
+                // a procedural object would paint a calm patch over the layer.
+                if matches!(object.tool, ToolKind::Macro | ToolKind::Patch)
+                    && placed.capture.is_none()
+                {
+                    return None;
+                }
                 let mut flat = flatten_object_at(object, step, placed.derived)?;
                 flat.layer = layer_index;
                 flat.kind = kind;
@@ -1247,4 +1287,73 @@ fn flatten_where(project: &Project, step: u32, wanted: impl Fn(&Layer) -> bool) 
             }));
     }
     scene
+}
+
+/// Selection previews isolate creations. Edits retain their input within the
+/// same layer, then restrict the result to the selected operators' footprints.
+pub fn selection_scenes(
+    project: &Project,
+    step: u32,
+    selected: &[ve_core::Id],
+) -> Vec<(Scene, Vec<FlatObject>)> {
+    let links = Links::resolve(project, step);
+    let mut result = Vec::new();
+    for layer in project
+        .layers
+        .iter()
+        .filter(|layer| layer.visible && layer.has_field())
+    {
+        let mut members = Vec::new();
+        for object in layer
+            .objects
+            .iter()
+            .filter(|object| selected.contains(&object.id))
+        {
+            let placed = place(project, object, layer.parameter(), step, &links.at);
+            if matches!(object.tool, ToolKind::Macro | ToolKind::Patch) && placed.capture.is_none()
+            {
+                continue;
+            }
+            if let Some(mut flat) = flatten_object_at(object, step, placed.derived) {
+                flat.kind = layer.parameter();
+                flat.motion = motion_of(
+                    object,
+                    step,
+                    project.settings.step_hours.hours(),
+                    project.settings.last_step(),
+                    &links,
+                );
+                flat.capture = placed.capture;
+                members.push(flat);
+            }
+        }
+        if members.is_empty() {
+            continue;
+        }
+        if members
+            .iter()
+            .any(|o| o.modifier.is_some() || o.clone_source.is_some() || o.erases)
+        {
+            // Keep source objects only up to the final selected object, so a
+            // later overlapping object can never contaminate the preview.
+            let mut source = project.clone();
+            if let Some(source_layer) = source.layers.iter_mut().find(|l| l.id == layer.id)
+                && let Some(last) = source_layer
+                    .objects
+                    .iter()
+                    .rposition(|o| selected.contains(&o.id))
+            {
+                source_layer.objects.truncate(last + 1);
+            }
+            result.push((flatten_only(&source, step, layer.id), members));
+        } else {
+            let mut scene = Scene::default();
+            if let Some(band) = layer.speed_range {
+                scene.speed_ranges.insert(0, band);
+            }
+            scene.objects = members;
+            result.push((scene, Vec::new()));
+        }
+    }
+    result
 }

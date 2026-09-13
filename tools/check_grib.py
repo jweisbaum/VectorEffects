@@ -27,7 +27,11 @@ def read(path):
             key = (eccodes.codes_get(gid, "shortName"), eccodes.codes_get(gid, "step"))
             ni = eccodes.codes_get(gid, "Ni")
             nj = eccodes.codes_get(gid, "Nj")
-            fields[key] = eccodes.codes_get_values(gid).reshape(nj, ni)
+            values = eccodes.codes_get_values(gid).reshape(nj, ni)
+            if eccodes.codes_get(gid, "bitmapPresent"):
+                bitmap = eccodes.codes_get_array(gid, "bitmap").reshape(nj, ni)
+                values[bitmap == 0] = np.nan
+            fields[key] = values
             eccodes.codes_release(gid)
     return fields
 
@@ -37,6 +41,11 @@ def main():
     fields = read(path)
     if len(fields) != 6:
         sys.exit(f"expected 6 messages, found {len(fields)}")
+    if "--empty" in sys.argv[2:]:
+        if not all(np.isnan(values).all() for values in fields.values()):
+            sys.exit("an empty export contains defined values")
+        print("all six empty messages decode as entirely undefined")
+        return
 
     u = fields[("10u", 0)]
     v = fields[("10v", 0)]
@@ -49,13 +58,13 @@ def main():
         ("eastward stroke is not in v", at(v, 0, 0), 0.0),
         ("northward stamp is in v", at(v, -120, 40), 18.0),
         ("northward stamp is not in u", at(u, -120, 40), 0.0),
-        ("open ocean is calm (u)", at(u, 100, -50), 0.0),
-        ("open ocean is calm (v)", at(v, 100, -50), 0.0),
+        ("unpainted ocean is undefined (u)", at(u, 100, -50), np.nan),
+        ("unpainted ocean is undefined (v)", at(v, 100, -50), np.nan),
     ]
 
     failures = []
     for name, got, want in checks:
-        ok = abs(got - want) < 0.01
+        ok = np.isnan(got) if np.isnan(want) else abs(got - want) < 0.01
         print(f"  {'ok  ' if ok else 'FAIL'} {name:32} got {got:8.3f} want {want:8.3f}")
         if not ok:
             failures.append(name)
