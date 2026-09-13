@@ -33,6 +33,11 @@ pub struct AppPaths {
 impl AppPaths {
     /// Resolves the platform-appropriate directories, creating them if needed.
     pub fn resolve() -> Result<Self> {
+        // Automated app runs must never modify the user's settings or recovery files.
+        #[cfg(feature = "webdriver")]
+        if let Some(root) = std::env::var_os("VE_AUTOMATION_ROOT") {
+            return Self::in_directory(Path::new(&root));
+        }
         let dirs = ProjectDirs::from("com", "VectorEffects", "VectorEffects")
             .ok_or_else(|| AppError::Internal("could not determine a home directory".to_owned()))?;
 

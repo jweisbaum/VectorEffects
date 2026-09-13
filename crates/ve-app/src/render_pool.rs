@@ -19,19 +19,16 @@
 //! per step into a `Vec` indexed by step, and the queue is a `Vec` in priority
 //! order.
 
-use std::collections::HashMap;
 use std::sync::{Arc, Condvar, Mutex};
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use ve_core::project::Project;
-use ve_render::cache::TileKey;
-use ve_render::scene::{Scene, flatten};
 use ve_render::tile::TileId;
 
 use crate::commands::AppState;
 use crate::error::{AppError, Result};
-use crate::protocol::{self, Frame};
+use crate::protocol::{self, Frame, TileScope};
 
 /// A tile address on the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -78,41 +75,6 @@ pub struct RenderProgress {
     pub step: u32,
 }
 
-/// One step, flattened, hashed and planned — everything a tile of it needs
-/// that does not depend on which tile.
-struct Prepared {
-    frame: Frame,
-    /// Each tile's key, once asked for: a key is the hash of the objects
-    /// that reach the tile (M31), and the readiness probe asks after the
-    /// same viewport several times a second.
-    keys: Mutex<HashMap<TileId, TileKey>>,
-}
-
-impl Prepared {
-    /// The tile's key, computed the first time.
-    fn key(&self, state: &AppState, tile: TileId) -> TileKey {
-        if let Ok(keys) = self.keys.lock()
-            && let Some(key) = keys.get(&tile)
-        {
-            return *key;
-        }
-        let key = self.frame.tile(state, tile).1;
-        if let Ok(mut keys) = self.keys.lock() {
-            keys.insert(tile, key);
-        }
-        key
-    }
-
-    /// The tile's sub-scene and its key, for rendering it.
-    fn tile(&self, state: &AppState, tile: TileId) -> (Scene, TileKey) {
-        let (scene, key) = self.frame.tile(state, tile);
-        if let Ok(mut keys) = self.keys.lock() {
-            keys.insert(tile, key);
-        }
-        (scene, key)
-    }
-}
-
 /// The document as the pool sees it: one revision, its steps prepared on
 /// demand.
 ///
@@ -125,7 +87,7 @@ struct Snapshot {
     revision: u64,
     project: Arc<Project>,
     /// Indexed by step: no map is iterated on this path.
-    steps: Mutex<Vec<Option<Arc<Prepared>>>>,
+    steps: Mutex<Vec<Option<Arc<Frame>>>>,
 }
 
 impl Snapshot {
@@ -140,16 +102,15 @@ impl Snapshot {
 
     /// The step's scene — every layer of every kind, as the map draws it
     /// (M31) — prepared the first time it is asked for.
-    fn prepared(&self, step: u32) -> Arc<Prepared> {
+    fn prepared(&self, state: &AppState, step: u32) -> Arc<Frame> {
         if let Ok(steps) = self.steps.lock()
             && let Some(Some(prepared)) = steps.get(step as usize)
         {
             return Arc::clone(prepared);
         }
-        let prepared = Arc::new(Prepared {
-            frame: Frame::of(flatten(&self.project, step)),
-            keys: Mutex::new(HashMap::new()),
-        });
+        let prepared = state
+            .scenes
+            .prepare(self.revision, step, TileScope::Whole, &self.project);
         if let Ok(mut steps) = self.steps.lock()
             && let Some(slot) = steps.get_mut(step as usize)
         {
@@ -172,6 +133,18 @@ struct Queue {
     units: Vec<Unit>,
     /// The snapshot the units belong to.
     snapshot: Option<Arc<Snapshot>>,
+    tiles: Vec<TileId>,
+    evictions: u64,
+    /// Readiness can replace the snapshot before any work is queued for it.
+    queued_revision: Option<u64>,
+    request_id: u64,
+}
+
+struct ReadinessCache {
+    revision: u64,
+    tiles: Vec<TileAddress>,
+    generation: u64,
+    report: TimelineReadiness,
 }
 
 /// What the pool calls when a tile lands.
@@ -183,6 +156,7 @@ pub struct RenderPool {
     wake: Condvar,
     /// Told when a tile lands, so the frontend can refresh its readiness.
     notify: Mutex<Option<Notify>>,
+    readiness_cache: Mutex<Option<ReadinessCache>>,
 }
 
 impl std::fmt::Debug for RenderPool {
@@ -207,9 +181,14 @@ impl RenderPool {
             queue: Mutex::new(Queue {
                 units: Vec::new(),
                 snapshot: None,
+                tiles: Vec::new(),
+                evictions: 0,
+                queued_revision: None,
+                request_id: 0,
             }),
             wake: Condvar::new(),
             notify: Mutex::new(None),
+            readiness_cache: Mutex::new(None),
         }
     }
 
@@ -238,6 +217,17 @@ impl RenderPool {
     /// dropped — a unit in flight finishes into a key that is either still
     /// wanted or harmlessly unreachable.
     pub fn request(&self, state: &AppState, current: u32, tiles: &[TileAddress]) -> Result<()> {
+        self.request_numbered(state, current, tiles, None)
+    }
+
+    /// A late viewport/playhead request cannot replace a newer queued request.
+    pub fn request_numbered(
+        &self,
+        state: &AppState,
+        current: u32,
+        tiles: &[TileAddress],
+        request_id: Option<u64>,
+    ) -> Result<()> {
         let snapshot = {
             let session = state
                 .session
@@ -266,18 +256,49 @@ impl RenderPool {
             .filter_map(|t| TileId::new(t.z, t.x, t.y).ok())
             .collect();
         let last = snapshot.project.last_step();
-        let mut units = Vec::with_capacity(ids.len() * (last as usize + 1));
-        for step in priority_order(current.min(last), last) {
-            for tile in &ids {
-                units.push(Unit { step, tile: *tile });
-            }
-        }
-        // Reversed so the workers can pop from the back in priority order.
-        units.reverse();
-
+        let order = priority_order(current.min(last), last);
+        let evictions = state.tiles.versions().1;
         if let Ok(mut queue) = self.queue.lock() {
-            queue.units = units;
-            queue.snapshot = Some(snapshot);
+            if let Some(request_id) = request_id {
+                if request_id < queue.request_id {
+                    return Ok(());
+                }
+                queue.request_id = request_id;
+            }
+            // An older asynchronous request must not replace a newer revision.
+            if queue
+                .snapshot
+                .as_ref()
+                .is_some_and(|held| held.revision > snapshot.revision)
+            {
+                return Ok(());
+            }
+            let same = queue.queued_revision == Some(snapshot.revision)
+                && queue.tiles == ids
+                && queue.evictions == evictions;
+            if same {
+                // Reprioritize only the outstanding units. A completed queue stays empty.
+                let mut rank = vec![0usize; last as usize + 1];
+                for (index, step) in order.iter().enumerate() {
+                    rank[*step as usize] = index;
+                }
+                queue
+                    .units
+                    .sort_by_key(|unit| std::cmp::Reverse(rank[unit.step as usize]));
+            } else {
+                let mut units = Vec::with_capacity(ids.len() * (last as usize + 1));
+                for step in order {
+                    for tile in &ids {
+                        units.push(Unit { step, tile: *tile });
+                    }
+                }
+                units.reverse();
+                queue.units = units;
+                queue.tiles = ids;
+                queue.evictions = evictions;
+                queue.queued_revision = Some(snapshot.revision);
+                queue.snapshot = Some(snapshot);
+            }
         }
         self.wake.notify_all();
         Ok(())
@@ -288,6 +309,8 @@ impl RenderPool {
         if let Ok(mut queue) = self.queue.lock() {
             queue.units.clear();
             queue.snapshot = None;
+            queue.tiles.clear();
+            queue.queued_revision = None;
         }
     }
 
@@ -310,7 +333,7 @@ impl RenderPool {
             (unit, snapshot)
         };
 
-        let prepared = snapshot.prepared(unit.step);
+        let prepared = snapshot.prepared(state, unit.step);
         if state.tiles.contains(&prepared.key(state, unit.tile)) {
             return true;
         }
@@ -391,15 +414,19 @@ impl RenderPool {
                 .filter(|snapshot| snapshot.revision == open.revision);
             match existing {
                 Some(snapshot) => snapshot,
-                None => {
-                    let snapshot = Arc::new(Snapshot::of(open.revision, open.project.clone()));
-                    if let Ok(mut queue) = self.queue.lock() {
-                        queue.snapshot = Some(Arc::clone(&snapshot));
-                    }
-                    snapshot
-                }
+                None => Arc::new(Snapshot::of(open.revision, open.project.clone())),
             }
         };
+
+        let generation = state.tiles.versions().0;
+        if let Ok(cached) = self.readiness_cache.lock()
+            && let Some(cached) = cached.as_ref()
+            && cached.revision == snapshot.revision
+            && cached.tiles == tiles
+            && cached.generation == generation
+        {
+            return Ok(cached.report.clone());
+        }
 
         let ids: Vec<TileId> = tiles
             .iter()
@@ -408,7 +435,7 @@ impl RenderPool {
         let total = ids.len() as u32;
         let steps = (0..snapshot.project.settings.step_count)
             .map(|step| {
-                let prepared = snapshot.prepared(step);
+                let prepared = snapshot.prepared(state, step);
                 let ready = ids
                     .iter()
                     .filter(|tile| state.tiles.contains(&prepared.key(state, **tile)))
@@ -416,10 +443,19 @@ impl RenderPool {
                 StepReadiness { step, ready, total }
             })
             .collect();
-        Ok(TimelineReadiness {
+        let report = TimelineReadiness {
             revision: snapshot.revision,
             steps,
-        })
+        };
+        if let Ok(mut cached) = self.readiness_cache.lock() {
+            *cached = Some(ReadinessCache {
+                revision: snapshot.revision,
+                tiles: tiles.to_vec(),
+                generation,
+                report: report.clone(),
+            });
+        }
+        Ok(report)
     }
 }
 
@@ -461,8 +497,9 @@ pub fn render_ahead(
     pool: tauri::State<'_, Arc<RenderPool>>,
     current: u32,
     tiles: Vec<TileAddress>,
+    request_id: Option<u64>,
 ) -> Result<()> {
-    pool.request(&state, current, &tiles)
+    pool.request_numbered(&state, current, &tiles, request_id)
 }
 
 /// How ready every step is, for the viewport.

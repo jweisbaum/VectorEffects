@@ -7,7 +7,9 @@
  * map — thousands of kilometres from the edit — and then resolved back to full
  * brightness in rectangular batches as the keys landed.
  */
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 import {
   BASE_CAPACITY,
@@ -67,6 +69,7 @@ describe("knowing a lookup from a fetch", () => {
    * would upload a texture.
    */
   it("is unresolved until the frame's keys land, and resolved after", async () => {
+    vi.stubGlobal("fetch", vi.fn(() => new Promise(() => {})));
     const gl = {} as unknown as WebGL2RenderingContext;
     const cache = new TileCache(gl, "ve-tile://");
     let asked = 0;
@@ -90,6 +93,114 @@ describe("knowing a lookup from a fetch", () => {
     // And another frame is its own question entirely — an edit re-addresses
     // every tile, which is what makes the distinction matter at all.
     expect(cache.unresolved("8/0", 2, 1, 1)).toBe(true);
+    cache.dispose();
+  });
+});
+
+function gpu() {
+  return {
+    createTexture: vi.fn(() => ({})), deleteTexture: vi.fn(), bindTexture: vi.fn(),
+    texImage2D: vi.fn(), texParameteri: vi.fn(),
+  } as unknown as WebGL2RenderingContext;
+}
+
+describe("preparing playback without animation callbacks", () => {
+  const view = [{ z: 0, x: 0, y: 0 }];
+  const bytes = new Uint8Array(TILE_BYTES);
+  function setup(limit = 768) {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date", "performance"] });
+    const gl = gpu();
+    const cache = new TileCache(gl, "ve-tile://", limit);
+    const resolve = vi.fn(async (frame: string, tiles: readonly { x: number }[]) => tiles.map((tile) => `${frame}:${tile.x}`));
+    cache.resolver = resolve;
+    const fetch = vi.fn(async () => new Response(bytes));
+    vi.stubGlobal("fetch", fetch);
+    return { cache, gl, resolve, fetch };
+  }
+
+  it("resolves, fetches, and uploads all frames once; a long second lap needs no traffic", async () => {
+    const { cache, fetch, resolve, gl } = setup();
+    cache.reserve(120, 1);
+    const frames = Array.from({ length: 120 }, (_, i) => `7/${i}`);
+    cache.prepare(frames, view);
+    await vi.runAllTimersAsync();
+    expect(cache.prepare(frames, view)).toBe(120);
+    expect(fetch).toHaveBeenCalledTimes(120);
+    expect(resolve).toHaveBeenCalledTimes(120);
+    for (const frame of frames) expect(cache.prefetch(frame, view)).toBe(true);
+    await vi.runAllTimersAsync();
+    expect(fetch).toHaveBeenCalledTimes(120);
+    expect(resolve).toHaveBeenCalledTimes(120);
+    expect(gl.texImage2D).toHaveBeenCalledTimes(120);
+    cache.dispose();
+  });
+
+  it("limits concurrent transfers and keeps bytes awaiting upload within that limit", async () => {
+    const { cache, fetch } = setup();
+    const pending: Array<(response: Response) => void> = [];
+    fetch.mockImplementation(() => new Promise((resolve) => pending.push(resolve)));
+    const tiles = Array.from({ length: 100 }, (_, x) => ({ z: 4, x, y: 0 }));
+    cache.prepare(["7/0"], tiles);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetch).toHaveBeenCalledTimes(64);
+    pending.forEach((resolve) => resolve(new Response(bytes)));
+    await vi.runAllTimersAsync();
+    expect(fetch).toHaveBeenCalledTimes(100);
+    cache.dispose();
+  });
+
+  it("protects the displayed and next frame when unrelated tiles exceed capacity", async () => {
+    const { cache } = setup(3);
+    cache.protect(["7/0", "7/1"], view);
+    cache.prepare(["7/0", "7/1", "7/2"], view);
+    await vi.runAllTimersAsync();
+    expect(cache.residentCount("7/0", view)).toBe(1);
+    cache.get("7/3", 0, 0, 0);
+    await vi.runAllTimersAsync();
+    expect(cache.residentCount("7/0", view)).toBe(1);
+    expect(cache.residentCount("7/1", view)).toBe(1);
+    expect(cache.stats().ready).toBeLessThanOrEqual(3);
+    cache.dispose();
+  });
+
+  it("does not fetch an obsolete preparation after its keys resolve", async () => {
+    const { cache, fetch } = setup();
+    let resolve!: (keys: string[]) => void;
+    cache.resolver = () => new Promise((done) => { resolve = done; });
+    cache.prepare(["7/0"], view);
+    await vi.advanceTimersByTimeAsync(0);
+    cache.prepare([], view);
+    resolve(["old-key"]);
+    await vi.runAllTimersAsync();
+    expect(fetch).not.toHaveBeenCalled();
+    cache.dispose();
+  });
+
+  it("ignores a resolver that completes after disposal", async () => {
+    const { cache, fetch } = setup();
+    let resolve!: (keys: string[]) => void;
+    cache.resolver = () => new Promise((done) => { resolve = done; });
+    cache.prepare(["7/0"], view);
+    await vi.advanceTimersByTimeAsync(0);
+    cache.dispose();
+    resolve(["old-key"]);
+    await vi.runAllTimersAsync();
+    expect(cache.unresolved("7/0", 0, 0, 0)).toBe(true);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("retries failed transfers with a bounded attempt count", async () => {
+    const { cache, fetch } = setup();
+    fetch.mockImplementation(async () => new Response(null, { status: 503 }));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    for (let attempt = 0; attempt < 5; attempt++) {
+      cache.prepare(["7/0"], view);
+      await vi.advanceTimersByTimeAsync(10_000);
+    }
+    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(cache.stats().failed).toBe(1);
+    cache.dispose();
+    warn.mockRestore();
   });
 });
 

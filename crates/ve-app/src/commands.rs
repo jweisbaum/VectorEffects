@@ -253,6 +253,8 @@ pub struct AppState {
     /// Evictable and never project data: deleting it while the app is closed is
     /// always safe (invariant 1).
     pub tiles: ve_render::cache::RenderCache,
+    /// Prepared frames shared by background rendering and tile requests.
+    pub scenes: crate::protocol::SceneCache,
 }
 
 impl AppState {
@@ -279,6 +281,7 @@ impl AppState {
             evaluators: Evaluators::detect(),
             session: std::sync::Mutex::new(session),
             tiles,
+            scenes: crate::protocol::SceneCache::default(),
             paths,
         }
     }

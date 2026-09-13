@@ -93,12 +93,12 @@ fn populate(state: &AppState, n: u32) {
 /// A viewport of `n` tiles, the shape the map sends: one zoom level, a run of
 /// columns across a couple of rows.
 fn viewport(n: u32) -> Vec<TileAddress> {
-    let z = 3;
+    let z = 4;
     (0..n)
         .map(|i| TileAddress {
             z,
-            x: i % 8,
-            y: i / 8,
+            x: i % 16,
+            y: i / 16,
         })
         .collect()
 }

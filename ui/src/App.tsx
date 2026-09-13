@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import ExportDialog from "./project/ExportDialog";
 import HistoryPanel from "./panels/HistoryPanel";
@@ -156,7 +156,11 @@ export default function App() {
   const mapRef = useRef<MapHandle | null>(null);
   // The map holds the tiles; playback asks it, not the backend, whether a step
   // can be shown (spec.md 9.4). Before the map exists there is nothing to wait for.
-  const warm = useCallback((target: number) => mapRef.current?.warm(target) ?? true, []);
+  const playback = useMemo(() => ({
+    prepare: (request: import("./timeline/preparation").PreparationRequest) =>
+      mapRef.current?.prepare(request) ?? { ready: 0, total: 1, streaming: false },
+    present: (target: number) => mapRef.current?.present(target) ?? false,
+  }), []);
   /** Where the map is looking, for an image that has to be placed by hand. */
   const viewBounds = useCallback(() => mapRef.current?.bounds() ?? null, []);
 
@@ -644,7 +648,7 @@ export default function App() {
         selection={selection}
         onSelect={selectObjects}
         viewport={viewport}
-        warm={warm}
+        playback={playback}
         autoKey={autoKey}
         onAutoKey={setAutoKey}
         onChanged={setProject}

@@ -168,6 +168,8 @@ import {
 } from "./place";
 import { MapRenderer, type OperatorPreview, type RenderState } from "./renderer";
 import { uniqueTiles } from "../timeline/playback";
+import { preparationTargets, type PlaybackMap, type PreparationRequest } from "../timeline/preparation";
+import { playbackPresented, playbackTime } from "../timeline/metrics";
 import { TileCache } from "./tiles";
 import { beneathToken, frameToken, onlyToken, parseFrameToken } from "./frameToken";
 import { releaseFocus } from "./focus";
@@ -454,7 +456,7 @@ function heldOperator(held: readonly HeldPreview[]): OperatorPreview | null {
 const MAX_PREVIEW_GLYPHS = 600;
 
 /** What the map does for the timeline (spec.md 9.4). */
-export interface MapHandle {
+export interface MapHandle extends PlaybackMap {
   /**
    * Starts fetching a step's tiles for the current viewport onto the GPU, and
    * says whether they are all there. Playback advances into a step only once
@@ -610,6 +612,7 @@ export default function MapView({
    * draws its missing tiles from this one, dimmed, rather than blank.
    */
   const shownFrameRef = useRef<string | null>(null);
+  const needsTilesRef = useRef(true);
   const cameraRef = useRef<Camera>({ centerLon: 0, centerLat: 20, pxPerDeg: 3 });
   const viewRef = useRef<Viewport>({ width: 1, height: 1 });
   /**
@@ -1416,6 +1419,7 @@ export default function MapView({
   }, []);
 
   const draw = useCallback(() => {
+    const drawStarted = performance.now();
     const renderer = rendererRef.current;
     if (!renderer) return;
 
@@ -1565,8 +1569,10 @@ export default function MapView({
       }
       // Once every tile of this frame is on screen it is the one to hold.
       const tiles = tilesRef.current;
-      if (tiles && tiles.residentCount(frame, unique) === unique.length) {
+      needsTilesRef.current = !tiles || tiles.residentCount(frame, unique) !== unique.length;
+      if (!needsTilesRef.current) {
         shownFrameRef.current = frame;
+        playbackPresented(frame);
       }
     } catch (err) {
       // A GL failure inside an animation frame is easy to lose. Report it once
@@ -1640,6 +1646,7 @@ export default function MapView({
       );
     }
     setPending(stats?.pending ?? 0);
+    playbackTime("drawMs", performance.now() - drawStarted);
     // Reading refs only, so this callback never needs to be rebuilt.
   }, []);
 
@@ -1727,7 +1734,12 @@ export default function MapView({
         pictures.onError = (message) => void api.frontendLog("error", message);
         imagesRef.current = pictures;
         renderer = new MapRenderer(gl, basemap, tiles);
-        tiles.onChange = () => requestDraw();
+        tiles.onChange = () => {
+          // Preparing another step must not repaint an already complete map.
+          // Missing viewport tiles and live/settling edits still redraw as they land.
+          if (needsTilesRef.current || shownFrameRef.current !== frameOf(stepRef.current)
+            || gestureRef.current || settling.current.length || settlingDrag.current) requestDraw();
+        };
         let reported = 0;
         tiles.onError = (message) => {
           // Report the first few only; a failing scheme fails for every tile.
@@ -2350,11 +2362,10 @@ export default function MapView({
    * The viewport's unique tiles, rebuilt only when the camera or the view
    * changes.
    *
-   * Playback warms every step of its lookahead on every animation frame, so
-   * this ran a full pass over the pyramid several times a frame to produce the
-   * same list each time. Both refs are replaced wholesale rather than mutated
-   * (`panBy`, `zoomAbout`, `clampCamera` all return new cameras), so identity
-   * is a sound key.
+   * Playback preparation and presentation reuse this list for the current
+   * viewport. Both refs are replaced wholesale rather than mutated (`panBy`,
+   * `zoomAbout`, `clampCamera` all return new cameras), so identity is a sound
+   * key.
    */
   const warmTilesRef = useRef<{
     camera: Camera;
@@ -2380,6 +2391,27 @@ export default function MapView({
     },
     [viewportTiles],
   );
+  const prepare = useCallback((request: PreparationRequest) => {
+    const cache = tilesRef.current;
+    const view = viewportTiles();
+    if (!cache || view.length === 0) return { ready: 0, total: 1, streaming: false };
+    cache.reserve(projectRef.current.step_count, view.length);
+    const plan = preparationTargets(request, view.length, cache.capacity, cache.preparationMs);
+    const protect = plan.protected.map(frameOf);
+    if (shownFrameRef.current) protect.push(shownFrameRef.current);
+    cache.protect(protect, view);
+    const frames = plan.targets.filter((step) => request.states[step] === "solid").map(frameOf);
+    const ready = cache.prepare(frames, view);
+    return { ready, total: plan.targets.length, streaming: plan.streaming };
+  }, [viewportTiles]);
+  const present = useCallback((target: number): boolean => {
+    const cache = tilesRef.current;
+    const view = viewportTiles();
+    if (!cache || view.length === 0 || !cache.prefetch(frameOf(target), view)) return false;
+    stepRef.current = target;
+    draw();
+    return shownFrameRef.current === frameOf(target);
+  }, [draw, viewportTiles]);
   const bounds = useCallback((): [number, number, number, number] | null => {
     const view = viewRef.current;
     if (view.width <= 1 || view.height <= 1) return null;
@@ -2424,8 +2456,8 @@ export default function MapView({
   );
   useImperativeHandle(
     ref,
-    () => ({ warm, bounds, clearRegion, copyRegion, pasteCapture, setCapture }),
-    [bounds, clearRegion, copyRegion, pasteCapture, setCapture, warm],
+    () => ({ warm, prepare, present, bounds, clearRegion, copyRegion, pasteCapture, setCapture }),
+    [bounds, clearRegion, copyRegion, pasteCapture, setCapture, warm, prepare, present],
   );
 
   // A project change can shorten the timeline.
@@ -2455,10 +2487,11 @@ export default function MapView({
 
   // Mirror display state into the refs `draw` reads, then redraw.
   useEffect(() => {
+    const changed = stepRef.current !== step || showGlyphsRef.current !== showGlyphs || showGraticuleRef.current !== showGraticule;
     showGlyphsRef.current = showGlyphs;
     showGraticuleRef.current = showGraticule;
     stepRef.current = step;
-    requestDraw();
+    if (changed) requestDraw();
   }, [requestDraw, step, showGlyphs, showGraticule]);
 
   /**

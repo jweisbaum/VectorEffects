@@ -417,6 +417,8 @@ struct Index {
     entries: HashMap<String, (u64, u64)>,
     bytes: u64,
     clock: u64,
+    generation: u64,
+    evictions: u64,
 }
 
 /// A disk-backed, size-capped tile cache.
@@ -528,29 +530,55 @@ impl RenderCache {
             .is_ok_and(|index| index.entries.contains_key(&key.digest()))
     }
 
+    /// Changes to cache membership, and specifically to removals. Reads do not
+    /// change these versions, so completed readiness and queues can be reused.
+    pub fn versions(&self) -> (u64, u64) {
+        self.index
+            .lock()
+            .map(|index| (index.generation, index.evictions))
+            .unwrap_or_default()
+    }
+
     /// Reads a tile, if it is cached.
     pub fn get(&self, key: &TileKey) -> Option<Vec<u8>> {
         let digest = key.digest();
-        let mut index = self.index.lock().ok()?;
-        if !index.entries.contains_key(&digest) {
+        // Do not hold the index mutex while reading a 256 KiB tile from disk.
+        // A playback burst asks for many independent tiles at once; keeping
+        // this lock across the read serialized those requests and made the
+        // frontend's fetch concurrency ineffective.
+        let present = self
+            .index
+            .lock()
+            .ok()
+            .is_some_and(|index| index.entries.contains_key(&digest));
+        if !present {
             return None;
         }
 
         match std::fs::read(self.path_for(&digest)) {
             Ok(bytes) => {
-                // Touch it, so eviction sees it as recently used.
-                index.clock += 1;
-                let clock = index.clock;
-                if let Some(entry) = index.entries.get_mut(&digest) {
-                    entry.1 = clock;
+                // Touch it, so eviction sees it as recently used. The entry
+                // may have been evicted while the read was in progress; in
+                // that case the bytes are still a valid response, but there
+                // is nothing left to touch.
+                if let Ok(mut index) = self.index.lock() {
+                    index.clock += 1;
+                    let clock = index.clock;
+                    if let Some(entry) = index.entries.get_mut(&digest) {
+                        entry.1 = clock;
+                    }
                 }
                 Some(bytes)
             }
             Err(_) => {
                 // The file vanished underneath us: forget it rather than
                 // reporting a cache hit that cannot be served.
-                if let Some((size, _)) = index.entries.remove(&digest) {
+                if let Ok(mut index) = self.index.lock()
+                    && let Some((size, _)) = index.entries.remove(&digest)
+                {
                     index.bytes = index.bytes.saturating_sub(size);
+                    index.generation += 1;
+                    index.evictions += 1;
                 }
                 None
             }
@@ -572,6 +600,7 @@ impl RenderCache {
             index.bytes = index.bytes.saturating_sub(old);
         }
         index.bytes += bytes.len() as u64;
+        index.generation += 1;
 
         self.evict(&mut index);
         Ok(())
@@ -589,6 +618,8 @@ impl RenderCache {
             };
             if let Some((size, _)) = index.entries.remove(&digest) {
                 index.bytes = index.bytes.saturating_sub(size);
+                index.generation += 1;
+                index.evictions += 1;
             }
             let _ = std::fs::remove_file(self.path_for(&digest));
         }
@@ -621,6 +652,8 @@ impl RenderCache {
         }
         index.entries.clear();
         index.bytes = 0;
+        index.generation += 1;
+        index.evictions += 1;
         Ok(())
     }
 }

@@ -9,6 +9,9 @@ import { invoke } from "@tauri-apps/api/core";
 
 import { beginBusy } from "./busy";
 
+// Monotonic across this frontend session; the time seed also survives a reload.
+let renderRequestId = Date.now() * 1000;
+
 import type { AppErrorPayload } from "./generated/AppErrorPayload";
 import type { AppInfo } from "./generated/AppInfo";
 import type { FieldSample } from "./generated/FieldSample";
@@ -312,7 +315,7 @@ export const api = {
    * 9.5), of every kind the project holds (M30).
    */
   renderAhead: (current: number, tiles: TileAddress[]) =>
-    call<void>("render_ahead", { current, tiles }),
+    call<void>("render_ahead", { current, tiles, requestId: ++renderRequestId }),
 
   /** How ready every step is, for the viewport, across every kind on the map. */
   frameReadiness: (tiles: TileAddress[]) => call<TimelineReadiness>("frame_readiness", { tiles }),

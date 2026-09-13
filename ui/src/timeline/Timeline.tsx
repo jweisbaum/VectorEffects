@@ -29,6 +29,10 @@ import type { ShrinkImpact } from "../generated/ShrinkImpact";
 import type { TileAddress } from "../generated/TileAddress";
 import type { TrackSamples } from "../generated/TrackSamples";
 import NumberField from "../NumberField";
+import { PlaybackClock } from "./clock";
+import { ReadinessPoller } from "./readiness";
+import { playbackCount, playbackTime } from "./metrics";
+import type { PlaybackMap, PreparationStatus } from "./preparation";
 import { reportError, setHint } from "../hint";
 import { api } from "../ipc";
 import { IconSvg, LOOP_ICON } from "../map/ToolIcon";
@@ -65,7 +69,6 @@ import {
   type StepState,
   tick,
   utcLabel,
-  warmTargets,
 } from "./playback";
 
 /** Width of the labels column, in CSS pixels. Sticky, so it never scrolls. */
@@ -188,7 +191,7 @@ export default function Timeline({
   selection,
   onSelect,
   viewport,
-  warm,
+  playback,
   autoKey,
   onAutoKey,
   onChanged,
@@ -206,12 +209,7 @@ export default function Timeline({
   onSelect: (objects: number[]) => void;
   /** The map's visible tiles, for render-ahead and readiness (spec.md 9.5). */
   viewport: TileAddress[];
-  /**
-   * Fetches a step's tiles onto the GPU and says whether they are all there.
-   * Playback advances into a step only when the backend has it rendered *and*
-   * the map has it resident (spec.md 9.4).
-   */
-  warm: (step: number) => boolean;
+  playback: PlaybackMap;
   autoKey: boolean;
   onAutoKey: (on: boolean) => void;
   onChanged: (project: ProjectSummary) => void;
@@ -305,44 +303,56 @@ export default function Timeline({
   statesRef.current = states;
   const viewportKey = viewport.map((t) => `${t.z}/${t.x}/${t.y}`).join(",");
 
-  const refreshReadiness = useCallback(() => {
-    if (viewport.length === 0) return;
-    void api
-      .frameReadiness(viewport)
-      .then((report) => {
-        const next = classify(report, memory.current);
-        setStates(next.states);
-        setProgress(next.progress);
-      })
-      .catch(() => undefined);
-    // `viewportKey` stands in for the array, which is a new value every render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewportKey]);
+  const readinessIdentity = useRef("");
+  const identity = `${project.revision}:${viewportKey}`;
+  if (readinessIdentity.current !== identity) statesRef.current = [];
 
-  // A new revision, viewport or playhead re-queues the pool and re-asks.
   useEffect(() => {
     if (viewport.length === 0) return;
-    void api.renderAhead(step, viewport).catch(() => undefined);
-    refreshReadiness();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project.revision, step, viewportKey, refreshReadiness]);
-
-  // The pool says when a tile lands. Coalesced: a viewport is a hundred tiles
-  // and a probe per tile would be a hundred probes a second.
-  useEffect(() => {
-    let timer: number | null = null;
-    const pending = listen<RenderProgress>("render://progress", () => {
-      if (timer !== null) return;
-      timer = window.setTimeout(() => {
-        timer = null;
-        refreshReadiness();
-      }, 120);
+    const revision = project.revision;
+    const poller = new ReadinessPoller(async () => {
+      const started = performance.now();
+      playbackCount("readinessProbes");
+      const report = await api.frameReadiness(viewport);
+      playbackTime("readinessMs", performance.now() - started);
+      return report;
+    }, (report) => {
+      if (report.revision !== revision) return;
+      const next = classify(report, memory.current);
+      readinessIdentity.current = identity;
+      statesRef.current = next.states;
+      setStates((old) => old.length === next.states.length && old.every((value, i) => value === next.states[i]) ? old : next.states);
+      setProgress((old) => old.length === next.progress.length && old.every((value, i) => value === next.progress[i]) ? old : next.progress);
+      // An eviction or failed render can make an idle pool need work again.
+      if (next.states.some((state) => state !== "solid")) {
+        void api.renderAhead(stepRef.current, viewport).catch(() => undefined);
+      }
     });
+    playbackCount("renderAheadRequests");
+    void api.renderAhead(step, viewport).then(poller.request).catch(() => undefined);
+    // Progress is coalesced; an infrequent probe also observes cache eviction.
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const pending = listen<RenderProgress>("render://progress", (event) => {
+      if (event.payload.revision !== revision || timer !== null) return;
+      timer = setTimeout(() => { timer = null; poller.request(); }, 120);
+    });
+    const check = setInterval(poller.request, 1000);
     return () => {
-      if (timer !== null) window.clearTimeout(timer);
+      poller.dispose();
+      clearInterval(check);
+      if (timer !== null) clearTimeout(timer);
       void pending.then((unlisten) => unlisten());
     };
-  }, [refreshReadiness]);
+    // The stable viewport key stands for its array. Playhead movement only reprioritizes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [identity]);
+
+  useEffect(() => {
+    if (viewport.length === 0 || (statesRef.current.length === steps && statesRef.current.every((state) => state === "solid"))) return;
+    playbackCount("renderAheadRequests");
+    void api.renderAhead(step, viewport).catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step]);
 
   // --- Playback (spec.md 9.4) ---
   const [playing, setPlaying] = useState(false);
@@ -357,8 +367,9 @@ export default function Timeline({
   loopRef.current = loop;
   const rateRef = useRef(rate);
   rateRef.current = rate;
-  const warmRef = useRef(warm);
-  warmRef.current = warm;
+  const playbackRef = useRef(playback);
+  playbackRef.current = playback;
+  const [prepared, setPrepared] = useState<PreparationStatus>({ ready: 0, total: steps, streaming: false });
   const previewRef = useRef(previewing);
   previewRef.current = previewing;
   const firstRef = useRef(firstStep);
@@ -385,57 +396,55 @@ export default function Timeline({
     if (capturing && step < firstStep) onStepChange(firstStep);
   }, [capturing, firstStep, onStepChange, step]);
 
+  // Preparation continues while paused, and uploads drive their own next stage.
+  // This timer only updates priorities/status, never gates presentation timing.
+  useEffect(() => {
+    const prepare = () => {
+      const status = playbackRef.current.prepare({
+        step: stepRef.current, first: firstRef.current, last: playLastRef.current,
+        loop: loopRef.current || previewRef.current, rate: rateRef.current,
+        states: previewRef.current ? allReadyRef.current : statesRef.current,
+      });
+      setPrepared((old) => old.ready === status.ready && old.total === status.total && old.streaming === status.streaming ? old : status);
+    };
+    prepare();
+    const timer = setInterval(prepare, 100);
+    return () => clearInterval(timer);
+  }, [identity, steps, previewing]);
+
   useEffect(() => {
     if (!playing) {
       setBuffering(false);
       return;
     }
     let frame = 0;
-    let lastAdvance = performance.now();
-    // A macro preview plays its run round and round, whatever the loop
-    // switch says, and its readiness is the map's alone: the strip above
-    // is the document's, and the preview is not the document (D71).
-    const looping = () => loopRef.current || previewRef.current;
-    const gate = () =>
-      previewRef.current ? (allReadyRef.current as readonly StepState[]) : statesRef.current;
+    const clock = new PlaybackClock(performance.now(), rateRef.current);
     const loopFrame = (now: number) => {
-      // Keep the map two steps ahead of the playhead, so a step's tiles are on
-      // the GPU before its turn comes and playback never waits on a fetch it
-      // could have started earlier. Every target every frame: warming the
-      // second only once the first was resident meant the two fetches never
-      // overlapped, and each step's latency was paid inside the loop.
-      for (const target of warmTargets(
-        stepRef.current,
-        playLastRef.current,
-        looping(),
-        firstRef.current,
-      )) {
-        warmRef.current(target);
-      }
-      const result = tick(
-        stepRef.current,
-        playLastRef.current,
-        looping(),
-        rateRef.current,
-        now - lastAdvance,
-        gate(),
-        (target) => warmRef.current(target),
-        firstRef.current,
-      );
-      if (result.finished) {
-        setPlaying(false);
-        return;
-      }
-      setBuffering(result.buffering);
-      if (result.advanced) {
-        lastAdvance = now;
-        onStepChange(result.step);
+      playbackCount("animationCallbacks");
+      if (clock.due(now, rateRef.current)) {
+        const result = tick(
+          stepRef.current, playLastRef.current, loopRef.current || previewRef.current,
+          rateRef.current, Infinity,
+          previewRef.current ? allReadyRef.current : statesRef.current,
+          (target) => playbackRef.current.present(target), firstRef.current,
+        );
+        if (result.finished) { setPlaying(false); return; }
+        setBuffering(result.buffering);
+        if (result.advanced) {
+          clock.advance(now);
+          stepRef.current = result.step;
+          playbackCount("advances");
+          onStepChange(result.step);
+        } else {
+          clock.hold();
+          playbackCount("bufferedCallbacks");
+        }
       }
       frame = requestAnimationFrame(loopFrame);
     };
     frame = requestAnimationFrame(loopFrame);
     return () => cancelAnimationFrame(frame);
-  }, [playing, last, onStepChange]);
+  }, [playing, last, onStepChange, identity]);
 
   const stop = () => {
     setPlaying(false);
@@ -1046,6 +1055,7 @@ export default function Timeline({
             <span className="tl-when"> · {utcLabel(step, project.step_hours, project.start_unix_s)}</span>
           )}
           {buffering && <span className="tl-buffering"> · buffering…</span>}
+          {!buffering && prepared.ready < prepared.total && <span className="tl-buffering"> · preparing playback {prepared.ready}/{prepared.total}</span>}
         </span>
         {startDraft !== null && (
           <span className="tl-start-editor" role="group" aria-label="Start time (UTC)">

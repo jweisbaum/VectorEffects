@@ -419,6 +419,83 @@ fn a_new_request_replaces_the_queue() {
     );
 }
 
+#[test]
+fn completed_work_stays_idle_when_the_playhead_moves() {
+    let (_root, state) = project("completed-idle");
+    let id = stamp(&state, 0.0, 0.0);
+    animate(&state, id);
+    let pool = RenderPool::new();
+    pool.request(&state, 0, &viewport()).expect("request");
+    pool.drain(&state);
+    for step in 0..STEPS {
+        pool.request(&state, step, &viewport()).expect("move");
+        assert!(
+            !pool.process_next(&state),
+            "completed tiles must not be queued again"
+        );
+        assert!(
+            pool.readiness(&state, &viewport())
+                .expect("ready")
+                .steps
+                .iter()
+                .all(|step| step.ready == step.total)
+        );
+    }
+    // Membership changes invalidate both the cached report and the idle queue.
+    state.tiles.clear().expect("clear cache");
+    assert!(
+        pool.readiness(&state, &viewport())
+            .expect("empty")
+            .steps
+            .iter()
+            .all(|step| step.ready == 0)
+    );
+    pool.request(&state, 5, &viewport()).expect("refill");
+    assert!(pool.process_next(&state));
+    pool.drain(&state);
+    assert!(
+        pool.readiness(&state, &viewport())
+            .expect("ready again")
+            .steps
+            .iter()
+            .all(|step| step.ready == step.total)
+    );
+}
+
+#[test]
+fn reprioritizing_does_not_restore_units_already_processed() {
+    let (_root, state) = project("outstanding-only");
+    let pool = RenderPool::new();
+    let tiles = viewport();
+    pool.request(&state, 0, &tiles).expect("request");
+    assert!(pool.process_next(&state));
+    pool.request(&state, 11, &tiles).expect("move");
+    let mut remaining = 0;
+    while pool.process_next(&state) {
+        remaining += 1;
+    }
+    assert_eq!(remaining, STEPS as usize * tiles.len() - 1);
+}
+
+#[test]
+fn an_obsolete_viewport_request_does_not_replace_newer_work() {
+    let (_root, state) = project("obsolete-viewport");
+    let pool = RenderPool::new();
+    let tiles = viewport();
+    pool.request_numbered(&state, 5, &tiles[..1], Some(2))
+        .expect("new view");
+    pool.request_numbered(&state, 0, &tiles, Some(1))
+        .expect("late old view");
+    let mut units = 0;
+    while pool.process_next(&state) {
+        units += 1;
+    }
+    assert_eq!(
+        units, STEPS as usize,
+        "the older request must not restore its second tile"
+    );
+}
+
 /// Acceptance: a time-step switch with a warm cache is fast. The backend's
 /// share is a cache read, and it has to be far inside the 50 ms budget to
 /// leave room for the fetch, the decode and the upload on the other side.

@@ -26,6 +26,12 @@ function tile(words: number[]): Uint8Array {
 }
 
 describe("tileSpeedRange", () => {
+  it("respects an unaligned subarray and ignores an incomplete trailing word", () => {
+    const storage = new Uint8Array(15);
+    storage.fill(255);
+    storage.set(tile([word(700, 31, "wind"), word(900, 15, "current")]), 1);
+    expect(tileSpeedRange(storage.subarray(1, 12))).toEqual({ wind: [700, 700], current: [900, 900] });
+  });
   it("reads the low and high speed of each kind out of the words", () => {
     const bytes = tile([
       word(0x0102, 31, "wind"),

@@ -17,6 +17,7 @@
  */
 
 import { type TileRanges, hasField, tileSpeedRange } from "./tileRange";
+import { playbackCount, playbackTime } from "../timeline/metrics";
 
 /** How a tile is doing. */
 export type TileStatus = "ready" | "pending" | "failed";
@@ -30,6 +31,16 @@ interface Entry {
    * field in it.
    */
   range: TileRanges | null;
+  attempts: number;
+  retryAt: number;
+  background: boolean;
+}
+
+interface FetchJob {
+  frame: string;
+  address: string;
+  key: string;
+  entry: Entry;
 }
 
 /** A tile's place in the pyramid. */
@@ -45,8 +56,13 @@ export interface TileAddress {
  */
 export type KeyResolver = (frame: string, tiles: readonly TileAddress[]) => Promise<string[]>;
 
-/** How many frames' key maps are remembered. Playback loops over a few dozen. */
-const FRAMES_KEPT = 96;
+/** Metadata is cheap; keep a full 240-step run plus scoped editing frames. */
+const FRAMES_KEPT = 256;
+// WebKit's custom-scheme requests spend most of their time outside the
+// JavaScript task queue. Keep enough requests in flight to fill that gap;
+// uploads remain independently budgeted below so this does not block draws.
+const FETCHES = 64;
+const RESOLVERS = 2;
 
 /** One tile's texture: 256 x 256 RGBA8, matching `TILE_BYTES` in `ve-render`. */
 export const TILE_BYTES = 256 * 256 * 4;
@@ -88,6 +104,23 @@ export class TileCache {
   /** Frames whose resolution is in flight, with the tiles it covers. */
   private readonly resolving = new Map<string, Set<string>>();
   private flushScheduled = false;
+  private disposed = false;
+  private frameLimit = FRAMES_KEPT;
+  private readonly resolutionFailures = new Map<string, { attempts: number; retryAt: number }>();
+  private readonly background = new Set<string>();
+  private protectedFrames: readonly string[] = [];
+  private protectedTiles: ReadonlyArray<TileAddress> = [];
+  private preparationTiles = new Set<string>();
+  private pinned = new Set<string>();
+  private jobs: FetchJob[] = [];
+  private activeFetches = 0;
+  private uploads: Array<{ job: FetchJob; bytes: Uint8Array }> = [];
+  private uploadTimer: ReturnType<typeof setTimeout> | null = null;
+  private uploadScheduled = false;
+  private readonly uploadChannel: MessageChannel | null;
+  private readonly preparingAt = new Map<string, number>();
+  /** Whole-frame latency, including queueing, resolution, transfer, and upload. */
+  preparationMs = 250;
   /** Called when a fetch or a resolution completes, so the caller can redraw. */
   onChange: (() => void) | null = null;
   /** Called when a fetch fails, so the failure reaches the application log. */
@@ -106,6 +139,10 @@ export class TileCache {
     this.gl = gl;
     this.baseUrl = baseUrl;
     this.limit = limit;
+    // A posted task yields to drawing without the nested-timer clamp that
+    // made two-tile timer batches cap streaming at roughly two frames/s.
+    this.uploadChannel = typeof window !== "undefined" && typeof MessageChannel !== "undefined" ? new MessageChannel() : null;
+    if (this.uploadChannel) this.uploadChannel.port1.onmessage = () => this.drainUploads();
   }
 
   /** How many tiles the cache will hold before it evicts. */
@@ -129,7 +166,9 @@ export class TileCache {
    * panning around a single step wants.
    */
   reserve(steps: number, tilesPerFrame: number): void {
-    const wanted = Math.max(0, Math.ceil(steps)) * Math.max(0, Math.ceil(tilesPerFrame));
+    this.frameLimit = Math.max(FRAMES_KEPT, Math.ceil(steps) * 3 + 8);
+    // Leave room for the held frame and the editor's layer scope as well.
+    const wanted = (Math.max(0, Math.ceil(steps)) + 2) * Math.max(0, Math.ceil(tilesPerFrame));
     const limit = Math.min(MAX_CAPACITY, Math.max(BASE_CAPACITY, wanted));
     if (limit === this.limit) return;
     this.limit = limit;
@@ -156,6 +195,11 @@ export class TileCache {
    * panning never blanks the map.
    */
   get(frame: string, z: number, x: number, y: number): WebGLTexture | null {
+    return this.request(frame, z, x, y, false);
+  }
+
+  private request(frame: string, z: number, x: number, y: number, background: boolean): WebGLTexture | null {
+    if (this.disposed) return null;
     const key = this.keyOf(frame, z, x, y);
     if (key === undefined) {
       this.ask(frame, { z, x, y });
@@ -166,14 +210,98 @@ export class TileCache {
       // Re-insert to mark as recently used.
       this.entries.delete(key);
       this.entries.set(key, existing);
+      if (existing.status === "failed" && existing.attempts < 3 && performance.now() >= existing.retryAt) {
+        existing.status = "pending";
+        this.enqueue(frame, z, x, y, key, existing, background);
+      }
+      if (!background) {
+        existing.background = false;
+        if (existing.status === "pending") {
+          const at = this.jobs.findIndex((job) => job.entry === existing);
+          if (at > 0) this.jobs.unshift(this.jobs.splice(at, 1)[0]!);
+        }
+      }
       return existing.texture;
     }
 
-    const entry: Entry = { texture: null, status: "pending", range: null };
+    const entry: Entry = { texture: null, status: "pending", range: null, attempts: 0, retryAt: 0, background };
     this.entries.set(key, entry);
-    void this.fetch(`${frame}/${TileCache.tileKey(z, x, y)}`, key, entry);
+    this.enqueue(frame, z, x, y, key, entry, background);
     this.evict();
     return null;
+  }
+
+  private enqueue(frame: string, z: number, x: number, y: number, key: string, entry: Entry, background: boolean): void {
+    const job = { frame, address: `${frame}/${TileCache.tileKey(z, x, y)}`, key, entry };
+    if (background) this.jobs.push(job);
+    else this.jobs.unshift(job);
+    this.pumpFetches();
+  }
+
+  private pumpFetches(): void {
+    while (!this.disposed && this.activeFetches < FETCHES && this.jobs.length > 0) {
+      const job = this.jobs.shift()!;
+      if (this.entries.get(job.key) !== job.entry) continue;
+      this.activeFetches++;
+      void this.fetch(job);
+    }
+  }
+
+  /** Protect the displayed frame and playback window before starting more work. */
+  protect(frames: readonly string[], tiles: ReadonlyArray<TileAddress>): void {
+    this.protectedFrames = frames;
+    this.protectedTiles = tiles;
+    this.refreshPins();
+    this.evict();
+  }
+
+  private refreshPins(): void {
+    this.pinned = new Set();
+    for (const frame of this.protectedFrames) for (const tile of this.protectedTiles) {
+      const key = this.keyOf(frame, tile.z, tile.x, tile.y);
+      if (key !== undefined) this.pinned.add(key);
+    }
+  }
+
+  /** A bounded set of frames to prepare while paused as well as while playing. */
+  prepare(frames: readonly string[], tiles: ReadonlyArray<TileAddress>): number {
+    const before = new Set(this.background);
+    this.background.clear();
+    for (const frame of frames) this.background.add(frame);
+    for (const frame of this.preparingAt.keys()) if (!this.background.has(frame)) this.preparingAt.delete(frame);
+    this.preparationTiles = new Set(tiles.map((tile) => TileCache.tileKey(tile.z, tile.x, tile.y)));
+    for (const [frame, wanted] of this.pending) {
+      if (!before.has(frame)) continue;
+      for (const key of wanted.keys()) {
+        if (!this.background.has(frame) || !this.preparationTiles.has(key)) wanted.delete(key);
+      }
+      if (!wanted.size) this.pending.delete(frame);
+    }
+    this.jobs = this.jobs.filter((job) => {
+      if (!job.entry.background || (this.background.has(job.frame) && this.preparationTiles.has(job.address.slice(job.frame.length + 1)))) return true;
+      if (this.entries.get(job.key) === job.entry) this.entries.delete(job.key);
+      return false;
+    });
+    let ready = 0;
+    for (const frame of frames) {
+      let resident = 0;
+      for (const tile of tiles) {
+        if (this.request(frame, tile.z, tile.x, tile.y, true)) resident++;
+      }
+      if (resident === tiles.length) {
+        ready++;
+        const started = this.preparingAt.get(frame);
+        if (started !== undefined) {
+          const elapsed = performance.now() - started;
+          this.preparationMs = Math.max(100, this.preparationMs * 0.75 + elapsed * 0.25);
+          playbackTime("prepareFrameMs", elapsed);
+          this.preparingAt.delete(frame);
+        }
+      } else if (!this.preparingAt.has(frame)) {
+        this.preparingAt.set(frame, performance.now());
+      }
+    }
+    return ready;
   }
 
   /**
@@ -235,6 +363,8 @@ export class TileCache {
    * viewport's tiles one after another; one request answers them all.
    */
   private ask(frame: string, tile: TileAddress): void {
+    const failure = this.resolutionFailures.get(frame);
+    if (failure && (failure.attempts >= 3 || performance.now() < failure.retryAt)) return;
     const tileKey = TileCache.tileKey(tile.z, tile.x, tile.y);
     if (this.resolving.get(frame)?.has(tileKey)) return;
     let tiles = this.pending.get(frame);
@@ -252,15 +382,17 @@ export class TileCache {
   private flush(): void {
     this.flushScheduled = false;
     const resolver = this.resolver;
-    if (!resolver) return;
+    if (!resolver || this.disposed) return;
     for (const [frame, tiles] of this.pending) {
+      if (this.resolving.size >= RESOLVERS) break;
+      if (this.resolving.has(frame)) continue;
+      this.pending.delete(frame);
       const list = [...tiles.values()];
       const covered = this.resolving.get(frame) ?? new Set<string>();
       for (const tile of list) covered.add(TileCache.tileKey(tile.z, tile.x, tile.y));
       this.resolving.set(frame, covered);
       void this.resolve(resolver, frame, list);
     }
-    this.pending.clear();
   }
 
   private async resolve(
@@ -268,61 +400,131 @@ export class TileCache {
     frame: string,
     tiles: TileAddress[],
   ): Promise<void> {
+    const started = performance.now();
+    const background = this.background.has(frame);
     try {
+      playbackCount("keyResolutions");
       const keys = await resolver(frame, tiles);
+      if (this.disposed) return;
+      this.resolutionFailures.delete(frame);
       let map = this.frames.get(frame);
       if (!map) {
         map = new Map();
         this.frames.set(frame, map);
         // The oldest frames' maps go; their textures stay by key.
-        while (this.frames.size > FRAMES_KEPT) {
-          const oldest = this.frames.keys().next();
-          if (oldest.done) break;
-          this.frames.delete(oldest.value);
+        while (this.frames.size > this.frameLimit) {
+          const oldest = [...this.frames.keys()].find((key) => !this.protectedFrames.includes(key));
+          if (oldest === undefined) break;
+          this.frames.delete(oldest);
+          this.resolutionFailures.delete(oldest);
         }
       }
       tiles.forEach((tile, index) => {
         const key = keys[index];
         if (key) map.set(TileCache.tileKey(tile.z, tile.x, tile.y), key);
       });
+      this.refreshPins();
+      // Resolution drives the next stage immediately, even with playback paused.
+      for (const tile of tiles) {
+        if (background && (!this.background.has(frame) || !this.preparationTiles.has(TileCache.tileKey(tile.z, tile.x, tile.y)))) continue;
+        this.request(frame, tile.z, tile.x, tile.y, background);
+      }
     } catch (error) {
+      if (this.disposed) return;
       // The revision moved on before it was asked about — an edit landed
       // between the draw and the request. The next draw asks with the new one.
       console.debug(`tile keys for ${frame} unavailable: ${String(error)}`);
+      const attempts = (this.resolutionFailures.get(frame)?.attempts ?? 0) + 1;
+      this.resolutionFailures.set(frame, { attempts, retryAt: performance.now() + 250 * 4 ** (attempts - 1) });
     } finally {
       const covered = this.resolving.get(frame);
       if (covered) {
         for (const tile of tiles) covered.delete(TileCache.tileKey(tile.z, tile.x, tile.y));
         if (covered.size === 0) this.resolving.delete(frame);
       }
+      playbackTime("keysMs", performance.now() - started);
+      this.flush();
     }
-    this.onChange?.();
+    if (!this.disposed) this.onChange?.();
   }
 
-  private async fetch(address: string, key: string, entry: Entry): Promise<void> {
+  private async fetch(job: FetchJob): Promise<void> {
+    const { address, key, entry } = job;
+    const started = performance.now();
+    let uploading = false;
+    entry.attempts++;
     try {
+      playbackCount("tileFetches");
       const response = await fetch(`${this.baseUrl}${address}`);
       if (!response.ok) throw new Error(`status ${response.status}`);
       const bytes = new Uint8Array(await response.arrayBuffer());
 
       // The entry may have been evicted while the fetch was in flight.
-      if (this.entries.get(key) !== entry) return;
-
-      entry.texture = this.upload(bytes);
-      entry.status = entry.texture ? "ready" : "failed";
-      if (entry.texture) {
-        const ranges = tileSpeedRange(bytes);
-        entry.range = hasField(ranges) ? ranges : null;
-      } else {
-        entry.range = null;
+      if (this.disposed || this.entries.get(key) !== entry) return;
+      if (entry.background && (!this.background.has(job.frame) || !this.preparationTiles.has(address.slice(job.frame.length + 1)))) {
+        this.entries.delete(key);
+        return;
       }
+      playbackCount("tileBytes", bytes.length);
+      this.uploads.push({ job, bytes });
+      uploading = true;
+      this.scheduleUploads();
     } catch (error) {
       entry.status = "failed";
+      entry.retryAt = performance.now() + 250 * 4 ** (entry.attempts - 1);
       const message = `tile ${address} failed: ${error instanceof Error ? error.message : String(error)}`;
       console.warn(message);
       this.onError?.(message);
+    } finally {
+      const elapsed = performance.now() - started;
+      playbackTime("fetchMs", elapsed);
+      if (!uploading) {
+        this.activeFetches--;
+        this.pumpFetches();
+        if (!this.disposed) this.onChange?.();
+      }
     }
+  }
+
+  private scheduleUploads(): void {
+    if (this.uploadScheduled || this.disposed) return;
+    this.uploadScheduled = true;
+    if (this.uploadChannel) this.uploadChannel.port2.postMessage(null);
+    else this.uploadTimer = setTimeout(() => this.drainUploads(), 0);
+  }
+
+  private drainUploads(): void {
+    this.uploadScheduled = false;
+    this.uploadTimer = null;
+    if (this.disposed) return;
+    const started = performance.now();
+    while (this.uploads.length && performance.now() - started < 4) {
+      const { job, bytes } = this.uploads.shift()!;
+      const { entry, key } = job;
+      const wanted = !entry.background || (this.background.has(job.frame) && this.preparationTiles.has(job.address.slice(job.frame.length + 1)));
+      if (this.entries.get(key) === entry && wanted) {
+        const at = performance.now();
+        try {
+          entry.texture = this.upload(bytes);
+          if (!entry.texture) throw new Error("texture upload failed");
+          const ranges = tileSpeedRange(bytes);
+          entry.range = hasField(ranges) ? ranges : null;
+          entry.status = "ready";
+          playbackCount("tileUploads");
+        } catch (error) {
+          entry.status = "failed";
+          entry.retryAt = performance.now() + 1000;
+          this.onError?.(String(error));
+        }
+        playbackTime("uploadAndRangeMs", performance.now() - at);
+      } else if (this.entries.get(key) === entry) {
+        this.entries.delete(key);
+      }
+      this.activeFetches--;
+    }
+    this.pumpFetches();
     this.onChange?.();
+    if (this.uploads.length) this.scheduleUploads();
   }
 
   private upload(bytes: Uint8Array): WebGLTexture | null {
@@ -349,11 +551,12 @@ export class TileCache {
 
   private evict(): void {
     while (this.entries.size > this.limit) {
-      const oldest = this.entries.keys().next();
-      if (oldest.done) break;
-      const entry = this.entries.get(oldest.value);
+      const oldest = [...this.entries.keys()].find((key) => !this.pinned.has(key));
+      if (oldest === undefined) break;
+      const entry = this.entries.get(oldest);
       if (entry?.texture) this.gl.deleteTexture(entry.texture);
-      this.entries.delete(oldest.value);
+      this.entries.delete(oldest);
+      playbackCount("tileEvictions");
     }
   }
 
@@ -372,6 +575,12 @@ export class TileCache {
 
   /** Releases every texture. */
   dispose(): void {
+    this.disposed = true;
+    if (this.uploadTimer !== null) clearTimeout(this.uploadTimer);
+    this.uploadChannel?.port1.close();
+    this.uploadChannel?.port2.close();
+    this.jobs = [];
+    this.uploads = [];
     for (const entry of this.entries.values()) {
       if (entry.texture) this.gl.deleteTexture(entry.texture);
     }

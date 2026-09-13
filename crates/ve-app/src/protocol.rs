@@ -17,6 +17,7 @@
 //! channel as JSON. The caller sends the largest texture its GPU will take, so
 //! the downsampling happens once, here, rather than in the webview.
 
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use tauri::Manager;
@@ -42,13 +43,28 @@ pub struct Frame {
     /// The content hash of each of its objects and rasters, computed once
     /// for the frame: what each tile's key is combined from (M31).
     pub digests: Digests,
+    keys: Mutex<HashMap<tile::TileId, TileKey>>,
 }
 
 impl Frame {
     /// A frame of `scene`, its objects digested.
     pub fn of(scene: Scene) -> Self {
         let digests = digests_of(&scene);
-        Self { scene, digests }
+        Self {
+            scene,
+            digests,
+            keys: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Reuse the tile key calculated during background preparation.
+    pub fn key(&self, state: &AppState, id: tile::TileId) -> TileKey {
+        if let Ok(keys) = self.keys.lock()
+            && let Some(key) = keys.get(&id)
+        {
+            return *key;
+        }
+        self.tile(state, id).1
     }
 
     /// The part of the frame a tile sees, and the key it is cached under.
@@ -61,14 +77,15 @@ impl Frame {
     pub fn tile(&self, state: &AppState, id: tile::TileId) -> (Scene, TileKey) {
         let TileScene { scene, hash } = tile_scene(&self.scene, &self.digests, id);
         let (_, quality) = plan_for(state, &scene);
-        (
-            scene,
-            TileKey {
-                scene: hash,
-                tile: id,
-                quality,
-            },
-        )
+        let key = TileKey {
+            scene: hash,
+            tile: id,
+            quality,
+        };
+        if let Ok(mut keys) = self.keys.lock() {
+            keys.insert(id, key);
+        }
+        (scene, key)
     }
 }
 
@@ -88,13 +105,9 @@ struct CachedFrame {
     frame: Arc<Frame>,
 }
 
-/// How many frames are held at once.
-///
-/// Three, because a clone in progress draws from three of them on every
-/// frame: the whole stack, the stack without the layer being edited, and that
-/// layer by itself (M40, M44, M45). Fewer slots would re-flatten the project
-/// several times per redraw, at pointer rate.
-const FRAMES_HELD: usize = 3;
+/// One full supported timeline plus scoped editing frames. The pool shares
+/// these Arcs rather than keeping a second set of flattened scenes.
+const FRAMES_HELD: usize = 256;
 
 impl SceneCache {
     /// Returns the frame for an address, flattening it if it is not held.
@@ -108,6 +121,20 @@ impl SceneCache {
         step: u32,
         scope: TileScope,
     ) -> Option<Arc<Frame>> {
+        {
+            let session = state.session.lock().ok()?;
+            if !session
+                .open
+                .as_ref()
+                .is_some_and(|open| open.revision == revision)
+                && !session
+                    .preview
+                    .as_ref()
+                    .is_some_and(|preview| preview.revision == revision)
+            {
+                return None;
+            }
+        }
         let matches = |held: &CachedFrame| {
             held.revision == revision && held.step == step && held.scope == scope
         };
@@ -122,12 +149,42 @@ impl SceneCache {
             return Some(frame);
         }
 
-        let session = state.session.lock().ok()?;
-        // The document at its revision — every layer of every kind, which is
-        // what the map draws (M31) — or the macro preview at its own revision
-        // (D71): a one-object project the session holds while a capture is
-        // being looked at before it is kept.
-        let flatten_at = |project: &ve_core::project::Project| match scope {
+        // Copy a missing revision under the session lock; flatten without it.
+        let project = {
+            let session = state.session.lock().ok()?;
+            match session.open.as_ref() {
+                Some(open) if open.revision == revision => open.project.clone(),
+                _ => match session.preview.as_ref() {
+                    Some(preview) if preview.revision == revision => preview.project.clone(),
+                    _ => return None,
+                },
+            }
+        };
+        Some(self.prepare(revision, step, scope, &project))
+    }
+
+    /// Single-flight preparation, shared with the pool's immutable snapshot.
+    pub fn prepare(
+        &self,
+        revision: u64,
+        step: u32,
+        scope: TileScope,
+        project: &ve_core::project::Project,
+    ) -> Arc<Frame> {
+        let mut cached = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let matches = |held: &CachedFrame| {
+            held.revision == revision && held.step == step && held.scope == scope
+        };
+        if let Some(at) = cached.iter().position(matches) {
+            let held = cached.remove(at);
+            let frame = Arc::clone(&held.frame);
+            cached.insert(0, held);
+            return frame;
+        }
+        let scene = match scope {
             TileScope::Whole => flatten(project, step),
             TileScope::Without(raw) => {
                 ve_render::scene::flatten_without(project, step, crate::document::object_id(raw))
@@ -136,30 +193,18 @@ impl SceneCache {
                 ve_render::scene::flatten_only(project, step, crate::document::object_id(raw))
             }
         };
-        let scene = match session.open.as_ref() {
-            Some(open) if open.revision == revision => flatten_at(&open.project),
-            _ => match session.preview.as_ref() {
-                Some(preview) if preview.revision == revision => flatten_at(&preview.project),
-                _ => return None,
-            },
-        };
-        drop(session);
-
         let frame = Arc::new(Frame::of(scene));
-        if let Ok(mut cached) = self.0.lock() {
-            cached.retain(|held| !matches(held));
-            cached.insert(
-                0,
-                CachedFrame {
-                    revision,
-                    step,
-                    scope,
-                    frame: Arc::clone(&frame),
-                },
-            );
-            cached.truncate(FRAMES_HELD);
-        }
-        Some(frame)
+        cached.insert(
+            0,
+            CachedFrame {
+                revision,
+                step,
+                scope,
+                frame: Arc::clone(&frame),
+            },
+        );
+        cached.truncate(FRAMES_HELD);
+        frame
     }
 }
 
@@ -312,9 +357,9 @@ pub fn handle(app: &tauri::AppHandle, request: &Request<Vec<u8>>) -> Response<Ve
     };
 
     let state = app.state::<AppState>();
-    let Some(frame) =
-        app.state::<SceneCache>()
-            .frame_for(&state, parsed.revision, parsed.step, parsed.scope)
+    let Some(frame) = state
+        .scenes
+        .frame_for(&state, parsed.revision, parsed.step, parsed.scope)
     else {
         // The document moved on, or nothing is open. Refusing beats answering
         // with current data under a URL that names an older revision.
@@ -325,6 +370,10 @@ pub fn handle(app: &tauri::AppHandle, request: &Request<Vec<u8>>) -> Response<Ve
         return respond(409, Vec::new());
     };
 
+    let key = frame.key(&state, parsed.id);
+    if let Some(bytes) = state.tiles.get(&key) {
+        return respond(200, bytes);
+    }
     let (scene, key) = frame.tile(&state, parsed.id);
     match serve_keyed(&state, &scene, key) {
         Ok(encoded) => respond(200, encoded),
@@ -446,7 +495,7 @@ pub fn serve(
 /// leaves the rest on screen, undimmed. The revision is the document's or
 /// the macro preview's, exactly as a tile address is; a revision that is
 /// neither is refused, and the map asks again with the one it has by then.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn tile_keys(
     app: tauri::AppHandle,
     revision: u64,
@@ -474,8 +523,8 @@ pub fn tile_keys(
         }
     };
     let state = app.state::<AppState>();
-    let frame = app
-        .state::<SceneCache>()
+    let frame = state
+        .scenes
         .frame_for(&state, revision, step, scope)
         .ok_or_else(|| {
             crate::error::AppError::Internal(format!("revision {revision} is not the one open"))
@@ -484,7 +533,7 @@ pub fn tile_keys(
         .iter()
         .map(
             |address| match tile::TileId::new(address.z, address.x, address.y) {
-                Ok(id) => frame.tile(&state, id).1.digest(),
+                Ok(id) => frame.key(&state, id).digest(),
                 Err(_) => String::new(),
             },
         )

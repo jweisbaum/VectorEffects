@@ -65,7 +65,6 @@ pub fn run() -> anyhow::Result<()> {
     };
     builder
         .manage(state)
-        .manage(protocol::SceneCache::default())
         .manage(export::ExportCancel::default())
         .manage(std::sync::Arc::new(render_pool::RenderPool::new()))
         .setup(|app| {

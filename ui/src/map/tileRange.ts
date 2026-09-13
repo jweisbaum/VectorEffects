@@ -49,33 +49,38 @@ export type TileRanges = Record<FieldKindName, [number, number] | null>;
  * nothing else — the faded ones are used rather than reporting nothing.
  */
 export function tileSpeedRange(bytes: Uint8Array): TileRanges {
-  const min = { wind: SPEED_MAX + 1, current: SPEED_MAX + 1 };
-  const max = { wind: -1, current: -1 };
-  // The same, over every written cell whatever its coverage, for a kind whose
-  // cells are all fade.
-  const faintMin = { wind: SPEED_MAX + 1, current: SPEED_MAX + 1 };
-  const faintMax = { wind: -1, current: -1 };
-  for (let o = 0; o + 3 < bytes.length; o += BYTES_PER_TEXEL) {
-    // Assembled in two halves: a 32-bit shift of the top byte would go negative.
-    const low = (bytes[o] ?? 0) | ((bytes[o + 1] ?? 0) << 8);
-    const high = (bytes[o + 2] ?? 0) | ((bytes[o + 3] ?? 0) << 8);
-    const coverage = (high >> (COVERAGE_SHIFT - 16)) & COVERAGE_MASK;
+  // Scalar accumulators avoid a dynamic string-key lookup for every texel.
+  // DataView reads the packed little-endian word in one operation and also
+  // supports subarrays whose byteOffset is not aligned to four bytes.
+  let windMin = SPEED_MAX + 1, windMax = -1;
+  let currentMin = SPEED_MAX + 1, currentMax = -1;
+  let faintWindMin = SPEED_MAX + 1, faintWindMax = -1;
+  let faintCurrentMin = SPEED_MAX + 1, faintCurrentMax = -1;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  for (let offset = 0; offset + 3 < bytes.length; offset += BYTES_PER_TEXEL) {
+    const word = view.getUint32(offset, true);
+    const coverage = (word >>> COVERAGE_SHIFT) & COVERAGE_MASK;
     if (coverage === 0) continue;
-    const kind: FieldKindName = high >> 15 === 1 ? "wind" : "current";
-    const speed = low & SPEED_MAX;
-    if (speed < faintMin[kind]) faintMin[kind] = speed;
-    if (speed > faintMax[kind]) faintMax[kind] = speed;
-    if (coverage < SOLID_COVERAGE) continue;
-    if (speed < min[kind]) min[kind] = speed;
-    if (speed > max[kind]) max[kind] = speed;
+    const speed = word & SPEED_MAX;
+    if (word >>> 31) {
+      if (speed < faintWindMin) faintWindMin = speed;
+      if (speed > faintWindMax) faintWindMax = speed;
+      if (coverage >= SOLID_COVERAGE) {
+        if (speed < windMin) windMin = speed;
+        if (speed > windMax) windMax = speed;
+      }
+    } else {
+      if (speed < faintCurrentMin) faintCurrentMin = speed;
+      if (speed > faintCurrentMax) faintCurrentMax = speed;
+      if (coverage >= SOLID_COVERAGE) {
+        if (speed < currentMin) currentMin = speed;
+        if (speed > currentMax) currentMax = speed;
+      }
+    }
   }
-  const rangeOf = (kind: FieldKindName): [number, number] | null => {
-    if (max[kind] >= 0) return [min[kind], max[kind]];
-    return faintMax[kind] < 0 ? null : [faintMin[kind], faintMax[kind]];
-  };
   return {
-    wind: rangeOf("wind"),
-    current: rangeOf("current"),
+    wind: windMax >= 0 ? [windMin, windMax] : faintWindMax >= 0 ? [faintWindMin, faintWindMax] : null,
+    current: currentMax >= 0 ? [currentMin, currentMax] : faintCurrentMax >= 0 ? [faintCurrentMin, faintCurrentMax] : null,
   };
 }
 
