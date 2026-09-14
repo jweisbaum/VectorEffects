@@ -23,6 +23,8 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   VE_FORCE_CPU: "1"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
   RELEASE_TAG: ${{ inputs.release_tag || (startsWith(github.ref, 'refs/tags/') && github.ref_name) || '' }}
 
 jobs:
@@ -144,15 +146,41 @@ jobs:
       - run: npm run check:offline
         shell: bash
 
-      - uses: tauri-apps/tauri-action@v1
+      - name: Configure optional macOS signing
+        if: runner.os == 'macOS'
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || '-' }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          node --input-type=module <<'JS'
+          import { appendFileSync } from 'node:fs';
+          import { randomUUID } from 'node:crypto';
+          const env = process.env;
+          const signing = {};
+          if (env.APPLE_CERTIFICATE) {
+            signing.APPLE_CERTIFICATE = env.APPLE_CERTIFICATE;
+            signing.APPLE_CERTIFICATE_PASSWORD = env.APPLE_CERTIFICATE_PASSWORD || '';
+          }
+          if (env.APPLE_SIGNING_IDENTITY) signing.APPLE_SIGNING_IDENTITY = env.APPLE_SIGNING_IDENTITY;
+          else if (!env.APPLE_CERTIFICATE) signing.APPLE_SIGNING_IDENTITY = '-';
+          for (const key of ['APPLE_ID', 'APPLE_PASSWORD', 'APPLE_TEAM_ID']) {
+            if (env[key]) signing[key] = env[key];
+          }
+          // Do not forward absent secrets as empty variables: Tauri interprets
+          // their presence as a request to import a certificate or notarize.
+          for (const [key, value] of Object.entries(signing)) {
+            const delimiter = randomUUID();
+            appendFileSync(env.GITHUB_ENV, `${key}<<${delimiter}\n${value}\n${delimiter}\n`);
+          }
+          JS
+
+      - uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           releaseId: ${{ needs.prepare.outputs.release-id }}
           uploadWorkflowArtifacts: true

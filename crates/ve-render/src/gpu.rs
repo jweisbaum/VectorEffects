@@ -441,6 +441,17 @@ impl GpuEvaluator {
         let info = adapter.get_info();
         let description = format!("{} ({:?}, {:?})", info.name, info.device_type, info.backend);
 
+        // GitHub's Intel Mac VM reports its paravirtual adapter as DiscreteGpu,
+        // but it fails the deterministic field-fidelity sweep (case 32: a
+        // 21.456 m/s vector where the CPU reports calm). The same sweep passes
+        // on physical Metal hardware. Decline the adapter for the application
+        // too, so a virtualized Mac gets the correct CPU preview.
+        if info.name.starts_with("Apple Paravirtual") {
+            return Err(RenderError::NoAdapter(
+                "Apple virtual GPUs are not supported; using CPU rendering".to_owned(),
+            ));
+        }
+
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("ve-render"),
             required_features: wgpu::Features::empty(),

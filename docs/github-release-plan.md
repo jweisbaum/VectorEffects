@@ -71,12 +71,12 @@ in an isolated test VM using dates immediately before and on January 1, 2027.
 Keep `Cargo.toml`, `package.json`, `ui/package.json`, lockfiles, and the Tauri
 configuration on the same version. Add release notes at `docs/releases/VERSION.md`
 and tag the tested commit with the matching `vVERSION` tag. The initial release
-uses `v0.1.0` and is marked as a beta prerelease on GitHub.
+uses `v0.1.1` and is marked as a beta prerelease on GitHub.
 
 ```sh
 node tools/check-release.mjs
-git tag -a v0.1.0 -m "VectorEffects 0.1.0 Beta"
-git push origin v0.1.0
+git tag -a v0.1.1 -m "VectorEffects 0.1.1 Beta"
+git push origin v0.1.1
 ```
 
 The pipeline validates versions and notes, creates one draft prerelease, and

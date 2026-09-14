@@ -13,6 +13,10 @@ env:
   # CI has no GPU. The CPU evaluator is the reference implementation and the
   # one export uses, so this is the correct backend to test against anyway.
   VE_FORCE_CPU: "1"
+  # Hundreds of integration binaries otherwise exhaust the Linux runner's disk
+  # while linking. Keep normal optimizations and assertions, without DWARF/PDBs.
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
 
 jobs:
   rust:

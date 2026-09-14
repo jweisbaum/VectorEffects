@@ -2459,6 +2459,7 @@ persistent warning that output bytes become machine-dependent.
 **Backend selection and fallback.** At startup, request a wgpu adapter with the
 required compute limits. Fall back to `CpuEvaluator` for preview when: no
 adapter is available; the adapter lacks required limits; device creation fails;
+the adapter is Apple's paravirtual GPU (which fails the field-fidelity suite);
 or `VE_FORCE_CPU=1` is set. The active backend and the reason for any fallback
 are shown in About and written to the log. wgpu covers Metal (Intel and Apple
 Silicon Macs), DX12 and Vulkan (Windows), and Vulkan (Linux); the fallback

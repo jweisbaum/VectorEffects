@@ -29,9 +29,10 @@ def read(path):
             nj = eccodes.codes_get(gid, "Nj")
             values = np.asarray(eccodes.codes_get_values(gid), dtype=float).reshape(nj, ni)
             if eccodes.codes_get(gid, "bitmapPresent"):
-                # Distribution-packaged ecCodes can return integer arrays as a
-                # Python list, while newer bindings return a NumPy array.
-                bitmap = np.asarray(eccodes.codes_get_array(gid, "bitmap")).reshape(nj, ni)
+                # Request integers explicitly: some distribution builds report
+                # bitmap's native type as bytes and generic get_array returns a
+                # single byte string instead of the expanded mask.
+                bitmap = np.asarray(eccodes.codes_get_long_array(gid, "bitmap")).reshape(nj, ni)
                 values[bitmap == 0] = np.nan
             fields[key] = values
             eccodes.codes_release(gid)
