@@ -154,7 +154,7 @@ cargo test -p ve-grib --release --test resample_cost -- --nocapture
                                  # project's lattice
 
 # Regenerate TS bindings after changing any IPC-facing Rust type
-npm run bindings            # cargo run -p ve-app --bin export-bindings
+npm run bindings            # cargo run -p ve-app --example export_bindings
 
 # Release bundle
 npm run build               # tauri build

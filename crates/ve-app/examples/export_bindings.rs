@@ -1,6 +1,6 @@
 //! Regenerates the frontend's TypeScript bindings from the Rust types.
 //!
-//! `cargo run -p ve-app --bin export-bindings`
+//! `cargo run -p ve-app --example export_bindings`
 //!
 //! Every type that crosses IPC must be listed here. CI runs this and fails if
 //! the working tree changes, so bindings cannot drift from the Rust types.

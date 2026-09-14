@@ -101,7 +101,7 @@ jobs:
         with:
           toolchain: "1.97"
       - uses: Swatinem/rust-cache@v2
-      - run: cargo run -p ve-app --bin export-bindings
+      - run: cargo run -p ve-app --example export_bindings
       # Bindings are generated from the Rust types and committed. If this diff
       # is non-empty, someone changed a type without regenerating.
       - name: Fail if bindings drifted

@@ -238,7 +238,7 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
 name = "basemap-builder"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "earcutr",
  "serde_json",
@@ -1828,7 +1828,7 @@ dependencies = [
 
 [[package]]
 name = "icon-grid-builder"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "flate2",
  "ve-grib",
@@ -5314,7 +5314,7 @@ checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
 
 [[package]]
 name = "ve-app"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "chrono",
@@ -5342,7 +5342,7 @@ dependencies = [
 
 [[package]]
 name = "ve-core"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "blake3",
  "lz4_flex",
@@ -5356,7 +5356,7 @@ dependencies = [
 
 [[package]]
 name = "ve-grib"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "flate2",
  "hayro-jpeg2000",
@@ -5369,7 +5369,7 @@ dependencies = [
 
 [[package]]
 name = "ve-render"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "blake3",
  "pollster",
@@ -5382,7 +5382,7 @@ dependencies = [
 
 [[package]]
 name = "ve-zarr"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "lz4_flex",
  "reqwest",

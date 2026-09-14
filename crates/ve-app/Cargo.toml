@@ -5,8 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 description = "VectorEffects desktop application."
-# The crate also ships `export-bindings`; without this, `tauri dev`'s
-# bare `cargo run` cannot choose between them.
+# Development utilities live in examples/ so Tauri bundles only the app.
 default-run = "ve-app"
 
 [lib]

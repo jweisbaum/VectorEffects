@@ -2,7 +2,7 @@
 //!
 //! Every type crossing this boundary derives `TS`, so the frontend never
 //! hand-writes a Rust-shaped type. Regenerate with:
-//! `cargo run -p ve-app --bin export-bindings`.
+//! `cargo run -p ve-app --example export_bindings`.
 //!
 //! This is also the only layer permitted to convert between stored
 //! azimuth-toward and the user's display convention (spec.md 3.3).

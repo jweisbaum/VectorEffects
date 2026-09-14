@@ -1,7 +1,7 @@
 {
   "name": "vectoreffects",
   "private": true,
-  "version": "0.1.1",
+  "version": "0.1.2",
   "workspaces": [
     "ui"
   ],
@@ -14,7 +14,7 @@
     "ui:typecheck": "npm run typecheck -w ui",
     "ui:test": "npm run test -w ui",
     "ui:build": "npm run build -w ui",
-    "bindings": "cargo run -p ve-app --bin export-bindings",
+    "bindings": "cargo run -p ve-app --example export_bindings",
     "tools:test": "node --test tools/webdriver/client.test.mjs",
     "check:offline": "./tools/check-offline.sh"
   },

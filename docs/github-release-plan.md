@@ -71,12 +71,12 @@ in an isolated test VM using dates immediately before and on January 1, 2027.
 Keep `Cargo.toml`, `package.json`, `ui/package.json`, lockfiles, and the Tauri
 configuration on the same version. Add release notes at `docs/releases/VERSION.md`
 and tag the tested commit with the matching `vVERSION` tag. The initial release
-uses `v0.1.1` and is marked as a beta prerelease on GitHub.
+uses `v0.1.2` and is marked as a beta prerelease on GitHub.
 
 ```sh
 node tools/check-release.mjs
-git tag -a v0.1.1 -m "VectorEffects 0.1.1 Beta"
-git push origin v0.1.1
+git tag -a v0.1.2 -m "VectorEffects 0.1.2 Beta"
+git push origin v0.1.2
 ```
 
 The pipeline validates versions and notes, creates one draft prerelease, and
@@ -92,12 +92,21 @@ commit for every platform. This rebuilds the original application without moving
 the tag. Cargo-specific options such as `--locked` go after Tauri's `--` separator.
 Windows checkouts keep LF line endings, including when rebuilding an older tag;
 shell checks run directly in Git Bash rather than through npm's Windows shell.
+The TypeScript binding generator lives in `examples/export_bindings.rs` and is
+run with `npm run bindings`; keeping it out of `src/bin` prevents Tauri from
+shipping it as an extra executable and avoids an unsigned nested binary during
+Intel Mac signing.
 
 Downloads are hosted at
 [GitHub Releases](https://github.com/jweisbaum/VectorEffects/releases), linked from
 the repository README. No separate hosting service or personal access token is
 needed. GitHub Actions must be enabled for the repository; the workflow requests
 `contents: write` only in the release jobs.
+
+If Actions refuses to start jobs because account payments failed or the spending
+limit was reached, resolve the account's **Settings → Billing & plans** first,
+then rerun the failed workflow. This is separate from SSH authentication: a key
+can successfully push source while hosted runners remain unavailable.
 
 This version intentionally stops working at local midnight on January 1, 2027.
 State that expiry date in the beta release notes. Ship a replacement version
