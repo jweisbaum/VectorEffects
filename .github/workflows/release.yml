@@ -1,23 +1,29 @@
 name: Release builds
 
-# Manual runs create build artifacts. Version tags publish a beta release only
-# after every platform succeeds. Never enable the WebDriver feature.
+# Manual runs create build artifacts, or rebuild an existing unpublished tag.
+# Beta releases publish only after every platform succeeds. Never enable WebDriver.
 
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing unpublished tag to rebuild (blank for artifacts only)
+        required: false
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.release_tag || github.ref_name }}
   cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
   VE_FORCE_CPU: "1"
+  RELEASE_TAG: ${{ inputs.release_tag || (startsWith(github.ref, 'refs/tags/') && github.ref_name) || '' }}
 
 jobs:
   prepare:
@@ -27,20 +33,35 @@ jobs:
       contents: write
     outputs:
       release-id: ${{ steps.release.outputs.release-id }}
+      release-tag: ${{ steps.release.outputs.release-tag }}
+      source-sha: ${{ steps.source.outputs.sha }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || github.ref }}
+      - name: Pin source commit for every platform
+        id: source
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-node@v4
         with:
           node-version: 22
       - name: Check application and tag versions
-        run: node tools/check-release.mjs
+        run: |
+          node tools/check-release.mjs
+          # Also validate manual rebuilds, where GITHUB_REF names the workflow's
+          # branch while the source checkout comes from the requested tag.
+          node --input-type=module <<'JS'
+          import assert from 'node:assert/strict';
+          import { readFileSync } from 'node:fs';
+          const version = JSON.parse(readFileSync('package.json', 'utf8')).version;
+          if (process.env.RELEASE_TAG) assert.equal(process.env.RELEASE_TAG, `v${version}`);
+          JS
       - name: Prepare draft beta release
         id: release
-        if: startsWith(github.ref, 'refs/tags/')
+        if: env.RELEASE_TAG != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ github.ref_name }}
         run: |
           # A failed build can resume its draft; a published release is immutable
           # to this workflow. Create it once before the parallel uploads begin.
@@ -55,6 +76,7 @@ jobs:
             release_id=$(gh release view "$RELEASE_TAG" --json databaseId --jq .databaseId)
           fi
           echo "release-id=$release_id" >> "$GITHUB_OUTPUT"
+          echo "release-tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
 
   bundle:
     needs: prepare
@@ -69,21 +91,23 @@ jobs:
           - name: mac-intel
             os: macos-15-intel
             targets: x86_64-apple-darwin
-            args: --target x86_64-apple-darwin --locked
+            args: --target x86_64-apple-darwin -- --locked
           - name: mac-arm
             os: macos-15
             targets: aarch64-apple-darwin
-            args: --target aarch64-apple-darwin --locked
+            args: --target aarch64-apple-darwin -- --locked
           - name: windows-x64
             os: windows-2022
             targets: x86_64-pc-windows-msvc
-            args: --target x86_64-pc-windows-msvc --locked
+            args: --target x86_64-pc-windows-msvc -- --locked
           - name: linux-x64
             os: ubuntu-22.04
             targets: x86_64-unknown-linux-gnu
-            args: --target x86_64-unknown-linux-gnu --locked
+            args: --target x86_64-unknown-linux-gnu -- --locked
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.source-sha }}
 
       - name: Install Linux system dependencies
         if: matrix.os == 'ubuntu-22.04'
@@ -99,6 +123,8 @@ jobs:
           components: rustfmt, clippy
           targets: ${{ matrix.targets }}
       - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
 
       - uses: actions/setup-node@v4
         with:
@@ -136,16 +162,18 @@ jobs:
   publish:
     name: checksums and publish beta
     needs: [prepare, bundle]
-    if: startsWith(github.ref, 'refs/tags/')
+    if: needs.prepare.outputs.release-tag != ''
     runs-on: ubuntu-22.04
     permissions:
       contents: write
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GH_REPO: ${{ github.repository }}
-      RELEASE_TAG: ${{ github.ref_name }}
+      RELEASE_TAG: ${{ needs.prepare.outputs.release-tag }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.source-sha }}
       - name: Verify installers and generate checksums
         run: |
           mkdir release-assets

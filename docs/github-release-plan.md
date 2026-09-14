@@ -85,6 +85,12 @@ platform's installers exist, upload `SHA256SUMS`, and publish the beta. A failed
 build leaves a draft that can be resumed using Actions → Re-run failed jobs.
 Published releases are not overwritten by a new run; issue a new version instead.
 
+If the workflow itself needs a packaging fix, push the fix to `main`, run
+**Release builds** from `main`, and set its **release_tag** input to the existing
+unpublished tag. The updated workflow checks out that tag and pins the same source
+commit for every platform. This rebuilds the original application without moving
+the tag. Cargo-specific options such as `--locked` go after Tauri's `--` separator.
+
 Downloads are hosted at
 [GitHub Releases](https://github.com/jweisbaum/VectorEffects/releases), linked from
 the repository README. No separate hosting service or personal access token is
