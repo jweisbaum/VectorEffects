@@ -27,9 +27,11 @@ def read(path):
             key = (eccodes.codes_get(gid, "shortName"), eccodes.codes_get(gid, "step"))
             ni = eccodes.codes_get(gid, "Ni")
             nj = eccodes.codes_get(gid, "Nj")
-            values = eccodes.codes_get_values(gid).reshape(nj, ni)
+            values = np.asarray(eccodes.codes_get_values(gid), dtype=float).reshape(nj, ni)
             if eccodes.codes_get(gid, "bitmapPresent"):
-                bitmap = eccodes.codes_get_array(gid, "bitmap").reshape(nj, ni)
+                # Distribution-packaged ecCodes can return integer arrays as a
+                # Python list, while newer bindings return a NumPy array.
+                bitmap = np.asarray(eccodes.codes_get_array(gid, "bitmap")).reshape(nj, ni)
                 values[bitmap == 0] = np.nan
             fields[key] = values
             eccodes.codes_release(gid)
