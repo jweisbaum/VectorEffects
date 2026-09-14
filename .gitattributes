@@ -1,0 +1,2 @@
+# Shell scripts and source fixtures use the same line endings on every platform.
+* text=auto eol=lf

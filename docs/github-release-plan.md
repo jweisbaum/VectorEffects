@@ -90,6 +90,8 @@ If the workflow itself needs a packaging fix, push the fix to `main`, run
 unpublished tag. The updated workflow checks out that tag and pins the same source
 commit for every platform. This rebuilds the original application without moving
 the tag. Cargo-specific options such as `--locked` go after Tauri's `--` separator.
+Windows checkouts keep LF line endings, including when rebuilding an older tag;
+shell checks run directly in Git Bash rather than through npm's Windows shell.
 
 Downloads are hosted at
 [GitHub Releases](https://github.com/jweisbaum/VectorEffects/releases), linked from

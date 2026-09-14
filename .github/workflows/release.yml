@@ -107,6 +107,10 @@ jobs:
             targets: x86_64-unknown-linux-gnu
             args: --target x86_64-unknown-linux-gnu -- --locked
     steps:
+      # Also supports rebuilding tags created before .gitattributes was added.
+      - name: Preserve source line endings on Windows
+        if: runner.os == 'Windows'
+        run: git config --global core.autocrlf false
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.prepare.outputs.source-sha }}
@@ -126,6 +130,8 @@ jobs:
           targets: ${{ matrix.targets }}
       - uses: Swatinem/rust-cache@v2
         with:
+          # Reuse the matching platform's native CI cache on the default branch.
+          shared-key: rust
           cache-on-failure: true
 
       - uses: actions/setup-node@v4
@@ -143,7 +149,7 @@ jobs:
       - run: git diff --exit-code -- ui/src/generated
       - run: npm run ui:test
       - run: npm run ui:build
-      - run: npm run check:offline
+      - run: bash tools/check-offline.sh
         shell: bash
 
       - name: Configure optional macOS signing
