@@ -346,24 +346,23 @@ fn shape_distance(object: Object, p: vec2<f32>) -> f32 {
             }
             return best - object.shape_a;
         }
-        default: {
-            // Capsule: swept disc along one or more polylines, uploaded as
-            // independent segment pairs. Pairs rather than polylines because a
-            // merged stroke holds several chains, and walking one contiguous
-            // run would sweep the brush across the gaps between them.
-            let n = object.shape_count;
-            if (n == 0u) { return 1e30; }
-            var best = 1e30;
-            for (var i = 0u; i + 1u < n; i = i + 2u) {
-                best = min(
-                    best,
-                    segment_distance(p, points[object.shape_offset + i],
-                                     points[object.shape_offset + i + 1u])
-                );
-            }
-            return best - object.shape_a;
-        }
+        default: {}
     }
+    // Keep the default return outside the switch: Windows' FXC compiler does
+    // not recognize that every branch of the generated HLSL returns a value.
+    // Capsule: swept disc along independent segment pairs, so merged chains
+    // never paint across the gaps between them.
+    let n = object.shape_count;
+    if (n == 0u) { return 1e30; }
+    var best = 1e30;
+    for (var i = 0u; i + 1u < n; i = i + 2u) {
+        best = min(
+            best,
+            segment_distance(p, points[object.shape_offset + i],
+                             points[object.shape_offset + i + 1u])
+        );
+    }
+    return best - object.shape_a;
 }
 
 fn smooth_step(edge0: f32, edge1: f32, x: f32) -> f32 {
@@ -395,8 +394,9 @@ fn speed_at(object: Object, local: vec2<f32>) -> f32 {
             let t = axis_fraction(object, local);
             return object.speed_a + (object.speed_b - object.speed_a) * t;
         }
-        default: { return object.speed_a; }
+        default: {}
     }
+    return object.speed_a;
 }
 
 // Shortest-arc blend between two bearings.
@@ -493,8 +493,9 @@ fn direction_at(object: Object, position: vec2<f32>, local: vec2<f32>) -> f32 {
             let dlambda = normalize_lon(object.dir_a - position.x) * DEG;
             return atan2(dlambda, dpsi) / DEG + object.target_offset;
         }
-        default: { return object.dir_a; }
+        default: {}
     }
+    return object.dir_a;
 }
 
 // The velocity an object's own movement adds at a position, in m/s eastward

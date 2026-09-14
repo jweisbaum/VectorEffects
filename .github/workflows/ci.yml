@@ -49,6 +49,9 @@ jobs:
           shared-key: rust
           cache-on-failure: true
 
+      # Catch native shader/compiler failures before compiling the app tests.
+      - name: Check GPU shader and field fidelity
+        run: cargo test -p ve-render --test empty_layers --test fidelity -- --nocapture
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace

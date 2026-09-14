@@ -134,6 +134,10 @@ jobs:
           shared-key: rust
           cache-on-failure: true
 
+      # Catch native shader/compiler failures before compiling the app tests.
+      - name: Check GPU shader and field fidelity
+        run: cargo test -p ve-render --test empty_layers --test fidelity -- --nocapture
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22

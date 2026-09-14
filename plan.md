@@ -2,6 +2,12 @@
 
 **Companion to** `spec.md`. Section references below point into it.
 
+**2026-09-14: Windows shader compilation.** The GPU shape, speed, and direction
+functions return their default values after the switch, preserving the field
+math while making every return path explicit to DirectX's FXC compiler. CI and
+release jobs run the existing empty-layer and field-fidelity GPU comparisons
+before the application build so native shader failures surface early.
+
 **2026-09-14: empty-layer transparency.** The canvas owns the basemap, beneath
 the layer stack. Raster-only GPU tiles now skip object-buffer padding before it
 can overwrite a layer's speed filter and hide its field. The evaluator cache

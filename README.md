@@ -6,7 +6,7 @@ Generate and edit routing forecasts to test routing algorithms.
 
 [Download releases](https://github.com/jweisbaum/VectorEffects/releases) ·
 [Build status](https://github.com/jweisbaum/VectorEffects/actions) ·
-[Release notes](docs/releases/0.1.3.md)
+[Release notes](docs/releases/0.1.4.md)
 
 ![VectorEffects workspace](ui/public/help/workspace.png)
 
