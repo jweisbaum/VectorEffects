@@ -441,6 +441,15 @@ impl GpuEvaluator {
         let info = adapter.get_info();
         let description = format!("{} ({:?}, {:?})", info.name, info.device_type, info.backend);
 
+        // A software adapter offers no hardware acceleration. In particular,
+        // Windows' Basic Render Driver compiles the kernel but fails readback.
+        // Use the reference CPU evaluator instead of emulating GPU execution.
+        if info.device_type == wgpu::DeviceType::Cpu {
+            return Err(RenderError::NoAdapter(format!(
+                "software graphics adapter {description}; using CPU rendering"
+            )));
+        }
+
         // GitHub's Intel Mac VM reports its paravirtual adapter as DiscreteGpu,
         // but it fails the deterministic field-fidelity sweep (case 32: a
         // 21.456 m/s vector where the CPU reports calm). The same sweep passes
@@ -452,6 +461,10 @@ impl GpuEvaluator {
             ));
         }
 
+        Self::from_adapter(&adapter, description)
+    }
+
+    fn from_adapter(adapter: &wgpu::Adapter, description: String) -> Result<Self> {
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("ve-render"),
             required_features: wgpu::Features::empty(),
@@ -715,5 +728,29 @@ impl FieldEvaluator for GpuEvaluator {
         staging.unmap();
 
         Ok(out)
+    }
+}
+
+#[cfg(all(test, target_os = "windows"))]
+mod windows_tests {
+    use super::GpuEvaluator;
+
+    #[test]
+    fn shader_compiles_with_directx_software_adapter() {
+        // Production uses CpuEvaluator on software graphics, but FXC must
+        // still compile the shipped kernel. No dispatch/readback is needed.
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::DX12,
+            ..Default::default()
+        });
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            force_fallback_adapter: true,
+            ..Default::default()
+        }))
+        .expect("Windows DirectX software adapter for shader compilation");
+        let name = adapter.get_info().name;
+        let gpu = GpuEvaluator::from_adapter(&adapter, name)
+            .expect("the production shader must compile on DirectX");
+        println!("compiled production shader on {}", gpu.adapter);
     }
 }
