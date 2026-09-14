@@ -134,13 +134,14 @@ npm run tools:test                         # the driver's parsing
 # Checks — all of these before declaring work done
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
+VE_FORCE_CPU=1 cargo test --workspace
 npm run ui:typecheck
 npm run ui:test
 npm run check:offline       # invariant 5
 
 # Focused
-cargo test -p ve-render parity   # GPU/CPU parity suite
+# GPU/CPU comparisons on physical hardware
+cargo test -p ve-render --test fidelity --test empty_layers -- --nocapture
 cargo test -p ve-grib            # round-trip; external decoders run in CI
 cargo test -p ve-render --release --test tile_cost -- --nocapture
                                  # the tile budget from spec.md 13
@@ -162,6 +163,10 @@ npm run build               # tauri build
 # Regenerate application icons (rarely needed)
 python3 tools/make_icons.py
 ```
+
+The full Rust suite uses the same CPU startup setting as CI, avoiding a GPU
+initialization for every app test program. Tests that explicitly construct
+`GpuEvaluator` still exercise the GPU, including the focused comparisons above.
 
 ## Conventions
 
