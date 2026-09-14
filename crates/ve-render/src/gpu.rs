@@ -731,17 +731,21 @@ impl FieldEvaluator for GpuEvaluator {
     }
 }
 
-#[cfg(all(test, target_os = "windows"))]
+#[cfg(test)]
 mod windows_tests {
     use super::GpuEvaluator;
 
     #[test]
     fn shader_compiles_with_directx_software_adapter() {
+        // Type-check this setup on every platform, including developer Macs.
+        if !cfg!(target_os = "windows") {
+            return;
+        }
         // Production uses CpuEvaluator on software graphics, but FXC must
         // still compile the shipped kernel. No dispatch/readback is needed.
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::DX12,
-            ..Default::default()
+            ..wgpu::InstanceDescriptor::new_without_display_handle()
         });
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             force_fallback_adapter: true,
