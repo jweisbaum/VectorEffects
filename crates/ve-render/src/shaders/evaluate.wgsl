@@ -703,6 +703,10 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
             next_raster = next_raster + 1u;
         }
         let object = objects[o];
+        // An empty object buffer is padded with a negative-cap placeholder.
+        // Skip it before touching layer state: its zeroed speed limits would
+        // otherwise filter out a raster sharing its layer index.
+        if (object.cap_radius_m < 0.0) { continue; }
         enter_layer(&c, object.layer, object.kind);
         c.speed_min = object.speed_min;
         c.speed_max = object.speed_max;

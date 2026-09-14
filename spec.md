@@ -1091,6 +1091,9 @@ by zoom. Graticule drawn procedurally.
 
 The basemap is **not a layer** and does not appear in the layer panel. It is
 always beneath all layers and cannot be reordered, hidden, or edited.
+It belongs to the canvas. Normal painted layers contain only objects and are
+fully transparent wherever none of their objects contributes coverage. An empty
+layer cannot obscure another layer, regardless of its order or speed filter.
 
 ### 5.3 Field display
 

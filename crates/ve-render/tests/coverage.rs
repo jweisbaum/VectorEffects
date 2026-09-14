@@ -89,6 +89,25 @@ fn a_deliberate_zero_is_covered() {
     assert!(sample.u.abs() < 1e-6 && sample.v.abs() < 1e-6);
 }
 
+#[test]
+fn an_empty_layer_does_not_obscure_painted_objects() {
+    let mut project = project(vec![stamp(ToolKind::Brush, at(0.0, 0.0), 600.0, 20.0)]);
+    let expected = sample_scene_covered(&flatten(&project, 0), at(0.0, 0.0));
+    assert!(expected.is_some());
+    let mut empty = Layer::new("Empty on top");
+    empty.parameter = FieldKind::Current;
+    empty.speed_range = Some(ve_core::document::SpeedRange {
+        min_mps: 0.0,
+        max_mps: 0.0,
+    });
+    project.layers.push(empty);
+    assert_eq!(
+        sample_scene_covered(&flatten(&project, 0), at(0.0, 0.0)),
+        expected
+    );
+    assert!(sample_scene_covered(&flatten(&project, 0), at(40.0, 0.0)).is_none());
+}
+
 /// A mask writes calm to the field and **removes** coverage, so a capture
 /// taken over one is transparent there rather than a hole of dead air (D58).
 #[test]

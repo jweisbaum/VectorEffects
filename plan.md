@@ -2,6 +2,13 @@
 
 **Companion to** `spec.md`. Section references below point into it.
 
+**2026-09-14: empty-layer transparency.** The canvas owns the basemap, beneath
+the layer stack. Raster-only GPU tiles now skip object-buffer padding before it
+can overwrite a layer's speed filter and hide its field. The evaluator cache
+version advances so previously blank tiles are regenerated. Regression checks
+cover empty layers above/below imports, hidden layers, wind/current GRIB and
+history sources, culled objects, missing data, and explicitly painted calm.
+
 **2026-09-13: arrow and wind-barb appearance settings.** Independent size,
 stroke width, color, opacity, density, speed fading, and configurable drop
 shadows now live in Settings, with visual samples and per-style reset.

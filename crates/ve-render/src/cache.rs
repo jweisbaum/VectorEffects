@@ -40,7 +40,8 @@ pub type SceneHash = [u8; 32];
 /// served as this one's (spec.md 7.10). 2: divergence radiates from a
 /// stroke's centreline (M29). 3: layers are composited on their own and
 /// stacked by coverage, and a tile carries the coverage and the kind (M31).
-pub const EVALUATOR_VERSION: u32 = 4;
+/// 5: raster-only GPU tiles ignore object-buffer padding during compositing.
+pub const EVALUATOR_VERSION: u32 = 5;
 
 pub fn scene_hash(scene: &Scene) -> SceneHash {
     let mut hasher = blake3::Hasher::new();

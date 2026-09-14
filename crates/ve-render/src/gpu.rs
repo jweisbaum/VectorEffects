@@ -596,8 +596,8 @@ impl FieldEvaluator for GpuEvaluator {
                 })
         };
         // A scene of rasters alone still needs a non-empty object buffer. The
-        // placeholder's cap radius is negative, so the cull rejects it at
-        // every sample and it is never looked at further.
+        // placeholder's negative cap tells the shader to skip it before it
+        // can alter the compositing layer or that layer's speed limits.
         let object_bytes = if packed.objects.is_empty() {
             let mut placeholder = Vec::with_capacity(OBJECT_WORDS * 4);
             for word in 0..OBJECT_WORDS {
