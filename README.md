@@ -1,8 +1,10 @@
 # VectorEffects
 
-VectorEffects is a desktop editor for painting and animating global wind and
-ocean-current fields, combining them with GRIB or Zarr data, and exporting GRIB2.
-Generate and edit routing forecasts to test routing algorithms.
+VectorEffects allows you to create grib forecasts by editing or creating vector fields for both 10m wind and surface currents, 
+and exporting them as grib. The purpose of the app is to create test and benchmark data for routing algorithms.
+You can easily download historical data within the app, import grib files (even ICON or jpeg compressed gribs), and edit or create
+new vector fields using a suite of paint brush, shape fill, and vector edit tools.
+When you're ready, export the grib and use it to route in your routing app of choice. 
 
 [Download releases](https://github.com/jweisbaum/VectorEffects/releases) ·
 [Build status](https://github.com/jweisbaum/VectorEffects/actions) ·
@@ -12,10 +14,9 @@ Generate and edit routing forecasts to test routing algorithms.
 
 ## Install
 
-Open a release and expand **Assets**. Choose `_x64.dmg` for an Intel Mac,
-`_aarch64.dmg` for Apple Silicon, `-setup.exe` or `.msi` for Windows, or
-`.AppImage`, `.deb`, or `.rpm` for Linux. A `SHA256SUMS` file accompanies each
-complete release.
+[Download releases](https://github.com/jweisbaum/VectorEffects/releases)
+
+Note on Mac that you need to go through the unsigned app permission flow.
 
 **The current beta expires on January 1, 2027.** Initial beta installers are
 ad-hoc signed on Mac and unsigned on Windows. Use the app's Help menu or F1 for
@@ -46,3 +47,9 @@ VectorEffects is licensed under the
 [PolyForm Noncommercial License 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0).
 See the linked license for the full terms governing use, modification, and
 distribution.
+
+This means you may use the app except for commercial purposes. Commercial purposes include:
+- Developers of paid routing software. 
+- Professional or paid navigators, crew, or consultants, or as part of a paid contract.
+- Commercial forecast providers.
+- Licensed captains during a paid delivery or voyage.
