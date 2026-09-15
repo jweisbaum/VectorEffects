@@ -2,6 +2,26 @@
 
 **Companion to** `spec.md`. Section references below point into it.
 
+**2026-09-15: placement and editing interaction corrections.** Macro placement
+uses only the selected painted layer's recorded field plane, with a crossed
+hover and no command for an incompatible destination. In-page tool menus keep
+the next map press available to drawing. The toolbar centres and sizes to its
+contents, inspector sliders stack, and ruler drags suppress text selection.
+Captured macros and patches have no shape-animation controls. Brush/Shape fill
+Direction mode, Circle Fill, Clone Offset, Path Direction mode, Mask Invert, and
+Warp mode/Push to are editable constants; Liquify remains unchanged. The last
+layer can be deleted, leaving the basemap, and restored with Undo.
+
+Verification: 758 UI tests and 1,098 workspace Rust tests pass across 48 test
+executables (run in batches; 13 existing fixture/performance tests remain
+ignored), along with workspace doctests. WebKit checks with real components
+and native IPC verify the first gesture after changing
+options for all 11 drawing tools, the exact Brush → Square sequence, compact
+centred toolbar geometry, a circle inspector without horizontal overflow, and
+ruler text-selection suppression. Pointer events are synthetic; OS mouse input
+is not automated. Generated bindings, TypeScript, production UI build, the
+offline check, formatting, and workspace clippy with warnings denied pass.
+
 **2026-09-14: tool corrections and illustrated reference.** Clone stamps and
 their live preview preserve missing source coverage, while defined calm still
 copies. Divergence's physical sign was already correct; outward/inward labels

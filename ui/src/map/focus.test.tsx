@@ -17,6 +17,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import ToolOptions from "./ToolOptions";
 import NumberField from "../NumberField";
+import ToolSelect from "../ToolSelect";
 import { finishToolControl, focusMapForGesture } from "./focus";
 import type { ToolSchema } from "../generated/ToolSchema";
 import type { ToolState } from "./tools";
@@ -152,4 +153,61 @@ it("releases a completed native control without stealing a newly focused field",
     input.focus(); vi.runAllTimers();
     expect(document.activeElement).toBe(input);
   } finally { select.remove(); input.remove(); vi.useRealTimers(); }
+});
+
+it("uses the first map drag after choosing an option without a native popup", async () => {
+  const paint = vi.fn();
+  function Host() {
+    const [state, setState] = useState(STATE);
+    return <><ToolOptions schema={SCHEMA} state={state} onChange={setState} convention="from" camera={CAMERA}
+      picking={null} onPick={() => {}} sampling={false} onSample={() => {}} />
+      <canvas tabIndex={0} onPointerDownCapture={e => focusMapForGesture(e.currentTarget)}
+        onPointerDown={() => paint(state.values.EdgeMode)} /></>;
+  }
+  await act(async () => root.render(<Host />));
+  const select = container.querySelector("select")!;
+  const press = new PointerEvent("pointerdown", {bubbles:true, cancelable:true, button:0});
+  await act(async () => select.dispatchEvent(press));
+  expect(press.defaultPrevented, "the OS popup must not open").toBe(true);
+  expect(document.querySelector('[role="listbox"]')).not.toBeNull();
+  await act(async () => (document.querySelectorAll<HTMLButtonElement>('[role="option"]')[1]!).click());
+  expect(document.querySelector('[role="listbox"]')).toBeNull();
+  await act(async () => container.querySelector("canvas")!.dispatchEvent(new PointerEvent("pointerdown", {bubbles:true, button:0})));
+  expect(paint).toHaveBeenCalledTimes(1);
+  expect(paint).toHaveBeenCalledWith({kind:"choice", index:1});
+});
+
+it("dismisses an open option list without consuming the first map press", async () => {
+  const paint = vi.fn();
+  await render(STATE);
+  const canvas = document.createElement("canvas"); container.append(canvas);
+  canvas.addEventListener("pointerdown", paint);
+  await act(async () => container.querySelector("select")!.dispatchEvent(new PointerEvent("pointerdown", {bubbles:true, cancelable:true, button:0})));
+  const press = new PointerEvent("pointerdown", {bubbles:true, cancelable:true, button:0});
+  await act(async () => canvas.dispatchEvent(press));
+  expect(press.defaultPrevented).toBe(false);
+  expect(paint).toHaveBeenCalledTimes(1);
+  expect(document.querySelector('[role="listbox"]')).toBeNull();
+});
+
+it("supports keyboard choice and cancellation without opening a native menu", async () => {
+  const changed = vi.fn();
+  await act(async () => root.render(<ToolSelect defaultValue="round" onChange={e => changed(e.currentTarget.value)}>
+    <option value="round">Round</option><option disabled value="disabled">Unavailable</option><option value="square">Square</option>
+  </ToolSelect>));
+  const select = container.querySelector("select")!;
+  const key = async (value: string) => {
+    const event = new KeyboardEvent("keydown", { key: value, bubbles: true, cancelable: true });
+    await act(async () => select.dispatchEvent(event));
+    expect(event.defaultPrevented).toBe(true);
+  };
+  await key("ArrowDown");
+  await key("Enter");
+  expect(changed).toHaveBeenCalledWith("square");
+  expect(document.activeElement).not.toBe(select);
+  await key("Home");
+  await key("Escape");
+  expect(changed).toHaveBeenCalledTimes(1);
+  expect(select.value).toBe("square");
+  expect(document.querySelector('[role="listbox"]')).toBeNull();
 });

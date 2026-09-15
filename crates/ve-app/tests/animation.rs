@@ -306,56 +306,40 @@ fn a_keyed_rotation_takes_the_shortest_arc() {
     );
 }
 
-/// An enum holds its earlier key until the next one: there is no half-way
-/// between a filled disc and a ring. Asserted on the field, where a blended
-/// mode would have to invent one.
+/// An enum that remains animatable holds until the next key.
 #[test]
 fn a_keyed_enum_holds_until_its_next_key() {
     let (_root, state) = project("enum");
     let id = circle(&state, 0.0, 0.0);
-    // Fill mode 0 is filled, 1 is a ring.
     key(
         &state,
         id,
-        "FillMode",
+        "EdgeMode",
         2,
         PropertyValue::Choice { index: 0 },
     );
     key(
         &state,
         id,
-        "FillMode",
+        "EdgeMode",
         8,
         PropertyValue::Choice { index: 1 },
     );
-
     for step in 2..8 {
         assert_eq!(
-            value_at(&state, id, PropId::FillMode, step).as_enum(),
-            Some(0),
-            "step {step} should still be filled"
-        );
-        assert!(
-            sample(&state, ll(0.0, 0.0), step).0 > 1.0,
-            "the disc has a hole at {step}"
+            value_at(&state, id, PropId::EdgeMode, step).as_enum(),
+            Some(0)
         );
     }
-    assert_eq!(value_at(&state, id, PropId::FillMode, 8).as_enum(), Some(1));
-    assert!(
-        sample(&state, ll(0.0, 0.0), 8).0 < 0.01,
-        "the ring has no hole at 8"
-    );
-
-    // And it cannot be asked to do otherwise: the only interpolation offered is
-    // step, and any other is refused rather than silently coerced.
+    assert_eq!(value_at(&state, id, PropId::EdgeMode, 8).as_enum(), Some(1));
     let tracks = animation::tracks_of(&state, id, 2).expect("tracks");
-    let fill = tracks
+    let edge = tracks
         .tracks
         .iter()
-        .find(|t| t.property == "FillMode")
+        .find(|t| t.property == "EdgeMode")
         .unwrap();
-    assert_eq!(fill.interpolations, vec![InterpolationView::Step]);
-    assert!(animation::ease_from(&state, id, "FillMode", 2, InterpolationView::Linear).is_err());
+    assert_eq!(edge.interpolations, vec![InterpolationView::Step]);
+    assert!(animation::ease_from(&state, id, "EdgeMode", 2, InterpolationView::Linear).is_err());
 }
 
 /// A boolean holds too, and switching `enabled` off at a step removes the
@@ -1355,9 +1339,9 @@ fn a_position_graphs_as_two_degree_series() {
 fn a_choice_offers_no_graph() {
     let (_root, state) = project("choice-graph");
     let id = circle(&state, 0.0, 0.0);
-    let samples = animation::samples_of(&state, id, "FillMode").expect("samples");
+    let samples = animation::samples_of(&state, id, "EdgeMode").expect("samples");
     assert!(samples.series.is_empty());
-    assert_eq!(samples.label, "Fill");
+    assert_eq!(samples.label, "Edge");
 }
 
 // --- Linked objects (spec.md 9.3, M13) ---------------------------------------
@@ -1649,4 +1633,107 @@ fn constant_motion_starts_here_stops_at_next_key_and_undo_restores_keys() {
     assert_eq!(position.value_at(11), old.value_at(11));
     edit::undo_for_test(&state).unwrap();
     assert_eq!(document_of(&state).layers, before.layers);
+}
+
+#[test]
+fn static_tool_options_stay_editable_without_any_keyframe_entry_point() {
+    use ve_core::{Object, ToolKind};
+    for (tool, property, value) in [
+        (
+            ToolKind::Brush,
+            "DirectionMode",
+            PropertyValue::Choice { index: 1 },
+        ),
+        (
+            ToolKind::Circle,
+            "FillMode",
+            PropertyValue::Choice { index: 1 },
+        ),
+        (
+            ToolKind::ShapeFill,
+            "DirectionMode",
+            PropertyValue::Choice { index: 1 },
+        ),
+        (
+            ToolKind::CloneStamp,
+            "OffsetMode",
+            PropertyValue::Choice { index: 1 },
+        ),
+        (
+            ToolKind::Curve,
+            "CurveDirectionMode",
+            PropertyValue::Choice { index: 1 },
+        ),
+        (
+            ToolKind::Mask,
+            "Invert",
+            PropertyValue::Bool { value: true },
+        ),
+        (
+            ToolKind::Warp,
+            "WarpMode",
+            PropertyValue::Choice { index: 1 },
+        ),
+        (
+            ToolKind::Warp,
+            "PushTo",
+            PropertyValue::Position {
+                lon: 5.0,
+                lat: 10.0,
+            },
+        ),
+    ] {
+        let (_root, state) = project(property);
+        let object = Object::new(tool, "Static option", 12);
+        let id = object.id.raw();
+        state
+            .session
+            .lock()
+            .unwrap()
+            .require_open()
+            .unwrap()
+            .project
+            .layers[0]
+            .objects
+            .push(object);
+        assert!(
+            animation::tracks_of(&state, id, 0)
+                .unwrap()
+                .tracks
+                .iter()
+                .all(|t| t.property != property)
+        );
+        let properties = document::properties(&state, id, 0).unwrap();
+        assert!(
+            !properties
+                .iter()
+                .find(|p| p.id == property)
+                .unwrap()
+                .keyable
+        );
+        assert!(animation::key_at(&state, id, property, 4, None).is_err());
+        document::set_property_with(&state, id, property, value, None, 4, true).unwrap();
+        let at = |step| {
+            document::properties(&state, id, step)
+                .unwrap()
+                .into_iter()
+                .find(|p| p.id == property)
+                .unwrap()
+                .value
+        };
+        assert_eq!(
+            serde_json::to_value(at(0)).unwrap(),
+            serde_json::to_value(at(9)).unwrap()
+        );
+    }
+    // Liquify retains its editable amount/feather/transform animation.
+    for prop in [
+        PropId::Position,
+        PropId::RotationDeg,
+        PropId::ScalePct,
+        PropId::Feather,
+        PropId::Strength,
+    ] {
+        assert!(ve_core::schema::animatable(ToolKind::Liquify, prop));
+    }
 }

@@ -1,3 +1,4 @@
+import ToolSelect from "../ToolSelect";
 import { hitShapePoint, movedShapePoint, type ShapePointHit } from "./shapeEditing";
 import type { ShapeControls } from "../generated/ShapeControls";
 import { useUnits, type DisplayUnits } from "../settings/units";
@@ -24,6 +25,7 @@ import type { AppSettings } from "../generated/AppSettings";
 import type { BrushShape } from "../generated/BrushShape";
 import type { CaptureMode } from "../generated/CaptureMode";
 import type { MacroLibrary } from "../generated/MacroLibrary";
+import type { LayerNode } from "../generated/LayerNode";
 import type { MacroOutline } from "../generated/MacroOutline";
 import type { ShortcutAction } from "../generated/ShortcutAction";
 import type { ToolSchema } from "../generated/ToolSchema";
@@ -183,6 +185,7 @@ import {
   type LayerSourceName,
   type ToolKindOfWork,
 } from "./allowed";
+import { macroFitsLayer } from "./allowed";
 import { knownGradients, loadGradients, stopsOf } from "../gradients";
 
 interface Readout {
@@ -602,7 +605,7 @@ export default function MapView({
    * first, showing the edit happening to the layers that *are* visible. So
    * the map has to know before the pointer goes down.
    */
-  const layerStackRef = useRef<ReadonlyArray<{ id: number; visible: boolean }>>([]);
+  const layerStackRef = useRef<ReadonlyArray<LayerNode>>([]);
 
   /** Whether a gesture now would land off the map (`allowed.ts`, M68). */
   const activeLayerHidden = useCallback(
@@ -1006,6 +1009,11 @@ export default function MapView({
   const [library, setLibrary] = useState<MacroLibrary | null>(null);
   /** Which macro the insert tool will place. */
   const [macroId, setMacroId] = useState<string | null>(null);
+  const canInsertMacro = useCallback(() => macroFitsLayer(
+    library?.entries.find(entry => entry.id === macroId) ?? null,
+    activeLayerRef.current,
+    layerStackRef.current,
+  ), [library, macroId]);
   /** The name being typed for a capture being finished. */
   const [captureName, setCaptureName] = useState<string | null>(null);
   const [regionMode, setRegionMode] = useState<RegionMode>("rect");
@@ -2075,10 +2083,7 @@ export default function MapView({
         layerSourcesRef.current = new Map(
           tree.layers.map((layer) => [layer.id, layer.source as LayerSourceName]),
         );
-        layerStackRef.current = tree.layers.map((layer) => ({
-          id: layer.id,
-          visible: layer.visible,
-        }));
+        layerStackRef.current = tree.layers;
         // And which of them draw over the field rather than under it.
         imagesOverRef.current = imagesOverField(
           tree.layers.map((layer) => ({
@@ -3360,7 +3365,7 @@ export default function MapView({
     // Drawn *before* the schema check below: the insert tool has no schema,
     // and behind that return this was never reached (M27).
     const macro = library?.entries.find((entry) => entry.id === macroId) ?? null;
-    if (cursor && tool === INSERT && recording === null && macro !== null) {
+    if (cursor && tool === INSERT && recording === null && macro !== null && canInsertMacro()) {
       const at = unproject(camera, view, cursor);
       drawMacroFootprint(
         context,
@@ -3627,6 +3632,7 @@ export default function MapView({
   }, [
     shapeEditing,
     step,
+    canInsertMacro,
     drawDragOutlines,
     drawMacroFootprint,
     drawGlyphs,
@@ -3962,7 +3968,9 @@ export default function MapView({
       // (M51). The eraser is an edit and has no schema of its own; a tool
       // that draws nothing is nobody's business.
       const work: ToolKindOfWork =
-        tool === ERASE
+        tool === INSERT
+          ? "adds"
+          : tool === ERASE
           ? "edits"
           : !drawsObjects(tool)
             ? "neither"
@@ -3985,16 +3993,17 @@ export default function MapView({
         // work over anything.
         forbidden:
           work !== "neither" &&
-          (!layerTakes(
+          (projectRef.current.layer_count === 0 || !layerTakes(
             layerSourcesRef.current.get(activeLayerRef.current ?? -1) ?? "painted",
             work,
           ) ||
-            activeLayerHidden()),
+            activeLayerHidden() ||
+            (tool === INSERT && !canInsertMacro())),
         grip,
       });
       if (canvas.style.cursor !== wanted) canvas.style.cursor = wanted;
     },
-    [activeLayerHidden, eyedropper, picking, recording, tool, toolPick],
+    [activeLayerHidden, canInsertMacro, eyedropper, picking, recording, tool, toolPick],
   );
   useEffect(() => {
     applyCursor(false, dragging.current !== null);
@@ -4121,6 +4130,11 @@ export default function MapView({
     // The eraser (spec.md 8.1, M29): a brush stroke that takes away. `Shift`
     // says this frame only. A size in pixels becomes kilometres here, at the
     // latitude the stroke begins, as a brush's does.
+    if ((drawsObjects(tool) || tool === ERASE || tool === INSERT) && projectRef.current.layer_count === 0) {
+      setHint("Add a layer before using this tool.");
+      return;
+    }
+
     if (tool === ERASE) {
       const geo = unproject(cameraRef.current, viewRef.current, point);
       const brush = eraserRef.current;
@@ -4135,7 +4149,7 @@ export default function MapView({
     }
 
     if (tool === INSERT) {
-      if (macroId === null) return;
+      if (macroId === null || !canInsertMacro()) return;
       const geo = unproject(cameraRef.current, viewRef.current, point);
       void api
         .insertMacro(macroId, geo.lon, geo.lat, stepRef.current, activeLayer)
@@ -5816,7 +5830,7 @@ export default function MapView({
           <div className="tool-options" role="group" aria-label="Select options">
             <label>
               Shape
-              <select
+              <ToolSelect
                 value={regionMode}
                 onChange={(event) => {
                   setRegionMode(event.target.value as RegionMode);
@@ -5827,7 +5841,7 @@ export default function MapView({
                 <option value="rect">Rectangle</option>
                 <option value="circle">Circle</option>
                 <option value="lasso">Lasso</option>
-              </select>
+              </ToolSelect>
             </label>
             <button
               disabled={region === null}
@@ -5853,7 +5867,7 @@ export default function MapView({
               <>
                 <label>
                   Shape
-                  <select
+                  <ToolSelect
                     value={regionMode}
                     onChange={(event) => {
                   setRegionMode(event.target.value as RegionMode);
@@ -5864,7 +5878,7 @@ export default function MapView({
                     <option value="rect">Rectangle</option>
                     <option value="circle">Circle</option>
                     <option value="lasso">Lasso</option>
-                  </select>
+                  </ToolSelect>
                 </label>
                 <label title="Static writes every frame as if the region never moved, so a region dragged to follow a system yields that system standing still. Record movement keeps each frame's displacement from the first.">
                   <input
@@ -6011,7 +6025,7 @@ export default function MapView({
                 format={(v) => String(Math.round(v * 100) / 100)}
                 onCommit={(size) => setEraser({ ...eraser, size: eraser.unit === "px" ? size : units.distanceToKm(size) })}
               />
-              <select
+              <ToolSelect
                 value={eraser.unit}
                 onChange={(e) => {
                   setEraser({ ...eraser, unit: e.target.value === "px" ? "px" : "km" });
@@ -6021,11 +6035,11 @@ export default function MapView({
               >
                 <option value="km">{units.distanceUnit}</option>
                 <option value="px">px</option>
-              </select>
+              </ToolSelect>
             </label>
             <label>
               Brush shape
-              <select
+              <ToolSelect
                 value={eraser.shape}
                 onChange={(e) => {
                   setEraser({ ...eraser, shape: e.target.value === "square" ? "square" : "circle" });
@@ -6034,7 +6048,7 @@ export default function MapView({
               >
                 <option value="circle">circle</option>
                 <option value="square">square</option>
-              </select>
+              </ToolSelect>
             </label>
             <label>
               Feather
@@ -6053,7 +6067,7 @@ export default function MapView({
           <div className="tool-options" role="group" aria-label="Insert options">
             <label>
               Macro
-              <select
+              <ToolSelect
                 value={macroId ?? ""}
                 disabled={(library?.entries.length ?? 0) === 0}
                 onChange={(event) => {
@@ -6067,7 +6081,7 @@ export default function MapView({
                     {entry.moves ? " · moves" : ""}
                   </option>
                 ))}
-              </select>
+              </ToolSelect>
             </label>
             <button onClick={readLibrary} title="Re-read the macro library from disk">
               Refresh
@@ -6085,7 +6099,7 @@ export default function MapView({
           <div className="tool-options" role="group" aria-label="Measure options">
             <label>
               Measure
-              <select
+              <ToolSelect
                 value={measureKind}
                 onChange={(event) => {
                   endMeasuring();
@@ -6099,7 +6113,7 @@ export default function MapView({
                     {MEASURE_LABELS[kind]}
                   </option>
                 ))}
-              </select>
+              </ToolSelect>
             </label>
             {measureKind === "rings" && (
               <>
@@ -6268,7 +6282,7 @@ export default function MapView({
         </label>
         <label>
           Projection
-          <select
+          <ToolSelect
             value={settings?.projection ?? "equirectangular"}
             disabled={settings === null}
             onChange={(e) => {
@@ -6281,7 +6295,7 @@ export default function MapView({
                 {p.label}
               </option>
             ))}
-          </select>
+          </ToolSelect>
         </label>
         <label>
           <input

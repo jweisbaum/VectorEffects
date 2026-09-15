@@ -97,6 +97,11 @@ impl ToolKind {
         !matches!(self, Self::Patch | Self::Macro)
     }
 
+    /// Captured fields retain their recorded footprint rather than shape keys.
+    pub fn can_animate_shape(self) -> bool {
+        !matches!(self, Self::Patch | Self::Macro)
+    }
+
     /// Whether the tool modifies the field beneath it rather than adding one
     /// (spec.md 6.3).
     ///
@@ -727,8 +732,8 @@ const WARP: &[PropSpec] = &[
     // Where the field under the anchor is dragged to. A *position*, not a
     // distance and a bearing: a warp is set by pulling the field where you want
     // it (shift-drag, spec.md 6.3), and the two ends of that pull are the
-    // object's own anchor and this — both animatable, so a warp that grows or
-    // travels is two keyframed points and nothing else.
+    // object's anchor and this destination. The destination applies throughout
+    // the object's lifetime; its placement can still be animated.
     pos(PropId::PushTo, "Push to"),
     num(
         PropId::TwistDeg,
@@ -1098,40 +1103,20 @@ pub fn dependencies(tool: ToolKind) -> &'static [Dependency] {
     }
 }
 
-/// Properties that exist, are edited, and cannot carry keyframes (M60).
-///
-/// Short and expected to stay short. Editable and animatable are nearly the
-/// same question — a key is an edit spread over time — and the two general
-/// answers are already rules: a creation-only property admits no edit at all
-/// (spec.md 6.1), and everything else may be keyed. This is the list of the
-/// places where that is wrong for a reason particular to the property.
-///
-/// **`shape_fill.vector_mode`.** It chooses between one vector everywhere and
-/// a ramp across the shape, and those are read from *different properties* —
-/// `speed` and `direction` against the four `*_start`/`*_end` ones. Keying it
-/// makes the object a different thing half way along the timeline: the
-/// inspector offers one set of properties at step 4 and another at step 5, and
-/// keys placed under the first sit on properties that are inert at the second,
-/// doing nothing and saying nothing about why.
-///
-/// Deliberately *not* extended to every mode that decides whether another
-/// property is live — `fill_mode`, `direction_mode`, `warp_mode`. Those have
-/// the same shape on paper, and keying `fill_mode` from a filled disc to a
-/// ring is a working, tested thing to do. The report named this one; taking
-/// the others away would be removing behaviour nobody asked about.
-///
-/// **`macro.scale_pct`.** A macro is a *recording*, and its frames are its
-/// animation (spec.md 8.7): it advances through what was captured as the
-/// timeline advances. Its scale says how large that recording was placed —
-/// chosen once, when it is placed. Keying it stretches the recording while the
-/// recording is itself advancing, so what plays back is neither what was
-/// recorded nor a clean resize; and because §9.3's motion reads the rate of
-/// change of the scale, the object would also paint a flow of its own on top
-/// of the flow it is a recording of. The `patch` is the same kind of object
-/// and is left alone until someone says the same of it.
-/// **`macro.resample`.** One strategy applies to the entire recording.
+/// Editable options whose value applies to the entire object's lifetime.
+/// Direction/fill/offset/warp modes choose how the other properties are read.
+/// Macro scale and interpolation describe the recorded field as a whole.
+/// Liquify keeps its existing keyframe behavior.
 const NEVER_KEYED: &[(ToolKind, PropId)] = &[
+    (ToolKind::Brush, PropId::DirectionMode),
+    (ToolKind::Circle, PropId::FillMode),
     (ToolKind::ShapeFill, PropId::VectorMode),
+    (ToolKind::ShapeFill, PropId::DirectionMode),
+    (ToolKind::CloneStamp, PropId::OffsetMode),
+    (ToolKind::Curve, PropId::CurveDirectionMode),
+    (ToolKind::Mask, PropId::Invert),
+    (ToolKind::Warp, PropId::WarpMode),
+    (ToolKind::Warp, PropId::PushTo),
     (ToolKind::Macro, PropId::ScalePct),
     (ToolKind::Macro, PropId::Resample),
 ];

@@ -363,8 +363,12 @@ line marks the destination. Each move is undoable, and Escape cancels a drag.
 
 ### 4.4 Animatable properties
 
-Every property of every object is animatable — including the common transform
-properties, and including enums and booleans.
+Object transform and numeric properties are animatable, as are supported enums
+and booleans. These editable choices apply to the object's entire lifetime and
+cannot be keyed: Brush Direction mode; Circle Fill; Shape fill Vector mode and
+Direction mode; Clone stamp Offset; Path Direction mode; Mask Invert; Warp Warp
+and Push to; Macro Scale and Interpolation strategy. Auto-key does not override
+these restrictions. Liquify retains its existing keyframe behavior.
 
 ```rust
 Animatable<T> {
@@ -393,8 +397,9 @@ tool-specific ones:
 field. A **modifier** (§6.3) does not carry it: its output is whatever was
 beneath it, changed, so there is nothing for "replace" to name.
 
-**Shape animation.** Every existing create or edit object has an **Animate shape**
-button on its timeline row. It toggles a temporary editing mode: perimeter dots
+**Shape animation.** Existing create and edit objects, except captured macros
+and patches, have an **Animate shape** button on their timeline row. Macros and
+patches have neither a Shape track nor shape-key editing commands. It toggles a temporary editing mode: perimeter dots
 appear on the map, and choosing another tool, pressing Escape, or pressing the
 same button closes the mode. Opening it alone does not alter the document.
 Scrubbing keeps the mode active. Dragging a dot keys only that point at the
@@ -1321,21 +1326,19 @@ Facts, not controls. A layer's name, its eye, its lock, its speed filter and
 an image's opacity are edited on the layer's own row, beside the layer they
 belong to; a second copy in the panel would be two places to change one thing.
 
-**The tool option bar spans the map view and wraps within it.** It is the width
-of the map, not of its contents. A tool's options grow as the tool gains them,
-and a bar that sizes to its contents puts the last ones past the right-hand edge
-where they cannot be reached or even seen. Wrapping to a second row is the cost
-of that, and it is the right cost: a control the user cannot reach is worse than
-one a row lower. Nothing else occupies the map's top edge.
+**The tool option bar is centred over the visible map and sizes to its tools.**
+Its maximum width leaves a margin beside both docks, and tool groups and options
+wrap within that width so every control remains reachable on narrow windows.
+Long inspector sliders, including Circle's angle from tangent, put the track,
+endpoint labels and value on separate lines instead of widening the panel.
 
-**An option control hands the keyboard back once it has been used** (M46). The
-bar sits over the map, and a control that keeps focus keeps the keyboard with
-it: the arrows that nudge a selection go to the menu, the tool shortcuts type
-into it, and on WebKit the click that dismisses a native menu's popup is
-swallowed before it reaches the canvas — which is why the first map click after
-changing a setting did nothing. Only the controls that finish in one action
-give focus up: a menu, a checkbox, a button. A text field is still being typed
-into and keeps it until it is left.
+**Changing a tool option never consumes the next map gesture.** Tool and
+inspector choice menus use an in-page option list rather than a native popup
+that can retain mouse capture. Choosing an option closes the list and releases
+focus. Clicking the map with a list still open closes it while delivering that
+same press to the tool. Numeric fields commit their pending edit before the
+canvas handles the press. This applies to every tool, including the eraser,
+macro insertion and the measurement controls.
 
 **Chrome does not overlap chrome.** It is laid out in *rows* above the bottom
 dock (M52): the readout and the legend share the first, and anything else —
@@ -1472,7 +1475,9 @@ All tools produce **objects**. Common rules:
   is shown, not chosen; an image layer has none. The map shows one kind at a
   time (§5.3), the export bakes each kind's layers together (§12.1), and a
   region copy or a macro capture is of the kind on show.
-- A layer holds an unlimited number of objects.
+- A layer holds an unlimited number of objects. All layers, including the last,
+  can be deleted. A project with no layers shows the canvas basemap; Undo restores
+  the removed layer and its objects. Add a layer before painting again.
 - All objects support: rename, delete, duplicate, copy/paste, select and
   multi-select, enable/disable, move, rotate, scale.
 - All objects are geospatial polygons or polygon-generating geometry. Nothing is
@@ -1625,7 +1630,7 @@ they cannot be forgotten either.
 
 ### 6.2 Tool catalogue
 
-Property types: `f32` unless noted. All are animatable per §4.4.
+Property types: `f32` unless noted. Keyframe availability follows §4.4.
 
 #### Brush
 
@@ -2088,9 +2093,8 @@ of aiming another. A warp therefore starts pushing *nowhere* — `push_to` is it
 anchor until it is pulled — and the option bar does not offer it at all, since
 a push is measured from an anchor no gesture has placed yet. It is the one
 property of any tool that cannot be set before the object exists. The object's own `position` is where the field comes from and
-`push_to` is where it lands — two positions, so **both ends are keyframable**
-like any other property (§9.3), and a warp that travels or grows over time is
-two animated points and nothing else. A distance and a bearing said the same
+`push_to` is where it lands. Position can be animated (§9.3); the destination
+and warp mode are constant settings (§4.4). A distance and a bearing said the same
 thing in numbers nobody could aim; this is the gesture the tool is named for.
 The pull previews as a line from the anchor to the pointer and writes once on
 release, like every other drag (§8.2).
@@ -3018,9 +3022,11 @@ the container holds one plane of samples per kind present, wind first, and an
 object placed from it paints the plane its layer is for — a macro of a storm
 carries the wind and the current that were beneath it. A capture from a
 project with no visible field layer holds one empty plane. Placing a macro
-puts one object in a layer of each kind it holds: the layer asked for where
-it is of that kind, the topmost visible painted layer of that kind
-otherwise, and a kind no layer can take is not placed.
+adds exactly one object to the selected painted layer, using its matching field
+plane. If the recording has no plane of that layer's kind, hover shows a crossed
+crosshair and placement is refused without changing any layer. Placement never
+searches another layer. A recording containing both kinds can be placed in
+either kind of layer, one explicit placement at a time.
 
 A **macro** is §8.5's capture over a *run* of frames, kept under a name in a
 library of `.vemacro` files rather than in any project, and dropped into a
@@ -3221,6 +3227,10 @@ layer and not of any object in it — and it is the one thing a layer row shows,
 which is why it is not a bar.
 
 ### 9.3 Keyframe editing
+
+Dragging the playhead/ruler scrubs time without selecting text. Ruler presses
+suppress text-selection defaults, including in WebKit, and release or pointer
+cancellation ends the scrub.
 
 - Add a key at the current step by changing a property while auto-key is on, or
   explicitly via the diamond button beside any property in the inspector.

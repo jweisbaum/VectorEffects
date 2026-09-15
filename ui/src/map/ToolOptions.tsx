@@ -1,3 +1,4 @@
+import ToolSelect from "../ToolSelect";
 /**
  * The option bar, rendered from what the backend says a tool has.
  *
@@ -140,7 +141,7 @@ function ToolOptions({
       {unitIsLive && firstSize === undefined && (
         <label>
           Shape in
-          <select
+          <ToolSelect
             value={state.unit}
             onChange={(e) => {
               setUnit(unitOf(e.target.value));
@@ -150,7 +151,7 @@ function ToolOptions({
           >
             <option value="km">{units.distanceUnit} (on the ground)</option>
             <option value="px">px (on the map)</option>
-          </select>
+          </ToolSelect>
         </label>
       )}
     </div>
@@ -212,7 +213,7 @@ function Option({
       return (
         <label>
           {spec.label}
-          <select
+          <ToolSelect
             value={value.index}
             onChange={(e) => {
               onValue({ kind: "choice", index: Number(e.target.value) });
@@ -224,7 +225,7 @@ function Option({
                 {variantLabel(name)}
               </option>
             ))}
-          </select>
+          </ToolSelect>
         </label>
       );
 
@@ -380,7 +381,7 @@ function Option({
             onCommit={(next) => onValue({ kind: "number", value: ground ? units.distanceToKm(next) : next })}
           />
           {size && showUnit && (
-            <select
+            <ToolSelect
               value={state.unit}
               onChange={(e) => {
               onUnit(unitOf(e.target.value));
@@ -390,7 +391,7 @@ function Option({
             >
               <option value="km">{units.distanceUnit}</option>
               <option value="px">px</option>
-            </select>
+            </ToolSelect>
           )}
           {size && !showUnit && (ground ? units.distanceUnit : state.unit)}
           {!size && units.suffix(spec.unit)}

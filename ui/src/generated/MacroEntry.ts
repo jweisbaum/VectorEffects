@@ -18,6 +18,10 @@ name: string,
  */
 field_kind: string,
 /**
+ * Field planes actually present in the recording, for placement validation.
+ */
+field_kinds: Array<string>,
+/**
  * How many time slices it holds.
  */
 frames: number,

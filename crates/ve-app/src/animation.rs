@@ -379,7 +379,9 @@ pub fn tracks_of(state: &AppState, object: u64, step: u32) -> Result<ObjectTrack
                 })
             })
             .collect();
-        tracks.insert(0, crate::shape_animation::track(target, step));
+        if target.tool.can_animate_shape() {
+            tracks.insert(0, crate::shape_animation::track(target, step));
+        }
         Ok(ObjectTracks {
             object,
             name: target.name.clone(),

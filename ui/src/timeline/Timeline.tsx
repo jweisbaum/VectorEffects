@@ -1214,6 +1214,8 @@ export default function Timeline({
             style={{ width: gridWidth }}
             onPointerDown={(event) => {
               // The ruler scrubs; it is not a place to select keys from.
+              if (event.button !== 0) return;
+              event.preventDefault();
               event.stopPropagation();
               setPlaying(false);
               onStepChange(clampStep(stepAt(gridX(event), pxPerStep, last)));
@@ -1222,9 +1224,11 @@ export default function Timeline({
               const done = () => {
                 window.removeEventListener("pointermove", scrub);
                 window.removeEventListener("pointerup", done);
+                window.removeEventListener("pointercancel", done);
               };
               window.addEventListener("pointermove", scrub);
               window.addEventListener("pointerup", done);
+              window.addEventListener("pointercancel", done);
             }}
           >
             {Array.from({ length: steps }, (_, s) => (
@@ -1421,7 +1425,7 @@ export default function Timeline({
                       >
                         {object.name}
                       </span>
-                      <button
+                      {object.tool !== "macro" && object.tool !== "patch" && <button
                         className={`tl-shape-toggle${shapeEditing === object.id ? " on" : ""}`}
                         aria-label={`Animate shape of ${object.name}`}
                         aria-pressed={shapeEditing === object.id}
@@ -1437,7 +1441,7 @@ export default function Timeline({
                           <path d="M4 5 15 3 16 15 5 16Z" fill="none" stroke="currentColor" />
                           {[[4,5],[15,3],[16,15],[5,16]].map(([x,y],i) => <circle key={i} cx={x} cy={y} r="2" fill="currentColor" />)}
                         </svg>
-                      </button>
+                      </button>}
                     </div>
                     <div className="tl-grid" style={{ width: gridWidth }}>
                       {/* The lifetime bar: either end resizes it, and the

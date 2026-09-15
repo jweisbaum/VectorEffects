@@ -8,7 +8,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { layerTakes, type LayerSourceName, type ToolKindOfWork } from "./allowed";
+import { layerTakes, macroFitsLayer, type LayerSourceName, type ToolKindOfWork } from "./allowed";
 
 const SOURCES: LayerSourceName[] = ["painted", "raster", "zarr", "image"];
 const WORK: ToolKindOfWork[] = ["adds", "edits", "neither"];
@@ -54,5 +54,29 @@ describe("what a layer takes", () => {
   /** The hand, the selection and the measurements are nobody's business. */
   it("lets the tools that touch no field work anywhere", () => {
     for (const source of SOURCES) expect(layerTakes(source, "neither")).toBe(true);
+  });
+});
+
+describe("macro placement", () => {
+  const layers = [
+    { id: 1, visible: true, locked: false, source: "painted", parameter: "wind" },
+    { id: 2, visible: true, locked: false, source: "painted", parameter: "current" },
+  ];
+  it("never searches other layers for the macro's field", () => {
+    expect(macroFitsLayer({field_kind:"wind", field_kinds:["wind"]}, 2, layers)).toBe(false);
+    expect(macroFitsLayer({field_kind:"current", field_kinds:["current"]}, 1, layers)).toBe(false);
+    expect(macroFitsLayer({field_kind:"wind", field_kinds:["wind"]}, 1, layers)).toBe(true);
+  });
+  it("accepts either recorded plane of a multi-field macro in the chosen layer", () => {
+    for (const id of [1, 2]) expect(macroFitsLayer({field_kind:"wind", field_kinds:["wind", "current"]}, id, layers)).toBe(true);
+  });
+  it("refuses unavailable, hidden, locked, or imported destinations", () => {
+    const macro = {field_kind:"wind", field_kinds:["wind"]};
+    expect(macroFitsLayer(macro, null, [])).toBe(false);
+    expect(macroFitsLayer(macro, 99, layers)).toBe(false);
+    expect(macroFitsLayer(null, 1, layers)).toBe(false);
+    for (const override of [{visible:false}, {locked:true}, {source:"raster"}, {source:"zarr"}, {source:"image"}]) {
+      expect(macroFitsLayer(macro, 1, [{...layers[0]!, ...override}])).toBe(false);
+    }
   });
 });

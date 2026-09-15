@@ -66,6 +66,19 @@ export function targetLayer(
   return layers[layers.length - 1]?.id ?? null;
 }
 
+/** A macro may use only the selected layer's field plane, never another layer. */
+export function macroFitsLayer(
+  macro: { field_kind: string; field_kinds?: ReadonlyArray<string> } | null,
+  active: number | null,
+  layers: ReadonlyArray<{ id: number; visible: boolean; locked: boolean; source: string; parameter: string }>,
+): boolean {
+  const id = targetLayer(active, layers);
+  const layer = layers.find(layer => layer.id === id);
+  return macro !== null && layer !== undefined && layer.visible && !layer.locked
+    && layer.source === "painted"
+    && (macro.field_kinds ?? [macro.field_kind]).includes(layer.parameter);
+}
+
 /**
  * Whether a gesture aimed at the map would land somewhere off it (M68).
  *

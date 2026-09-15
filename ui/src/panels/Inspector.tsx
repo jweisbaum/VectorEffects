@@ -1,3 +1,4 @@
+import ToolSelect from "../ToolSelect";
 import { useEffect, useState } from "react";
 
 import CentredSlider, { readoutFor } from "../CentredSlider";
@@ -235,7 +236,7 @@ export default function Inspector({
               // Two coordinates and a picker do not fit beside a label in this
               // panel's width, so a position takes the next line for itself.
               className={
-                property.value.kind === "position" ? "property stacked" : "property"
+                property.value.kind === "position" || property.slider ? "property stacked" : "property"
               }
             >
               <span className="property-label">
@@ -353,7 +354,7 @@ export default function Inspector({
 
               {property.value.kind === "choice" && (
                 <span className="property-editor">
-                  <select
+                  <ToolSelect
                     value={property.value.index}
                     onChange={(e) =>
                       write(property.id, {
@@ -367,7 +368,7 @@ export default function Inspector({
                         {variant.replace(/_/g, " ")}
                       </option>
                     ))}
-                  </select>
+                  </ToolSelect>
                 </span>
               )}
 

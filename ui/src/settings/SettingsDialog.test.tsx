@@ -23,6 +23,7 @@ const held = vi.hoisted(() => {
     id,
     name: id,
     field_kind: "wind",
+    field_kinds: ["wind"],
     frames: 3,
     span_hours: 6,
     step_hours: 3,

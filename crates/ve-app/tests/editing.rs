@@ -439,13 +439,27 @@ fn layers_can_be_added_renamed_and_removed() {
     assert_eq!(removed.layer_count, 1);
 }
 
-/// A project must always have somewhere to put an object.
+/// The last layer can be removed; Undo restores its contents.
 #[test]
-fn the_last_layer_cannot_be_removed() {
+fn the_last_layer_can_be_removed_and_restored() {
     let (_root, state) = painted("last-layer");
     let id = document::tree(&state, 0).expect("tree").layers[0].id;
-    assert!(document::layer_remove(&state, id).is_err());
-    assert_eq!(document::tree(&state, 0).expect("tree").layers.len(), 1);
+    let before = document::tree(&state, 0).expect("tree");
+    assert_eq!(
+        document::layer_remove(&state, id)
+            .expect("remove")
+            .layer_count,
+        0
+    );
+    assert!(document::tree(&state, 0).expect("tree").layers.is_empty());
+    edit::undo_for_test(&state).expect("undo");
+    let restored = document::tree(&state, 0).expect("tree");
+    assert_eq!(restored.layers.len(), 1);
+    assert_eq!(restored.layers[0].id, id);
+    assert_eq!(
+        restored.layers[0].objects.len(),
+        before.layers[0].objects.len()
+    );
 }
 
 #[test]

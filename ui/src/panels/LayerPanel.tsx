@@ -178,6 +178,10 @@ export default function LayerPanel({
   // selection, which is the same absence arriving a different way.
   useEffect(() => {
     if (!tree) return;
+    if (tree.layers.length === 0) {
+      if (activeLayer !== null) onActivateLayer(null);
+      return;
+    }
     const wanted = layerToActivate(activeLayer, tree.layers);
     if (wanted !== null) onActivateLayer(wanted);
   }, [activeLayer, onActivateLayer, tree]);
@@ -615,7 +619,6 @@ export default function LayerPanel({
                 </button>
                 <button
                   title="Delete layer"
-                  disabled={tree.layers.length <= 1}
                   onClick={() => run(api.removeLayer(layer.id))}
                 >
                   ×

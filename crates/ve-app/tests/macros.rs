@@ -219,7 +219,7 @@ fn a_macro_is_as_wide_as_its_frames_even_when_that_is_everything() {
 /// The map shows every kind the project holds, so a copy of what is on
 /// screen is a copy of all of it: a project of wind and current layers
 /// yields a macro holding both, a plane of samples each, and placing it
-/// puts an object in a layer of each kind.
+/// places only the plane belonging to the selected layer.
 #[test]
 fn a_capture_takes_every_kind_under_it() {
     use ve_core::project::FieldKind;
@@ -256,6 +256,20 @@ fn a_capture_takes_every_kind_under_it() {
     let library = macros::capture_finish(&app, "Both".to_owned(), 0).expect("finish");
     let entry = &library.entries[0];
     macros::macro_insert(&app, &entry.id, 100.0, 0.0, 0, None).expect("insert");
+    assert_eq!(entry.field_kinds, ["wind", "current"]);
+    let tree = ve_app::document::tree(&app, 0).expect("tree");
+    assert_eq!(
+        tree.layers[0].objects.len(),
+        1,
+        "no macro spills into the wind layer"
+    );
+    assert_eq!(
+        tree.layers[1].objects.len(),
+        2,
+        "one macro in the active current layer"
+    );
+    macros::macro_insert(&app, &entry.id, 100.0, 0.0, 0, Some(tree.layers[0].id))
+        .expect("explicit wind placement");
 
     let project = {
         let session = app.session.lock().expect("lock");
@@ -1116,4 +1130,43 @@ fn macro_strategy_is_static_and_missing_frames_are_transparent_or_interpolated()
             .any(|p| p.id == "Resample"),
         "matching cadence hides the setting"
     );
+}
+
+#[test]
+fn incompatible_macros_never_fall_through_to_a_matching_layer() {
+    for (kind, other) in [("wind", "current"), ("current", "wind")] {
+        let root = TempRoot::new(kind);
+        let state = app(&root);
+        let first = ve_app::document::tree(&state, 0).unwrap().layers[0].id;
+        ve_app::document::layer_parameter(&state, first, kind).unwrap();
+        travelling_stroke(&state, 18.0);
+        macros::capture_start(&state, region(0.0, 0.0), 0, false, None).unwrap();
+        let library = macros::capture_finish(&state, "Single field".into(), 0).unwrap();
+        assert_eq!(library.entries[0].field_kinds, [kind]);
+        ve_app::document::layer_add(&state, "Wrong field".into()).unwrap();
+        let selected = ve_app::document::tree(&state, 0).unwrap().layers[1].id;
+        ve_app::document::layer_parameter(&state, selected, other).unwrap();
+        let error =
+            macros::macro_insert(&state, &library.entries[0].id, 30.0, 0.0, 0, Some(selected))
+                .unwrap_err();
+        assert!(error.to_string().contains("select a matching layer"));
+        let tree = ve_app::document::tree(&state, 0).unwrap();
+        assert_eq!(
+            tree.layers[0].objects.len(),
+            1,
+            "only the original stroke remains"
+        );
+        assert!(tree.layers[1].objects.is_empty());
+        assert!(
+            state
+                .session
+                .lock()
+                .unwrap()
+                .require_open()
+                .unwrap()
+                .project
+                .captures
+                .is_empty()
+        );
+    }
 }

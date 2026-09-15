@@ -1,19 +1,4 @@
-/**
- * The option bar's layout rule (spec.md 5.5, 6.1).
- *
- * "A tool whose option bar does not fit the map at 1280 px wide, wrapped, is
- * not done" is M6's acceptance criterion, and what makes it hold for every tool
- * at once is that the bar **spans the map and wraps within it** rather than
- * sizing to its contents. A bar that sizes to its contents puts the last
- * options off screen where they cannot be reached, and it does so silently —
- * the layout is correct by every other measure and the controls are simply
- * gone.
- *
- * Asserted against the stylesheet because that is where the rule lives. jsdom
- * has no layout engine, so a rendered test could not measure the bar; what it
- * can do is fail when the two declarations that make wrapping work are removed,
- * which is the change that would break the criterion.
- */
+/** Centred, content-sized toolbar with a bound that keeps every tool reachable. */
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
@@ -29,21 +14,16 @@ function block(selector: string): string {
 }
 
 describe("the toolbar", () => {
-  /**
-   * Anchored to both edges rather than given a width: the bar is as wide as the
-   * map at any window size, which is what leaves room for the options to wrap
-   * into instead of overflowing. The edges are the *visible* map's: the map
-   * runs under the docked panels (spec.md 5.5, M27), so each side is inset by
-   * that side's dock variable.
-   */
-  it("spans the visible map", () => {
+  it("centres its contents inside the visible map and caps its width", () => {
     const rule = block(".map-toolbar");
-    expect(rule).toMatch(/left:\s*calc\(var\(--dock-left, 0px\) \+ 12px\)/);
-    expect(rule).toMatch(/right:\s*calc\(var\(--dock-right, 0px\) \+ 12px\)/);
+    expect(rule).toContain("left: calc(50% + (var(--dock-left, 0px) - var(--dock-right, 0px)) / 2)");
+    expect(rule).toContain("transform: translateX(-50%)");
+    expect(rule).toContain("width: max-content");
+    expect(rule).toContain("max-width: calc(100% - var(--dock-left, 0px) - var(--dock-right, 0px) - 24px)");
   });
 
-  it("wraps rather than overflowing", () => {
-    expect(block(".map-toolbar")).toMatch(/flex-wrap:\s*wrap/);
+  it("wraps the tool buttons on narrow windows", () => {
+    expect(block(".map-toolbar .history")).toMatch(/flex-wrap:\s*wrap/);
   });
 
   /**

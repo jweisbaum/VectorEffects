@@ -62,6 +62,8 @@ pub struct MacroEntry {
     pub name: String,
     /// `"wind"` or `"current"`, from the project it was taken in.
     pub field_kind: String,
+    /// Field planes actually present in the recording, for placement validation.
+    pub field_kinds: Vec<String>,
     /// How many time slices it holds.
     pub frames: u32,
     /// Hours from its first frame to its last.
@@ -171,6 +173,11 @@ fn entry_of(path: &Path) -> Option<MacroEntry> {
         id: path.file_stem()?.to_string_lossy().into_owned(),
         name: header.name,
         field_kind: header.field_kind,
+        field_kinds: capture
+            .kinds
+            .iter()
+            .map(|kind| crate::projects::kind_name(*kind).to_owned())
+            .collect(),
         frames: capture.frames.len() as u32,
         span_hours: capture.frames.last().map_or(0.0, |f| f.offset_hours),
         step_hours: header.step_hours,
@@ -1084,79 +1091,30 @@ pub fn macro_insert(
             step_count,
             open.project.settings.step_hours.hours(),
         );
-        // One object per kind the capture holds (M34), each in a layer of
-        // that kind: an object paints the plane its layer is for, and a macro
-        // of wind and current together is two objects or it is half of
-        // itself. The layer asked for is used where it is of the right kind,
-        // and the topmost visible painted layer of that kind otherwise; a
-        // kind no layer can take is not placed, and if none can be the
-        // refusal is the ordinary one.
+        // A placement belongs only to the selected layer. A multi-field macro
+        // uses that layer's plane; missing planes never redirect the placement.
         let asked =
             crate::document::creation_layer(&open.project, layer, crate::document::Placing::Field)?;
-        let (asked_id, asked_kind) = (asked.id, asked.parameter());
-        let targets: Vec<_> = capture
-            .kinds
-            .iter()
-            .filter_map(|kind| {
-                let found = if asked_kind == *kind {
-                    Some(asked_id)
-                } else {
-                    open.project
-                        .layers
-                        .iter()
-                        .rev()
-                        .find(|layer| {
-                            layer.visible
-                                && !layer.locked
-                                && !layer.is_grib()
-                                && layer.parameter() == *kind
-                        })
-                        .map(|layer| layer.id)
-                };
-                let id = found?;
-                let index = open
-                    .project
-                    .layer(id)
-                    .map_or(0, |layer| layer.objects.len());
-                Some((id, index))
-            })
-            .collect();
-        if targets.is_empty() {
+        crate::document::pointed_at(asked)?;
+        if !capture.kinds.contains(&asked.parameter()) {
             return Err(AppError::BadOption {
                 field: "layer",
                 value: format!(
-                    "no visible painted layer holds {}; make one and place it there",
-                    capture
-                        .kinds
-                        .iter()
-                        .map(|kind| crate::projects::kind_name(*kind))
-                        .collect::<Vec<_>>()
-                        .join(" or ")
+                    "this macro has no {} data for \"{}\"; select a matching layer",
+                    crate::projects::kind_name(asked.parameter()),
+                    asked.name
                 ),
             });
         }
+        let (layer, index) = (asked.id, asked.objects.len());
         open.project
             .captures
             .entry(capture.hash.clone())
             .or_insert_with(|| Arc::clone(&capture));
-        let commands: Vec<Command> = targets
-            .into_iter()
-            .map(|(layer, index)| Command::AddObject {
-                layer,
-                index,
-                object: Box::new(object.clone()),
-            })
-            .collect();
-        let command = if commands.len() == 1 {
-            commands.into_iter().next().unwrap_or(Command::Batch {
-                label: "Place macro".to_owned(),
-                commands: Vec::new(),
-            })
-        } else {
-            Command::Batch {
-                label: "Place macro".to_owned(),
-                commands,
-            }
+        let command = Command::AddObject {
+            layer,
+            index,
+            object: Box::new(object),
         };
         let (project, history) = (&mut open.project, &mut open.history);
         history.push(project, command)?;

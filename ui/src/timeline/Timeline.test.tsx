@@ -163,3 +163,39 @@ it("holds the latest released span through the write and delayed tree refresh", 
     expect(changed).toHaveBeenCalledTimes(1);
   } finally { await act(async () => root.unmount()); container.remove(); backend.tree.mockResolvedValue({ layers: [] }); }
 });
+
+it("scrubs the ruler without starting text selection and stops on cancel", async () => {
+  backend.tree.mockResolvedValue({layers: []});
+  const project = {revision: 19, step_count:10, step_hours:1, start_unix_s:null} as ProjectSummary;
+  const move = vi.fn();
+  const container = document.createElement("div"); document.body.append(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(<Timeline project={project} step={0} onStepChange={move} selection={[]} onSelect={() => {}}
+      viewport={[]} playback={{prepare: () => ({ready:0,total:0,streaming:false}), present: () => false}} autoKey={false} onAutoKey={() => {}} onChanged={() => {}} onFramesSelected={() => {}}
+      onKeysSelected={() => {}} settings={null} capture={null} onCapture={() => {}} />));
+    const ruler = container.querySelector<HTMLElement>(".tl-ruler .tl-grid")!;
+    const press = new PointerEvent("pointerdown", {bubbles:true, cancelable:true, button:0, clientX:240});
+    await act(async () => ruler.dispatchEvent(press));
+    expect(press.defaultPrevented).toBe(true);
+    await act(async () => window.dispatchEvent(new PointerEvent("pointermove", {clientX:310})));
+    expect(move).toHaveBeenCalledTimes(2);
+    await act(async () => window.dispatchEvent(new PointerEvent("pointercancel")));
+    await act(async () => window.dispatchEvent(new PointerEvent("pointermove", {clientX:360})));
+    expect(move).toHaveBeenCalledTimes(2);
+  } finally { await act(async () => root.unmount()); container.remove(); }
+});
+
+it.each(["macro", "patch"])("does not offer shape animation for a %s", async (tool) => {
+  backend.tree.mockResolvedValue({ layers: [{id:1, name:"Layer", visible:true, locked:false, source:"painted", parameter:"wind", grib:null, image:null,
+    objects:[{id:2, name:"Capture", tool, tool_label:tool, active_here:true, start_step:0, end_step:9}]}]});
+  const project = {revision: 20, step_count:10, step_hours:1, start_unix_s:null} as ProjectSummary;
+  const container = document.createElement("div"); document.body.append(container); const root=createRoot(container);
+  try {
+    await act(async () => root.render(<Timeline project={project} step={0} onStepChange={() => {}} selection={[]} onSelect={() => {}}
+      viewport={[]} playback={{prepare: () => ({ready:0,total:0,streaming:false}), present: () => false}} autoKey={false} onAutoKey={() => {}} onChanged={() => {}} onFramesSelected={() => {}}
+      onKeysSelected={() => {}} settings={null} capture={null} onCapture={() => {}} />));
+    expect(container.querySelector(".tl-object-name")?.textContent).toBe("Capture");
+    expect(container.querySelector(".tl-shape-toggle")).toBeNull();
+  } finally { await act(async () => root.unmount()); container.remove(); backend.tree.mockResolvedValue({layers:[]}); }
+});

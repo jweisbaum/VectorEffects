@@ -882,13 +882,6 @@ pub fn remove_layer(state: tauri::State<'_, AppState>, layer: u64) -> Result<Pro
 /// Implementation of [`remove_layer`].
 pub fn layer_remove(state: &AppState, layer: u64) -> Result<ProjectSummary> {
     apply(state, |project| {
-        // A project always has somewhere to put an object, so the last layer
-        // cannot be removed.
-        if project.layers.len() <= 1 {
-            return Err(AppError::Internal(
-                "a project must keep at least one layer".to_owned(),
-            ));
-        }
         let index = project
             .layer_index(object_id(layer))
             .ok_or_else(|| missing_layer(layer))?;

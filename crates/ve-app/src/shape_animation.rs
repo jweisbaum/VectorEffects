@@ -46,9 +46,13 @@ fn target(project: &Project, object: u64) -> Result<&Object> {
     if layer.locked {
         return Err(bad(format!("{} is locked", layer.name)));
     }
-    project
+    let target = project
         .object(object_id(object))
-        .ok_or(AppError::Core(ve_core::CoreError::MissingObject(object)))
+        .ok_or(AppError::Core(ve_core::CoreError::MissingObject(object)))?;
+    if !target.tool.can_animate_shape() {
+        return Err(bad("macros and patches cannot have shape keyframes"));
+    }
+    Ok(target)
 }
 
 fn flat_at(project: &Project, object: &Object, step: u32) -> Result<FlatObject> {

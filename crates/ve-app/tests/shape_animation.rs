@@ -385,3 +385,26 @@ fn a_mercator_pixel_eraser_cuts_a_ground_object_in_screen_space_and_survives_sav
     assert!(!fixture.covered(0, inside));
     assert!(fixture.covered(0, outside));
 }
+
+#[test]
+fn captured_objects_have_no_shape_controls_or_key_commands() {
+    for tool in [ToolKind::Macro, ToolKind::Patch] {
+        let f = Fixture::new(tool);
+        assert!(
+            animation::tracks_of(&f.state, f.object, 0)
+                .unwrap()
+                .tracks
+                .iter()
+                .all(|t| t.property != "shape")
+        );
+        assert!(shape::controls_of(&f.state, f.object, 0).is_err());
+        assert!(animation::key_at(&f.state, f.object, "shape", 2, None).is_err());
+        assert!(
+            f.doc()
+                .object(ve_core::Id::from_raw(f.object))
+                .unwrap()
+                .shape_animation
+                .is_none()
+        );
+    }
+}
