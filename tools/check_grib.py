@@ -24,6 +24,16 @@ def read(path):
             gid = eccodes.codes_grib_new_from_file(handle)
             if gid is None:
                 break
+            assert eccodes.codes_get_long(gid, "centre") == 65535, "originating centre must be unspecified"
+            assert eccodes.codes_get_long(gid, "bitsPerValue") <= 16, "automatic packing"
+            message = eccodes.codes_get_message(gid)
+            offset, memos = 16, []
+            while offset < len(message) - 4:
+                length = int.from_bytes(message[offset:offset + 4], "big")
+                if message[offset + 4] == 2:
+                    memos.append(message[offset + 5:offset + length])
+                offset += length
+            assert memos == [b"Created with VectorEffects"], "each message must carry provenance"
             key = (eccodes.codes_get(gid, "shortName"), eccodes.codes_get(gid, "step"))
             ni = eccodes.codes_get(gid, "Ni")
             nj = eccodes.codes_get(gid, "Nj")

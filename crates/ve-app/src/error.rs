@@ -121,6 +121,7 @@ impl AppError {
     /// A stable, machine-readable discriminant for the frontend.
     pub fn kind(&self) -> &'static str {
         match self {
+            Self::Core(ve_core::CoreError::MissingObject(_)) => "missing-object",
             Self::Core(_) => "core",
             Self::Render(_) => "render",
             Self::Grib(_) => "grib",
@@ -209,5 +210,13 @@ mod tests {
     fn wraps_library_errors_with_their_own_kind() {
         let err: AppError = ve_core::CoreError::LatitudeOutOfRange(91.0).into();
         assert_eq!(err.kind(), "core");
+    }
+
+    #[test]
+    fn missing_object_reads_have_a_distinct_wire_kind() {
+        let err: AppError = ve_core::CoreError::MissingObject(50).into();
+        let json = serde_json::to_value(&err).unwrap();
+        assert_eq!(json["kind"], "missing-object");
+        assert!(json["message"].as_str().unwrap().contains("#50"));
     }
 }

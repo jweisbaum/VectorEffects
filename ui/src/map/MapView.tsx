@@ -175,7 +175,7 @@ import { preparationTargets, type PlaybackMap, type PreparationRequest } from ".
 import { playbackPresented, playbackTime } from "../timeline/metrics";
 import { TileCache } from "./tiles";
 import { beneathToken, frameToken, onlyToken, parseFrameToken } from "./frameToken";
-import { releaseFocus } from "./focus";
+import { focusMapForGesture, releaseFocus } from "./focus";
 import { imagesOverField } from "./imageStack";
 import {
   aimedOffTheMap,
@@ -914,6 +914,7 @@ export default function MapView({
       }).catch((error: unknown) => {
         if (cancelled) return;
         onExitShapeEditing?.();
+        if (typeof error === "object" && error !== null && "kind" in error && error.kind === "missing-object") return;
         reportError(String(error));
       });
     }
@@ -2292,7 +2293,7 @@ export default function MapView({
         transformRevision.current = revision;
         setTransform(value);
       })
-      .catch(() => setTransform(null));
+      .catch(() => { if (!cancelled) setTransform(null); });
     return () => {
       cancelled = true;
     };
@@ -2375,7 +2376,7 @@ export default function MapView({
     unit: "km" | "px";
     shape: BrushShape;
     feather: number;
-  }>({ size: 400, unit: "km", shape: "circle", feather: 0.3 });
+  }>({ size: 400, unit: "km", shape: "circle", feather: 0 });
   const eraserRef = useRef(eraser);
   eraserRef.current = eraser;
   const operatorOutlinesRef = useRef<OperatorOutline[]>([]);
@@ -5694,6 +5695,8 @@ export default function MapView({
       <canvas
         ref={canvasRef}
         className="map-canvas"
+        tabIndex={0}
+        onPointerDownCapture={(event) => focusMapForGesture(event.currentTarget)}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={endDrag}

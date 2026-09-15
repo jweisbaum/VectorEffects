@@ -469,11 +469,14 @@ export default function Timeline({
   const [graphs, setGraphs] = useState<Set<string>>(new Set());
   const [samples, setSamples] = useState<Map<string, TrackSamples>>(new Map());
 
+  const treeRequest = useRef(0);
   useEffect(() => {
+    const request = ++treeRequest.current;
     api
       .documentTree(step)
-      .then(setTree)
-      .catch((err: unknown) => setError(String(err)));
+      .then((next) => { if (request === treeRequest.current) setTree(next); })
+      .catch((err: unknown) => { if (request === treeRequest.current) setError(String(err)); });
+    return () => { treeRequest.current++; };
   }, [project.revision, step]);
 
   const expandedKey = [...expanded].sort((a, b) => a - b).join(",");
@@ -622,6 +625,8 @@ export default function Timeline({
    */
   const [rangeDrag, setRangeDrag] = useState<RangeDrag | null>(null);
   const rangeDragRef = useRef<RangeGrab | null>(null);
+  const rangeSession = useRef(0);
+  const rangePreview = useRef<RangeDrag | null>(null);
   /** A box selection in progress, in grid pixels. */
   const [box, setBox] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const boxRef = useRef<{ x0: number; y0: number } | null>(null);
@@ -820,7 +825,8 @@ export default function Timeline({
     }
     const range = rangeDragRef.current;
     if (range) {
-      setRangeDrag(draggedRange(range, stepAt(gridX(event), pxPerStep, last), last));
+      rangePreview.current = draggedRange(range, stepAt(gridX(event), pxPerStep, last), last);
+      setRangeDrag(rangePreview.current);
       return;
     }
     const start = boxRef.current;
@@ -889,20 +895,22 @@ export default function Timeline({
     const range = rangeDragRef.current;
     if (range) {
       rangeDragRef.current = null;
-      if (!rangeDrag) {
+      const preview = rangePreview.current;
+      if (!preview) {
         // Pressed and released without moving: a click on the window, which
         // selects the object and changes nothing (M63).
         onSelect([range.object]);
         return;
       }
-      if (unchanged(range, rangeDrag)) {
+      if (unchanged(range, preview)) {
         // A nudge that never left the step it began in: the same as a click,
         // and no entry in the history that undoes nothing.
         setRangeDrag(null);
         onSelect([range.object]);
         return;
       }
-      const [start, end] = committedRange(range, rangeDrag);
+      const [start, end] = committedRange(range, preview);
+      const session = rangeSession.current;
       setError(null);
       // The preview stands until the document has caught up. Clearing it here
       // and asking afterwards drew the window from the old numbers for the
@@ -910,9 +918,18 @@ export default function Timeline({
       // jumped to where it was dropped (M62).
       void commitRangeDrag(
         () => api.setActiveRange(range.object, start, end),
-        onChanged,
+        async (next) => {
+          const request = ++treeRequest.current;
+          try {
+            const refreshed = await api.documentTree(step);
+            if (request === treeRequest.current) setTree(refreshed);
+          } finally {
+            // The write succeeded even if refreshing the rows failed.
+            onChanged(next);
+          }
+        },
         (why) => setError(String(why)),
-        () => setRangeDrag(null),
+        () => { if (session === rangeSession.current) setRangeDrag(null); },
       );
       return;
     }
@@ -1366,10 +1383,23 @@ export default function Timeline({
               // Every grip takes hold the same way: capture the pointer, note
               // what is not moving, and let the move handler do the maths.
               const takeHold = (event: React.PointerEvent, grab: RangeGrab) => {
+                if (event.button !== 0) return;
+                event.preventDefault();
                 event.stopPropagation();
                 (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
                 rangeDragRef.current = grab;
+                rangeSession.current++;
+                rangePreview.current = null;
                 setRangeDrag(null);
+              };
+              const nudgeEnd = (event: React.KeyboardEvent, grip: "start" | "end") => {
+                if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+                event.preventDefault();
+                event.stopPropagation();
+                const delta = event.key === "ArrowLeft" ? -1 : 1;
+                const from = grip === "start" ? Math.max(0, Math.min(hi, lo + delta)) : lo;
+                const to = grip === "end" ? Math.min(last, Math.max(lo, hi + delta)) : hi;
+                if (from !== lo || to !== hi) run(api.setActiveRange(object.id, from, to));
               };
               return (
                 <div key={object.id} className="tl-object">
@@ -1439,6 +1469,12 @@ export default function Timeline({
                       >
                         <span
                           className="tl-range-end"
+                          role="slider"
+                          tabIndex={0}
+                          onKeyDown={event => nudgeEnd(event, "start")}
+                          aria-label={`Start frame for ${object.name}`}
+                          aria-valuemin={0} aria-valuemax={last} aria-valuenow={lo}
+                          title={`Start frame ${lo} — drag to resize`}
                           onPointerDown={(event) =>
                             takeHold(event, {
                               object: object.id,
@@ -1451,6 +1487,12 @@ export default function Timeline({
                         />
                         <span
                           className="tl-range-end right"
+                          role="slider"
+                          tabIndex={0}
+                          onKeyDown={event => nudgeEnd(event, "end")}
+                          aria-label={`End frame for ${object.name}`}
+                          aria-valuemin={0} aria-valuemax={last} aria-valuenow={hi}
+                          title={`End frame ${hi} — drag to resize`}
                           onPointerDown={(event) =>
                             takeHold(event, {
                               object: object.id,

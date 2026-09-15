@@ -588,8 +588,6 @@ fn an_image_layer_exports_to_the_same_bytes_as_no_image() {
                 month: 9,
                 day: 4,
                 hour: 0,
-                centre: 255,
-                bits: 16,
             },
             &AtomicBool::new(false),
             |_| {},

@@ -1881,6 +1881,12 @@ at a fixed geodesic offset. See §7.6 for the evaluation rule and recursion cap.
 The GPU declines a scene containing one and routes it to the CPU (§7.8), so
 this is the one tool whose evaluation has a single implementation.
 
+Only defined vector samples are copied. An undefined source area leaves the
+destination untouched, in both edge modes and during the live preview; the
+basemap is never part of the source. A deliberately painted calm is still data.
+Source coverage multiplies stamp coverage, with premultiplied vectors blended
+only once. Reaching the recursion cap contributes nothing.
+
 | Option | Type | Notes |
 |---|---|---|
 | `brush_shape` | enum `Circle` \| `Square` | **Fixed at creation**, as on the brush. |
@@ -1909,7 +1915,7 @@ A polyline or cubic-Bézier path with a vector field along it.
 | `curve_kind` | enum `Polyline` \| `Bezier` | **Fixed at creation.** A node's handles are what make a segment a Bézier, so the kind is implied by the geometry — but it is also what the *tool* was set to when the path was drawn, which is what the option bar has to remember. |
 | `stamp_space` | enum `Geodesic` \| `Projected` \| `Mercator` \| `Miller` | **Fixed at creation**; set by the width's unit. The corridor has a width, so it asks the same question every sized tool asks (§3.5). |
 | `speed` | f32 | |
-| `direction_mode` | enum `Absolute` \| `RelativeToPath` | **Its own property**, not the shared `direction_mode`: a curve aims along its path, where the shared modes aim at a point. A tool may add modes of its own; it may not redefine a shared one. `Constant` is named for the fixed bearing every other tool calls by that name — it was `Absolute`, which meant the same thing in different words and made two option bars read as though they described different things. The variant is renamed in place, not reordered: the stored value is the index. |
+| `direction_mode` | enum `Constant` \| `RelativeToPath` | **Its own property**, not the shared `direction_mode`: a curve aims along its path, where the shared modes aim at a point. A tool may add modes of its own; it may not redefine a shared one. `Constant` is named for the fixed bearing every other tool calls by that name — it was `Absolute`, which meant the same thing in different words and made two option bars read as though they described different things. The variant is renamed in place, not reordered: the stored value is the index. |
 | `direction` | Angle | `Constant`: fixed bearing, a flow direction shown in the project's convention (§3.3). `RelativeToPath`: an *offset* added to the path's local tangent, so 0 = along the path and 90 = across it — an offset is not an azimuth and must not be converted. The two readings of one property are why it is displayed by mode, not by unit, and why the eyedropper (§6.1) is offered in `Constant` mode only. |
 | `width_km` | f32 | Corridor half-width; px or km input, so `stamp_space` applies (§3.5). |
 | `feather` | f32 0–1 | Across the corridor width. |
@@ -3191,6 +3197,10 @@ Each object row shows a bar spanning its `active_range`, draggable at either end
 to change start and end. Layers have **no** bars — the range is an object-level
 concept per the requirements.
 
+End grips have a generous pointer target around the visible mark. A released
+drag stays at its requested range until the refreshed document tree arrives,
+not merely until the write acknowledges; failed writes restore the old range.
+
 **The body of the bar slides the whole window** (M63), keeping its length, so
 "this happens later" is one drag rather than two resizes that have to be done
 in the right order — dragging the start past the old end first would shorten
@@ -3591,7 +3601,7 @@ Section layout per message:
 |---|---|---|
 | 0 | `GRIB`, discipline, edition 2, total length | 16 |
 | 1 | Identification: centre, tables versions, reference time, production status, type of data | 21 |
-| 2 | Local use — **omitted** | — |
+| 2 | Local use: UTF-8 memo `Created with VectorEffects` | 31 |
 | 3 | Grid definition, template 3.0 (regular lat/lon) | 72 |
 | 4 | Product definition, template 4.0 (analysis/forecast at a horizontal level) | 34 |
 | 5 | Data representation, template 5.0 (simple packing) | 21 |
@@ -3616,9 +3626,11 @@ Key field values:
   1 (forecast).
 - **Indicator of unit of time range** = 1 (hour); **forecast time** =
   `step_index × step_hours`.
-- **Centre** defaults to 255 (missing) and is configurable, since some consumers
-  treat unknown centres poorly; setting it to 7 (NCEP) is offered as a
-  compatibility option and clearly labelled as a fiction.
+- **Centre** is missing (`65535`, all bits set in its two octets). There is
+  no centre selector and no attribution to another forecast provider.
+- Every message includes the memo **Created with VectorEffects** in Section 2.
+  It is local-use metadata; component values, bitmaps and time metadata retain
+  their standard encodings. See [GRIB2 local-use layout](https://codes.ecmwf.int/grib/format/grib2/sections/2/).
 
 ### 12.3 Simple packing (template 5.0)
 
@@ -3626,33 +3638,23 @@ Key field values:
 Y * 10^D = R + X * 2^E
 ```
 
-For each field: `D = 0`; `R = min(Y)`; `bits` as chosen — **8, 12, 16 or 24,
-default 16** (M19, D53); `E = ceil(log2((max - min) / (2^bits - 1)))`, clamped
-to ≥ a floor that avoids denormal blow-up; `X = round((Y * 10^D - R) / 2^E)`.
-
-16 bits gives roughly 0.002 m/s resolution over a ±60 m/s range — far finer than
-anything the tools can express, and what every export wrote before the width
-was a choice. 8 bits halves the file at steps of about half a knot; 24 is for
-someone who asked. The export dialog shows the step the width implies, in
-knots over a nominal ±60 m/s, and the size beside it; the packer refuses any
-width but those four, before a file is opened. A constant field (max == min) is
-encoded with `bits = 0` and no data octets, which is legal and compact.
-
-"Export as float16" was the request that became this option. GRIB2 has no
-16-bit float representation — template 5.4 offers 32, 64 and 128 — and the
-export already packed 16 bits per value, so what was wanted was the precision
-as a visible choice against the file size (D53). Template 5.0 stays the only
-packing written.
+For each field: `D = 0`; `R = min(Y)`; **16 bits per value**;
+`E = ceil(log2((max - min) / (2^16 - 1)))`, with the packer's lower bound.
+`X = round((Y * 10^D - R) / 2^E)`. This is roughly 0.002 m/s resolution over
+±60 m/s. Constant fields use zero bits and no data octets. Export precision
+is fixed; the earlier 8/12/16/24-bit selection is withdrawn on the user's
+September 14 instruction. The library packer retains those widths for internal
+use and tests. Template 5.0 remains the output format.
 
 ### 12.4 Export flow
 
 1. User invokes export and supplies: **forecast start time (UTC)**, output
-   **file name**, and **output location**. Optionally centre code and the
-   `fast_export` toggle.
+   **file name**, and **output location**. There are no centre or precision
+   selections; exports use the deterministic CPU evaluator.
 2. A pre-flight panel shows the estimated file size (`Ni × Nj × bits/8 × 2
    fields × step_count`, plus headers) and the estimated duration. At 0.1° with
    120 steps and 16 bits this is ≈ 6.2 GB, which the user should see before
-   starting; at 8 bits, half that.
+   starting.
 3. Export runs on a background worker, streaming to disk one message at a time —
    the whole field set is never held in memory.
 4. Progress is per-step, with a cancel button. Cancelling deletes the partial
@@ -3728,6 +3730,17 @@ their reasoning so they are not reopened by accident.
 
 
 ### September 2026 beta behavior
+
+- Newly selected tools and the eraser default to Feather 0. Saved object values
+  are preserved. Circle's Angle from tangent is a −90° to +90° slider (inward,
+  tangent, outward); Path's fixed-bearing direction mode is named Constant.
+- A completed tool setting returns keyboard focus to the map. The first map
+  press commits any outstanding numeric edit and performs the requested gesture.
+- Deleted objects are removed from selection and shape-editing state. Obsolete
+  inspector responses cannot replace a newer selection or report stale errors.
+- Help includes searchable, illustrated descriptions of each tool, parameter,
+  layer operation, global setting, and timeline option, with bundled screenshots
+  supplied by the user. Earlier screenshots are labelled where controls changed.
 
 - Selected-object drag previews evaluate the selected objects themselves. They
   never copy the rectangular region of the composited map. Selected edit tools

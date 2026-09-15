@@ -1732,7 +1732,7 @@ fn the_divergence_amount_is_a_reversed_centred_slider() {
     assert!(slider.reversed, "diverging is to the left");
     assert_eq!(
         (slider.low_label.as_str(), slider.high_label.as_str()),
-        ("Divergence", "Convergence")
+        ("Divergence (outward)", "Convergence (inward)")
     );
 }
 

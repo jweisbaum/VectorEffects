@@ -361,6 +361,19 @@ fn section6_bitmap(present: &[bool]) -> Vec<u8> {
     out
 }
 
+/// Human-readable provenance stored in every message's local-use section.
+pub const PROVENANCE: &str = "Created with VectorEffects";
+
+/// GRIB2 Section 2: four-byte length, section number, then local-use octets.
+/// https://codes.ecmwf.int/grib/format/grib2/sections/2/
+fn section2() -> Vec<u8> {
+    let mut out = Vec::with_capacity(5 + PROVENANCE.len());
+    put_u32(&mut out, (5 + PROVENANCE.len()) as u32);
+    put_u8(&mut out, 2);
+    out.extend_from_slice(PROVENANCE.as_bytes());
+    out
+}
+
 fn section7(packed: &Packed) -> Vec<u8> {
     let mut out = Vec::with_capacity(5 + packed.data.len());
     put_u32(&mut out, (5 + packed.data.len()) as u32);
@@ -384,6 +397,7 @@ pub fn message(spec: &MessageSpec, values: &[f32]) -> Result<Vec<u8>> {
     let packed = packing::pack(values, spec.bits)?;
     let body = [
         section1(spec),
+        section2(),
         section3(spec.grid),
         section4(spec),
         section5(&packed),
@@ -433,6 +447,7 @@ pub fn message_masked(spec: &MessageSpec, values: &[f32]) -> Result<Vec<u8>> {
     let packed = packing::pack(&written, spec.bits)?;
     let body = [
         section1(spec),
+        section2(),
         section3(spec.grid),
         section4(spec),
         section5(&packed),
@@ -570,6 +585,7 @@ mod tests {
     #[test]
     fn sections_are_the_documented_lengths() {
         assert_eq!(section1(&spec()).len(), 21);
+        assert_eq!(section2().len(), 5 + PROVENANCE.len());
         assert_eq!(section3(grid()).len(), 72);
         assert_eq!(section4(&spec()).len(), 34);
         assert_eq!(section6().len(), 6);
@@ -577,6 +593,43 @@ mod tests {
         let packed = packing::pack(&[1.0, 2.0], packing::BITS_PER_VALUE).expect("packs");
         assert_eq!(section5(&packed).len(), 21);
         assert_eq!(section7(&packed).len(), 5 + packed.data.len());
+    }
+
+    #[test]
+    fn every_message_carries_provenance_without_changing_coverage() {
+        for parameter in [
+            Parameter::WindU,
+            Parameter::WindV,
+            Parameter::CurrentU,
+            Parameter::CurrentV,
+        ] {
+            let mut spec = spec();
+            spec.parameter = parameter;
+            for missing in [0, 1, spec.grid.point_count() as usize] {
+                let mut values = vec![0.0; spec.grid.point_count() as usize];
+                values[..missing].fill(f32::NAN);
+                let bytes = message_masked(&spec, &values).expect("encode");
+                let mut offset = 16;
+                let mut memos = 0;
+                while offset < bytes.len() - 4 {
+                    let length =
+                        u32::from_be_bytes(bytes[offset..offset + 4].try_into().unwrap()) as usize;
+                    if bytes[offset + 4] == 2 {
+                        assert_eq!(
+                            &bytes[offset + 5..offset + length],
+                            b"Created with VectorEffects"
+                        );
+                        memos += 1;
+                    }
+                    offset += length;
+                }
+                assert_eq!(memos, 1);
+                let decoded = crate::decode::read_all(&bytes).expect("decode local-use section");
+                let got = &decoded.messages[0].values;
+                assert!(got[..missing].iter().all(|v| *v == crate::decode::MISSING));
+                assert!(got[missing..].iter().all(|v| *v == 0.0));
+            }
+        }
     }
 
     /// Sign-magnitude, not two's complement. A latitude of -90 must not become

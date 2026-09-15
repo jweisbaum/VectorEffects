@@ -20,12 +20,12 @@ it("opens from the native menu, shows bundled help, and restores the editor on E
     expect(host.querySelector('[role="dialog"]')).toBeNull();
     await act(async () => events.open());
     expect(host.querySelector('[role="dialog"]')?.textContent).toContain("Get started");
-    expect(host.querySelector("img")?.getAttribute("src")).toBe("/help/workspace.png");
+    expect(host.querySelector("img")?.getAttribute("src")).toBe("/help/reference/overview/overview.png");
     expect(host.firstElementChild?.hasAttribute("inert")).toBe(true);
     const motion = [...host.querySelectorAll("nav button")].find(b => b.textContent === "Keyframes and motion");
     await act(async () => (motion as HTMLButtonElement).click());
     expect(host.querySelector("article")?.textContent).toContain("next position key");
-    expect(host.querySelector("img")?.getAttribute("src")).toBe("/help/motion.png");
+    expect(host.querySelector("img")?.getAttribute("src")).toBe("/help/reference/overview/timeline.png");
     await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })));
     expect(host.querySelector('[role="dialog"]')).toBeNull();
     expect(host.firstElementChild?.hasAttribute("inert")).toBe(false);

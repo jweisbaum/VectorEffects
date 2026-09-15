@@ -140,7 +140,8 @@ export default function Inspector({
   // map rather than edited field by field, and showing one member's numbers as
   // though they applied to all of them would be a lie.
   const object = selection.length === 1 ? (selection[0] ?? null) : null;
-  const [properties, setProperties] = useState<PropertyView[] | null>(null);
+  const [loaded, setLoaded] = useState<{ object: number; step: number; properties: PropertyView[] } | null>(null);
+  const properties = loaded?.object === object && loaded.step === step ? loaded.properties : null;
   // The active layer, for the panel to describe when no object is selected.
   // Read here rather than passed down: the tree is the one place that knows
   // what a layer holds, and the panel already refetches on every revision.
@@ -166,13 +167,22 @@ export default function Inspector({
 
   useEffect(() => {
     if (object === null) {
-      setProperties(null);
+      setLoaded(null);
       return;
     }
+    let live = true;
     api
       .objectProperties(object, step)
-      .then(setProperties)
-      .catch((err: unknown) => setError(String(err)));
+      .then((properties) => { if (live) setLoaded({ object, step, properties }); })
+      .catch((err: unknown) => {
+        if (!live) return;
+        setLoaded(null);
+        // Undo/deletion can win the race with this read. The layer tree
+        // retires that selection; it is not a failed user edit.
+        if (typeof err === "object" && err !== null && "kind" in err && err.kind === "missing-object") return;
+        setError(String(err));
+      });
+    return () => { live = false; };
   }, [object, project.revision, step]);
 
   if (object === null) {
@@ -268,7 +278,7 @@ export default function Inspector({
                     lowLabel={property.slider.low_label}
                     highLabel={property.slider.high_label}
                     reversed={property.slider.reversed}
-                    format={readoutFor(property.slider)}
+                    format={readoutFor(property.slider, property.unit)}
                     // On release, not on every tick: an inspector write is a
                     // document edit and an undo entry (spec.md 8.4).
                     onCommit={(next) => write(property.id, { kind: "number", value: next })}

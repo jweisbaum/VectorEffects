@@ -1,4 +1,5 @@
 import { UnitsProvider } from "./settings/units";
+import { useSelectionLifecycle } from "./selectionLifecycle";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import ExportDialog from "./project/ExportDialog";
@@ -124,6 +125,7 @@ function EditorApp() {
     setSelection(ids);
     setShapeEditing((current) => current !== null && ids.length === 1 && ids[0] === current ? current : null);
   }, []);
+  useSelectionLifecycle(project, selection, selectObjects);
   // Which layer receives new objects, and what a plain marquee is scoped to
   // (spec.md 6.1, 8.2). Null means the top of the stack.
   const [activeLayer, setActiveLayer] = useState<number | null>(null);

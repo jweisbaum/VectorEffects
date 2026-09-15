@@ -1,4 +1,3 @@
-import { useUnits } from "../settings/units";
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 
@@ -28,7 +27,6 @@ export default function ExportDialog({
   project: ProjectSummary;
   onClose: () => void;
 }) {
-  const units = useUnits();
   // The project's start time when it has one, else now rounded to the
   // nearest hour, UTC (M29): the dialog still asks, it just starts right.
   const start = startDraftFrom(project.start_unix_s);
@@ -36,14 +34,6 @@ export default function ExportDialog({
   const [month, setMonth] = useState(start.month);
   const [day, setDay] = useState(start.day);
   const [hour, setHour] = useState(start.hour);
-  const [centre, setCentre] = useState(255);
-  /**
-   * Bits per packed value (spec.md 12.3, M19). Sixteen is what every export
-   * wrote before this was a choice; 8 halves the file at steps of about half a
-   * knot, which the estimate says beside it.
-   */
-  const [bits, setBits] = useState(16);
-
   const [estimate, setEstimate] = useState<ExportEstimate | null>(null);
   const [progress, setProgress] = useState<ExportProgress | null>(null);
   const [running, setRunning] = useState(false);
@@ -51,8 +41,8 @@ export default function ExportDialog({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    api.exportEstimate(bits).then(setEstimate).catch(() => setEstimate(null));
-  }, [bits]);
+    api.exportEstimate().then(setEstimate).catch(() => setEstimate(null));
+  }, []);
 
   useEffect(() => {
     const pending = listen<ExportProgress>("export://progress", (event) =>
@@ -72,7 +62,7 @@ export default function ExportDialog({
     setRunning(true);
     setProgress(null);
     try {
-      const result = await api.exportGrib({ path, year, month, day, hour, centre, bits });
+      const result = await api.exportGrib({ path, year, month, day, hour });
       // The export is what the dialog was opened to do, so finishing it
       // closes the dialog (M48). What it wrote goes to the status bar, which
       // is where everything else the application has to say goes: leaving the
@@ -134,34 +124,6 @@ export default function ExportDialog({
             </label>
           </div>
 
-          <label className="modal-centre">
-            Precision
-            <select value={bits} onChange={(event) => setBits(Number(event.target.value))}>
-              {[8, 12, 16, 24].map((width) => (
-                <option key={width} value={width}>
-                  {width} bits per value
-                </option>
-              ))}
-            </select>
-            <span className="muted">
-              {estimate
-                ? `steps of about ${units.speedFromKnots(estimate.step_knots).toFixed(units.speedFromKnots(estimate.step_knots) >= 0.1 ? 2 : 4)} ${units.speedUnit} over ±${units.speedFromMps(60).toFixed(1)} ${units.speedUnit} · ${formatBytes(estimate.bytes)}`
-                : ""}
-              {bits === 16 ? " · the default, and what earlier exports used" : ""}
-            </span>
-          </label>
-
-          <label className="modal-centre">
-            Originating centre
-            <NumberField min={0} max={65535} value={centre} onCommit={setCentre} />
-            <span className="muted">
-              {centre === 255
-                ? "255 = missing, the honest default"
-                : centre === 7
-                  ? "7 = NCEP; a fiction some readers prefer"
-                  : ""}
-            </span>
-          </label>
         </fieldset>
 
         {running && (

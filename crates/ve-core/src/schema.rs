@@ -578,15 +578,8 @@ pub const OFFSET_MODES: &[&str] = &["aligned", "fixed"];
 /// Variants of [`PropId::CurveDirectionMode`]. Renamed in place, never
 /// reordered: the stored value is the index.
 ///
-/// Index 0 has been called both things. It was `absolute`, then `constant` to
-/// match the name every other tool gives a fixed bearing, and it is
-/// `absolute` again on the user's reading of the option bar in the running
-/// app (M48). The earlier argument was about consistency across two bars; the
-/// one that wins is about the contrast *within* this one. Here the choice is
-/// against `relative_to_path`, and the opposite of relative is absolute —
-/// while "constant" reads as unchanging over time, which is what a keyframe
-/// decides and not what this mode means.
-pub const CURVE_DIRECTION_MODES: &[&str] = &["absolute", "relative_to_path"];
+/// Constant means one bearing across the path; keyframes can still change it.
+pub const CURVE_DIRECTION_MODES: &[&str] = &["constant", "relative_to_path"];
 /// Variants of [`PropId::TurnSense`] (M29). Index 0 is clockwise, which is
 /// the positive sense the evaluator's `Modifier::Turn` turns for.
 pub const TURN_SENSES: &[&str] = &["clockwise", "counterclockwise"];
@@ -674,7 +667,7 @@ const INTENSITY: &[PropSpec] = &[
         "+200%",
         false,
     ),
-    num(PropId::Feather, "Feather", 0.5, 0.0, 1.0, Unit::None),
+    num(PropId::Feather, "Feather", 0.0, 0.0, 1.0, Unit::None),
 ];
 
 const DIVERGENCE: &[PropSpec] = &[
@@ -686,11 +679,11 @@ const DIVERGENCE: &[PropSpec] = &[
     // is untouched, the slider is simply reversed.
     slider(
         num(PropId::Radial, "Amount", 0.0, -400.0, 400.0, Unit::Percent),
-        "Divergence",
-        "Convergence",
+        "Divergence (outward)",
+        "Convergence (inward)",
         true,
     ),
-    num(PropId::Feather, "Feather", 0.5, 0.0, 1.0, Unit::None),
+    num(PropId::Feather, "Feather", 0.0, 0.0, 1.0, Unit::None),
 ];
 
 const TURN: &[PropSpec] = &[
@@ -710,7 +703,7 @@ const TURN: &[PropSpec] = &[
         180.0,
         Unit::Degrees,
     ),
-    num(PropId::Feather, "Feather", 0.5, 0.0, 1.0, Unit::None),
+    num(PropId::Feather, "Feather", 0.0, 0.0, 1.0, Unit::None),
 ];
 
 const LIQUIFY: &[PropSpec] = &[
@@ -724,7 +717,7 @@ const LIQUIFY: &[PropSpec] = &[
         100.0,
         Unit::Percent,
     ),
-    num(PropId::Feather, "Feather", 0.5, 0.0, 1.0, Unit::None),
+    num(PropId::Feather, "Feather", 0.0, 0.0, 1.0, Unit::None),
 ];
 
 const WARP: &[PropSpec] = &[
@@ -745,7 +738,7 @@ const WARP: &[PropSpec] = &[
         360.0,
         Unit::Degrees,
     ),
-    num(PropId::Feather, "Feather", 0.5, 0.0, 1.0, Unit::None),
+    num(PropId::Feather, "Feather", 0.0, 0.0, 1.0, Unit::None),
 ];
 
 const BRUSH: &[PropSpec] = &[
@@ -781,7 +774,7 @@ const BRUSH: &[PropSpec] = &[
         180.0,
         Unit::SignedDegrees,
     ),
-    num(PropId::Feather, "Feather", 0.2, 0.0, 1.0, Unit::None),
+    num(PropId::Feather, "Feather", 0.0, 0.0, 1.0, Unit::None),
     // No `divergence` or `curl`: the brush paints a flow along a stroke, and a
     // radial or rotational component belongs to the tools that have a centre to
     // define it about. The other tools keep theirs (spec.md 7.5).
@@ -823,18 +816,23 @@ const CIRCLE: &[PropSpec] = &[
         Unit::Speed,
     ),
     choice(PropId::RotationSense, "Rotation", 0, ROTATION_SENSES),
-    num(
-        PropId::CircleAngle,
-        "Angle from tangent",
-        0.0,
-        -90.0,
-        90.0,
-        Unit::SignedDegrees,
+    slider(
+        num(
+            PropId::CircleAngle,
+            "Angle from tangent",
+            0.0,
+            -90.0,
+            90.0,
+            Unit::SignedDegrees,
+        ),
+        "−90° inward",
+        "+90° outward",
+        false,
     ),
     // The same property the brush uses, deliberately: "px" must mean one
     // thing across the catalogue (spec.md 3.5, 6.1).
     frozen(choice(PropId::StampSpace, "Stamp space", 0, STAMP_SPACES)),
-    num(PropId::Feather, "Feather", 0.2, 0.0, 1.0, Unit::None),
+    num(PropId::Feather, "Feather", 0.0, 0.0, 1.0, Unit::None),
     // The tangent tilt is a direction, preserving the chosen speed.
 ];
 
@@ -885,7 +883,7 @@ const SHAPE_FILL: &[PropSpec] = &[
         180.0,
         Unit::SignedDegrees,
     ),
-    num(PropId::Feather, "Feather", 0.1, 0.0, 1.0, Unit::None),
+    num(PropId::Feather, "Feather", 0.0, 0.0, 1.0, Unit::None),
 ];
 
 // "Identical interaction to the brush" is binding (spec.md 6.2): the mask
@@ -942,7 +940,7 @@ const MASK: &[PropSpec] = &[
         20_000.0,
         Unit::Kilometres,
     ),
-    num(PropId::Feather, "Feather", 0.2, 0.0, 1.0, Unit::None),
+    num(PropId::Feather, "Feather", 0.0, 0.0, 1.0, Unit::None),
     // Which side of the footprint is masked. Off, the mask covers what it is
     // drawn over; on, it covers everything *except* that — which is how a
     // field is confined to a region rather than cut out of one (spec.md 6.2).
@@ -962,7 +960,7 @@ const CLONE_STAMP: &[PropSpec] = &[
     ),
     pos(PropId::SourcePoint, "Source"),
     choice(PropId::OffsetMode, "Offset", 0, OFFSET_MODES),
-    num(PropId::Feather, "Feather", 0.2, 0.0, 1.0, Unit::None),
+    num(PropId::Feather, "Feather", 0.0, 0.0, 1.0, Unit::None),
 ];
 
 const CURVE: &[PropSpec] = &[
@@ -992,7 +990,7 @@ const CURVE: &[PropSpec] = &[
     // so the honest answer is mode-dependent — like `Direction` on the brush,
     // which `DEPENDENCIES` handles by hiding rather than converting.
     ang(PropId::Direction, "Direction", 0.0),
-    num(PropId::Feather, "Feather", 0.3, 0.0, 1.0, Unit::None),
+    num(PropId::Feather, "Feather", 0.0, 0.0, 1.0, Unit::None),
 ];
 
 /// A property that only does anything when another property has certain values.
@@ -1791,7 +1789,7 @@ mod tests {
         assert!(map.get(PropId::Feather).is_none());
 
         let value = map.value_at(ToolKind::Brush, PropId::Feather, 0);
-        assert_eq!(value, Some(PropValue::F32(0.2)));
+        assert_eq!(value, Some(PropValue::F32(0.0)));
 
         assert_eq!(map.backfill(ToolKind::Brush), 1);
         assert!(map.get(PropId::Feather).is_some());

@@ -56,6 +56,7 @@ const MASK_UNIT = 1;
  * tile on unit 0 in the same pass, so the two cannot share.
  */
 const BELOW_UNIT = 2;
+const SOURCE_COVERAGE_UNIT = 3;
 /** Vertices per glyph instance; see the glyph vertex shader. */
 const GLYPH_VERTICES = 54;
 
@@ -135,6 +136,8 @@ export interface OperatorPreview {
    * `cloneSourceCamera`, which builds it.
    */
   source?: Camera;
+  /** A clone leaves undefined source pixels untouched; a warp moves holes too. */
+  transparentSource?: boolean;
   /** A modifier's setting: gain as a fraction, turn in degrees, radial as a fraction. */
   amount?: number;
   /**
@@ -153,7 +156,7 @@ export interface OperatorPreview {
 export const OP_POINTS = 64;
 
 /** Which part of an operation a pass draws. */
-type OpStage = "none" | "remove" | "keep" | "apply";
+type OpStage = "none" | "remove" | "keep" | "source" | "apply";
 
 /** The kind's code in the shaders, for the `apply` stage. */
 const OP_CODE: Record<OperatorKind, number> = {
@@ -359,6 +362,8 @@ export class MapRenderer {
     width: number;
     height: number;
   } | null = null;
+  private sourceCoverageReady = false;
+  private capturingCoverage = false;
   private readonly smearProgram: WebGLProgram;
   private readonly smearUniforms: Uniforms;
 
@@ -379,7 +384,7 @@ export class MapRenderer {
     this.geoUniforms = uniforms(gl, this.geoProgram, [...shared, "uColor"]);
     const mask = [
       "uMask", "uMaskSize", "uOpKind", "uOpAmount", "uOpCount", "uOpPoints", "uOpDeltas",
-      "uOpRadius", "uOpFeather",
+      "uOpRadius", "uOpFeather", "uSourceCoverage", "uUseSourceCoverage",
     ];
     this.smearUniforms = uniforms(gl, this.smearProgram, [...mask, "uField"]);
     this.rasterUniforms = uniforms(gl, this.rasterProgram, [
@@ -387,7 +392,7 @@ export class MapRenderer {
       // An array's location is asked for by its first element, which is what
       // `getUniformLocation` accepts; `uniform3fv` then writes the whole run.
       "uRampStopsWind[0]", "uRampStopsCurrent[0]", "uRampCountWind", "uRampCountCurrent",
-      "uBelow", "uEditScoped",
+      "uBelow", "uEditScoped", "uCoverageOnly",
     ]);
     this.imageUniforms = uniforms(gl, this.imageProgram, [
       ...shared, "uPlaceLon", "uPlaceLat", "uImage", "uOpacity",
@@ -555,10 +560,15 @@ export class MapRenderer {
         ? 0
         : stage === "remove"
           ? 1
-          : stage === "keep"
+          : stage === "keep" || stage === "source"
             ? 2
             : OP_CODE[operator.kind];
     gl.uniform1i(u.uOpKind ?? null, kind);
+    gl.uniform1i(u.uSourceCoverage ?? null, SOURCE_COVERAGE_UNIT);
+    gl.uniform1i(u.uUseSourceCoverage ?? null,
+      operator?.transparentSource && this.sourceCoverageReady &&
+      (stage === "remove" || stage === "keep") ? 1 : 0);
+    gl.uniform1i(u.uCoverageOnly ?? null, this.capturingCoverage ? 1 : 0);
     gl.uniform2f(u.uMaskSize ?? null, view.width, view.height);
     gl.uniform1i(u.uMask ?? null, MASK_UNIT);
     gl.uniform1f(u.uOpAmount ?? null, operator?.amount ?? 0);
@@ -603,6 +613,7 @@ export class MapRenderer {
     const texture = gl.createTexture();
     const framebuffer = gl.createFramebuffer();
     if (!texture || !framebuffer) return null;
+    gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, texture);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
@@ -1105,7 +1116,7 @@ export class MapRenderer {
     // What the passes over the field do inside the gesture (M32): take it
     // away for a mask, an eraser, a clone or a liquify, whose replacement
     // is drawn afterwards; change it in place for a modifier.
-    const stage: OpStage =
+    let stage: OpStage =
       operator === null
         ? "none"
         : operator.kind === "gain" || operator.kind === "turn" || operator.kind === "radial"
@@ -1133,6 +1144,11 @@ export class MapRenderer {
     // the raster and the glyphs walk the same set.
     const tiles = visibleTiles(state.camera, state.view);
     const sourceTiles = source ? visibleTiles(source, state.view) : [];
+    this.sourceCoverageReady = false;
+    // Avoid sampling the render target while drawing into it. The mask is a
+    // complete fallback texture even when this sampler is disabled.
+    gl.activeTexture(gl.TEXTURE0 + SOURCE_COVERAGE_UNIT);
+    gl.bindTexture(gl.TEXTURE_2D, this.maskTexture);
 
     // --- Land and coastlines ---
     gl.useProgram(this.geoProgram);
@@ -1154,6 +1170,29 @@ export class MapRenderer {
     // basemap is not — a mask takes the field away, not what is beneath it.
     const images = state.images ?? [];
     this.drawImages(state, offsets, images.filter((image) => !image.over));
+
+    // A clone removes destination pixels only where its source contains data.
+    // This target holds source coverage alone: no basemap, colors, or glyphs.
+    if (source && operator?.transparentSource) {
+      const target = this.ensureFieldTarget(state.view);
+      if (target && this.fieldTarget) {
+        gl.bindFramebuffer(gl.FRAMEBUFFER, target);
+        gl.clearColor(0, 0, 0, 0);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+        gl.disable(gl.BLEND);
+        this.capturingCoverage = true;
+        if (state.sourceFrame) this.drawRaster(state, source, sourceTiles, "none", state.sourceFrame);
+        this.capturingCoverage = false;
+        gl.enable(gl.BLEND);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.activeTexture(gl.TEXTURE0 + SOURCE_COVERAGE_UNIT);
+        gl.bindTexture(gl.TEXTURE_2D, this.fieldTarget.texture);
+        this.sourceCoverageReady = true;
+      }
+      // If the temporary target cannot be allocated, retain the field until
+      // the committed preview arrives instead of cutting an unfilled hole.
+      if (!this.sourceCoverageReady) stage = "none";
+    }
 
     // --- The field alone, for a liquify to read back ---
     if (smearing) {
@@ -1185,8 +1224,8 @@ export class MapRenderer {
     // The source is the edited layer alone (M45), not the whole stack: that
     // is what the commit samples. Unscoped, because the source pass draws
     // only where the gesture covers and there is nothing there to compare.
-    if (source) {
-      this.drawRaster(state, source, sourceTiles, "keep", state.sourceFrame ?? undefined);
+    if (source && (!operator?.transparentSource || (state.sourceFrame && this.sourceCoverageReady))) {
+      this.drawRaster(state, source, sourceTiles, "source", state.sourceFrame ?? undefined);
     }
     if (smearing && this.fieldTarget) {
       gl.useProgram(this.smearProgram);
@@ -1248,8 +1287,8 @@ export class MapRenderer {
       if (stage === "remove" && below) {
         this.drawGlyphs(state, state.camera, tiles, "keep", below);
       }
-      if (source) {
-        this.drawGlyphs(state, source, sourceTiles, "keep", state.sourceFrame ?? undefined);
+      if (source && (!operator?.transparentSource || (state.sourceFrame && this.sourceCoverageReady))) {
+        this.drawGlyphs(state, source, sourceTiles, "source", state.sourceFrame ?? undefined);
       }
     }
 

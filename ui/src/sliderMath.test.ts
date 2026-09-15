@@ -50,3 +50,8 @@ describe("a slider's readout", () => {
     expect(read(0)).toBe("0%");
   });
 });
+
+it("reads the circle tangent slider in degrees including zero and both endpoints", () => {
+  const read = readoutFor({ low_label: "−90° inward", high_label: "+90° outward", reversed: false }, "signed_degrees");
+  expect([-90, -30, 0, 30, 90].map(read)).toEqual(["-90°", "-30°", "0°", "30°", "90°"]);
+});

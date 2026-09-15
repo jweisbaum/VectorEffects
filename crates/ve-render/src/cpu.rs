@@ -541,17 +541,31 @@ fn sample_layer(
             let Some(weight) = operator_weight(object, position) else {
                 continue;
             };
-            let vector = if depth >= MAX_CLONE_DEPTH {
-                Uv::default()
-            } else {
-                let sampled = clone_source_position(object, source, position);
-                sample_layer(scene, span, index, sampled, depth + 1).0
-            };
+            if depth >= MAX_CLONE_DEPTH {
+                continue;
+            }
+            let sampled = clone_source_position(object, source, position);
+            let (vector, source_coverage) = sample_layer(scene, span, index, sampled, depth + 1);
+            // Undefined is transparent, including inside the stamp. A real
+            // calm sample still copies; testing the vector for zero loses that
+            // distinction and paints empty source areas as a calm background.
+            if source_coverage <= 0.0 {
+                continue;
+            }
             // A moving clone stamp carries its own motion into what it copies
             // (spec.md 9.3), added before the edge so the feather fades the
             // sum rather than the two separately.
-            let vector = with_motion(object, position, vector);
-            let w = weight as f32;
+            // Layer samples are premultiplied. Unpremultiply before applying
+            // the combined source/stamp coverage so soft edges fade once.
+            let vector = with_motion(
+                object,
+                position,
+                Uv {
+                    u: vector.u / source_coverage,
+                    v: vector.v / source_coverage,
+                },
+            );
+            let w = weight as f32 * source_coverage;
             accumulated = match object.edge_mode {
                 EdgeMode::Blend => Uv {
                     u: accumulated.u + (vector.u - accumulated.u) * w,

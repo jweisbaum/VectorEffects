@@ -21,14 +21,16 @@ import type { ProjectSummary } from "../generated/ProjectSummary";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const held = vi.hoisted(() => ({ layers: [] as unknown[] }));
+const held = vi.hoisted(() => ({ layers: [] as unknown[], properties: vi.fn(async (_id: number) => [] as import("../generated/PropertyView").PropertyView[]), error: vi.fn() }));
 
 vi.mock("../ipc", () => ({
   api: {
     documentTree: () => Promise.resolve({ layers: held.layers }),
-    objectProperties: () => Promise.resolve([]),
+    objectProperties: held.properties,
   },
 }));
+
+vi.mock("../hint", () => ({ reportError: held.error }));
 
 const Inspector = (await import("./Inspector")).default;
 
@@ -179,4 +181,23 @@ describe("the panel with no object selected", () => {
     await show(layer({ name: "Trade winds" }), [42]);
     expect(text()).not.toContain("Trade winds");
   });
+});
+
+it("ignores late properties and missing-object errors after changing selection", async () => {
+  let resolveOld!: (rows: import("../generated/PropertyView").PropertyView[]) => void;
+  held.properties.mockReturnValueOnce(new Promise(resolve => { resolveOld = resolve; }));
+  await show(layer({}), [50]);
+  held.properties.mockResolvedValueOnce([]);
+  await show(layer({}), [51]);
+  await act(async () => resolveOld([{ id: "Speed", label: "Stale speed", value: { kind: "number", value: 10 },
+    unit: "speed", min: 0, max: 120, variants: [], animated: false, keyed_here: false,
+    interpolated_here: false, keyable: true, slider: null }]));
+  expect(text()).not.toContain("Stale speed");
+  held.error.mockClear();
+  held.properties.mockRejectedValueOnce({ kind: "missing-object", message: "gone" });
+  await show(layer({}), [52]);
+  expect(held.error).not.toHaveBeenCalled();
+  held.properties.mockRejectedValueOnce(new Error("real read failure"));
+  await show(layer({}), [53]);
+  expect(held.error).toHaveBeenCalledWith("Error: real read failure");
 });

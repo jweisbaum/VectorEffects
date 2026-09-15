@@ -63,6 +63,15 @@ export async function screenshot(mapPng: string | null, css: string): Promise<st
   const stage = clone.querySelector<HTMLElement>(".stage");
   if (stage) stage.style.isolation = "isolate";
   await Promise.all([...clone.querySelectorAll("img")].map(img => img.decode()));
+  // An SVG foreignObject cannot fetch the app's bundled URLs. Inline loaded
+  // help screenshots so the captured page includes the illustrations too.
+  for (const img of clone.querySelectorAll<HTMLImageElement>("img")) {
+    if (img.src.startsWith("data:")) continue;
+    const raster = document.createElement("canvas");
+    raster.width = img.naturalWidth; raster.height = img.naturalHeight;
+    raster.getContext("2d")!.drawImage(img, 0, 0);
+    img.src = raster.toDataURL("image/png");
+  }
   const wrapper = document.createElement("html");
   wrapper.setAttribute("xmlns", "http://www.w3.org/1999/xhtml");
   const style = document.createElement("style");

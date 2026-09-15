@@ -2,6 +2,33 @@
 
 **Companion to** `spec.md`. Section references below point into it.
 
+**2026-09-14: tool corrections and illustrated reference.** Clone stamps and
+their live preview preserve missing source coverage, while defined calm still
+copies. Divergence's physical sign was already correct; outward/inward labels
+and the wind-barb convention are now explicit. New tool and eraser feathers
+start at zero, circle tangent tilt uses a signed −90° to +90° slider, and the
+path's fixed-bearing mode is called Constant. Settings relinquish focus without
+consuming the next map gesture. Larger lifetime grips retain their released
+preview until the refreshed tree arrives. Deleted selections and stale inspector
+requests are discarded, including with the layer panel closed. GRIB export
+uses fixed packing and an unspecified centre; each message carries a 31-byte
+local-use section containing “Created with VectorEffects”. The reproducibility
+test pins this section and retains the old digest for all remaining bytes.
+Offline help now has 33 searchable pages, parameter tables, related pages, and
+36 screenshots, including all 34 supplied Desktop/screenshots images.
+
+Verified locally: 1,095 Rust tests across all 48 workspace test executables
+(run in batches; 13 fixture/performance tests remain intentionally ignored),
+workspace doctests, 749 UI tests, formatting, clippy, generated bindings,
+production UI build, and the offline check. Physical Metal GPU parity and
+empty-layer checks passed. ecCodes and grib_dump decoded both ordinary and
+entirely undefined exports; an independent ecCodes/Matplotlib plot confirmed
+flow directions. wgrib2 was not installed locally. WebKit checks covered clone
+holes, defined calm, empty sources, glyphs, and all help pages/images with
+enlargement and focus restoration. At 800×600, clone preview draws measured
+4 ms median before and after, with at most 7 ms p95 after the fix. These are
+isolated renderer timings, not playback throughput.
+
 **2026-09-14: Windows shader compilation.** The GPU shape, speed, and direction
 functions return their default values after the switch, preserving the field
 math while making every return path explicit to DirectX's FXC compiler. CI and

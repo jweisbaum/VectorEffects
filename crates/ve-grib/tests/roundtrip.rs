@@ -241,9 +241,20 @@ fn the_encoding_is_identical_on_every_platform() {
 
     let bytes = message(&spec(grid, Parameter::WindU, 12), &values).expect("builds");
 
-    assert_eq!(bytes.len(), 130_499, "message length changed");
+    // The 31-byte local-use section records VectorEffects provenance.
+    assert_eq!(bytes.len(), 130_530, "message length changed");
+    // Pin the new section exactly, then retain the pre-provenance digest for
+    // every other byte. This proves adding the memo did not alter field data.
+    // Section 0 occupies 16 bytes and Section 1 occupies 21 bytes.
     assert_eq!(
-        digest(&bytes),
+        &bytes[37..68],
+        b"\x00\x00\x00\x1f\x02Created with VectorEffects"
+    );
+    let mut without_provenance = bytes;
+    without_provenance.drain(37..68);
+    without_provenance[8..16].copy_from_slice(&130_499u64.to_be_bytes());
+    assert_eq!(
+        digest(&without_provenance),
         0x769b_cfb2_fb07_77c3,
         "encoding changed; re-record deliberately or find the non-determinism"
     );

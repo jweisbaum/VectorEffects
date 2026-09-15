@@ -884,6 +884,10 @@ Miller. Legacy Projected remains equirectangular. Layer thresholds apply to fina
 layer vectors; image thresholds use the displayed vector field. Export coverage
 as GRIB missing-value bitmaps and retain genuinely calm zeros. The system-local
 January 1, 2027 expiry gate must remain enforced in both the UI and native IPC.
-Help images are bundled assets generated with `tools/webdriver/help.mjs` using
-isolated automation storage. Never ship the WebDriver feature. Publishing and
+Help images are bundled assets: the illustrated reference includes the user's
+supplied screenshots under `ui/public/help/reference`; current dialog captures
+are generated with `tools/webdriver/help.mjs` using isolated automation storage.
+Parameter descriptions live in `ui/src/help/topics.ts` and must track the actual
+tool catalogue; screenshot values are examples, not declarations of defaults.
+Never ship the WebDriver feature. Publishing and
 four-platform verification follow `docs/github-release-plan.md`.

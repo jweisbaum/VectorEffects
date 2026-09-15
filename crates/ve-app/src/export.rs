@@ -43,19 +43,6 @@ pub struct ExportRequest {
     pub day: u8,
     /// Hour, 0-23.
     pub hour: u8,
-    /// Originating centre code. 255 means missing, which is the honest default.
-    pub centre: u16,
-    /// Bits per packed value: 8, 12, 16 or 24 (spec.md 12.3, M19).
-    ///
-    /// Sixteen unless chosen otherwise, which is what every export before this
-    /// option existed wrote; an old caller that sends nothing gets the file it
-    /// always got.
-    #[serde(default = "default_bits")]
-    pub bits: u8,
-}
-
-fn default_bits() -> u8 {
-    ve_grib::packing::BITS_PER_VALUE
 }
 
 /// What an export produced.
@@ -115,7 +102,8 @@ pub fn estimate(project: &Project, bits: u8) -> ExportEstimate {
     // `bits` per packed value, rounded up to whole octets per message, plus a
     // little for section headers.
     let data = (points * u64::from(bits)).div_ceil(8);
-    let bytes = (data + points.div_ceil(8) + 200) * u64::from(messages);
+    let bytes = (data + points.div_ceil(8) + 200 + ve_grib::writer::PROVENANCE.len() as u64 + 5)
+        * u64::from(messages);
     ExportEstimate {
         bytes,
         messages,
@@ -135,17 +123,14 @@ fn parameters(kind: FieldKind) -> (Parameter, Parameter) {
 
 /// Estimates the size of the export for the open project.
 #[tauri::command]
-pub fn export_estimate(
-    state: tauri::State<'_, AppState>,
-    bits: Option<u8>,
-) -> Result<ExportEstimate> {
+pub fn export_estimate(state: tauri::State<'_, AppState>) -> Result<ExportEstimate> {
     let mut session = state
         .session
         .lock()
         .map_err(|_| AppError::Internal("session lock was poisoned".to_owned()))?;
     Ok(estimate(
         &session.require_open()?.project,
-        bits.unwrap_or(ve_grib::packing::BITS_PER_VALUE),
+        ve_grib::packing::BITS_PER_VALUE,
     ))
 }
 
@@ -187,19 +172,6 @@ pub fn run(
     cancel: &AtomicBool,
     mut on_progress: impl FnMut(ExportProgress),
 ) -> Result<ExportResult> {
-    // Refused here, before a file is opened, rather than by the packer on the
-    // first message: the widths are the four the dialog offers, and anything
-    // else is a caller's bug and not a preference (spec.md 12.3, M19).
-    if !ve_grib::packing::BIT_WIDTHS.contains(&request.bits) {
-        return Err(AppError::BadOption {
-            field: "bits",
-            value: format!(
-                "{} bits per value; the export offers {:?}",
-                request.bits,
-                ve_grib::packing::BIT_WIDTHS
-            ),
-        });
-    }
     let started = std::time::Instant::now();
     let settings = &project.settings;
     let grid = GridSpec {
@@ -272,8 +244,8 @@ pub fn run(
                         grid,
                         reference_time,
                         forecast_hour: hour,
-                        centre: request.centre,
-                        bits: request.bits,
+                        centre: u16::MAX,
+                        bits: ve_grib::packing::BITS_PER_VALUE,
                     };
                     bytes += write_message_masked(&mut out, &spec, values)? as u64;
                     messages += 1;

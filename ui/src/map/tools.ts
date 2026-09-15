@@ -943,7 +943,7 @@ export function operatorOf(
       return { kind: "remove" };
     case "clone_stamp": {
       const source = cloneSourceCamera(state, gesture, camera);
-      return source ? { kind: "clone", source } : null;
+      return source ? { kind: "clone", source, transparentSource: true } : null;
     }
     case "intensity":
       return { kind: "gain", amount: numberOf(values, "Gain") / 100 };

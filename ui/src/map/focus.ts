@@ -13,6 +13,30 @@
  * being typed into and keeps it until it is left.
  */
 
+import { flushSync } from "react-dom";
+
+/** Commit a pending numeric edit before the same press reaches the tool. */
+export function focusMapForGesture(canvas: HTMLElement): void {
+  const active = document.activeElement;
+  if (active instanceof HTMLElement && active !== canvas) {
+    flushSync(() => active.blur());
+  }
+  canvas.focus({ preventScroll: true });
+}
+
+/** Finish single-action controls after their native pointer-up handling. */
+export function finishToolControl(event: { target: EventTarget | null }): void {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) return;
+  if (!target.matches('select, button, input[type="checkbox"], input[type="range"]')) return;
+  releaseFocus({ currentTarget: target });
+  // WebKit can restore focus as the native popup closes after change. Let it
+  // finish, then relinquish only this control, never a newly focused input.
+  window.setTimeout(() => {
+    if (document.activeElement === target) target.blur();
+  }, 0);
+}
+
 /** Drops focus from the control an event came from. */
 export function releaseFocus(event: {
   currentTarget: EventTarget | null;

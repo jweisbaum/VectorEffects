@@ -109,7 +109,7 @@ describe("the live-gesture operator", () => {
         expect(defines(source), `${name} applies the operator without defining it`).toContain(
           "opApply",
         );
-        for (const uniform of ["uMask", "uMaskSize", "uOpKind", "uOpAmount", "uOpCount"]) {
+        for (const uniform of ["uSourceCoverage", "uUseSourceCoverage", "uMask", "uMaskSize", "uOpKind", "uOpAmount", "uOpCount"]) {
           expect(declared(source), `${name} is missing ${uniform}`).toContain(uniform);
         }
       }
@@ -245,11 +245,11 @@ describe("the renderer's uniform lookups", () => {
     // shader gaining a uniform has to be noticed here too.
     const known = new Set([
       "uCamera", "uViewport", "uLonOffset", "uProjection",
-      "uMask", "uMaskSize", "uOpKind", "uOpAmount", "uOpCount", "uOpRadius", "uOpFeather",
+      "uSourceCoverage", "uUseSourceCoverage", "uMask", "uMaskSize", "uOpKind", "uOpAmount", "uOpCount", "uOpRadius", "uOpFeather",
       "uField",
       "uTileGeo", "uTile", "uSpeedScale", "uRampWind", "uRampCurrent", "uDim",
       "uRampStopsWind", "uRampStopsCurrent", "uRampCountWind", "uRampCountCurrent",
-      "uBelow", "uEditScoped",
+      "uBelow", "uCoverageOnly", "uEditScoped",
       "uColor", "uPixelRatio", "uLengthArrow", "uLengthBarb", "uStrokeArrow", "uStrokeBarb",
       "uColorArrow", "uColorBarb", "uFadeArrow", "uFadeBarb", "uShadowPass",
       "uShadowArrow", "uShadowBarb", "uShadowOffsetArrow", "uShadowOffsetBarb",

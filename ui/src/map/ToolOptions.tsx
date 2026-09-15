@@ -21,7 +21,7 @@ import type { ToolOptionSpec } from "../generated/ToolOptionSpec";
 import type { ToolSchema } from "../generated/ToolSchema";
 import { useUnits } from "../settings/units";
 import type { Camera } from "./camera";
-import { releaseFocus } from "./focus";
+import { finishToolControl } from "./focus";
 import { EYEDROPPER_ICON, IconSvg } from "./ToolIcon";
 import {
   convertSizes,
@@ -93,7 +93,7 @@ function ToolOptions({
   const eyedropper = offersEyedropper(schema, state.values);
 
   return (
-    <div className="tool-options">
+    <div className="tool-options" onPointerUp={finishToolControl} onKeyUp={finishToolControl}>
       {options.map((spec) => (
         <Option
           key={spec.property}
@@ -144,7 +144,7 @@ function ToolOptions({
             value={state.unit}
             onChange={(e) => {
               setUnit(unitOf(e.target.value));
-              releaseFocus(e);
+              finishToolControl(e);
             }}
             title={DRAWN_UNIT_TITLE}
           >
@@ -216,7 +216,7 @@ function Option({
             value={value.index}
             onChange={(e) => {
               onValue({ kind: "choice", index: Number(e.target.value) });
-              releaseFocus(e);
+              finishToolControl(e);
             }}
           >
             {spec.variants.map((name, index) => (
@@ -236,7 +236,7 @@ function Option({
             checked={value.value}
             onChange={(e) => {
               onValue({ kind: "bool", value: e.target.checked });
-              releaseFocus(e);
+              finishToolControl(e);
             }}
           />
           {spec.label}
@@ -314,7 +314,7 @@ function Option({
               lowLabel={spec.slider.low_label}
               highLabel={spec.slider.high_label}
               reversed={spec.slider.reversed}
-              format={readoutFor(spec.slider)}
+              format={readoutFor(spec.slider, spec.unit)}
               onInput={(next) => onValue({ kind: "number", value: next })}
               onCommit={(next) => onValue({ kind: "number", value: next })}
             />
@@ -384,7 +384,7 @@ function Option({
               value={state.unit}
               onChange={(e) => {
               onUnit(unitOf(e.target.value));
-              releaseFocus(e);
+              finishToolControl(e);
             }}
               title={UNIT_TITLE}
             >

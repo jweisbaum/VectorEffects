@@ -195,6 +195,8 @@ void main() {
 const OP_POINTS = 64;
 const OPERATOR = `
 uniform sampler2D uMask;    // screen-space coverage of the gesture, in alpha
+uniform sampler2D uSourceCoverage;
+uniform highp int uUseSourceCoverage;
 uniform vec2 uMaskSize;     // the framebuffer's size, to read gl_FragCoord
 uniform int uOpKind;        // 0 none, 1 remove, 2 keep only, 3 gain, 4 turn,
                             // 5 radial, 6 smear
@@ -208,7 +210,9 @@ uniform float uOpFeather;   // and its feather, 0 to 1
 // How much of a point the gesture covers, 0 to 1.
 float opCoverageAt(vec2 p) {
   if (uOpKind == 0) return 0.0;
-  return texture(uMask, p / uMaskSize).a;
+  float coverage = texture(uMask, p / uMaskSize).a;
+  if (uUseSourceCoverage == 1) coverage *= texture(uSourceCoverage, p / uMaskSize).a;
+  return coverage;
 }
 
 // The factor a fragment's alpha is multiplied by: the mask and the eraser
@@ -401,6 +405,7 @@ uniform float uDim;         // 1.0 normally, lower while a frame is stale
 // bound (M44). What scopes a live edit to one layer.
 uniform sampler2D uBelow;
 uniform highp int uEditScoped;
+uniform highp int uCoverageOnly;
 ${OPERATOR}
 ${OPERATOR_FRAG}
 ${TEXEL}
@@ -476,6 +481,10 @@ vec2 tileUV() {
 void main() {
   vec2 uv = tileUV();
   Field field = sampleField(uv);
+  if (uCoverageOnly == 1) {
+    fragColor = vec4(0.0, 0.0, 0.0, field.coverage);
+    return;
+  }
   // Only where the pixel is showing the layer being edited (M44). Elsewhere
   // the gesture is over a layer it does not touch, and the map must not move.
   bool mine = editedHere(uv);

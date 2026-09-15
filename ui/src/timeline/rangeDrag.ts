@@ -80,12 +80,14 @@ export function unchanged(grab: RangeGrab, drag: RangeDrag): boolean {
  */
 export async function commitRangeDrag<T>(
   write: () => Promise<T>,
-  onDone: (value: T) => void,
+  onDone: (value: T) => void | Promise<void>,
   onError: (why: unknown) => void,
   clearPreview: () => void,
 ): Promise<void> {
   try {
-    onDone(await write());
+    // A write acknowledgement is not the refreshed object tree. Keep the
+    // preview until the caller has installed the data the bar renders.
+    await onDone(await write());
   } catch (why) {
     onError(why);
   } finally {

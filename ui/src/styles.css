@@ -1470,15 +1470,23 @@ body {
 .tl-range:active { cursor: grabbing; }
 .tl-range-end {
   position: absolute;
-  top: -1px;
-  bottom: -1px;
-  left: -3px;
-  width: 6px;
+  top: -5px;
+  bottom: -5px;
+  left: -9px;
+  width: min(18px, calc(50% + 9px));
   cursor: ew-resize;
+  touch-action: none;
+  z-index: 1;
+}
+.tl-range-end::after {
+  content: "";
+  position: absolute;
+  inset: 4px 5px;
   background: rgba(111, 217, 255, 0.9);
   border-radius: 2px;
 }
-.tl-range-end.right { left: auto; right: -3px; }
+.tl-range-end:hover::after { background: #fff; }
+.tl-range-end.right { left: auto; right: -9px; }
 
 .tl-track { height: 20px; }
 .tl-track.interpolated .tl-track-label { color: var(--muted); }
@@ -1678,3 +1686,20 @@ body {
 .help-screenshot img { display: block; width: 100%; height: auto; }
 .help-screenshot img.zoomed { width: auto; max-width: none; cursor: zoom-out; }
 .help-body figcaption { font-size: 12px; color: #aab8c7; margin-top: 8px; }
+.help-body nav > div button { width: 100%; }
+.help-body nav h3 { margin: 16px 8px 6px; font-size: 12px; color: #aab8c7; text-transform: uppercase; letter-spacing: .06em; }
+.help-count { margin: 0 8px; font-size: 12px; color: #aab8c7; }
+.help-parameters { width: 100%; border-collapse: collapse; margin: 24px 0; font-size: 14px; }
+.help-parameters th, .help-parameters td { text-align: left; vertical-align: top; padding: 12px; border: 1px solid #374352; }
+.help-parameters thead { background: #111b28; }
+.help-parameters tbody th { width: 29%; font-weight: 600; color: #b0e8d8; }
+.help-body article h4 { margin-top: 30px; font-size: 18px; }
+.help-related { border-top: 1px solid #374352; margin-top: 28px; }
+.help-related button { margin: 0 8px 8px 0; white-space: normal; }
+.help-screenshot img { width: auto; max-width: 100%; }
+.help-screenshot[aria-expanded="true"] { max-height: 65vh; cursor: zoom-out; }
+@media (max-width: 700px) {
+  .help-body { grid-template-columns: 175px minmax(0, 1fr); }
+  .help-body article { padding: 10px 14px; }
+  .help-parameters th, .help-parameters td { padding: 7px; }
+}

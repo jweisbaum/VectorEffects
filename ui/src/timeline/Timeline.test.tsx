@@ -8,13 +8,13 @@ import type { PlaybackMap } from "./preparation";
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const backend = vi.hoisted(() => ({
   tree: vi.fn(async () => ({ layers: [] as import("../generated/LayerNode").LayerNode[] })),
-  tracks: vi.fn(), setKey: vi.fn(),
+  tracks: vi.fn(), setKey: vi.fn(), setRange: vi.fn(),
   renderAhead: vi.fn(async () => {}), readiness: vi.fn(async () => ({
   revision: 7, steps: Array.from({ length: 10 }, (_, step) => ({ step, ready: 1, total: 1 })),
 })) }));
 vi.mock("../ipc", () => ({ api: {
   renderAhead: backend.renderAhead, frameReadiness: backend.readiness,
-  documentTree: backend.tree, objectTracks: backend.tracks, setKeyframe: backend.setKey,
+  documentTree: backend.tree, objectTracks: backend.tracks, setKeyframe: backend.setKey, setActiveRange: backend.setRange,
 } }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: async () => () => {} }));
 const Timeline = (await import("./Timeline")).default;
@@ -126,4 +126,40 @@ it("toggles shape editing per object and uses the shape track to add keys", asyn
   } finally {
     await act(async () => root.unmount()); container.remove(); backend.tree.mockResolvedValue({ layers: [] });
   }
+});
+
+it("holds the latest released span through the write and delayed tree refresh", async () => {
+  const project = { revision: 8, step_count: 10, step_hours: 1, start_unix_s: null } as ProjectSummary;
+  const layer = { id: 1, name: "Layer", visible: true, locked: false, source: "painted", parameter: "wind", grib: null, image: null,
+    objects: [{ id: 2, name: "Front", tool: "shape_fill", tool_label: "Shape", active_here: true, start_step: 0, end_step: 9 }] };
+  backend.tree.mockResolvedValue({ layers: [layer] });
+  let written!: (project: ProjectSummary) => void;
+  let refreshed!: (tree: { layers: typeof layer[] }) => void;
+  backend.setRange.mockReturnValue(new Promise(resolve => { written = resolve; }));
+  const container = document.createElement("div"); document.body.append(container);
+  const root = createRoot(container);
+  const changed = vi.fn();
+  try {
+    await act(async () => root.render(<Timeline project={project} step={0} onStepChange={() => {}} selection={[]} onSelect={() => {}}
+      viewport={[]} playback={{ prepare: () => ({ready:0,total:0,streaming:false}), present: () => false }}
+      autoKey={false} onAutoKey={() => {}} onChanged={changed} onFramesSelected={() => {}} onKeysSelected={() => {}}
+      settings={null} capture={null} onCapture={() => {}} />));
+    const bar = container.querySelector<HTMLElement>(".tl-range")!;
+    const frameWidth = Number.parseFloat(bar.style.width) / 10;
+    const grip = container.querySelector<HTMLElement>('[aria-label="End frame for Front"]')!;
+    await act(async () => grip.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0, pointerId: 1 })));
+    await act(async () => {
+      grip.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, clientX: 200 + 5.2 * frameWidth, pointerId: 1 }));
+      grip.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 1 }));
+    });
+    expect(backend.setRange).toHaveBeenCalledWith(2, 0, 5);
+    expect(bar.style.width).toBe(`${6 * frameWidth}px`);
+    backend.tree.mockReturnValueOnce(new Promise(resolve => { refreshed = resolve; }));
+    await act(async () => written({ ...project, revision: 9 }));
+    expect(bar.style.width).toBe(`${6 * frameWidth}px`);
+    expect(changed).not.toHaveBeenCalled();
+    await act(async () => refreshed({ layers: [{ ...layer, objects: [{ ...layer.objects[0]!, end_step: 5 }] }] }));
+    expect(bar.style.width).toBe(`${6 * frameWidth}px`);
+    expect(changed).toHaveBeenCalledTimes(1);
+  } finally { await act(async () => root.unmount()); container.remove(); backend.tree.mockResolvedValue({ layers: [] }); }
 });

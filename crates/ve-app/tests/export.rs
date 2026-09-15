@@ -65,8 +65,6 @@ fn request(path: &std::path::Path) -> ExportRequest {
         month: 9,
         day: 2,
         hour: 0,
-        centre: 255,
-        bits: 16,
     }
 }
 

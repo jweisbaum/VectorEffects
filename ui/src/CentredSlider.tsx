@@ -85,7 +85,10 @@ export function readoutFor(slider: {
   low_label: string;
   high_label: string;
   reversed: boolean;
-}): (value: number) => string {
+}, unit?: string): (value: number) => string {
+  if (unit === "signed_degrees" || unit === "degrees") {
+    return (value) => `${Math.round(value * 10) / 10}°`;
+  }
   const worded = !/%/.test(slider.low_label) && !/%/.test(slider.high_label);
   if (!worded) return signedPercent;
   return (value: number) => {

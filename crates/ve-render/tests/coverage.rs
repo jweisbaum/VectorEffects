@@ -150,3 +150,60 @@ fn a_modifier_over_nothing_covers_nothing() {
         "a rotate-flow over open water has nothing to rotate and nothing to capture"
     );
 }
+
+/// Copying a larger footprint must leave source holes transparent in both
+/// modes, whether they fall on empty map or another painted vector.
+#[test]
+fn clone_copies_only_defined_source_data_including_real_calm() {
+    for offset in [0, 1] {
+        for edge in [0, 1] {
+            for speed in [0.0, 20.0] {
+                let source = stamp(ToolKind::Brush, at(0.0, 0.0), 200.0, speed);
+                let destination = stamp(ToolKind::Brush, at(20.0, 0.0), 1200.0, 8.0);
+                let mut clone = stamp(ToolKind::CloneStamp, at(20.0, 0.0), 1000.0, 0.0);
+                set(
+                    &mut clone,
+                    PropId::SourcePoint,
+                    PropValue::LonLat(at(0.0, 0.0)),
+                );
+                set(&mut clone, PropId::OffsetMode, PropValue::Enum(offset));
+                set(&mut clone, PropId::EdgeMode, PropValue::Enum(edge));
+                let scene = flatten(&project(vec![source.clone(), clone.clone()]), 0);
+                assert!(
+                    sample_scene_covered(&scene, at(23.0, 0.0)).is_none(),
+                    "source hole must stay undefined"
+                );
+                let copied =
+                    sample_scene_covered(&scene, at(20.0, 0.0)).expect("even calm is defined");
+                assert!((copied.u - speed as f32).abs() < 0.001);
+                let scene = flatten(&project(vec![source, destination, clone]), 0);
+                let retained = sample_scene_covered(&scene, at(23.0, 0.0))
+                    .expect("destination survives a source hole");
+                assert!((retained.u - 8.0).abs() < 0.001);
+                let copied = sample_scene_covered(&scene, at(20.0, 0.0)).unwrap();
+                assert!((copied.u - speed as f32).abs() < 0.001);
+            }
+        }
+    }
+}
+
+#[test]
+fn cloning_a_soft_source_edge_preserves_its_vector_and_coverage() {
+    let mut source = stamp(ToolKind::Brush, at(0.0, 0.0), 800.0, 20.0);
+    set(&mut source, PropId::Feather, PropValue::F32(0.5));
+    let mut clone = stamp(ToolKind::CloneStamp, at(20.0, 0.0), 1200.0, 0.0);
+    set(
+        &mut clone,
+        PropId::SourcePoint,
+        PropValue::LonLat(at(0.0, 0.0)),
+    );
+    let scene = flatten(&project(vec![source, clone]), 0);
+    let original = ve_render::cpu::composite(&scene, at(2.7, 0.0));
+    let copied = ve_render::cpu::composite(&scene, at(22.7, 0.0));
+    assert!(original.coverage > 0.1 && original.coverage < 0.9);
+    assert!((original.coverage - copied.coverage).abs() < 0.001);
+    assert!(
+        (original.uv.u - copied.uv.u).abs() < 0.001,
+        "do not feather the source twice"
+    );
+}

@@ -94,7 +94,7 @@ describe("committing a drag", () => {
 
     const done = commitRangeDrag(
       write,
-      () => order.push("applied"),
+      () => { order.push("applied"); },
       () => order.push("failed"),
       () => order.push("cleared"),
     );
@@ -109,10 +109,27 @@ describe("committing a drag", () => {
     const order: string[] = [];
     await commitRangeDrag(
       () => Promise.reject(new Error("locked")),
-      () => order.push("applied"),
+      () => { order.push("applied"); },
       () => order.push("failed"),
       () => order.push("cleared"),
     );
     expect(order).toEqual(["failed", "cleared"]);
   });
+});
+
+it("keeps the released preview until the object tree has refreshed after the write", async () => {
+  const order: string[] = [];
+  let publishTree!: () => void;
+  const tree = new Promise<void>((resolve) => { publishTree = resolve; });
+  const done = commitRangeDrag(
+    async () => "written",
+    async () => { order.push("acknowledged"); await tree; order.push("tree installed"); },
+    () => { order.push("failed"); },
+    () => { order.push("cleared"); },
+  );
+  await Promise.resolve();
+  expect(order).toEqual(["acknowledged"]);
+  publishTree();
+  await done;
+  expect(order).toEqual(["acknowledged", "tree installed", "cleared"]);
 });

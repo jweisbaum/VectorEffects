@@ -11,11 +11,13 @@
  * Rendered rather than asserted against the source, because what matters is
  * that focus has actually gone by the time the change has been handled.
  */
-import { act } from "react";
+import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import ToolOptions from "./ToolOptions";
+import NumberField from "../NumberField";
+import { finishToolControl, focusMapForGesture } from "./focus";
 import type { ToolSchema } from "../generated/ToolSchema";
 import type { ToolState } from "./tools";
 
@@ -116,4 +118,38 @@ describe("a tool's option controls", () => {
     });
     expect(document.activeElement).not.toBe(box);
   });
+});
+
+it("uses a pending numeric value on the first map press", async () => {
+  const host = document.createElement("div"); document.body.append(host);
+  const root = createRoot(host); const paint = vi.fn();
+  function Host() {
+    const [size, setSize] = useState(5);
+    return <><NumberField value={size} onCommit={setSize} commitWhileTyping={false} min={1} max={20} />
+      <canvas tabIndex={0} onPointerDownCapture={e => focusMapForGesture(e.currentTarget)} onPointerDown={() => paint(size)} /></>;
+  }
+  try {
+    await act(async () => root.render(<Host />));
+    const input = host.querySelector("input")!;
+    await act(async () => {
+      input.focus();
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "30");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => host.querySelector("canvas")!.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0 })));
+    expect(paint).toHaveBeenCalledTimes(1);
+    expect(paint).toHaveBeenCalledWith(20);
+    expect(document.activeElement).toBe(host.querySelector("canvas"));
+  } finally { await act(async () => root.unmount()); host.remove(); }
+});
+it("releases a completed native control without stealing a newly focused field", () => {
+  vi.useFakeTimers();
+  const select = document.createElement("select"), input = document.createElement("input");
+  document.body.append(select, input);
+  try {
+    select.focus(); finishToolControl({ target: select });
+    expect(document.activeElement).not.toBe(select);
+    input.focus(); vi.runAllTimers();
+    expect(document.activeElement).toBe(input);
+  } finally { select.remove(); input.remove(); vi.useRealTimers(); }
 });
