@@ -16,7 +16,8 @@ it("keeps every reference image and cross-reference reachable offline", () => {
     }
   }
   for (const path of readdirSync(fileURLToPath(new URL("../../public/help/reference", import.meta.url)), { recursive: true })) {
-    if (String(path).endsWith(".png")) expect(paths.has(`reference/${path}`), String(path)).toBe(true);
+    const relative = String(path).replaceAll("\\", "/");
+    if (relative.endsWith(".png")) expect(paths.has(`reference/${relative}`), relative).toBe(true);
   }
 });
 it("finds parameter descriptions and nested workflows", () => {

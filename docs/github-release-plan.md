@@ -89,7 +89,25 @@ If the workflow itself needs a packaging fix, push the fix to `main`, run
 **Release builds** from `main`, and set its **release_tag** input to the existing
 unpublished tag. The updated workflow checks out that tag and pins the same source
 commit for every platform. This rebuilds the original application without moving
-the tag. Cargo-specific options such as `--locked` go after Tauri's `--` separator.
+the tag. Leave **platform** set to **all** for a complete rebuild, or choose just
+the failed platform to retain successful installers already uploaded for that
+same tag. Publication still checks for every platform's installers; selecting a
+single platform cannot publish an incomplete release.
+
+For example, resume an unpublished Windows build using the current workflow:
+
+```sh
+gh workflow run release.yml --ref main -f release_tag=v0.1.5 -f platform=windows-x64
+```
+
+The v0.1.5 Windows retry has one test-harness compatibility step: it reads the
+corrected Help image test from the immutable workflow commit. The original test
+compared Windows filesystem backslashes with URL slashes, incorrectly reporting
+missing screenshots. The step changes only that test and verifies that all other
+tracked files still match the tag. The full UI suite runs with the correction;
+all application sources and bundled assets remain at the original v0.1.5 commit.
+
+Cargo-specific options such as `--locked` go after Tauri's `--` separator.
 Windows checkouts keep LF line endings, including when rebuilding an older tag;
 shell checks run directly in Git Bash rather than through npm's Windows shell.
 The TypeScript binding generator lives in `examples/export_bindings.rs` and is

@@ -12,6 +12,12 @@ on:
         description: Existing unpublished tag to rebuild (blank for artifacts only)
         required: false
         type: string
+      platform:
+        description: Platform to build (a release still requires all platform installers)
+        required: false
+        default: all
+        type: choice
+        options: [all, mac-intel, mac-arm, windows-x64, linux-x64]
 
 permissions:
   contents: read
@@ -37,6 +43,7 @@ jobs:
       release-id: ${{ steps.release.outputs.release-id }}
       release-tag: ${{ steps.release.outputs.release-tag }}
       source-sha: ${{ steps.source.outputs.sha }}
+      build-matrix: ${{ steps.matrix.outputs.targets }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -47,6 +54,24 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Select platforms
+        id: matrix
+        env:
+          BUILD_PLATFORM: ${{ inputs.platform || 'all' }}
+        run: |
+          node --input-type=module <<'JS'
+          import assert from 'node:assert/strict';
+          import { appendFileSync } from 'node:fs';
+          const targets = [
+            { name: 'mac-intel', os: 'macos-15-intel', targets: 'x86_64-apple-darwin' },
+            { name: 'mac-arm', os: 'macos-15', targets: 'aarch64-apple-darwin' },
+            { name: 'windows-x64', os: 'windows-2022', targets: 'x86_64-pc-windows-msvc' },
+            { name: 'linux-x64', os: 'ubuntu-22.04', targets: 'x86_64-unknown-linux-gnu' },
+          ].filter(target => process.env.BUILD_PLATFORM === 'all' || target.name === process.env.BUILD_PLATFORM)
+            .map(target => ({ ...target, args: `--target ${target.targets} -- --locked` }));
+          assert(targets.length > 0, 'Unknown build platform');
+          appendFileSync(process.env.GITHUB_OUTPUT, `targets=${JSON.stringify(targets)}\n`);
+          JS
       - name: Check application and tag versions
         run: |
           node tools/check-release.mjs
@@ -89,23 +114,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - name: mac-intel
-            os: macos-15-intel
-            targets: x86_64-apple-darwin
-            args: --target x86_64-apple-darwin -- --locked
-          - name: mac-arm
-            os: macos-15
-            targets: aarch64-apple-darwin
-            args: --target aarch64-apple-darwin -- --locked
-          - name: windows-x64
-            os: windows-2022
-            targets: x86_64-pc-windows-msvc
-            args: --target x86_64-pc-windows-msvc -- --locked
-          - name: linux-x64
-            os: ubuntu-22.04
-            targets: x86_64-unknown-linux-gnu
-            args: --target x86_64-unknown-linux-gnu -- --locked
+        include: ${{ fromJSON(needs.prepare.outputs.build-matrix) }}
     steps:
       # Also supports rebuilding tags created before .gitattributes was added.
       - name: Preserve source line endings on Windows
@@ -114,6 +123,20 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.prepare.outputs.source-sha }}
+
+      # v0.1.5's application already passed native checks on every platform.
+      # Its Help test compares Windows filesystem separators to URL paths.
+      # Use the workflow commit's corrected test when resuming that draft;
+      # keep every application/bundle input at the original tagged commit.
+      - name: Correct v0.1.5 Help test path separators
+        if: github.event_name == 'workflow_dispatch' && runner.os == 'Windows' && env.RELEASE_TAG == 'v0.1.5'
+        shell: bash
+        env:
+          WORKFLOW_SHA: ${{ github.sha }}
+        run: |
+          git fetch --no-tags --depth=1 origin "$WORKFLOW_SHA"
+          git show "$WORKFLOW_SHA:ui/src/help/topics.test.ts" > ui/src/help/topics.test.ts
+          git diff --exit-code -- . ':!ui/src/help/topics.test.ts'
 
       - name: Install Linux system dependencies
         if: matrix.os == 'ubuntu-22.04'
