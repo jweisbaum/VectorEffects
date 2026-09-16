@@ -1261,9 +1261,12 @@ pub fn mcp_status(
 
 /// Turns the service on or off and sets its port. Enabling issues a fresh
 /// token; disabling clears it and drops the listener.
+///
+/// Generic over the Tauri runtime so the integration tests can drive it
+/// through a mock application.
 #[tauri::command]
-pub fn mcp_set(
-    app: tauri::AppHandle,
+pub fn mcp_set<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     state: tauri::State<'_, AppState>,
     service: tauri::State<'_, crate::mcp::McpService>,
     enabled: bool,
@@ -1294,9 +1297,12 @@ pub fn mcp_set(
 }
 
 /// Issues a new token and restarts the listener with it.
+///
+/// Generic over the Tauri runtime so the integration tests can drive it
+/// through a mock application.
 #[tauri::command]
-pub fn mcp_rotate_token(
-    app: tauri::AppHandle,
+pub fn mcp_rotate_token<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     state: tauri::State<'_, AppState>,
     service: tauri::State<'_, crate::mcp::McpService>,
 ) -> Result<McpStatus> {

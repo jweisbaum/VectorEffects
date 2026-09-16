@@ -103,6 +103,13 @@ pub fn run() -> anyhow::Result<()> {
             // Crash recovery: a snapshot of unsaved work every minute or fifty
             // edits, offered back on the start screen (spec.md 4.2, M10).
             autosave::start(app.handle().clone());
+            // The MCP service, only if the person left it on (spec.md 8.8).
+            let app_state = app.state::<AppState>();
+            let mcp_settings = app_state.session.lock().map(|s| s.settings.mcp.clone());
+            if let Ok(mcp_settings) = mcp_settings {
+                app.state::<mcp::McpService>()
+                    .apply(app.handle(), &mcp_settings);
+            }
             Ok(())
         })
         .on_menu_event(|app, event| {
