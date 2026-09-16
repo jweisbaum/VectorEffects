@@ -39,6 +39,19 @@ tauri-plugin-dialog = "2.7.3"
 png = "0.18.1"
 jpeg-decoder = "0.3.2"
 tiff = "0.11.3"
+# The MCP service (spec.md 8.8). Pure Rust; the listener exists only while
+# the setting is on. See invariant 5's second exception.
+rmcp = { version = "3.4", default-features = false, features = ["server", "macros", "transport-streamable-http-server"] }
+schemars = "1"
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+http = "1"
+bytes = "1"
+tokio = { version = "1", features = ["net", "sync", "time", "macros", "rt"] }
+tokio-util = "0.7"
+getrandom = "0.3"
+base64 = "0.22"
 # End-to-end automation, and **never in a shipped build** — see `[features]`.
 tauri-plugin-webdriver-automation = { version = "0.1.3", optional = true }
 
@@ -67,6 +80,11 @@ zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 ve-grib = { workspace = true, features = ["testing"] }
 # Reading a Zarr export back, to check what the writer put where.
 zarrs = { version = "0.23", default-features = false, features = ["filesystem", "zstd"] }
+# A mock application gives the MCP tests a real AppHandle without a window.
+tauri = { version = "2.11.5", features = ["test"] }
+rmcp = { version = "3.4", default-features = false, features = ["client", "transport-streamable-http-client-reqwest"] }
+reqwest = { version = "0.13", default-features = false }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
 [lints]
 workspace = true

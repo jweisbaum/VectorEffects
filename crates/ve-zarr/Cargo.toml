@@ -26,7 +26,13 @@ half = "2.7"
 # takes `reqwest` with its default features: that is `native-tls`, and on Linux
 # `openssl-sys` — a system C library the three-platform build forbids. Rustls
 # links no system library, and `reqwest` is already in the tree.
-reqwest = { version = "0.13", default-features = false, features = ["blocking", "rustls", "webpki-roots", "http2"] }
+#
+# `webpki-roots` (a bundled Mozilla root list) was dropped by reqwest 0.13.2 in
+# favour of `rustls-platform-verifier`, which the `rustls` feature already
+# pulls in and which reads the platform's own trust store instead — no `-sys`
+# crate either way (M86: the MCP service's `rmcp` dev-dependency forces the
+# unified `reqwest` version past 0.13.1, where the old feature stopped existing).
+reqwest = { version = "0.13.2", default-features = false, features = ["blocking", "rustls", "http2"] }
 url = "2"
 
 [dev-dependencies]

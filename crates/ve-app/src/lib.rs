@@ -19,6 +19,7 @@ pub mod image;
 pub mod import;
 pub mod logging;
 pub mod macros;
+pub mod mcp;
 pub mod measure;
 pub mod merge;
 pub mod palette;
@@ -71,6 +72,7 @@ pub fn run() -> anyhow::Result<()> {
         .manage(state)
         .manage(export::ExportCancel::default())
         .manage(std::sync::Arc::new(render_pool::RenderPool::new()))
+        .manage(mcp::McpService::default())
         .setup(|app| {
             use tauri::{Emitter, Manager};
             if beta::expired_now() {
@@ -194,6 +196,9 @@ pub fn run() -> anyhow::Result<()> {
                 settings::reset_shortcuts,
                 settings::set_default_scales,
                 settings::set_macro_directory,
+                settings::mcp_status,
+                settings::mcp_set,
+                settings::mcp_rotate_token,
                 settings::set_autosave_mode,
                 settings::set_projection,
                 settings::set_auto_scale,

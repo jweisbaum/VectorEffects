@@ -463,6 +463,32 @@ impl GlyphAppearance {
     }
 }
 
+/// The MCP service's switch, port and token (spec.md 8.8).
+///
+/// The token is a plain string in the file the person already owns: it
+/// grants a local process what sitting at the keyboard grants, nothing more.
+/// Empty means no token, and `token::matches` refuses everything then.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "McpSettings.ts")]
+pub struct McpSettings {
+    pub enabled: bool,
+    pub port: u16,
+    pub token: String,
+}
+
+/// The port a fresh install listens on when the service is first enabled.
+pub const DEFAULT_MCP_PORT: u16 = 47391;
+
+impl Default for McpSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            port: DEFAULT_MCP_PORT,
+            token: String::new(),
+        }
+    }
+}
+
 /// The application's persisted preferences.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "AppSettings.ts")]
@@ -502,6 +528,9 @@ pub struct AppSettings {
     /// preference like the projection: it changes no stored or exported
     /// value, only which colour a speed is drawn in.
     pub auto_scale: bool,
+    /// The MCP service (spec.md 8.8). Absent from older files: off.
+    #[serde(default)]
+    pub mcp: McpSettings,
 }
 
 /// The map projections the view offers, in the order the menu lists them.
@@ -525,6 +554,7 @@ impl Default for AppSettings {
             macro_directory: String::new(),
             projection: PROJECTIONS[0].to_owned(),
             auto_scale: false,
+            mcp: McpSettings::default(),
         }
     }
 }
@@ -986,6 +1016,15 @@ mod tests {
     }
 
     #[test]
+    fn a_settings_file_without_mcp_loads_with_it_off() {
+        let json = r#"{"glyphs":{},"distance_unit":"km","speed_unit":"kt","autosave":"recovery","shortcuts":[],"default_wind_scale_knots":60.0,"default_current_scale_knots":6.0,"macro_directory":"","projection":"equirectangular","auto_scale":false}"#;
+        let settings: AppSettings = serde_json::from_str(json).expect("older settings load");
+        assert_eq!(settings.mcp, McpSettings::default());
+        assert!(!settings.mcp.enabled);
+        assert_eq!(settings.mcp.port, 47391);
+    }
+
+    #[test]
     fn a_settings_file_naming_an_unknown_projection_costs_the_preference() {
         // A settings file is a file: it can be hand-edited or written by a
         // different build. An unusable projection must fall back to the flat
@@ -1190,4 +1229,89 @@ mod tests {
             );
         }
     }
+}
+
+/// What the Settings dialog shows about the service (spec.md 8.8).
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export, export_to = "McpStatus.ts")]
+pub struct McpStatus {
+    pub enabled: bool,
+    pub port: u16,
+    /// The token, so the dialog can build a client configuration.
+    pub token: String,
+    /// The port actually bound, or null while off or if binding failed.
+    pub bound_port: Option<u16>,
+    /// Why the listener is not up although the setting is on.
+    pub bind_error: Option<String>,
+    /// Open client sessions.
+    pub sessions: u32,
+    /// The last tool a client called, if any.
+    pub last_tool: Option<String>,
+}
+
+/// Reads the service's settings and live state.
+#[tauri::command]
+pub fn mcp_status(
+    state: tauri::State<'_, AppState>,
+    service: tauri::State<'_, crate::mcp::McpService>,
+) -> Result<McpStatus> {
+    let mcp = with_session(&state, |session| Ok(session.settings.mcp.clone()))?;
+    Ok(service.status(&mcp))
+}
+
+/// Turns the service on or off and sets its port. Enabling issues a fresh
+/// token; disabling clears it and drops the listener.
+#[tauri::command]
+pub fn mcp_set(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    service: tauri::State<'_, crate::mcp::McpService>,
+    enabled: bool,
+    port: u16,
+) -> Result<McpStatus> {
+    if port == 0 {
+        return Err(AppError::BadOption {
+            field: "port",
+            value: port.to_string(),
+        });
+    }
+    let file = state.paths.settings_file();
+    let mcp = with_session(&state, |session| {
+        let turning_on = enabled && !session.settings.mcp.enabled;
+        session.settings.mcp.enabled = enabled;
+        session.settings.mcp.port = port;
+        if turning_on || (enabled && session.settings.mcp.token.is_empty()) {
+            session.settings.mcp.token = crate::mcp::token::fresh();
+        }
+        if !enabled {
+            session.settings.mcp.token.clear();
+        }
+        session.save_settings(&file)?;
+        Ok(session.settings.mcp.clone())
+    })?;
+    service.apply(&app, &mcp);
+    Ok(service.status(&mcp))
+}
+
+/// Issues a new token and restarts the listener with it.
+#[tauri::command]
+pub fn mcp_rotate_token(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    service: tauri::State<'_, crate::mcp::McpService>,
+) -> Result<McpStatus> {
+    let file = state.paths.settings_file();
+    let mcp = with_session(&state, |session| {
+        if !session.settings.mcp.enabled {
+            return Err(AppError::BadOption {
+                field: "mcp",
+                value: "is not turned on".to_owned(),
+            });
+        }
+        session.settings.mcp.token = crate::mcp::token::fresh();
+        session.save_settings(&file)?;
+        Ok(session.settings.mcp.clone())
+    })?;
+    service.apply(&app, &mcp);
+    Ok(service.status(&mcp))
 }

@@ -2,6 +2,7 @@
 import type { AutosaveMode } from "./AutosaveMode";
 import type { DistanceUnit } from "./DistanceUnit";
 import type { GlyphSettings } from "./GlyphSettings";
+import type { McpSettings } from "./McpSettings";
 import type { Shortcut } from "./Shortcut";
 import type { SpeedUnit } from "./SpeedUnit";
 
@@ -62,4 +63,8 @@ projection: string,
  * preference like the projection: it changes no stored or exported
  * value, only which colour a speed is drawn in.
  */
-auto_scale: boolean, };
+auto_scale: boolean,
+/**
+ * The MCP service (spec.md 8.8). Absent from older files: off.
+ */
+mcp: McpSettings, };
