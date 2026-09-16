@@ -734,24 +734,39 @@ impl<R: tauri::Runtime> VectorEffects<R> {
     // ----------------------------------------------------------------- field
 
     #[tool(
-        description = "The evaluated field at points and steps: speed m/s, azimuth toward (degrees clockwise from north), u east, v north, and whether the cell is defined."
+        description = "The evaluated field at points and steps: speed m/s, azimuth toward (degrees clockwise from north), u east, v north, and whether the cell is defined. Refused above 4096 points*steps."
     )]
     async fn field_sample(
         &self,
         Parameters(p): Parameters<SampleParams>,
     ) -> std::result::Result<Json<Samples>, ToolError> {
+        // Refused before any allocation or session lock: each step flattens
+        // the whole project (`ve_render::scene::flatten`), so an unbounded
+        // points*steps grid is minutes of a starved interface from one call
+        // (invariant 6).
+        let total = p.points.len().saturating_mul(p.steps.len());
+        if total > MAX_FIELD_SAMPLES {
+            return Err(ToolError::Refused(format!(
+                "field_sample: {total} points*steps requested, over the {MAX_FIELD_SAMPLES} limit; ask for fewer points or steps"
+            )));
+        }
         let samples = self
             .run("field_sample", move |app| {
-                let mut out = Vec::with_capacity(p.points.len() * p.steps.len());
+                let state = app.state::<AppState>();
+                let points: Vec<(f64, f64)> =
+                    p.points.iter().map(|&[lon, lat]| (lon, lat)).collect();
+                let mut out = Vec::with_capacity(total);
+                // One flatten per step, not per (point, step) pair: a flatten
+                // is a whole-scene walk, so this is the difference between
+                // `steps.len()` flattens and `points.len() * steps.len()`.
                 for &step in &p.steps {
-                    for &[lon, lat] in &p.points {
-                        let s = crate::commands::sample_field(
-                            app.state(),
-                            lon,
-                            lat,
-                            step,
-                            p.kind.clone(),
-                        )?;
+                    let at_step = crate::commands::sample_points_at_step(
+                        state.inner(),
+                        &points,
+                        step,
+                        p.kind.clone(),
+                    )?;
+                    for (&[lon, lat], s) in p.points.iter().zip(at_step) {
                         let az = s.azimuth_toward_deg.to_radians();
                         out.push(Sample {
                             lon,
@@ -1093,6 +1108,14 @@ where
 }
 
 // ------------------------------------------------------------------- field
+
+/// The largest `points.len() * steps.len()` `field_sample` accepts.
+///
+/// Each step flattens the whole project once (`sample_points_at_step`); at
+/// this bound a request is at most a few thousand samples plus however many
+/// flattens `steps` asks for, not the minutes of whole-scene work an
+/// unbounded grid would be (invariant 6).
+const MAX_FIELD_SAMPLES: usize = 4096;
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct SampleParams {

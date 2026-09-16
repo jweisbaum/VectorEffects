@@ -448,13 +448,33 @@ async fn keyframes_and_motion_animate_an_object() {
     let (port, token) = serve(&app);
     let client = client(port, &token).await;
     call(&client, "project_new", new_project_args("Time")).await;
+    // Brush, not circle: `CIRCLE` (schema.rs) has no `Direction`/
+    // `DirectionMode` property at all — its field direction is tangential
+    // (`RotationSense` + `CircleAngle`, "the tangent tilt is a direction"),
+    // not a settable azimuth. `BRUSH` has a constant `Direction` live by
+    // default (`BRUSH_DEPENDENCIES`: `dep(Direction, DirectionMode, &[0])`,
+    // and `DirectionMode` defaults to 0), which is what a u/v reference check
+    // needs. The brush takes a `Stroke` gesture, but `create.rs`'s
+    // `points(raw, 1, "points")` accepts a single point, so one click's worth
+    // still works.
     let created = call(
         &client,
         "object_create",
-        json!({ "tool": "circle", "gesture": { "kind": "point", "at": [10.0, 10.0] } }),
+        json!({ "tool": "brush", "gesture": { "kind": "stroke", "points": [[10.0, 10.0]] } }),
     )
     .await;
     let object = created["object"].as_u64().expect("id");
+    // `PropId::Direction` is `Unit::Direction`: azimuth-toward, degrees
+    // clockwise from north (schema.rs's `dir` helper). 90 degrees is due
+    // east, so `u_mps` should equal `speed_mps` and `v_mps` should be ~0 at
+    // the sampled point — asserted below against `field_sample`'s own
+    // `speed_mps`, independent of the u/v computation under test.
+    call(
+        &client,
+        "object_set",
+        json!({ "object": object, "step": 0, "values": { "Direction": { "kind": "angle", "degrees": 90.0 } } }),
+    )
+    .await;
     // `PropId::Position`'s `Debug` form is "Position" (schema.rs), and
     // `PropertyValue` is tagged `{"kind":"position","lon":..,"lat":..}"`
     // (document.rs), not a raw `[lon, lat]` pair.
@@ -507,6 +527,17 @@ async fn keyframes_and_motion_animate_an_object() {
     )
     .await;
     assert_eq!(sample["samples"][0]["defined"], true, "{sample}");
+    // Independent reference: at a due-east azimuth, u (eastward) should be
+    // the whole speed and v (northward) should be ~0 — catches a u/v swap
+    // or a from/toward inversion (CLAUDE.md), which asserting only
+    // `defined` cannot.
+    let speed_mps = sample["samples"][0]["speed_mps"]
+        .as_f64()
+        .expect("speed_mps");
+    let u_mps = sample["samples"][0]["u_mps"].as_f64().expect("u_mps");
+    let v_mps = sample["samples"][0]["v_mps"].as_f64().expect("v_mps");
+    assert!((u_mps - speed_mps).abs() < 1e-3, "{sample}");
+    assert!(v_mps.abs() < 1e-3, "{sample}");
     let undone = call(&client, "undo", json!({})).await;
     assert_eq!(undone["can_redo"], true);
     client.cancel().await.expect("close");

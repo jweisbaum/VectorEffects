@@ -135,7 +135,31 @@ pub fn sample_field(
     step: u32,
     kind: Option<String>,
 ) -> Result<FieldSample> {
-    let position = ve_core::LonLat::new(lon, lat)?;
+    let mut samples = sample_points_at_step(&state, &[(lon, lat)], step, kind)?;
+    samples
+        .pop()
+        .ok_or_else(|| AppError::Internal("sample_points_at_step returned nothing".to_owned()))
+}
+
+/// Samples several positions at one step, flattening the scene once and
+/// reusing it for every point.
+///
+/// [`sample_field`] is this with a single point, so the readout keeps its one
+/// implementation. A caller with many points and steps (the MCP `field_sample`
+/// tool) calls this once per step instead of once per (point, step) pair: a
+/// flatten is a whole-project walk (`ve_render::scene::flatten`), and taking
+/// the session lock once per point rather than once per step would starve
+/// every other command sharing it (invariant 6).
+pub fn sample_points_at_step(
+    state: &AppState,
+    points: &[(f64, f64)],
+    step: u32,
+    kind: Option<String>,
+) -> Result<Vec<FieldSample>> {
+    let positions = points
+        .iter()
+        .map(|&(lon, lat)| ve_core::LonLat::new(lon, lat))
+        .collect::<std::result::Result<Vec<_>, _>>()?;
     let kind = kind
         .as_deref()
         .map(crate::projects::parse_field_kind)
@@ -146,26 +170,34 @@ pub fn sample_field(
         .lock()
         .map_err(|_| AppError::Internal("session lock was poisoned".to_owned()))?;
     let Some(open) = session.open.as_mut() else {
-        return Ok(FieldSample {
-            speed_mps: 0.0,
-            azimuth_toward_deg: 0.0,
-            defined: false,
-            kind: crate::projects::kind_name(kind.unwrap_or_default()).to_owned(),
-        });
+        return Ok(positions
+            .iter()
+            .map(|_| FieldSample {
+                speed_mps: 0.0,
+                azimuth_toward_deg: 0.0,
+                defined: false,
+                kind: crate::projects::kind_name(kind.unwrap_or_default()).to_owned(),
+            })
+            .collect());
     };
 
     let scene = match kind {
         Some(kind) => ve_render::scene::flatten_kind(&open.project, step, kind),
         None => ve_render::scene::flatten(&open.project, step),
     };
-    let sample = ve_render::cpu::composite(&scene, position);
-    let (speed, azimuth) = ve_core::vector::speed_azimuth_from_uv(sample.uv);
-    Ok(FieldSample {
-        speed_mps: speed,
-        azimuth_toward_deg: azimuth.degrees(),
-        defined: sample.coverage > 0.0,
-        kind: crate::projects::kind_name(kind.unwrap_or(sample.kind)).to_owned(),
-    })
+    Ok(positions
+        .iter()
+        .map(|&position| {
+            let sample = ve_render::cpu::composite(&scene, position);
+            let (speed, azimuth) = ve_core::vector::speed_azimuth_from_uv(sample.uv);
+            FieldSample {
+                speed_mps: speed,
+                azimuth_toward_deg: azimuth.degrees(),
+                defined: sample.coverage > 0.0,
+                kind: crate::projects::kind_name(kind.unwrap_or(sample.kind)).to_owned(),
+            }
+        })
+        .collect())
 }
 
 /// Records a message from the frontend in the application log.
