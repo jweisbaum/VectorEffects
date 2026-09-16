@@ -679,3 +679,41 @@ async fn a_screenshot_waits_for_the_frontend_and_returns_its_png() {
     assert!(image.data.starts_with("iVBOR"));
     client.cancel().await.expect("close");
 }
+
+/// The escape hatch reaches a command no curated tool covers, and refuses the
+/// two kinds of name it will not run.
+#[tokio::test]
+async fn invoke_reaches_a_command_no_curated_tool_covers() {
+    let root = TempRoot::new("invoke");
+    let app = mock_app(&root);
+    let (port, token) = serve(&app);
+    let client = client(port, &token).await;
+    call(&client, "project_new", new_project_args("Invoke")).await;
+    let renamed = call(
+        &client,
+        "invoke",
+        json!({ "command": "rename_project", "args": { "name": "Renamed" } }),
+    )
+    .await;
+    assert_eq!(renamed["result"]["name"], "Renamed");
+    // The interface's own read agrees: the write reached the document.
+    let current = ve_app::projects::current(app.state::<AppState>().inner())
+        .expect("current")
+        .expect("open");
+    assert_eq!(current.name, "Renamed");
+    let message = call_err(
+        &client,
+        "invoke",
+        json!({ "command": "basemap", "args": {} }),
+    )
+    .await;
+    assert!(message.contains("not available"), "{message}");
+    let message = call_err(
+        &client,
+        "invoke",
+        json!({ "command": "no_such_command", "args": {} }),
+    )
+    .await;
+    assert!(message.contains("unknown command"), "{message}");
+    client.cancel().await.expect("close");
+}

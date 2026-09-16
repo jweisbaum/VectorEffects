@@ -3,6 +3,7 @@
 
 pub mod capture;
 pub mod events;
+pub mod invoke;
 pub mod server;
 pub mod token;
 pub mod tools;
