@@ -26,6 +26,7 @@ import type { GradientView } from "../generated/GradientView";
 import { knownGradients, loadGradients } from "../gradients";
 import GradientPicker from "./GradientPicker";
 import GlyphSettings from "./GlyphSettings";
+import McpSection from "./McpSection";
 
 /** The rows the Shortcuts section lists, in order, with their labels. */
 const ACTIONS: ReadonlyArray<{ action: Shortcut["action"]; tool: string; label: string }> = [
@@ -378,6 +379,8 @@ export default function SettingsDialog({
             </button>
           </div>
         </section>
+
+        <McpSection onError={report} />
 
         <div className="modal-actions">
           <button onClick={onClose}>Close</button>

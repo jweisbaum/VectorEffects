@@ -1696,6 +1696,9 @@ body {
   padding: 2px 6px;
 }
 .modal-error { color: #ff8fb0; margin: 0 0 8px; }
+.settings-snippet { white-space: pre-wrap; word-break: break-all; font-size: 11px; padding: 6px; background: var(--panel-inset, rgba(0,0,0,0.2)); border-radius: 4px; }
+.settings-error { color: var(--error, #e66); }
+.mcp-badge { font-weight: 600; }
 
 /* Shape controls are an explicit timeline mode, separate from selection. */
 .tl-shape-toggle { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 24px; padding: 2px; border: 0; background: transparent; color: var(--muted); cursor: pointer; }
