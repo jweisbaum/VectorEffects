@@ -13,6 +13,7 @@ use std::io::{BufWriter, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tauri::Emitter;
 use ts_rs::TS;
@@ -47,7 +48,7 @@ pub struct ExportRequest {
 }
 
 /// What an export produced.
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, JsonSchema, TS)]
 #[ts(export, export_to = "ExportResult.ts")]
 pub struct ExportResult {
     /// Where it was written.
@@ -77,7 +78,7 @@ pub struct ExportZarrRequest {
 }
 
 /// What a Zarr V3 export produced.
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, JsonSchema, TS)]
 #[ts(export, export_to = "ExportZarrResult.ts")]
 pub struct ExportZarrResult {
     /// Where it was written.
@@ -91,7 +92,10 @@ pub struct ExportZarrResult {
 }
 
 /// Progress, emitted as the `export://progress` event.
-#[derive(Debug, Clone, Serialize, TS)]
+///
+/// `Deserialize` as well as `Serialize`: `mcp::tools`'s progress relay reads
+/// the event back off the bus to forward it to an MCP client.
+#[derive(Debug, Clone, Deserialize, Serialize, TS)]
 #[ts(export, export_to = "ExportProgress.ts")]
 pub struct ExportProgress {
     /// Steps completed.
@@ -172,9 +176,13 @@ pub fn cancel_export(cancel: tauri::State<'_, ExportCancel>) {
 }
 
 /// Writes the open project to a Zarr V3 directory.
+///
+/// Generic over the Tauri runtime so the MCP service, which is generic for
+/// the mock application its tests drive, can call the same command the
+/// interface does.
 #[tauri::command(async)]
-pub fn export_zarr(
-    app: tauri::AppHandle,
+pub fn export_zarr<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     state: tauri::State<'_, AppState>,
     cancel: tauri::State<'_, ExportCancel>,
     request: ExportZarrRequest,
@@ -195,9 +203,11 @@ pub fn export_zarr(
 }
 
 /// Writes the open project to a GRIB2 file.
+///
+/// Generic over the Tauri runtime, for the reason [`export_zarr`] gives.
 #[tauri::command(async)]
-pub fn export_grib(
-    app: tauri::AppHandle,
+pub fn export_grib<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     state: tauri::State<'_, AppState>,
     cancel: tauri::State<'_, ExportCancel>,
     request: ExportRequest,

@@ -1,6 +1,7 @@
 //! The MCP service (spec.md 8.8): a loopback endpoint through which a client
 //! drives the application, on only while the setting says so.
 
+pub mod capture;
 pub mod events;
 pub mod server;
 pub mod token;
@@ -18,6 +19,8 @@ pub struct McpService {
     pub(crate) bind_error: Mutex<Option<String>>,
     /// Open client sessions and the last tool called (status bar, Settings).
     activity: Mutex<events::McpActivity>,
+    /// Screenshots asked of the frontend and not yet answered.
+    pub captures: capture::Captures,
 }
 
 impl McpService {

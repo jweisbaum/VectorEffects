@@ -36,7 +36,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use ve_core::Command;
 use ve_core::document::Layer;
@@ -103,7 +103,10 @@ const CHANNEL_SLACK: usize = 2;
 /// spinner cannot tell a slow fetch from a stalled one. The steps are known
 /// before the first byte moves, so the bar is a real fraction rather than an
 /// animation.
-#[derive(Debug, Clone, Serialize, TS)]
+///
+/// `Deserialize` as well as `Serialize`: `mcp::tools`'s progress relay reads
+/// the event back off the bus to forward it to an MCP client.
+#[derive(Debug, Clone, Deserialize, Serialize, TS)]
 #[ts(export, export_to = "HistoryProgress.ts")]
 pub struct HistoryProgress {
     /// Which archive is being read, as [`Archive::label`] names it.
@@ -151,9 +154,13 @@ pub struct HistoryRequest {
 /// than a replacement for it. Joining the thread parks one runtime worker for
 /// the length of the import; the tile protocol does its work on the blocking
 /// pool, so the map keeps drawing while it runs.
+///
+/// Generic over the Tauri runtime so the MCP service, which is generic for
+/// the mock application its tests drive, can call the same command the
+/// interface does.
 #[tauri::command(async)]
-pub fn import_history(
-    app: tauri::AppHandle,
+pub fn import_history<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     archives: Vec<String>,
     start_unix_s: i64,
     end_unix_s: i64,

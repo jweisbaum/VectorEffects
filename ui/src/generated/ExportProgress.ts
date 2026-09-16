@@ -2,6 +2,9 @@
 
 /**
  * Progress, emitted as the `export://progress` event.
+ *
+ * `Deserialize` as well as `Serialize`: `mcp::tools`'s progress relay reads
+ * the event back off the bus to forward it to an MCP client.
  */
 export type ExportProgress = {
 /**

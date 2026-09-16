@@ -4,6 +4,7 @@
 //! handle gives, so there is one implementation of each feature. A tool that
 //! writes ends with `write`, which emits `document://changed`.
 
+use base64::Engine;
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::tool::IntoCallToolResult;
 use rmcp::handler::server::wrapper::{Json, Parameters};
@@ -127,6 +128,70 @@ impl<R: tauri::Runtime> VectorEffects<R> {
                 Ok(out)
             }
             Err(err) => Err(err),
+        }
+    }
+
+    /// Forwards a Tauri progress event to the client's progress token for
+    /// the life of one tool call.
+    ///
+    /// The command emits as it always did; the interface's own bar and the
+    /// client's both see it, so there is no second progress path to keep in
+    /// step with the first. `map` turns one event into the notification's
+    /// (progress, total, message).
+    ///
+    /// A client that asked for no progress token gets a relay that listens
+    /// to nothing: the events would have nowhere to go.
+    pub(crate) fn relay_progress<P: serde::de::DeserializeOwned + Send + 'static>(
+        &self,
+        event: &'static str,
+        ctx: rmcp::service::RequestContext<rmcp::RoleServer>,
+        map: impl Fn(&P) -> (f64, Option<f64>, Option<String>) + Send + Sync + 'static,
+    ) -> ProgressRelay<R> {
+        use tauri::Listener;
+        let Some(token) = ctx.meta.get_progress_token() else {
+            return ProgressRelay {
+                app: self.app.clone(),
+                id: None,
+            };
+        };
+        let peer = ctx.peer.clone();
+        let id = self.app.listen(event, move |e| {
+            if let Ok(payload) = serde_json::from_str::<P>(e.payload()) {
+                let (progress, total, message) = map(&payload);
+                let peer = peer.clone();
+                let token = token.clone();
+                // Spawned rather than awaited: a Tauri listener is a
+                // synchronous callback, and it runs on whichever thread the
+                // export is emitting from.
+                tauri::async_runtime::spawn(async move {
+                    let mut param = rmcp::model::ProgressNotificationParam::new(token, progress);
+                    param.total = total;
+                    param.message = message;
+                    let _ = peer.notify_progress(param).await;
+                });
+            }
+        });
+        ProgressRelay {
+            app: self.app.clone(),
+            id: Some(id),
+        }
+    }
+}
+
+/// Stops the relay when the call ends.
+///
+/// A listener outliving its call would forward another caller's export to a
+/// progress token nobody is reading any more.
+pub(crate) struct ProgressRelay<R: tauri::Runtime> {
+    app: tauri::AppHandle<R>,
+    id: Option<tauri::EventId>,
+}
+
+impl<R: tauri::Runtime> ProgressRelay<R> {
+    pub(crate) fn stop(self) {
+        use tauri::Listener;
+        if let Some(id) = self.id {
+            self.app.unlisten(id);
         }
     }
 }
@@ -934,6 +999,164 @@ impl<R: tauri::Runtime> VectorEffects<R> {
         let _ = tauri::Emitter::emit(&self.app, events::SELECTION, p.objects);
         Ok(Json(Done { ok: true }))
     }
+
+    // ----------------------------------------------------------------- files
+
+    #[tool(
+        description = "Imports a GRIB2 file as a new layer of the open project. Slow for large files; progress is reported."
+    )]
+    async fn import_grib(
+        &self,
+        Parameters(p): Parameters<PathParams>,
+    ) -> std::result::Result<Json<ProjectSummary>, ToolError> {
+        self.write("import_grib", false, move |app| {
+            crate::import::import_grib(app.state(), p.path)
+        })
+        .await
+        .map(Json)
+    }
+
+    #[tool(description = "Adds an image layer (PNG, JPEG, GeoTIFF). Display only; never exported.")]
+    async fn import_image(
+        &self,
+        Parameters(p): Parameters<ImageParams>,
+    ) -> std::result::Result<Json<ProjectSummary>, ToolError> {
+        self.write("import_image", false, move |app| {
+            crate::image::import_image(app.state(), p.path, p.view)
+        })
+        .await
+        .map(Json)
+    }
+
+    #[tool(
+        description = "Downloads historical wind or current (ERA5, GlobCurrent) over HTTPS into a layer. The one tool that reaches the network, and only when called."
+    )]
+    async fn import_history(
+        &self,
+        Parameters(p): Parameters<HistoryParams>,
+        ctx: rmcp::service::RequestContext<rmcp::RoleServer>,
+    ) -> std::result::Result<Json<ProjectSummary>, ToolError> {
+        let relay = self.relay_progress::<crate::history::HistoryProgress>(
+            "history://progress",
+            ctx,
+            |h| {
+                (
+                    f64::from(h.done),
+                    Some(f64::from(h.total)),
+                    Some(h.archive.clone()),
+                )
+            },
+        );
+        let out = self
+            .write("import_history", false, move |app| {
+                crate::history::import_history(
+                    app.clone(),
+                    p.archives,
+                    p.start_unix_s,
+                    p.end_unix_s,
+                    p.set_start_time,
+                )
+            })
+            .await;
+        relay.stop();
+        out.map(Json)
+    }
+
+    #[tool(
+        description = "Exports the project as GRIB2 to path. Refuses an existing file. Progress is reported; export_cancel stops it."
+    )]
+    async fn export_grib(
+        &self,
+        Parameters(p): Parameters<ExportParams>,
+        ctx: rmcp::service::RequestContext<rmcp::RoleServer>,
+    ) -> std::result::Result<Json<crate::export::ExportResult>, ToolError> {
+        let request = crate::export::ExportRequest {
+            path: p.path,
+            year: p.year,
+            month: p.month,
+            day: p.day,
+            hour: p.hour,
+        };
+        let relay =
+            self.relay_progress::<crate::export::ExportProgress>("export://progress", ctx, |e| {
+                (f64::from(e.step), Some(f64::from(e.total)), None)
+            });
+        let out = self
+            .run("export_grib", move |app| {
+                crate::export::export_grib(app.clone(), app.state(), app.state(), request)
+            })
+            .await;
+        relay.stop();
+        out.map(Json)
+    }
+
+    #[tool(
+        description = "Exports the project as a Zarr V3 directory at path (Float16, 72 h by 10 degree chunks, Zstd, NaN where uncovered). Refuses an existing directory."
+    )]
+    async fn export_zarr(
+        &self,
+        Parameters(p): Parameters<ExportParams>,
+        ctx: rmcp::service::RequestContext<rmcp::RoleServer>,
+    ) -> std::result::Result<Json<crate::export::ExportZarrResult>, ToolError> {
+        let request = crate::export::ExportZarrRequest {
+            path: p.path,
+            year: p.year,
+            month: p.month,
+            day: p.day,
+            hour: p.hour,
+        };
+        let relay =
+            self.relay_progress::<crate::export::ExportProgress>("export://progress", ctx, |e| {
+                (f64::from(e.step), Some(f64::from(e.total)), None)
+            });
+        let out = self
+            .run("export_zarr", move |app| {
+                crate::export::export_zarr(app.clone(), app.state(), app.state(), request)
+            })
+            .await;
+        relay.stop();
+        out.map(Json)
+    }
+
+    #[tool(description = "Asks a running export to stop.")]
+    async fn export_cancel(&self) -> std::result::Result<Json<Done>, ToolError> {
+        self.run("export_cancel", |app| {
+            crate::export::cancel_export(app.state());
+            Ok(())
+        })
+        .await?;
+        Ok(Json(Done { ok: true }))
+    }
+
+    #[tool(
+        description = "The map as the interface shows it, once its tiles have settled: a PNG. Needs an open project."
+    )]
+    async fn screenshot(&self) -> std::result::Result<CallToolResult, ToolError> {
+        // Neither `run` nor `write`: the work is the frontend's, so there is
+        // no closure to put on `spawn_blocking` and no document to report a
+        // change to. The activity note is what the other two would have done.
+        let service = self.app.state::<super::McpService>();
+        service.note_tool(&self.app, "screenshot");
+        let (id, rx) = service.captures.request(&self.app);
+        // The frontend waits up to 10 s for tiles and 20 s for a frame (M78);
+        // a little longer than both, then give up rather than hang the client.
+        match tokio::time::timeout(std::time::Duration::from_secs(35), rx).await {
+            Ok(Ok(png)) => {
+                let data = base64::engine::general_purpose::STANDARD.encode(png);
+                Ok(CallToolResult::success(vec![ContentBlock::image(
+                    data,
+                    "image/png",
+                )]))
+            }
+            _ => {
+                service.captures.forget(id);
+                Err(ToolError::Internal(McpError::internal_error(
+                    "the map did not answer the capture: is a project open and the window shown?",
+                    None,
+                )))
+            }
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -1194,6 +1417,39 @@ pub struct SelectionParams {
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct Done {
     pub ok: bool,
+}
+
+// ------------------------------------------------------------------- files
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct PathParams {
+    pub path: String,
+}
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ImageParams {
+    pub path: String,
+    /// `[west, north, east, south]` to place an image with no georeference
+    /// of its own; null uses the file's.
+    pub view: Option<[f64; 4]>,
+}
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct HistoryParams {
+    /// Archive names as the History panel lists them: "era5",
+    /// "globcurrent".
+    pub archives: Vec<String>,
+    pub start_unix_s: i64,
+    pub end_unix_s: i64,
+    #[serde(default)]
+    pub set_start_time: bool,
+}
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ExportParams {
+    pub path: String,
+    /// Reference time, UTC.
+    pub year: u16,
+    pub month: u8,
+    pub day: u8,
+    pub hour: u8,
 }
 
 #[tool_handler(router = self.tool_router.clone())]

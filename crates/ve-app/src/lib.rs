@@ -268,7 +268,8 @@ pub fn run() -> anyhow::Result<()> {
                 animation::set_start_time,
                 render_pool::render_ahead,
                 render_pool::frame_readiness,
-                protocol::tile_keys
+                protocol::tile_keys,
+                mcp::capture::deliver_capture
             ];
             handler(invoke)
         })

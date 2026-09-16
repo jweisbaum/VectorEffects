@@ -62,6 +62,15 @@ fn url(port: u16) -> String {
 }
 
 async fn client(port: u16, token: &str) -> rmcp::service::RunningService<rmcp::RoleClient, ()> {
+    client_with(port, token, ()).await
+}
+
+/// `client`, with a handler of the caller's own — a progress sink, say.
+async fn client_with<H: rmcp::ClientHandler>(
+    port: u16,
+    token: &str,
+    handler: H,
+) -> rmcp::service::RunningService<rmcp::RoleClient, H> {
     let mut headers = HashMap::new();
     headers.insert(
         http::HeaderName::from_static("authorization"),
@@ -69,7 +78,7 @@ async fn client(port: u16, token: &str) -> rmcp::service::RunningService<rmcp::R
     );
     let config = StreamableHttpClientTransportConfig::with_uri(url(port)).custom_headers(headers);
     let transport = StreamableHttpClientTransport::with_client(reqwest::Client::new(), config);
-    ().serve(transport).await.expect("initialize")
+    handler.serve(transport).await.expect("initialize")
 }
 
 #[tokio::test]
@@ -171,8 +180,8 @@ use rmcp::model::CallToolResult;
 use serde_json::{Value, json};
 
 /// Calls a tool and returns its structured content, or panics with its text.
-async fn call(
-    client: &rmcp::service::RunningService<rmcp::RoleClient, ()>,
+async fn call<H: rmcp::ClientHandler>(
+    client: &rmcp::service::RunningService<rmcp::RoleClient, H>,
     name: &'static str,
     args: Value,
 ) -> Value {
@@ -188,8 +197,8 @@ async fn call(
     result.structured_content.unwrap_or(Value::Null)
 }
 
-async fn call_err(
-    client: &rmcp::service::RunningService<rmcp::RoleClient, ()>,
+async fn call_err<H: rmcp::ClientHandler>(
+    client: &rmcp::service::RunningService<rmcp::RoleClient, H>,
     name: &'static str,
     args: Value,
 ) -> String {
@@ -576,5 +585,97 @@ async fn view_tools_emit_events_for_the_frontend() {
     assert_eq!(step.trim(), "2");
     let message = call_err(&client, "step_set", json!({ "step": 99 })).await;
     assert!(message.contains("step"), "{message}");
+    client.cancel().await.expect("close");
+}
+
+/// Collects the progress notifications the service relays, for
+/// `export_grib_writes_a_file_and_reports_progress`.
+struct ProgressSink(std::sync::mpsc::Sender<rmcp::model::ProgressNotificationParam>);
+
+impl rmcp::ClientHandler for ProgressSink {
+    async fn on_progress(
+        &self,
+        params: rmcp::model::ProgressNotificationParam,
+        _context: rmcp::service::NotificationContext<rmcp::RoleClient>,
+    ) {
+        let _ = self.0.send(params);
+    }
+}
+
+#[tokio::test]
+async fn export_grib_writes_a_file_and_reports_progress() {
+    let root = TempRoot::new("export");
+    let app = mock_app(&root);
+    let (port, token) = serve(&app);
+    let (progress_tx, progress_rx) = std::sync::mpsc::channel();
+    let client = client_with(port, &token, ProgressSink(progress_tx)).await;
+    call(&client, "project_new", new_project_args("Export")).await;
+    call(
+        &client,
+        "object_create",
+        json!({ "tool": "circle", "gesture": { "kind": "point", "at": [0.0, 0.0] } }),
+    )
+    .await;
+    let out = root.0.join("out.grib2");
+    let result = call(
+        &client,
+        "export_grib",
+        json!({ "path": out.to_string_lossy(), "year": 2026, "month": 9, "day": 16, "hour": 0 }),
+    )
+    .await;
+    assert!(result["bytes"].as_u64().unwrap_or(0) > 0, "{result}");
+    assert!(out.exists());
+    // The `export://progress` events the interface's own bar reads reached
+    // the client's progress token too, with the project's four steps as the
+    // total. The relay spawns each notification, so the last may still be in
+    // flight when the tool result lands: waited for rather than drained.
+    let mut reported = Vec::new();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while std::time::Instant::now() < deadline {
+        match progress_rx.recv_timeout(std::time::Duration::from_millis(250)) {
+            Ok(param) => {
+                let finished = param.progress >= 4.0;
+                reported.push(param);
+                if finished {
+                    break;
+                }
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+    }
+    let last = reported.last().expect("a progress notification");
+    assert_eq!(last.total, Some(4.0), "{reported:?}");
+    assert_eq!(last.progress, 4.0, "{reported:?}");
+    client.cancel().await.expect("close");
+}
+
+#[tokio::test]
+async fn a_screenshot_waits_for_the_frontend_and_returns_its_png() {
+    let root = TempRoot::new("shot");
+    let app = mock_app(&root);
+    let (port, token) = serve(&app);
+    let client = client(port, &token).await;
+    call(&client, "project_new", new_project_args("Shot")).await;
+    // Stand in for MapView: answer the capture request with a 1x1 PNG.
+    let handle = app.handle().clone();
+    app.listen(ve_app::mcp::events::CAPTURE, move |event| {
+        let id: u64 = serde_json::from_str::<Value>(event.payload()).expect("json")["id"]
+            .as_u64()
+            .expect("id");
+        let png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+        ve_app::mcp::capture::deliver_capture(handle.state(), id, png.to_owned()).expect("deliver");
+    });
+    let result: CallToolResult = client
+        .call_tool(CallToolRequestParams::new("screenshot"))
+        .await
+        .expect("call");
+    let image = result
+        .content
+        .iter()
+        .find_map(|c| c.as_image())
+        .expect("an image");
+    assert_eq!(image.mime_type, "image/png");
+    assert!(image.data.starts_with("iVBOR"));
     client.cancel().await.expect("close");
 }

@@ -7,6 +7,9 @@
  * spinner cannot tell a slow fetch from a stalled one. The steps are known
  * before the first byte moves, so the bar is a real fraction rather than an
  * animation.
+ *
+ * `Deserialize` as well as `Serialize`: `mcp::tools`'s progress relay reads
+ * the event back off the bus to forward it to an MCP client.
  */
 export type HistoryProgress = { 
 /**

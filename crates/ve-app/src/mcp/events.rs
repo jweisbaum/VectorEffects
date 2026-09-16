@@ -19,6 +19,10 @@ pub const STEP: &str = "view://step";
 pub const SELECTION: &str = "view://selection";
 pub const ACTIVITY: &str = "mcp://activity";
 
+// The screenshot round trip is its own module, but its event belongs in the
+// list of what the service tells the frontend.
+pub use super::capture::{CAPTURE, CaptureRequest};
+
 /// The document after a tool wrote to it. `project` null means closed.
 #[derive(Debug, Clone, Serialize, TS)]
 #[ts(export, export_to = "DocumentChanged.ts")]
