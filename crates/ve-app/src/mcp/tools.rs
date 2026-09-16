@@ -188,9 +188,24 @@ pub(crate) struct ProgressRelay<R: tauri::Runtime> {
 }
 
 impl<R: tauri::Runtime> ProgressRelay<R> {
+    /// Ends the relay. Dropping it does exactly this; the method is here so
+    /// the call site says when the call is over rather than relying on where
+    /// the binding happens to fall.
     pub(crate) fn stop(self) {
+        drop(self);
+    }
+}
+
+impl<R: tauri::Runtime> Drop for ProgressRelay<R> {
+    /// Unlistens however the call ended, including the one way `stop` cannot
+    /// cover: the tool *future* dropped at its `.await`, which is what an MCP
+    /// client disconnecting or cancelling mid-export does. A listener left
+    /// behind would deserialise every later `export://progress` and spawn a
+    /// notification into a dead peer, once per leak, for the life of the
+    /// process.
+    fn drop(&mut self) {
         use tauri::Listener;
-        if let Some(id) = self.id {
+        if let Some(id) = self.id.take() {
             self.app.unlisten(id);
         }
     }
@@ -1137,10 +1152,14 @@ impl<R: tauri::Runtime> VectorEffects<R> {
         // change to. The activity note is what the other two would have done.
         let service = self.app.state::<super::McpService>();
         service.note_tool(&self.app, "screenshot");
-        let (id, rx) = service.captures.request(&self.app);
+        // The guard forgets the request on every way out of here, the
+        // dropped future included, so nothing has to be cleaned up by hand.
+        let mut pending = service.captures.request(&self.app);
         // The frontend waits up to 10 s for tiles and 20 s for a frame (M78);
         // a little longer than both, then give up rather than hang the client.
-        match tokio::time::timeout(std::time::Duration::from_secs(35), rx).await {
+        let answer =
+            tokio::time::timeout(std::time::Duration::from_secs(35), pending.receiver()).await;
+        match answer {
             Ok(Ok(png)) => {
                 let data = base64::engine::general_purpose::STANDARD.encode(png);
                 Ok(CallToolResult::success(vec![ContentBlock::image(
@@ -1148,13 +1167,10 @@ impl<R: tauri::Runtime> VectorEffects<R> {
                     "image/png",
                 )]))
             }
-            _ => {
-                service.captures.forget(id);
-                Err(ToolError::Internal(McpError::internal_error(
-                    "the map did not answer the capture: is a project open and the window shown?",
-                    None,
-                )))
-            }
+            _ => Err(ToolError::Internal(McpError::internal_error(
+                "the map did not answer the capture: is a project open and the window shown?",
+                None,
+            ))),
         }
     }
 }
@@ -1476,5 +1492,49 @@ impl<R: tauri::Runtime> ServerHandler for VectorEffects<R> {
             .state::<super::McpService>()
             .session_delta(&self.app, 1);
         std::future::ready(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use tauri::{Emitter, Listener};
+
+    use super::ProgressRelay;
+
+    /// A relay stops listening when it is dropped, not only when `stop` is
+    /// called. The tool future dropped at its `.await` — a client that
+    /// disconnects or cancels mid-export — never reaches `stop`, and a
+    /// listener left behind would forward every later export to a peer
+    /// nobody is reading, once per leak, for the life of the process.
+    #[test]
+    fn a_dropped_relay_stops_listening() {
+        let app = tauri::test::mock_app();
+        let seen = Arc::new(AtomicUsize::new(0));
+        let counted = Arc::clone(&seen);
+        let relay = ProgressRelay {
+            app: app.handle().clone(),
+            id: Some(app.listen("export://progress", move |_| {
+                counted.fetch_add(1, Ordering::Relaxed);
+            })),
+        };
+
+        let _ = app.emit("export://progress", 1_u32);
+        assert_eq!(
+            seen.load(Ordering::Relaxed),
+            1,
+            "a live relay should hear the event"
+        );
+
+        // Dropped, never stopped: the one path `stop` cannot cover.
+        drop(relay);
+        let _ = app.emit("export://progress", 2_u32);
+        assert_eq!(
+            seen.load(Ordering::Relaxed),
+            1,
+            "a dropped relay must not still be listening"
+        );
     }
 }
