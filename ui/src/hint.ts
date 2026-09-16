@@ -29,10 +29,12 @@ export interface HintSnapshot {
    * status bar is where the eye already goes for what is happening.
    */
   activity: string | null;
+  /** What a connected MCP client last did, or null with no client (spec 8.8). */
+  mcp: string | null;
   retry?: (() => void) | null;
 }
 
-let snapshot: HintSnapshot = { hint: null, error: null, errorKind: null, activity: null };
+let snapshot: HintSnapshot = { hint: null, error: null, errorKind: null, activity: null, mcp: null };
 const listeners = new Set<() => void>();
 
 function publish(next: HintSnapshot) {
@@ -40,7 +42,8 @@ function publish(next: HintSnapshot) {
     next.hint === snapshot.hint &&
     next.error === snapshot.error &&
     next.errorKind === snapshot.errorKind &&
-    next.activity === snapshot.activity && next.retry === snapshot.retry
+    next.activity === snapshot.activity &&
+    next.mcp === snapshot.mcp && next.retry === snapshot.retry
   ) {
     return;
   }
@@ -83,6 +86,11 @@ export function retryError(): void {
 /** Sets what the map is busy with, or clears it. Independent of the hint and the error. */
 export function setActivity(activity: string | null): void {
   publish({ ...snapshot, activity });
+}
+
+/** Sets the MCP badge, or clears it. */
+export function setMcpActivity(mcp: string | null): void {
+  publish({ ...snapshot, mcp });
 }
 
 /** What the status bar shows: the error if there is one, else the hint. */

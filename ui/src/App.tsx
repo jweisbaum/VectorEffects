@@ -22,9 +22,13 @@ import { stillPasteChord } from "./chords";
 import type { FieldKindName } from "./kind";
 import { listen } from "@tauri-apps/api/event";
 import { api, HISTORY_LABEL, IpcError } from "./ipc";
-import { reportError, retryError, shown, useHint } from "./hint";
+import { reportError, retryError, setMcpActivity, shown, useHint } from "./hint";
 import { isBusy, useBusy } from "./busy";
 import type { HistoryProgress } from "./generated/HistoryProgress";
+import type { DocumentChanged } from "./generated/DocumentChanged";
+import type { McpActivity } from "./generated/McpActivity";
+import type { ViewFocus } from "./generated/ViewFocus";
+import { applyDocumentChanged } from "./mcp/follow";
 import { type PanelState, loadPanels, savePanels, togglePanel } from "./panels/layout";
 import SettingsDialog from "./settings/SettingsDialog";
 import type { AppInfo } from "./generated/AppInfo";
@@ -197,6 +201,29 @@ function EditorApp() {
   useEffect(() => {
     if (picking !== null && !selection.includes(picking.object)) setPicking(null);
   }, [picking, selection]);
+
+  // The interface follows the MCP service (spec 8.8). Each event is what the
+  // app would have done itself had it made the call.
+  useEffect(() => {
+    const actions = { setProject, setStep, setSelection, setShapeEditing, setActiveLayer };
+    const subs = [
+      listen<DocumentChanged>("document://changed", (e) => applyDocumentChanged(e.payload, actions)),
+      listen<number>("view://step", (e) => setStep(e.payload)),
+      listen<number[]>("view://selection", (e) => {
+        mapRef.current?.clearRegion();
+        setSelection(e.payload);
+      }),
+      listen<ViewFocus>("view://focus", (e) =>
+        mapRef.current?.focus(e.payload.lon, e.payload.lat, e.payload.px_per_deg ?? undefined),
+      ),
+      listen<McpActivity>("mcp://activity", (e) =>
+        setMcpActivity(e.payload.sessions > 0 ? (e.payload.last_tool ?? "connected") : null),
+      ),
+    ];
+    return () => {
+      for (const pending of subs) void pending.then((unlisten) => unlisten());
+    };
+  }, []);
 
   useEffect(() => {
     void (async () => {
@@ -915,22 +942,27 @@ function StatusHint({ status }: { status: string | null }) {
   // The map's activity — tiles still rendering — leads the line (M27).
   const activity =
     state.activity !== null ? <span className="activity">{state.activity}</span> : null;
+  // A client driving the application says so, where the map's own activity is
+  // said: an edit that nobody at the keyboard made is worth an explanation.
+  const mcp = state.mcp !== null ? <span className="activity mcp-badge" title="An MCP client is connected">MCP: {state.mcp}</span> : null;
   if (status !== null) {
     return (
       <span className="hint accent">
+        {mcp}
+        {mcp && " · "}
         {activity}
         {activity && " · "}
         {status}
       </span>
     );
   }
-  if (line === null) return <span className="hint">{activity}</span>;
+  if (line === null) return <span className="hint">{mcp}{mcp && " · "}{activity}</span>;
   return (
     <span
       className={`${line.kind === "error" ? "hint error" : "hint muted"}${line.kind === "error" && state.retry ? " has-retry" : ""}`}
       title={line.detail ?? undefined}
     >
-      <span className="hint-message">{activity}{activity && " · "}{line.text}</span>
+      <span className="hint-message">{mcp}{mcp && " · "}{activity}{activity && " · "}{line.text}</span>
       {line.kind === "error" && state.retry && <button className="status-retry" onClick={retryError}>Retry download</button>}
     </span>
   );
