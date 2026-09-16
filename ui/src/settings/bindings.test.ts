@@ -22,6 +22,7 @@ const settings: AppSettings = {
   macro_directory: "",
   projection: "equirectangular",
   auto_scale: false,
+  mcp: { enabled: false, port: 47391, token: "" },
 };
 
 describe("chordOf", () => {

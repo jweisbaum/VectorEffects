@@ -38,6 +38,7 @@ import type { EraseStroke } from "./generated/EraseStroke";
 import type { ClipboardKind } from "./generated/ClipboardKind";
 import type { AutosaveMode } from "./generated/AutosaveMode";
 import type { AppSettings } from "./generated/AppSettings";
+import type { McpStatus } from "./generated/McpStatus";
 import type { GlyphSetting } from "./generated/GlyphSetting";
 import type { GlyphStyle } from "./generated/GlyphStyle";
 import type { CaptureMode } from "./generated/CaptureMode";
@@ -653,6 +654,15 @@ export const api = {
   /** Where the macro library lives. */
   setMacroDirectory: (directory: string) =>
     call<AppSettings>("set_macro_directory", { directory }),
+  /** The MCP service's switch, port, token and live state (spec 8.8). */
+  mcpStatus: () => call<McpStatus>("mcp_status", {}),
+  /** Turns the service on or off; enabling issues a fresh token. */
+  setMcp: (enabled: boolean, port: number) => call<McpStatus>("mcp_set", { enabled, port }),
+  /** A new token, and the listener restarted with it. */
+  rotateMcpToken: () => call<McpStatus>("mcp_rotate_token", {}),
+  /** The map's answer to a `view://capture` request. */
+  deliverCapture: (id: number, pngBase64: string) =>
+    call<void>("deliver_capture", { id, pngBase64 }),
   /** The open project's colour scale: a document write, undoable. */
   /** The top of the colour ramp for one kind of field, in knots (M29). */
   setColourScale: (kind: FieldKindName, maxKnots: number) =>

@@ -13,6 +13,7 @@ import {
 } from "react";
 
 import { api } from "../ipc";
+import { listen } from "@tauri-apps/api/event";
 import NumberField from "../NumberField";
 import type { Gesture } from "../generated/Gesture";
 import type { PathPoint } from "../generated/PathPoint";
@@ -24,6 +25,7 @@ import type { Tool } from "../generated/Tool";
 import type { AppSettings } from "../generated/AppSettings";
 import type { BrushShape } from "../generated/BrushShape";
 import type { CaptureMode } from "../generated/CaptureMode";
+import type { CaptureRequest } from "../generated/CaptureRequest";
 import type { MacroLibrary } from "../generated/MacroLibrary";
 import type { LayerNode } from "../generated/LayerNode";
 import type { MacroOutline } from "../generated/MacroOutline";
@@ -491,6 +493,11 @@ export interface MapHandle extends PlaybackMap {
   pasteCapture(layer: number | null, still: boolean): void;
   /** Takes a capture mode answered elsewhere — the timeline's key removal. */
   setCapture(mode: CaptureMode): void;
+  /**
+   * Pans to a place, optionally at a zoom, for the MCP service's
+   * `view_focus` (spec 8.8). Clamped like every other camera move.
+   */
+  focus(lon: number, lat: number, pxPerDeg?: number): void;
 }
 
 export default function MapView({
@@ -2470,6 +2477,21 @@ export default function MapView({
     const seen = visibleBounds(cameraRef.current, view);
     return [seen.west, seen.north, seen.east, seen.south];
   }, []);
+  const focus = useCallback(
+    (lon: number, lat: number, pxPerDeg?: number) => {
+      cameraRef.current = clampCamera(
+        {
+          ...cameraRef.current,
+          centerLon: lon,
+          centerLat: lat,
+          pxPerDeg: pxPerDeg ?? cameraRef.current.pxPerDeg,
+        },
+        viewRef.current,
+      );
+      requestDraw();
+    },
+    [requestDraw],
+  );
   const clearRegion = useCallback(() => {
     setRegion((current) => {
       if (current !== null) requestOverlay();
@@ -2508,8 +2530,8 @@ export default function MapView({
   );
   useImperativeHandle(
     ref,
-    () => ({ warm, prepare, present, bounds, clearRegion, copyRegion, pasteCapture, setCapture }),
-    [bounds, clearRegion, copyRegion, pasteCapture, setCapture, warm, prepare, present],
+    () => ({ warm, prepare, present, bounds, clearRegion, copyRegion, pasteCapture, setCapture, focus }),
+    [bounds, clearRegion, copyRegion, focus, pasteCapture, setCapture, warm, prepare, present],
   );
 
   // A project change can shorten the timeline.
@@ -5398,12 +5420,14 @@ export default function MapView({
   };
 
   /**
-   * Reads the next frame back and writes it beside the logs, returning where.
+   * The map's framebuffer with the overlay on it, as base64 PNG, once the
+   * tiles have settled.
    *
-   * The path is returned as well as logged because automation needs it: a
-   * driver asks for a capture and then reads that file (M71).
+   * Split out of `capture` (M76) because the MCP service's screenshot wants
+   * the same picture and not the file: the debug capture writes it beside the
+   * logs, the service hands it back over IPC.
    */
-  const capture = useCallback(async (name: string): Promise<string | null> => {
+  const framebufferPng = useCallback(async (): Promise<string | null> => {
     // Waited for, not demanded: the renderer comes up asynchronously — a GL
     // context, then the basemap — while the effects that can ask for a capture
     // have already run. Giving up on the first look made an automated capture
@@ -5478,10 +5502,25 @@ export default function MapView({
       reader.readAsDataURL(blob);
     });
     const base64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
-    const path = await api.saveDebugCapture(name, base64);
-    void api.frontendLog("info", `capture written to ${path}`);
-    return path;
+    return base64;
   }, [requestDraw]);
+
+  /**
+   * Reads the next frame back and writes it beside the logs, returning where.
+   *
+   * The path is returned as well as logged because automation needs it: a
+   * driver asks for a capture and then reads that file (M71).
+   */
+  const capture = useCallback(
+    async (name: string): Promise<string | null> => {
+      const base64 = await framebufferPng();
+      if (base64 === null) return null;
+      const path = await api.saveDebugCapture(name, base64);
+      void api.frontendLog("info", `capture written to ${path}`);
+      return path;
+    },
+    [framebufferPng],
+  );
 
   /**
    * The capture, reachable from a script injected into the webview (M71).
@@ -5508,6 +5547,24 @@ export default function MapView({
       delete hooks.__veCapture;
     };
   }, [capture]);
+
+  // The MCP service's screenshot (spec 8.8). Not a window global and not
+  // dev-only: it answers an event the backend emits only while the person
+  // has the service on, with the same picture the capture suite takes.
+  useEffect(() => {
+    const pending = listen<CaptureRequest>("view://capture", async (event) => {
+      const png = await framebufferPng();
+      if (png === null) return;
+      try {
+        await api.deliverCapture(event.payload.id, png);
+      } catch (err) {
+        void api.frontendLog("warn", `capture ${event.payload.id} not delivered: ${String(err)}`);
+      }
+    });
+    return () => {
+      void pending.then((unlisten) => unlisten());
+    };
+  }, [framebufferPng]);
 
   /**
    * Development capture suite.

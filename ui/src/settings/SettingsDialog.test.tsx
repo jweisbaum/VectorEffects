@@ -116,6 +116,7 @@ const settings: AppSettings = {
   macro_directory: "/macros",
   projection: "equirectangular",
   auto_scale: false,
+  mcp: { enabled: false, port: 47391, token: "" },
 };
 
 let container: HTMLDivElement;
