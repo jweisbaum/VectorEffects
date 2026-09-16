@@ -6,6 +6,7 @@
 
 use std::path::PathBuf;
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use ve_core::io;
@@ -17,7 +18,7 @@ use crate::error::{AppError, Context, Result};
 use crate::session::{OpenProject, Session};
 
 /// What the frontend needs to know about the open project.
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, JsonSchema, TS)]
 #[ts(export, export_to = "ProjectSummary.ts")]
 pub struct ProjectSummary {
     /// Display name.
@@ -125,7 +126,7 @@ impl ProjectSummary {
 }
 
 /// A previously opened project.
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, JsonSchema, TS)]
 #[ts(export, export_to = "RecentProject.ts")]
 pub struct RecentProject {
     /// Full path.

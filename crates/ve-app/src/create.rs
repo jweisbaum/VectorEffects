@@ -12,6 +12,7 @@
 //! its *options*, which are property values keyed by the same ids the inspector
 //! uses. Neither is tool-specific code.
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use ve_core::command::Command;
@@ -31,7 +32,7 @@ use crate::projects::{ProjectSummary, with_session};
 /// Which tool made the gesture (spec.md 6.2).
 ///
 /// A wire mirror of [`ToolKind`], which cannot derive `TS` from another crate.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export, export_to = "Tool.ts")]
 pub enum Tool {
@@ -236,7 +237,7 @@ pub fn create_object(state: tauri::State<'_, AppState>, object: NewObject) -> Re
 /// What a gesture made: the document after it, and the object it left the
 /// user holding (M29) — the new object, or the one the gesture merged into,
 /// since that is the object that now has the stroke in it.
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, JsonSchema, TS)]
 #[ts(export, export_to = "Created.ts")]
 pub struct Created {
     /// The document after the gesture.

@@ -5,6 +5,7 @@
 //! adding a property to a tool makes it appear in the inspector with no
 //! frontend change at all (`CLAUDE.md`, "adding a property").
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use ve_core::angle::Angle;
@@ -19,7 +20,7 @@ use crate::error::{AppError, Result};
 use crate::projects::{ProjectSummary, with_session};
 
 /// One object, as the layer panel sees it.
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, JsonSchema, TS)]
 #[ts(export, export_to = "ObjectNode.ts")]
 pub struct ObjectNode {
     /// Stable identity.
@@ -61,7 +62,7 @@ fn history_origin(source: &ve_core::document::LayerSource) -> Option<HistoryOrig
 }
 
 /// Where a history layer's hours came from (spec.md 4.10, M55).
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, JsonSchema, TS)]
 #[ts(export, export_to = "HistoryOrigin.ts")]
 pub struct HistoryOrigin {
     /// The archive's identifier, as `ve_zarr::Archive::id` spells it.
@@ -77,7 +78,7 @@ pub struct HistoryOrigin {
 }
 
 /// One layer, with its objects in z-order.
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, JsonSchema, TS)]
 #[ts(export, export_to = "LayerNode.ts")]
 pub struct LayerNode {
     /// Speed thresholds, for every layer source.
@@ -111,7 +112,7 @@ pub struct LayerNode {
 }
 
 /// A layer's speed threshold controls, in metres per second.
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, JsonSchema, TS)]
 #[ts(export, export_to = "LayerSpeedFilter.ts")]
 pub struct LayerSpeedFilter {
     /// Lower bound, or no filter.
@@ -123,7 +124,7 @@ pub struct LayerSpeedFilter {
 }
 
 /// What one step of a GRIB layer shows (spec.md 4.8, M20).
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, JsonSchema, TS)]
 #[ts(export, export_to = "GribStepView.ts")]
 pub struct GribStepView {
     /// The file has a message of its own for this step's time.
@@ -141,7 +142,7 @@ pub struct GribStepView {
 }
 
 /// What the panel says about a layer's imported field (spec.md 4.8).
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, JsonSchema, TS)]
 #[ts(export, export_to = "GribLayerInfo.ts")]
 pub struct GribLayerInfo {
     /// The file the field is read from.
@@ -190,7 +191,7 @@ pub struct GribLayerInfo {
 }
 
 /// The whole document, for the panel.
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, JsonSchema, TS)]
 #[ts(export, export_to = "DocumentTree.ts")]
 pub struct DocumentTree {
     /// Layers, bottom of the stack first — the order they composite in.
@@ -198,7 +199,7 @@ pub struct DocumentTree {
 }
 
 /// A property value crossing IPC.
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[ts(export, export_to = "PropertyValue.ts")]
 pub enum PropertyValue {
@@ -274,7 +275,7 @@ impl PropertyValue {
 }
 
 /// One property, described well enough for the inspector to render it.
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, JsonSchema, TS)]
 #[ts(export, export_to = "PropertyView.ts")]
 pub struct PropertyView {
     /// Identifier, e.g. `"speed"`.
@@ -312,7 +313,7 @@ pub struct PropertyView {
 }
 
 /// A centred slider's labelling (M29), as the schema declares it.
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, JsonSchema, TS)]
 #[ts(export, export_to = "SliderView.ts")]
 pub struct SliderView {
     /// The label at the left end.

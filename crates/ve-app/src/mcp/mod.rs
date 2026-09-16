@@ -1,6 +1,7 @@
 //! The MCP service (spec.md 8.8): a loopback endpoint through which a client
 //! drives the application, on only while the setting says so.
 
+pub mod events;
 pub mod server;
 pub mod token;
 pub mod tools;
@@ -15,6 +16,8 @@ pub struct McpService {
     running: Mutex<Option<server::Running>>,
     /// Why the last bind failed, shown in Settings.
     pub(crate) bind_error: Mutex<Option<String>>,
+    /// Open client sessions and the last tool called (status bar, Settings).
+    activity: Mutex<events::McpActivity>,
 }
 
 impl McpService {
@@ -78,16 +81,38 @@ impl McpService {
         }
     }
 
+    /// Records a tool call and tells the status bar.
+    pub fn note_tool<R: tauri::Runtime>(&self, app: &tauri::AppHandle<R>, name: &str) {
+        use tauri::Emitter;
+        if let Ok(mut activity) = self.activity.lock() {
+            activity.last_tool = Some(name.to_owned());
+            let _ = app.emit(events::ACTIVITY, activity.clone());
+        }
+    }
+
+    /// A client session opened (+1) or closed (-1).
+    pub fn session_delta<R: tauri::Runtime>(&self, app: &tauri::AppHandle<R>, delta: i32) {
+        use tauri::Emitter;
+        if let Ok(mut activity) = self.activity.lock() {
+            activity.sessions = activity.sessions.saturating_add_signed(delta);
+            if activity.sessions == 0 {
+                activity.last_tool = None;
+            }
+            let _ = app.emit(events::ACTIVITY, activity.clone());
+        }
+    }
+
     /// What Settings shows.
     pub fn status(&self, mcp: &McpSettings) -> McpStatus {
+        let activity = self.activity.lock().ok();
         McpStatus {
             enabled: mcp.enabled,
             port: mcp.port,
             token: mcp.token.clone(),
             bound_port: self.running_port(),
             bind_error: self.bind_error.lock().ok().and_then(|e| e.clone()),
-            sessions: 0,
-            last_tool: None,
+            sessions: activity.as_ref().map_or(0, |a| a.sessions),
+            last_tool: activity.and_then(|a| a.last_tool.clone()),
         }
     }
 }

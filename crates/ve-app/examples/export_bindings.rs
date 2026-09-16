@@ -25,6 +25,7 @@ use ve_app::export::{
     ExportZarrResult,
 };
 use ve_app::history::HistoryProgress;
+use ve_app::mcp::events::{DocumentChanged, McpActivity, ViewFocus};
 use ve_app::palette::{
     GestureSelector, OptionDependency, PreviewKind, Sizing, ToolOptionSpec, ToolSchema,
 };
@@ -128,6 +129,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ExportEstimate::export_all(&cfg)?;
     ExportZarrRequest::export_all(&cfg)?;
     ExportZarrResult::export_all(&cfg)?;
+    DocumentChanged::export_all(&cfg)?;
+    ViewFocus::export_all(&cfg)?;
+    McpActivity::export_all(&cfg)?;
 
     // Keep generated files deterministic and free of ts-rs's trailing spaces.
     for entry in std::fs::read_dir(&out_dir)? {

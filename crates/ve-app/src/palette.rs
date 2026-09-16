@@ -12,6 +12,7 @@
 //! says, plus the two facts about a tool that are not properties: which gesture
 //! drives it, and whether it has a hover indicator (spec.md 6.2).
 
+use schemars::JsonSchema;
 use serde::Serialize;
 use ts_rs::TS;
 use ve_core::schema::{self, PropId, ToolKind, Unit};
@@ -26,7 +27,7 @@ use crate::error::Result;
 /// which is the one thing it has that the backend does not. The *rule* stays
 /// here, so "which options does this mode make inert" has one answer for the
 /// inspector and the option bar both (spec.md 6.1).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema, TS)]
 #[ts(export, export_to = "OptionDependency.ts")]
 pub struct OptionDependency {
     /// The choice property that decides.
@@ -36,7 +37,7 @@ pub struct OptionDependency {
 }
 
 /// One option a tool offers, described well enough to render.
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, JsonSchema, TS)]
 #[ts(export, export_to = "ToolOptionSpec.ts")]
 pub struct ToolOptionSpec {
     /// The property id, spelled as `create_object` expects it.
@@ -74,7 +75,7 @@ pub struct ToolOptionSpec {
 /// freehand polygon is a ring of placed vertices and a preset is a drag. The
 /// mapping lives here so the frontend cannot send a gesture `create_object`
 /// would refuse.
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, JsonSchema, TS)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[ts(export, export_to = "GestureSelector.ts")]
 pub enum GestureSelector {
@@ -108,7 +109,7 @@ pub enum GestureSelector {
 /// add pixels, never take them away — and the only honest preview of a
 /// modifier, whose result is whatever was beneath it, changed. The map
 /// applies the operation per pixel, live, as the pointer moves.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export, export_to = "PreviewKind.ts")]
 pub enum PreviewKind {
@@ -138,7 +139,7 @@ pub enum PreviewKind {
 /// that did nothing. `stamp_space` is therefore not among a tool's options, and
 /// this stands in its place — carrying the same dependency rules, so a control
 /// the mode makes inert is still hidden.
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, JsonSchema, TS)]
 #[ts(export, export_to = "Sizing.ts")]
 pub struct Sizing {
     /// What makes the unit inert, if anything.
@@ -153,7 +154,7 @@ pub struct Sizing {
 /// Two property names and the conditions that make them meaningful. The bar
 /// renders a button from this and nothing else, so a tool gains an eyedropper
 /// by declaring one in the schema.
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, JsonSchema, TS)]
 #[ts(export, export_to = "EyedropperSpec.ts")]
 pub struct EyedropperSpec {
     /// The speed option it writes, in m/s.
@@ -165,7 +166,7 @@ pub struct EyedropperSpec {
 }
 
 /// Everything the palette and the option bar need for one tool.
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, JsonSchema, TS)]
 #[ts(export, export_to = "ToolSchema.ts")]
 pub struct ToolSchema {
     /// Which tool.

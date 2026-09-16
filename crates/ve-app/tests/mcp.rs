@@ -4,7 +4,6 @@
 use std::collections::HashMap;
 
 use rmcp::ServiceExt;
-#[allow(unused_imports)]
 use rmcp::model::CallToolRequestParams;
 use rmcp::transport::StreamableHttpClientTransport;
 use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
@@ -113,7 +112,10 @@ async fn the_right_token_initialises_and_lists_tools() {
     let server_info = info.server_info.as_ref().expect("implementation identity");
     assert_eq!(server_info.name, "VectorEffects");
     let tools = client.list_all_tools().await.expect("tools");
-    assert!(tools.is_empty(), "no tools yet in this task: {tools:?}");
+    assert!(
+        !tools.is_empty(),
+        "the project and structure tools: {tools:?}"
+    );
     client.cancel().await.expect("close");
 }
 
@@ -162,4 +164,164 @@ async fn mcp_set_issues_a_token_on_enable_and_clears_it_on_disable() {
     assert!(status.token.is_empty());
     assert_eq!(status.bound_port, None);
     assert_eq!(app.state::<ve_app::mcp::McpService>().running_port(), None);
+}
+
+use rmcp::model::CallToolResult;
+use serde_json::{Value, json};
+
+/// Calls a tool and returns its structured content, or panics with its text.
+async fn call(
+    client: &rmcp::service::RunningService<rmcp::RoleClient, ()>,
+    name: &'static str,
+    args: Value,
+) -> Value {
+    let params = CallToolRequestParams::new(name)
+        .with_arguments(args.as_object().cloned().unwrap_or_default());
+    let result: CallToolResult = client.call_tool(params).await.expect("call");
+    assert_ne!(
+        result.is_error,
+        Some(true),
+        "{name} failed: {:?}",
+        result.content
+    );
+    result.structured_content.unwrap_or(Value::Null)
+}
+
+async fn call_err(
+    client: &rmcp::service::RunningService<rmcp::RoleClient, ()>,
+    name: &'static str,
+    args: Value,
+) -> String {
+    let params = CallToolRequestParams::new(name)
+        .with_arguments(args.as_object().cloned().unwrap_or_default());
+    let result: CallToolResult = client.call_tool(params).await.expect("call");
+    assert_eq!(result.is_error, Some(true), "{name} should have failed");
+    result
+        .content
+        .iter()
+        .filter_map(|c| c.as_text().map(|t| t.text.clone()))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn new_project_args(name: &str) -> Value {
+    json!({ "name": name, "field_kind": "wind", "resolution": "1.0", "step_hours": 3, "step_count": 4 })
+}
+
+#[tokio::test]
+async fn a_client_creates_a_project_and_the_app_sees_it() {
+    let root = TempRoot::new("project");
+    let app = mock_app(&root);
+    let (port, token) = serve(&app);
+    let client = client(port, &token).await;
+    let summary = call(&client, "project_new", new_project_args("Painted")).await;
+    assert_eq!(summary["name"], "Painted");
+    assert_eq!(summary["step_count"], 4);
+    // The interface's own read agrees.
+    let current = ve_app::projects::current(app.state::<AppState>().inner())
+        .expect("current")
+        .expect("open");
+    assert_eq!(current.name, "Painted");
+    let status = call(&client, "project_status", json!({})).await;
+    assert_eq!(status["project"]["name"], "Painted");
+    client.cancel().await.expect("close");
+}
+
+#[tokio::test]
+async fn unsaved_work_is_refused_without_discard() {
+    let root = TempRoot::new("dirty");
+    let app = mock_app(&root);
+    let (port, token) = serve(&app);
+    let client = client(port, &token).await;
+    call(&client, "project_new", new_project_args("One")).await;
+    call(&client, "layer_add", json!({ "name": "Extra" })).await;
+    let message = call_err(&client, "project_new", new_project_args("Two")).await;
+    // `AppError::UnsavedChanges`'s own wording ("...changes that are not
+    // saved...") never uses the word "unsaved" as one token.
+    assert!(message.contains("not saved"), "{message}");
+    let summary = call(
+        &client,
+        "project_new",
+        json!({ "name": "Two", "field_kind": "wind", "resolution": "1.0", "step_hours": 3, "step_count": 4, "discard_unsaved": true }),
+    )
+    .await;
+    assert_eq!(summary["name"], "Two");
+    client.cancel().await.expect("close");
+}
+
+#[tokio::test]
+async fn layers_and_objects_round_trip_through_the_interface_reads() {
+    let root = TempRoot::new("objects");
+    let app = mock_app(&root);
+    let (port, token) = serve(&app);
+    let client = client(port, &token).await;
+    call(&client, "project_new", new_project_args("Objects")).await;
+    let layers = call(&client, "layers_list", json!({ "step": 0 })).await;
+    let first = layers["layers"][0]["id"].as_u64().expect("layer id");
+    call(
+        &client,
+        "layer_set",
+        json!({ "layer": first, "name": "Surface", "visible": true }),
+    )
+    .await;
+    let created = call(
+        &client,
+        "object_create",
+        json!({
+            "tool": "circle",
+            "gesture": { "kind": "point", "at": [-40.0, 30.0] },
+            "options": [],
+            "layer": first
+        }),
+    )
+    .await;
+    let object = created["object"].as_u64().expect("object id");
+    let tree = ve_app::document::tree(app.state::<AppState>().inner(), 0).expect("tree");
+    let names: Vec<String> = tree.layers.iter().map(|l| l.name.clone()).collect();
+    assert!(names.contains(&"Surface".to_owned()), "{names:?}");
+    assert!(
+        tree.layers
+            .iter()
+            .any(|l| l.objects.iter().any(|o| o.id == object))
+    );
+    let props = call(
+        &client,
+        "object_get",
+        json!({ "object": object, "step": 0 }),
+    )
+    .await;
+    assert!(
+        props["properties"]
+            .as_array()
+            .map(|p| !p.is_empty())
+            .unwrap_or(false)
+    );
+    let set = call(
+        &client,
+        "object_set",
+        json!({ "object": object, "step": 0, "values": { "Speed": { "kind": "number", "value": 12.0 } } }),
+    )
+    .await;
+    assert_eq!(set["can_undo"], true);
+    let found = call(
+        &client,
+        "objects_in_region",
+        json!({ "west": -50.0, "south": 20.0, "east": -30.0, "north": 40.0, "step": 0 }),
+    )
+    .await;
+    assert!(
+        found["objects"]
+            .as_array()
+            .expect("ids")
+            .contains(&json!(object))
+    );
+    call(&client, "object_remove", json!({ "objects": [object] })).await;
+    let tree = ve_app::document::tree(app.state::<AppState>().inner(), 0).expect("tree");
+    assert!(
+        !tree
+            .layers
+            .iter()
+            .any(|l| l.objects.iter().any(|o| o.id == object))
+    );
+    client.cancel().await.expect("close");
 }

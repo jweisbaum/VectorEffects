@@ -35,6 +35,7 @@
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
 
+use schemars::JsonSchema;
 use serde::Serialize;
 use ts_rs::TS;
 use ve_core::document::{LayerSource, Placement};
@@ -53,7 +54,7 @@ use crate::projects::with_session;
 pub const MAX_SERVED_EDGE: u32 = 8192;
 
 /// What the frontend gets when it asks about an image layer.
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, JsonSchema, TS)]
 #[ts(export, export_to = "ImageLayerView.ts")]
 pub struct ImageLayerView {
     /// Which layer this is.
