@@ -209,10 +209,10 @@ function EditorApp() {
     const subs = [
       listen<DocumentChanged>("document://changed", (e) => applyDocumentChanged(e.payload, actions)),
       listen<number>("view://step", (e) => setStep(e.payload)),
-      listen<number[]>("view://selection", (e) => {
-        mapRef.current?.clearRegion();
-        setSelection(e.payload);
-      }),
+      // Through the app's own selection path, not a setter: it is what drops
+      // the region a selection replaces and leaves shape editing only where
+      // it still belongs (spec.md 8.2).
+      listen<number[]>("view://selection", (e) => selectObjects(e.payload)),
       listen<ViewFocus>("view://focus", (e) =>
         mapRef.current?.focus(e.payload.lon, e.payload.lat, e.payload.px_per_deg ?? undefined),
       ),
