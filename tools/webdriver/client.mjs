@@ -42,8 +42,13 @@ const START_TIMEOUT_MS = 180_000;
  * The endpoint binds `127.0.0.1:0` — a random port, announced on stdout and
  * nowhere else: no file, no environment variable, no fixed number. So the
  * driver has to own the process to know where to talk to it.
+ *
+ * `env` is merged over the caller's own environment. It exists for
+ * `VE_AUTOMATION_ROOT` (`paths.rs`): a run that changes a setting — the MCP
+ * service's, say — would otherwise write it into the person's real settings
+ * file and leave their own application carrying it on its next launch.
  */
-export async function launch({ cwd = process.cwd(), onLog } = {}) {
+export async function launch({ cwd = process.cwd(), onLog, env = {} } = {}) {
   // Its own process group, so it can be killed as a tree. `npm run
   // dev:webdriver` is a wrapper around the Tauri CLI, which starts Vite as
   // its `beforeDevCommand` and then cargo: signalling only the wrapper leaves
@@ -52,7 +57,7 @@ export async function launch({ cwd = process.cwd(), onLog } = {}) {
     cwd,
     stdio: ["ignore", "pipe", "pipe"],
     detached: true,
-    env: { ...process.env, FORCE_COLOR: "0" },
+    env: { ...process.env, FORCE_COLOR: "0", ...env },
   });
 
   let port = null;

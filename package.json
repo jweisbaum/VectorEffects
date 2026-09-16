@@ -16,6 +16,7 @@
     "ui:build": "npm run build -w ui",
     "bindings": "cargo run -p ve-app --example export_bindings",
     "tools:test": "node --test tools/webdriver/client.test.mjs",
+    "tools:mcp-follow": "node tools/webdriver/mcp-follow.mjs",
     "check:offline": "./tools/check-offline.sh"
   },
   "devDependencies": {
