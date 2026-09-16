@@ -87,7 +87,13 @@ pub fn start<R: tauri::Runtime>(
 
     let cancel = CancellationToken::new();
     let hosts = vec![format!("127.0.0.1:{bound}"), format!("localhost:{bound}")];
-    let origins: Vec<String> = hosts.iter().map(|h| format!("http://{h}")).collect();
+    // Spelled literally, not built from `hosts`, so `check-offline.sh`'s
+    // pattern for a loopback origin (`//127\.0\.0\.1`, `//localhost:`) can see
+    // these are local without widening what it allows.
+    let origins: Vec<String> = vec![
+        format!("http://127.0.0.1:{bound}"),
+        format!("http://localhost:{bound}"),
+    ];
     let config = StreamableHttpServerConfig::default()
         .with_sse_keep_alive(Some(Duration::from_secs(15)))
         .with_allowed_hosts(hosts)
