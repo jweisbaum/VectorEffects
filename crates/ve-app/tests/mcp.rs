@@ -88,6 +88,22 @@ async fn a_request_without_the_token_is_refused_before_mcp() {
 }
 
 #[tokio::test]
+async fn a_wrong_token_is_refused() {
+    let root = TempRoot::new("wrong-token");
+    let app = mock_app(&root);
+    let (port, _token) = serve(&app);
+    let response = reqwest::Client::new()
+        .post(url(port))
+        .header("content-type", "application/json")
+        .header("authorization", "Bearer nope")
+        .body(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#)
+        .send()
+        .await
+        .expect("request");
+    assert_eq!(response.status(), 401);
+}
+
+#[tokio::test]
 async fn the_right_token_initialises_and_lists_tools() {
     let root = TempRoot::new("init");
     let app = mock_app(&root);

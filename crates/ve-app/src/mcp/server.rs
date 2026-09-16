@@ -35,11 +35,22 @@ pub struct Running {
     stopped: std::sync::mpsc::Receiver<()>,
 }
 
+/// How long `stop` waits for the accept loop to confirm its socket closed,
+/// before giving up and returning anyway. The confirmation normally arrives
+/// in milliseconds; this is a backstop, not the expected path, so `stop`
+/// never blocks its caller — the main thread included — unboundedly.
+const STOP_TIMEOUT: Duration = Duration::from_secs(2);
+
 impl Running {
-    /// Cancels the listener and waits for its socket to close.
+    /// Cancels the listener and waits (briefly) for its socket to close.
     pub fn stop(self) {
         self.cancel.cancel();
-        let _ = self.stopped.recv();
+        if self.stopped.recv_timeout(STOP_TIMEOUT).is_err() {
+            tracing::warn!(
+                port = self.port,
+                "mcp listener did not confirm shutdown within {STOP_TIMEOUT:?}"
+            );
+        }
     }
 }
 

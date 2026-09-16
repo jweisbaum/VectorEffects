@@ -25,10 +25,13 @@ impl McpService {
     /// the Tauri runtime so the mock application used by the integration
     /// tests can drive the same path as the shipped `tauri::Wry` build.
     pub fn apply<R: tauri::Runtime>(&self, app: &tauri::AppHandle<R>, mcp: &McpSettings) {
-        if let Ok(mut slot) = self.running.lock()
-            && let Some(running) = slot.take()
-        {
-            running.stop();
+        // `take()` under the lock, then drop the guard before `stop()`:
+        // `stop` can block briefly waiting for the accept loop, and nothing
+        // else that touches `self.running` (`running_port`, `status`) must
+        // wait on that.
+        let previous = self.running.lock().ok().and_then(|mut slot| slot.take());
+        if let Some(previous) = previous {
+            previous.stop();
         }
         if !mcp.enabled {
             self.set_bind_error(None);
@@ -48,10 +51,16 @@ impl McpService {
 
     /// Holds a listener started elsewhere (the tests start one on port 0).
     pub fn adopt(&self, running: server::Running) {
-        if let Ok(mut slot) = self.running.lock()
-            && let Some(old) = slot.replace(running)
-        {
-            old.stop();
+        // `replace()` under the lock, then drop the guard before `stop()`,
+        // for the same reason as `apply`: a concurrent `running_port` or
+        // `status` read must not wait on the old listener's shutdown.
+        let previous = self
+            .running
+            .lock()
+            .ok()
+            .and_then(|mut slot| slot.replace(running));
+        if let Some(previous) = previous {
+            previous.stop();
         }
     }
 

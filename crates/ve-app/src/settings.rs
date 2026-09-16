@@ -1263,8 +1263,12 @@ pub fn mcp_status(
 /// token; disabling clears it and drops the listener.
 ///
 /// Generic over the Tauri runtime so the integration tests can drive it
-/// through a mock application.
-#[tauri::command]
+/// through a mock application. `async`: `McpService::apply` calls
+/// `Running::stop`, which can block briefly waiting for the listener's
+/// accept loop to confirm its socket closed, so this must run on Tauri's
+/// thread pool and never the main (webview) thread. Not in `LONG_RUNNING`
+/// (`ui/src/ipc.ts`) — a settings toggle must not spin the status bar.
+#[tauri::command(async)]
 pub fn mcp_set<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: tauri::State<'_, AppState>,
@@ -1299,8 +1303,9 @@ pub fn mcp_set<R: tauri::Runtime>(
 /// Issues a new token and restarts the listener with it.
 ///
 /// Generic over the Tauri runtime so the integration tests can drive it
-/// through a mock application.
-#[tauri::command]
+/// through a mock application. `async` for the same reason as `mcp_set`:
+/// `McpService::apply` can block briefly on `Running::stop`.
+#[tauri::command(async)]
 pub fn mcp_rotate_token<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: tauri::State<'_, AppState>,
