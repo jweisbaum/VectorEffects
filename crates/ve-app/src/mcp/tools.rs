@@ -592,6 +592,333 @@ impl<R: tauri::Runtime> VectorEffects<R> {
             .await?;
         Ok(Json(ObjectIds { objects }))
     }
+
+    // ------------------------------------------------------------------ time
+
+    #[tool(
+        description = "Sets a keyframe on an animated property at a step. value null keys the value the property has there now."
+    )]
+    async fn keyframe_set(
+        &self,
+        Parameters(p): Parameters<KeyframeSetParams>,
+    ) -> std::result::Result<Json<ProjectSummary>, ToolError> {
+        let value = p
+            .value
+            .map(serde_json::from_value::<crate::document::PropertyValue>)
+            .transpose()
+            .map_err(|e| ToolError::Refused(format!("value: {e}")))?;
+        self.write("keyframe_set", false, move |app| {
+            crate::animation::set_keyframe(app.state(), p.object, p.property, p.step, value)
+        })
+        .await
+        .map(Json)
+    }
+
+    #[tool(description = "Removes the keyframe at a step.")]
+    async fn keyframe_remove(
+        &self,
+        Parameters(p): Parameters<KeyframeParams>,
+    ) -> std::result::Result<Json<ProjectSummary>, ToolError> {
+        self.write("keyframe_remove", false, move |app| {
+            crate::animation::remove_keyframe(app.state(), p.object, p.property, p.step)
+        })
+        .await
+        .map(Json)
+    }
+
+    #[tool(description = "Moves a keyframe from one step to another.")]
+    async fn keyframe_move(
+        &self,
+        Parameters(p): Parameters<KeyframeMoveParams>,
+    ) -> std::result::Result<Json<ProjectSummary>, ToolError> {
+        self.write("keyframe_move", false, move |app| {
+            let summary = crate::animation::move_keyframe(
+                app.state(),
+                p.object,
+                p.property,
+                p.from,
+                p.to,
+                None,
+            )?;
+            crate::document::end_gesture(app.state())?;
+            Ok(summary)
+        })
+        .await
+        .map(Json)
+    }
+
+    #[tool(description = "Sets how a property interpolates out of the keyframe at a step.")]
+    async fn interpolation_set(
+        &self,
+        Parameters(p): Parameters<InterpolationParams>,
+    ) -> std::result::Result<Json<ProjectSummary>, ToolError> {
+        let interp: crate::animation::InterpolationView =
+            serde_json::from_value(p.interpolation)
+                .map_err(|e| ToolError::Refused(format!("interpolation: {e}")))?;
+        self.write("interpolation_set", false, move |app| {
+            crate::animation::set_interpolation(app.state(), p.object, p.property, p.step, interp)
+        })
+        .await
+        .map(Json)
+    }
+
+    #[tool(
+        description = "Constant motion from a step to the next position key: a rhumb line at a bearing and speed. Existing keys in between need overwrite true."
+    )]
+    async fn motion_add(
+        &self,
+        Parameters(p): Parameters<MotionParams>,
+    ) -> std::result::Result<Json<ProjectSummary>, ToolError> {
+        self.write("motion_add", false, move |app| {
+            crate::animation::add_constant_motion(
+                app.state(),
+                p.object,
+                p.step,
+                p.direction,
+                p.speed_mps,
+                p.overwrite,
+            )
+        })
+        .await
+        .map(Json)
+    }
+
+    #[tool(description = "Links a property to another object's, or unlinks it with primary null.")]
+    async fn follow_set(
+        &self,
+        Parameters(p): Parameters<FollowParams>,
+    ) -> std::result::Result<Json<ProjectSummary>, ToolError> {
+        self.write("follow_set", false, move |app| {
+            crate::animation::set_follow(app.state(), p.object, p.property, p.primary, p.step)
+        })
+        .await
+        .map(Json)
+    }
+
+    #[tool(
+        description = "Changes the step count and/or the start time (unix seconds). Shrinking drops keys beyond the end; read step_count_impact through invoke first if that matters."
+    )]
+    async fn timeline_set(
+        &self,
+        Parameters(p): Parameters<TimelineParams>,
+    ) -> std::result::Result<Json<ProjectSummary>, ToolError> {
+        self.write("timeline_set", false, move |app| {
+            let mut last = None;
+            if let Some(count) = p.step_count {
+                last = Some(crate::animation::set_step_count(app.state(), count)?);
+            }
+            if let Some(start) = p.start_unix_s {
+                last = Some(crate::animation::set_start_time(app.state(), start)?);
+            }
+            last.ok_or_else(|| AppError::BadOption {
+                field: "step_count/start_unix_s",
+                value: "nothing to set".to_owned(),
+            })
+        })
+        .await
+        .map(Json)
+    }
+
+    #[tool(description = "An object's animated properties with their keyframes and interpolation.")]
+    async fn object_tracks(
+        &self,
+        Parameters(p): Parameters<ObjectStepParams>,
+    ) -> std::result::Result<Json<crate::animation::ObjectTracks>, ToolError> {
+        self.run("object_tracks", move |app| {
+            crate::animation::object_tracks(app.state(), p.object, p.step)
+        })
+        .await
+        .map(Json)
+    }
+
+    // ----------------------------------------------------------------- field
+
+    #[tool(
+        description = "The evaluated field at points and steps: speed m/s, azimuth toward (degrees clockwise from north), u east, v north, and whether the cell is defined."
+    )]
+    async fn field_sample(
+        &self,
+        Parameters(p): Parameters<SampleParams>,
+    ) -> std::result::Result<Json<Samples>, ToolError> {
+        let samples = self
+            .run("field_sample", move |app| {
+                let mut out = Vec::with_capacity(p.points.len() * p.steps.len());
+                for &step in &p.steps {
+                    for &[lon, lat] in &p.points {
+                        let s = crate::commands::sample_field(
+                            app.state(),
+                            lon,
+                            lat,
+                            step,
+                            p.kind.clone(),
+                        )?;
+                        let az = s.azimuth_toward_deg.to_radians();
+                        out.push(Sample {
+                            lon,
+                            lat,
+                            step,
+                            speed_mps: s.speed_mps,
+                            azimuth_toward_deg: s.azimuth_toward_deg,
+                            u_mps: s.speed_mps * az.sin(),
+                            v_mps: s.speed_mps * az.cos(),
+                            defined: s.defined,
+                        });
+                    }
+                }
+                Ok(out)
+            })
+            .await?;
+        Ok(Json(Samples { samples }))
+    }
+
+    #[tool(
+        description = "Captures the field inside a region at a step onto the clipboard, for field_paste. Drops any copied objects."
+    )]
+    async fn field_capture(
+        &self,
+        Parameters(p): Parameters<CaptureParams>,
+    ) -> std::result::Result<Json<crate::capture::CaptureState>, ToolError> {
+        let region: crate::capture::RegionShape = serde_json::from_value(p.region)
+            .map_err(|e| ToolError::Refused(format!("region: {e}")))?;
+        self.run("field_capture", move |app| {
+            crate::capture::capture_region(app.state(), region, p.step, p.kind)
+        })
+        .await
+        .map(Json)
+    }
+
+    #[tool(
+        description = "Pastes the captured field at lon/lat (or where it was captured), from a step, onto a layer. still true pastes one frame."
+    )]
+    async fn field_paste(
+        &self,
+        Parameters(p): Parameters<PasteParams>,
+    ) -> std::result::Result<Json<ProjectSummary>, ToolError> {
+        self.write("field_paste", false, move |app| {
+            crate::capture::paste_capture(app.state(), p.lon, p.lat, p.step, p.layer, p.still)
+        })
+        .await
+        .map(Json)
+    }
+
+    #[tool(description = "The macro library: id, name, kind, frames, footprint.")]
+    async fn macro_list(
+        &self,
+    ) -> std::result::Result<Json<crate::macros::MacroLibrary>, ToolError> {
+        self.run("macro_list", |app| {
+            crate::macros::macro_library(app.state())
+        })
+        .await
+        .map(Json)
+    }
+
+    #[tool(description = "Inserts a macro from the library at lon/lat starting at a step.")]
+    async fn macro_insert(
+        &self,
+        Parameters(p): Parameters<MacroInsertParams>,
+    ) -> std::result::Result<Json<ProjectSummary>, ToolError> {
+        self.write("macro_insert", false, move |app| {
+            crate::macros::insert_macro(app.state(), p.id, p.lon, p.lat, p.step, p.layer)
+        })
+        .await
+        .map(Json)
+    }
+
+    // --------------------------------------------------------------- history
+
+    #[tool(description = "Undoes the last edit.")]
+    async fn undo(&self) -> std::result::Result<Json<ProjectSummary>, ToolError> {
+        self.write("undo", false, |app| crate::edit::undo(app.state()))
+            .await
+            .map(Json)
+    }
+
+    #[tool(description = "Redoes the last undone edit.")]
+    async fn redo(&self) -> std::result::Result<Json<ProjectSummary>, ToolError> {
+        self.write("redo", false, |app| crate::edit::redo(app.state()))
+            .await
+            .map(Json)
+    }
+
+    #[tool(description = "The history list with the current position.")]
+    async fn history_list(
+        &self,
+    ) -> std::result::Result<Json<crate::document::HistoryView>, ToolError> {
+        self.run("history_list", |app| {
+            crate::document::history_view(app.state())
+        })
+        .await
+        .map(Json)
+    }
+
+    #[tool(description = "Jumps to an entry of history_list.")]
+    async fn history_jump(
+        &self,
+        Parameters(p): Parameters<HistoryJumpParams>,
+    ) -> std::result::Result<Json<ProjectSummary>, ToolError> {
+        self.write("history_jump", false, move |app| {
+            crate::document::jump_to_history(app.state(), p.target)
+        })
+        .await
+        .map(Json)
+    }
+
+    // ------------------------------------------------------------------ view
+
+    #[tool(description = "Pans the map to lon/lat, optionally at a zoom.")]
+    async fn view_focus(
+        &self,
+        Parameters(p): Parameters<FocusParams>,
+    ) -> std::result::Result<Json<Done>, ToolError> {
+        ve_core::LonLat::new(p.lon, p.lat).map_err(AppError::from)?;
+        self.app
+            .state::<super::McpService>()
+            .note_tool(&self.app, "view_focus");
+        let _ = tauri::Emitter::emit(
+            &self.app,
+            events::FOCUS,
+            events::ViewFocus {
+                lon: p.lon,
+                lat: p.lat,
+                px_per_deg: p.px_per_deg,
+            },
+        );
+        Ok(Json(Done { ok: true }))
+    }
+
+    #[tool(description = "Moves the timeline to a step.")]
+    async fn step_set(
+        &self,
+        Parameters(p): Parameters<StepParams>,
+    ) -> std::result::Result<Json<Done>, ToolError> {
+        let step = p.step;
+        self.run("step_set", move |app| {
+            let summary =
+                crate::projects::current_project(app.state())?.ok_or(AppError::NoProjectOpen)?;
+            if step >= summary.step_count {
+                return Err(AppError::BadOption {
+                    field: "step",
+                    value: format!("{step} is past the last step {}", summary.step_count - 1),
+                });
+            }
+            let _ = tauri::Emitter::emit(app, events::STEP, step);
+            Ok(())
+        })
+        .await?;
+        Ok(Json(Done { ok: true }))
+    }
+
+    #[tool(description = "Selects objects in the interface; an empty list clears the selection.")]
+    async fn selection_set(
+        &self,
+        Parameters(p): Parameters<SelectionParams>,
+    ) -> std::result::Result<Json<Done>, ToolError> {
+        self.app
+            .state::<super::McpService>()
+            .note_tool(&self.app, "selection_set");
+        let _ = tauri::Emitter::emit(&self.app, events::SELECTION, p.objects);
+        Ok(Json(Done { ok: true }))
+    }
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -681,6 +1008,169 @@ pub struct ObjectProperties {
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct ObjectIds {
     pub objects: Vec<u64>,
+}
+
+// -------------------------------------------------------------------- time
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct KeyframeSetParams {
+    pub object: u64,
+    /// A property id (`object_get`'s `id`, e.g. `"Position"`, `"Speed"`).
+    pub property: String,
+    pub step: u32,
+    /// A tagged `PropertyValue` (object_set's shape), or null to key the
+    /// value the property has at this step right now.
+    pub value: Option<Value>,
+}
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct KeyframeParams {
+    pub object: u64,
+    pub property: String,
+    pub step: u32,
+}
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct KeyframeMoveParams {
+    pub object: u64,
+    pub property: String,
+    pub from: u32,
+    pub to: u32,
+}
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct InterpolationParams {
+    pub object: u64,
+    pub property: String,
+    pub step: u32,
+    /// A tagged `InterpolationView`: `{"kind":"step"}`, `{"kind":"linear"}`,
+    /// `{"kind":"ease_in"}`, `{"kind":"ease_out"}`, `{"kind":"ease_in_out"}`,
+    /// or `{"kind":"bezier","x1":..,"y1":..,"x2":..,"y2":..}` — the names
+    /// `object_tracks` returns in a track's `interpolations`.
+    pub interpolation: Value,
+}
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct MotionParams {
+    pub object: u64,
+    pub step: u32,
+    /// True bearing toward, degrees clockwise from north.
+    pub direction: f64,
+    pub speed_mps: f64,
+    #[serde(default)]
+    pub overwrite: bool,
+}
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct FollowParams {
+    pub object: u64,
+    pub property: String,
+    /// The object to follow, or null to stop following.
+    pub primary: Option<u64>,
+    pub step: u32,
+}
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct TimelineParams {
+    pub step_count: Option<u32>,
+    /// Unix seconds, `null` to clear it, or left out entirely to leave it
+    /// alone.
+    ///
+    /// Plain `Option<Option<i64>>` cannot tell an explicit `null` from an
+    /// absent field apart: `serde_json`'s `Option` deserialisation collapses
+    /// both to the outer `None` (verified: `{}"` and `{"x":null}` both
+    /// deserialise `x: Option<Option<i64>>` to `None`), which would make
+    /// clearing the start time unreachable through this tool.
+    /// `deserialize_present` runs only when the key is in the request, so a
+    /// present `null` reaches it and becomes `Some(None)`.
+    #[serde(default, deserialize_with = "deserialize_present")]
+    pub start_unix_s: Option<Option<i64>>,
+}
+
+/// Deserialises a field only when its key is present, distinguishing an
+/// explicit `null` (`Some(None)`) from an absent key (the `default` this is
+/// paired with). See [`TimelineParams::start_unix_s`].
+fn deserialize_present<'de, D, T>(deserializer: D) -> std::result::Result<Option<T>, D::Error>
+where
+    T: Deserialize<'de>,
+    D: serde::Deserializer<'de>,
+{
+    T::deserialize(deserializer).map(Some)
+}
+
+// ------------------------------------------------------------------- field
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SampleParams {
+    /// `[lon, lat]` pairs.
+    pub points: Vec<[f64; 2]>,
+    pub steps: Vec<u32>,
+    /// "wind" or "current"; null samples the composite.
+    pub kind: Option<String>,
+}
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct Sample {
+    pub lon: f64,
+    pub lat: f64,
+    pub step: u32,
+    pub speed_mps: f64,
+    pub azimuth_toward_deg: f64,
+    pub u_mps: f64,
+    pub v_mps: f64,
+    pub defined: bool,
+}
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct Samples {
+    pub samples: Vec<Sample>,
+}
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct CaptureParams {
+    /// A region as the interface draws it: `{"kind":"rect","centre":[lon,lat],"half_width_deg":..,"half_height_deg":..}`,
+    /// `{"kind":"disc","centre":[lon,lat],"radius_deg":..}`, or
+    /// `{"kind":"polygon","points":[[lon,lat],...]}` (`RegionShape` in
+    /// capture.rs).
+    pub region: Value,
+    pub step: u32,
+    /// "wind" or "current"; used only as a fallback when the project has no
+    /// visible field layer at all.
+    pub kind: Option<String>,
+}
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct PasteParams {
+    pub lon: Option<f64>,
+    pub lat: Option<f64>,
+    pub step: u32,
+    pub layer: Option<u64>,
+    #[serde(default)]
+    pub still: bool,
+}
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct MacroInsertParams {
+    pub id: String,
+    pub lon: f64,
+    pub lat: f64,
+    pub step: u32,
+    pub layer: Option<u64>,
+}
+
+// ----------------------------------------------------------------- history
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct HistoryJumpParams {
+    pub target: usize,
+}
+
+// -------------------------------------------------------------------- view
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct FocusParams {
+    pub lon: f64,
+    pub lat: f64,
+    /// Screen pixels per degree (3 is the whole world, 60 is a bay). Null
+    /// keeps the current zoom.
+    pub px_per_deg: Option<f64>,
+}
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SelectionParams {
+    pub objects: Vec<u64>,
+}
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct Done {
+    pub ok: bool,
 }
 
 #[tool_handler(router = self.tool_router.clone())]

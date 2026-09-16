@@ -440,3 +440,110 @@ async fn layer_set_keeps_the_other_speed_bound_and_refuses_a_lone_bound_with_no_
 
     client.cancel().await.expect("close");
 }
+
+#[tokio::test]
+async fn keyframes_and_motion_animate_an_object() {
+    let root = TempRoot::new("time");
+    let app = mock_app(&root);
+    let (port, token) = serve(&app);
+    let client = client(port, &token).await;
+    call(&client, "project_new", new_project_args("Time")).await;
+    let created = call(
+        &client,
+        "object_create",
+        json!({ "tool": "circle", "gesture": { "kind": "point", "at": [10.0, 10.0] } }),
+    )
+    .await;
+    let object = created["object"].as_u64().expect("id");
+    // `PropId::Position`'s `Debug` form is "Position" (schema.rs), and
+    // `PropertyValue` is tagged `{"kind":"position","lon":..,"lat":..}"`
+    // (document.rs), not a raw `[lon, lat]` pair.
+    //
+    // `Animatable::value_at` (keyframe.rs) holds a single key's value at
+    // every step, first and last alike, so keying only step 3 would move
+    // the object at step 0 too. Step 0 is keyed first, with `value: null`
+    // to pin the position it already has (create.rs sets only the base),
+    // so the object actually animates from (10, 10) to (20, 10).
+    call(
+        &client,
+        "keyframe_set",
+        json!({ "object": object, "property": "Position", "step": 0, "value": null }),
+    )
+    .await;
+    call(
+        &client,
+        "keyframe_set",
+        json!({ "object": object, "property": "Position", "step": 3, "value": { "kind": "position", "lon": 20.0, "lat": 10.0 } }),
+    )
+    .await;
+    let tracks = call(
+        &client,
+        "object_tracks",
+        json!({ "object": object, "step": 0 }),
+    )
+    .await;
+    let position = tracks["tracks"]
+        .as_array()
+        .expect("tracks")
+        .iter()
+        .find(|t| t["property"] == "Position")
+        .expect("position track");
+    assert_eq!(
+        position["keys"].as_array().expect("keys").len(),
+        2,
+        "{position}"
+    );
+    let summary = call(
+        &client,
+        "motion_add",
+        json!({ "object": object, "step": 0, "direction": 90.0, "speed_mps": 5.0, "overwrite": true }),
+    )
+    .await;
+    assert_eq!(summary["can_undo"], true);
+    let sample = call(
+        &client,
+        "field_sample",
+        json!({ "points": [[10.0, 10.0]], "steps": [0] }),
+    )
+    .await;
+    assert_eq!(sample["samples"][0]["defined"], true, "{sample}");
+    let undone = call(&client, "undo", json!({})).await;
+    assert_eq!(undone["can_redo"], true);
+    client.cancel().await.expect("close");
+}
+
+#[tokio::test]
+async fn view_tools_emit_events_for_the_frontend() {
+    use tauri::Listener;
+    let root = TempRoot::new("view");
+    let app = mock_app(&root);
+    let (port, token) = serve(&app);
+    let client = client(port, &token).await;
+    call(&client, "project_new", new_project_args("View")).await;
+    let (tx, rx) = std::sync::mpsc::channel::<String>();
+    let focus_tx = tx.clone();
+    app.listen("view://focus", move |event| {
+        let _ = focus_tx.send(event.payload().to_owned());
+    });
+    app.listen("view://step", move |event| {
+        let _ = tx.send(event.payload().to_owned());
+    });
+    call(
+        &client,
+        "view_focus",
+        json!({ "lon": -70.5, "lat": 41.0, "px_per_deg": 12.0 }),
+    )
+    .await;
+    call(&client, "step_set", json!({ "step": 2 })).await;
+    let focus = rx
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .expect("focus event");
+    assert!(focus.contains("-70.5"), "{focus}");
+    let step = rx
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .expect("step event");
+    assert_eq!(step.trim(), "2");
+    let message = call_err(&client, "step_set", json!({ "step": 99 })).await;
+    assert!(message.contains("step"), "{message}");
+    client.cancel().await.expect("close");
+}

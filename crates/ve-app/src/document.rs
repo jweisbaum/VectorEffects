@@ -1790,7 +1790,7 @@ pub struct ClipboardState {
 }
 
 /// One entry in the undo history.
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, JsonSchema, TS)]
 #[ts(export, export_to = "HistoryEntry.ts")]
 pub struct HistoryEntry {
     /// Position in the stack, oldest first.
@@ -1802,7 +1802,7 @@ pub struct HistoryEntry {
 }
 
 /// The undo history, for the history panel.
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, JsonSchema, TS)]
 #[ts(export, export_to = "HistoryView.ts")]
 pub struct HistoryView {
     /// Entries, oldest first.

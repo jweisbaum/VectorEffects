@@ -10,6 +10,7 @@
 //! keeps the key list sorted and unique. Nothing here re-checks those; a rule
 //! that lived in two places would eventually be two rules.
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use ve_core::command::Command;
@@ -28,7 +29,7 @@ use crate::projects::{ProjectSummary, with_session};
 /// The hand-authored curve is carried whole so a project that has one survives
 /// the timeline reading and writing its neighbours; the panel offers the named
 /// presets.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case", tag = "kind")]
 #[ts(export, export_to = "InterpolationView.ts")]
 pub enum InterpolationView {
@@ -120,7 +121,7 @@ pub fn written(before: &Animatable, step: u32, auto_key: bool, value: PropValue)
 }
 
 /// One keyframe, on the wire.
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, JsonSchema, TS)]
 #[ts(export, export_to = "KeyframeView.ts")]
 pub struct KeyframeView {
     /// The step the key is pinned to.
@@ -132,7 +133,7 @@ pub struct KeyframeView {
 }
 
 /// One property's track: its base, its keys, and what the timeline may do to it.
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, JsonSchema, TS)]
 #[ts(export, export_to = "TrackView.ts")]
 pub struct TrackView {
     /// The property id, as the inspector spells it.
@@ -181,7 +182,7 @@ pub struct TrackView {
 }
 
 /// An object's tracks, for the timeline's tree.
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, JsonSchema, TS)]
 #[ts(export, export_to = "ObjectTracks.ts")]
 pub struct ObjectTracks {
     /// Which object.

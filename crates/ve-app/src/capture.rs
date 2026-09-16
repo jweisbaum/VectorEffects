@@ -21,6 +21,7 @@
 
 use std::sync::Arc;
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -165,7 +166,7 @@ fn wrap180(degrees: f64) -> f64 {
 }
 
 /// What the clipboard holds after a capture.
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, JsonSchema, TS)]
 #[ts(export, export_to = "CaptureState.ts")]
 pub struct CaptureState {
     /// Whether a captured field is available to paste.

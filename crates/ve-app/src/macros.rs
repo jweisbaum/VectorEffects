@@ -21,6 +21,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -53,7 +54,7 @@ struct MacroHeader {
 }
 
 /// One entry of the library, as the panels list it.
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, JsonSchema, TS)]
 #[ts(export, export_to = "MacroEntry.ts")]
 pub struct MacroEntry {
     /// The file's stem, which is also how it is addressed.
@@ -89,7 +90,7 @@ pub struct MacroEntry {
 /// The capture stores its shape in the local metres a projected frame
 /// measures in (D28, D55); this is that shape read back into the degrees the
 /// map draws in, which is what `Region` on the frontend is made of.
-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema, TS)]
 #[ts(export, export_to = "MacroOutline.ts")]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum MacroOutline {
@@ -145,7 +146,7 @@ impl MacroOutline {
 }
 
 /// The library's contents, for the insert bar and the settings dialog.
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, JsonSchema, TS)]
 #[ts(export, export_to = "MacroLibrary.ts")]
 pub struct MacroLibrary {
     /// Where the files live.
