@@ -1,5 +1,12 @@
 # VectorEffects — Implementation Plan
 
+**2026-09-16: MCP service (M86).** An MCP server inside the application,
+on loopback, switched on in Settings. Tools call the IPC commands with a
+`tauri::State` from the handle, so nothing is duplicated; the frontend
+follows through `document://changed` and three view events; `invoke` reaches
+any command by name with a test that keeps its table complete. Design:
+`docs/superpowers/specs/2026-09-16-mcp-service-design.md`.
+
 **2026-09-15: Zarr V3 export.** The export panel now offers a filesystem Zarr
 V3 output beside GRIB2. A single Float16 `/data` array carries the four
 components (`u10m_wind`, `v10m_wind`, `u_total_surface_current`, and
@@ -4987,6 +4994,17 @@ relitigated by accident.
 | D70 | Autosave is a three-way setting: off, recovery snapshots, or the file written in place; default recovery | "Auto-save" can mean the snapshot the app already takes or the project file itself. Offering both, with today's behaviour as the default, changes nothing for an existing install and lets a user who wants the file kept current have it (M25). Settled with the user 2026-09-05 |
 | D71 | A macro preview is a preview scene in the session, served by the tile pipeline under its own revision, never a document write | Hiding every layer to show the macro alone is a document write, and the history is locked while a capture runs for exactly the reason it must stay locked. A one-object project flattened by the same `flatten` and served by the same `protocol::serve` keeps every tile rule — one path, content-hashed keys, readiness by cache probe — and leaves the document untouched (M26). Proposed 2026-09-05 |
 | D72 | A capture's positions are keyframes in the session: visited steps are keyed, gaps interpolate by great circle, keys can be deleted | Holding the last position wherever the user did not drag made a moving system that was placed at 3 and 9 stand still until 9 and jump; keys with interpolation are what every other track does and what "jump forward and change the position" means. They stay session state — not document, not history — so a placement is still not an edit (M26). Proposed 2026-09-05 |
+
+### MCP service and invariant 5
+
+The invariant said nothing reaches in, and the WebDriver endpoint is kept
+out of shipped builds for that reason. The MCP service is allowed in because
+it differs on every point that made WebDriver unshippable: it is off until a
+person turns it on, it is bound to a token that switch issues, it answers
+only loopback names, and it drives the domain through the same commands the
+interface uses rather than the interface itself. Recorded as an exception,
+not a repeal; a second inbound socket would need the same four properties
+and its own entry here.
 
 ---
 

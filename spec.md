@@ -92,6 +92,15 @@ is a design regression, not a trade-off.
    except that import. Was "zero runtime network access" until the history
    import, and the difference is *who asked*: nothing here runs on a timer, at
    startup, or behind the user's back.
+
+   **The invariant runs both ways, and has one inbound exception (M86):**
+   the MCP service of §8.8 listens on `127.0.0.1` while — and only while —
+   the person has switched it on in Settings, answers only to the token
+   that switch issued, and lives in `ve-app`'s `mcp` module, which nothing
+   calls but the setting and start-up. It is the same difference M38 drew:
+   *who asked*. The WebDriver endpoint is not this: it is unauthenticated,
+   drives the interface rather than the domain, has no switch, and stays
+   compiled out of every shipped build.
 6. **Interaction stays fast; export is allowed to be slow.** Never trade frame
    rate for export throughput.
 
@@ -3014,6 +3023,12 @@ all falls back to the defaults entirely. A hand-edited binding that is reserved
 or duplicated is dropped and its default comes back. Losing a preference is a
 far better outcome than not launching.
 
+**MCP service.** A switch, a port (default 47391) and a token. On, the
+application serves the Model Context Protocol at
+`http://127.0.0.1:<port>/mcp` and shows a ready client configuration; off,
+nothing listens and the token is forgotten. *Rotate token* issues a new one.
+The status bar shows `MCP: <tool>` while a client is connected.
+
 ### 8.7 Macros
 
 **A capture takes every kind of field under it** (M34). The map shows every
@@ -3171,6 +3186,38 @@ answers.
 
 **Kinds.** A wind macro in a current project, or the reverse, is allowed, as
 showing a GRIB layer of the other kind is (§4.8); the list marks the kind.
+
+### 8.8 MCP service
+
+An MCP server inside the application (M86). Every tool calls the command
+the interface calls, with the same state, so there is one implementation of
+each feature and every edit is undoable like a person's. Tools that write
+return the `ProjectSummary` and emit `document://changed`, which the
+frontend applies as it applies its own call's result; `view://focus`,
+`view://step` and `view://selection` move what is frontend state. The
+`screenshot` tool asks the map for its own framebuffer through
+`view://capture` and `deliver_capture`; nothing is written to disk.
+
+Groups: project (`project_status`, `project_new`, `project_open`,
+`project_save`, `project_close`, `recent_projects`, `tool_catalogue`),
+structure (`layers_list`, `layer_add`, `layer_set`, `layer_move`,
+`layer_remove`, `objects_list`, `object_get`, `object_create`, `object_set`,
+`object_move`, `object_duplicate`, `object_remove`, `objects_in_region`),
+time (`keyframe_set`, `keyframe_remove`, `keyframe_move`,
+`interpolation_set`, `motion_add`, `follow_set`, `timeline_set`,
+`object_tracks`), field (`field_sample`, `field_capture`, `field_paste`,
+`macro_list`, `macro_insert`), files (`import_grib`, `import_image`,
+`import_history`, `export_grib`, `export_zarr`, `export_cancel`), view
+(`screenshot`, `view_focus`, `step_set`, `selection_set`), history (`undo`,
+`redo`, `history_list`, `history_jump`) and `invoke`, which runs any IPC
+command by name — the test in `mcp/invoke.rs` holds its table equal to the
+handler list minus a named exclusion list, so a command added later is
+reachable the day it lands.
+
+Transport: Streamable HTTP on loopback, bearer token, `Host` and `Origin`
+restricted to loopback names. Directions cross this boundary as azimuth
+toward and speeds in m/s, the domain's own units; a client that wants the
+project's display convention reads it from the summary.
 
 ---
 
@@ -3817,3 +3864,6 @@ their reasoning so they are not reopened by accident.
 - GitHub workflows build Intel Mac, ARM Mac, Windows x64 and Linux x64. Manual
   runs retain artifacts; version tags prepare draft beta releases. See
   `docs/github-release-plan.md` for credentials, signing and publication steps.
+- The MCP service (§8.8) is the second exception to invariant 5 and the first
+  inbound one. It is switched, tokened and confined to one module; the
+  WebDriver rule is unchanged.

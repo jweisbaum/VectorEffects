@@ -45,10 +45,9 @@ Three decisions were taken in discussion and are fixed here:
 
 ## 3. Tool surface
 
-Every tool calls the same implementation function its IPC command calls
-(`projects::open`, `auto_scale_set` and the like). Where a command has no
-`*_impl` split yet, the split is made; the command becomes a one-line wrapper
-and the tool calls the function. **No tool duplicates command logic.**
+Every tool calls the `#[tauri::command]` function with
+`app.state::<AppState>()`, the same `State` Tauri passes. **No tool
+duplicates command logic**, and no split is made.
 
 Tools that change the document return the new `ProjectSummary`, so a client
 sees `revision`, `dirty` and `can_undo` exactly as the panels do. Errors are
@@ -106,8 +105,9 @@ pixels live in the WebGL canvas. The service emits `view://capture` with a
 request id; `MapView` reads its framebuffer once the tiles have settled (the
 `__veCapture` logic moved into a plain effect; the window global itself
 stays dev-only) and returns
-the PNG through a new `deliver_capture(id, bytes)` command; the tool awaits
-that, with a 10 s timeout. Nothing is written to disk.
+the PNG through a new `deliver_capture(id, bytes)` command; the tool waits
+35 s: the map's own 10 s for tiles and 20 s for a frame, and a margin.
+Nothing is written to disk.
 
 ## 5. Settings and indicator
 
@@ -139,7 +139,8 @@ that, with a 10 s timeout. Nothing is written to disk.
 - `spec.md` §8.6 gets the settings; a new §8.8 describes the service and its
   tool surface; §15 gets a line; `plan.md` §5 gets the reasoning above.
 - `CLAUDE.md` invariant 5 gets the matching paragraph, and a recipe *Adding
-  an MCP tool*: the `*_impl` split, the tool in `tools.rs`, the
+  an MCP tool*: the call into the `#[tauri::command]` function with
+  `app.state::<AppState>()`, the tool in `tools.rs`, the
   `document://changed` emit if it writes, and the integration test.
 - `docs/USER-GUIDE.md` and the Help topic for Settings describe the section.
 
@@ -174,3 +175,27 @@ that, with a 10 s timeout. Nothing is written to disk.
 - MCP resources and prompts. Tools only, for now; a `project_status` call
   is cheaper than a resource subscription and the surface stays one thing.
 - Exposing the render cache, tiles or evaluator internals.
+
+## 9. Deviations from this design
+
+- The `*_impl` split was not made: every tool calls the `#[tauri::command]`
+  function with `app.state::<AppState>()`, as §3 now says.
+- A command's `AppError` reaches the client as a tool result with
+  `is_error: true` and the error text as content (`ToolError::Refused`), not
+  as a JSON-RPC protocol error; only a panic or a malformed request is a
+  protocol error (`ToolError::Internal`).
+- The whole `mcp` module is generic over `R: tauri::Runtime`, because the
+  integration tests drive a `tauri::App<MockRuntime>`; `export_grib`,
+  `export_zarr` and `import_history` gained the same generic. Monomorphises
+  to Wry in the app.
+- `invoke`'s handler table takes `tauri::State<'_, AppState>` rather than the
+  app handle, since a `const` table of fn pointers cannot be generic over the
+  runtime.
+- `field_sample` refuses more than 4096 point×step samples and flattens the
+  scene once per step through `commands::sample_points_at_step`, which the
+  interface's own `sample_field` also uses.
+- Multi-field tools (`layer_set`, `object_set`) apply per command, one undo
+  step per field; `write` emits `document://changed` after the closure
+  whether it returned Ok or Err, so a partial write is always reported.
+- The screenshot's pending capture and the progress relay are guards that
+  clean up when a cancelled tool future is dropped.

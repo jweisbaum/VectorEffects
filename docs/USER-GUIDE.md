@@ -135,4 +135,12 @@ directory.
 with Shift or Alt), the default colour scales for new projects, and the macro
 library's directory.
 
-The application makes no network requests at any time.
+**MCP service.** Off by default. On, an AI client on this computer (Claude
+Code, or anything that speaks the Model Context Protocol over HTTP) can
+open, edit, animate, import, export and screenshot through the application,
+and the map follows along. The section shows the address and a client
+configuration with the token filled in; *Rotate token* revokes the old one.
+Nothing outside this computer can reach it.
+
+The application makes no network requests of its own. It accepts none unless
+you turn the MCP service on, and then only from this computer.

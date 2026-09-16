@@ -59,6 +59,10 @@ stop and raise it rather than working around it.
    that way. `npm run check:offline` **cannot** see a listener — it reads
    source URLs, remote references in the built bundle and the CSP — so for
    anything inbound the enforcement is that the dependency is not compiled in.
+   **And one inbound exception (M86):** the MCP service, `ve-app`'s `mcp`
+   module, listens on loopback only while the setting is on and only for its
+   token. `tests/mcp.rs`'s `off_means_no_socket_and_stop_releases_the_port`
+   is the enforcement; the offline check still cannot see a listener.
 6. **Interaction stays fast; export may be slow.** Never trade frame rate for
    export throughput.
 
@@ -303,6 +307,22 @@ state all the same, so it is saved and undone like everything else.
    `ve_app::measure`, at the IPC boundary, like every other unit. **A bearing
    in a measurement is a course, not a wind**, so it is never converted to the
    project's direction convention.
+
+### Adding an MCP tool
+
+1. The tool calls the `#[tauri::command]` function with `app.state()`; it
+   never reimplements it. If the feature has no command, add the command
+   first, for the interface.
+2. Parameters are a `schemars::JsonSchema` struct in `mcp/tools.rs` with a
+   doc comment per field; the client reads those.
+3. A tool that writes goes through `VectorEffects::write`, which emits
+   `document://changed`. One that opens or closes a project passes
+   `opened: true`. One that changes only frontend state emits its
+   `view://*` event and nothing else.
+4. A new command lands in `mcp/invoke.rs`'s table, or in `EXCLUDED` with a
+   reason in the comment; the coverage test fails otherwise.
+5. An integration test in `tests/mcp.rs` drives it over HTTP and checks the
+   document through the interface's own read.
 
 ### Adding a numeric input
 
