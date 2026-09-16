@@ -105,15 +105,29 @@ impl<R: tauri::Runtime> VectorEffects<R> {
     }
 
     /// `run`, then tell the frontend the document changed.
+    ///
+    /// Emits whether the closure succeeded or refused partway through: a
+    /// multi-command tool (`layer_set`, `object_set`) applies one command per
+    /// field, so a later field refusing still leaves the earlier ones
+    /// committed, and the frontend must not miss that the document changed
+    /// (task 3 review, fix round 1, finding 2). The closure's own error is
+    /// what the caller needs to see, so a failure to emit alongside it is
+    /// swallowed rather than replacing that error.
     pub(crate) async fn write<T: Send + 'static>(
         &self,
         name: &'static str,
         opened: bool,
         f: impl FnOnce(&tauri::AppHandle<R>) -> crate::error::Result<T> + Send + 'static,
     ) -> std::result::Result<T, ToolError> {
-        let out = self.run(name, f).await?;
-        events::changed(&self.app, opened).map_err(ToolError::from)?;
-        Ok(out)
+        let result = self.run(name, f).await;
+        let emitted = events::changed(&self.app, opened);
+        match result {
+            Ok(out) => {
+                emitted.map_err(ToolError::from)?;
+                Ok(out)
+            }
+            Err(err) => Err(err),
+        }
     }
 }
 
@@ -300,7 +314,7 @@ impl<R: tauri::Runtime> VectorEffects<R> {
     }
 
     #[tool(
-        description = "Sets any of a layer's name, visibility, lock, parameter (\"wind\"/\"current\") or speed range in m/s. Omitted fields are left alone."
+        description = "Sets any of a layer's name, visibility, lock, parameter (\"wind\"/\"current\") or speed range in m/s; each field set is its own undo step. Giving only one of min_mps/max_mps keeps the layer's other current bound; refused (writing nothing) if the layer has no existing band to fill it from. Omitted fields are left alone."
     )]
     async fn layer_set(
         &self,
@@ -308,6 +322,41 @@ impl<R: tauri::Runtime> VectorEffects<R> {
     ) -> std::result::Result<Json<ProjectSummary>, ToolError> {
         self.write("layer_set", false, move |app| {
             let state = app.state::<AppState>();
+
+            // Resolved and validated before any sub-write runs (ruling,
+            // task 3 review, fix round 1, findings 1 and 2c): a lone bound
+            // fills its partner from the layer's *current* band rather than
+            // clearing it, since `set_layer_speed_range` treats anything but
+            // (Some, Some) as "no filter". A lone bound with no existing band
+            // to fill from is refused before `name`/`visible`/`locked`/
+            // `parameter` ever write, so a bad call leaves nothing committed.
+            let bounds = if p.min_mps.is_some() || p.max_mps.is_some() {
+                let tree = crate::document::tree(state.inner(), 0)?;
+                let layer = tree
+                    .layers
+                    .iter()
+                    .find(|l| l.id == p.layer)
+                    .ok_or(AppError::Core(ve_core::CoreError::MissingLayer(p.layer)))?;
+                let current = layer.speed_filter.as_ref();
+                let min = p
+                    .min_mps
+                    .or_else(|| current.and_then(|f| f.speed_min_mps));
+                let max = p
+                    .max_mps
+                    .or_else(|| current.and_then(|f| f.speed_max_mps));
+                match (min, max) {
+                    (Some(min), Some(max)) => Some((min, max)),
+                    _ => {
+                        return Err(AppError::BadOption {
+                            field: "min_mps/max_mps",
+                            value: "one bound was given but the layer has no band to fill the other end from".to_owned(),
+                        });
+                    }
+                }
+            } else {
+                None
+            };
+
             let mut last = None;
             if let Some(name) = p.name {
                 last = Some(crate::document::rename_layer(state.clone(), p.layer, name)?);
@@ -333,12 +382,12 @@ impl<R: tauri::Runtime> VectorEffects<R> {
                     parameter,
                 )?);
             }
-            if p.min_mps.is_some() || p.max_mps.is_some() {
+            if let Some((min, max)) = bounds {
                 last = Some(crate::document::set_layer_speed_range(
                     state.clone(),
                     p.layer,
-                    p.min_mps,
-                    p.max_mps,
+                    Some(min),
+                    Some(max),
                     None,
                 )?);
             }
@@ -434,28 +483,44 @@ impl<R: tauri::Runtime> VectorEffects<R> {
     }
 
     #[tool(
-        description = "Sets one or more properties of an object at a step. `values` maps property name (from object_get's `id`) to a tagged value: {\"kind\":\"number\",\"value\":n}, {\"kind\":\"bool\",\"value\":b}, {\"kind\":\"angle\",\"degrees\":d}, {\"kind\":\"position\",\"lon\":x,\"lat\":y} or {\"kind\":\"choice\",\"index\":i}. With auto_key true a change on an animated property adds a keyframe at that step."
+        description = "Sets one or more properties of an object at a step; each is applied as its own command and its own undo step. `values` maps property name (from object_get's `id`) to a tagged value: {\"kind\":\"number\",\"value\":n}, {\"kind\":\"bool\",\"value\":b}, {\"kind\":\"angle\",\"degrees\":d}, {\"kind\":\"position\",\"lon\":x,\"lat\":y} or {\"kind\":\"choice\",\"index\":i}. Every value is parsed and validated before any is applied, so a malformed one writes nothing. With auto_key true a change on an animated property adds a keyframe at that step."
     )]
     async fn object_set(
         &self,
         Parameters(p): Parameters<ObjectSetParams>,
     ) -> std::result::Result<Json<ProjectSummary>, ToolError> {
+        let ObjectSetParams {
+            object,
+            step,
+            values,
+            auto_key,
+        } = p;
+        // Parsed before any sub-write runs (ruling, task 3 review, fix
+        // round 1, finding 2b): a malformed value used to be caught only
+        // when its own turn in the loop came around, after any values ahead
+        // of it in the map had already written.
+        let parsed = values
+            .into_iter()
+            .map(|(property, raw)| {
+                let value: crate::document::PropertyValue = serde_json::from_value(raw)
+                    .map_err(|e| ToolError::Refused(format!("values.{property}: {e}")))?;
+                Ok((property, value))
+            })
+            .collect::<std::result::Result<Vec<_>, ToolError>>()?;
+        if parsed.is_empty() {
+            return Err(ToolError::Refused("values is empty".to_owned()));
+        }
         self.write("object_set", false, move |app| {
             let state = app.state::<AppState>();
             let mut last = None;
-            for (property, raw) in p.values {
-                let value: crate::document::PropertyValue =
-                    serde_json::from_value(raw).map_err(|e| AppError::BadOption {
-                        field: "values",
-                        value: format!("{property}: {e}"),
-                    })?;
+            for (property, value) in parsed {
                 last = Some(crate::document::set_object_property(
                     state.clone(),
-                    p.object,
+                    object,
                     property,
                     value,
-                    p.step,
-                    p.auto_key,
+                    step,
+                    auto_key,
                     None,
                 )?);
             }

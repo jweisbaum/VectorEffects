@@ -7,6 +7,7 @@ use rmcp::ServiceExt;
 use rmcp::model::CallToolRequestParams;
 use rmcp::transport::StreamableHttpClientTransport;
 use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
+use tauri::Listener;
 use tauri::Manager;
 use tauri::test::{MockRuntime, mock_builder, mock_context, noop_assets};
 use ve_app::commands::AppState;
@@ -323,5 +324,119 @@ async fn layers_and_objects_round_trip_through_the_interface_reads() {
             .iter()
             .any(|l| l.objects.iter().any(|o| o.id == object))
     );
+    client.cancel().await.expect("close");
+}
+
+#[tokio::test]
+async fn a_write_tool_emits_document_changed_once_and_a_read_tool_emits_nothing() {
+    let root = TempRoot::new("events");
+    let app = mock_app(&root);
+    let (port, token) = serve(&app);
+    let client = client(port, &token).await;
+
+    // `emit` calls a registered listener synchronously (tauri's event bus
+    // does not go through the mock runtime's own event loop), but a channel
+    // with a bounded recv is used anyway rather than assuming that — it is
+    // the deterministic form either way, with no sleep.
+    let (changed_tx, changed_rx) = std::sync::mpsc::channel::<String>();
+    app.listen(ve_app::mcp::events::CHANGED, move |event| {
+        let _ = changed_tx.send(event.payload().to_owned());
+    });
+    let (activity_tx, activity_rx) = std::sync::mpsc::channel::<String>();
+    app.listen(ve_app::mcp::events::ACTIVITY, move |event| {
+        let _ = activity_tx.send(event.payload().to_owned());
+    });
+
+    // A write tool: exactly one `document://changed`, naming the project,
+    // and `mcp://activity` naming the tool that ran.
+    call(&client, "project_new", new_project_args("Events")).await;
+
+    let changed_payload = changed_rx
+        .recv_timeout(std::time::Duration::from_secs(2))
+        .expect("document://changed should have fired for a write tool");
+    let changed: Value = serde_json::from_str(&changed_payload).expect("json");
+    assert_eq!(changed["project"]["name"], "Events");
+    assert_eq!(changed["opened"], true);
+    assert!(
+        matches!(
+            changed_rx.recv_timeout(std::time::Duration::from_millis(100)),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+        ),
+        "document://changed fired more than once for one write tool call"
+    );
+
+    let activity_payload = activity_rx
+        .recv_timeout(std::time::Duration::from_secs(2))
+        .expect("mcp://activity should have fired");
+    let activity: Value = serde_json::from_str(&activity_payload).expect("json");
+    assert_eq!(activity["last_tool"], "project_new");
+    assert_eq!(activity["sessions"], 1);
+
+    // A read tool: no `document://changed` at all.
+    call(&client, "project_status", json!({})).await;
+    assert!(
+        matches!(
+            changed_rx.recv_timeout(std::time::Duration::from_millis(100)),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+        ),
+        "a read tool must not emit document://changed"
+    );
+
+    // `McpService::status` reports the live session while the client is
+    // connected, the way `off_means_no_socket_and_stop_releases_the_port`
+    // already reads `running_port()` straight off the service.
+    let status = app
+        .state::<ve_app::mcp::McpService>()
+        .status(&ve_app::settings::McpSettings::default());
+    assert_eq!(status.sessions, 1);
+    assert_eq!(status.last_tool.as_deref(), Some("project_status"));
+
+    client.cancel().await.expect("close");
+}
+
+#[tokio::test]
+async fn layer_set_keeps_the_other_speed_bound_and_refuses_a_lone_bound_with_no_band() {
+    let root = TempRoot::new("speed-bounds");
+    let app = mock_app(&root);
+    let (port, token) = serve(&app);
+    let client = client(port, &token).await;
+    call(&client, "project_new", new_project_args("Bounds")).await;
+    let layers = call(&client, "layers_list", json!({ "step": 0 })).await;
+    let layer = layers["layers"][0]["id"].as_u64().expect("layer id");
+
+    // No band yet: a lone bound is refused, and writes nothing.
+    let message = call_err(
+        &client,
+        "layer_set",
+        json!({ "layer": layer, "min_mps": 5.0 }),
+    )
+    .await;
+    assert!(message.contains("min_mps/max_mps"), "{message}");
+    let tree = ve_app::document::tree(app.state::<AppState>().inner(), 0).expect("tree");
+    let filter = tree.layers[0].speed_filter.as_ref().expect("filter");
+    assert_eq!(filter.speed_min_mps, None);
+    assert_eq!(filter.speed_max_mps, None);
+
+    // Establish a band with both ends.
+    call(
+        &client,
+        "layer_set",
+        json!({ "layer": layer, "min_mps": 2.0, "max_mps": 20.0 }),
+    )
+    .await;
+
+    // Setting one end alone (ruling, task 3 review, fix round 1, finding 1)
+    // keeps the layer's other current bound rather than clearing it.
+    call(
+        &client,
+        "layer_set",
+        json!({ "layer": layer, "min_mps": 5.0 }),
+    )
+    .await;
+    let tree = ve_app::document::tree(app.state::<AppState>().inner(), 0).expect("tree");
+    let filter = tree.layers[0].speed_filter.as_ref().expect("filter");
+    assert_eq!(filter.speed_min_mps, Some(5.0));
+    assert_eq!(filter.speed_max_mps, Some(20.0));
+
     client.cancel().await.expect("close");
 }
