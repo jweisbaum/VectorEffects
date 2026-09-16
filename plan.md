@@ -1,5 +1,16 @@
 # VectorEffects — Implementation Plan
 
+**2026-09-15: Zarr V3 export.** The export panel now offers a filesystem Zarr
+V3 output beside GRIB2. A single Float16 `/data` array carries the four
+components (`u10m_wind`, `v10m_wind`, `u_total_surface_current`, and
+`v_total_surface_current`) in its parameter dimension. Chunks cover 72 hours
+and 10° by 10° at the project resolution, with Zstd-only compression and NaN
+land masking. Both field kinds are evaluated through the CPU export path;
+missing kinds remain masked. Each step is evaluated once and spooled to a
+file beside the store as Float16; the 72-hour chunks are then assembled from
+the spool a band at a time, in groups bounded to 64 MiB, so a fine grid never
+holds a time chunk in memory and never evaluates a step twice.
+
 **Companion to** `spec.md`. Section references below point into it.
 
 **2026-09-15: placement and editing interaction corrections.** Macro placement

@@ -2902,6 +2902,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "page_size"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "30d5b2194ed13191c1999ae0704b7839fb18384fa22e49b57eeaa97d79ce40da"
+dependencies = [
+ "libc",
+ "winapi",
+]
+
+[[package]]
 name = "pango"
 version = "0.18.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2960,6 +2970,12 @@ name = "paste"
 version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
+
+[[package]]
+name = "pathdiff"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "df94ce210e5bc13cb6651479fa48d14f601d9858cfe0467f43ae157023b938d3"
 
 [[package]]
 name = "percent-encoding"
@@ -3090,6 +3106,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a106d1259c23fac8e543272398ae0e3c0b8d33c88ed73d0cc71b0f1d902618"
 dependencies = [
  "portable-atomic",
+]
+
+[[package]]
+name = "positioned-io"
+version = "0.3.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d4ec4b80060f033312b99b6874025d9503d2af87aef2dd4c516e253fbfcdada7"
+dependencies = [
+ "byteorder",
+ "libc",
+ "winapi",
 ]
 
 [[package]]
@@ -5337,6 +5364,7 @@ dependencies = [
  "ve-grib",
  "ve-render",
  "ve-zarr",
+ "zarrs",
  "zip",
 ]
 
@@ -5384,6 +5412,7 @@ dependencies = [
 name = "ve-zarr"
 version = "0.1.5"
 dependencies = [
+ "half",
  "lz4_flex",
  "reqwest",
  "serde",
@@ -6474,10 +6503,12 @@ dependencies = [
  "zarrs_chunk_key_encoding",
  "zarrs_codec",
  "zarrs_data_type",
+ "zarrs_filesystem",
  "zarrs_metadata",
  "zarrs_metadata_ext",
  "zarrs_plugin",
  "zarrs_storage",
+ "zstd",
 ]
 
 [[package]]
@@ -6547,6 +6578,25 @@ dependencies = [
  "thiserror 2.0.20",
  "zarrs_metadata",
  "zarrs_plugin",
+]
+
+[[package]]
+name = "zarrs_filesystem"
+version = "0.3.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32d9010e13dcde15100ba7eea4ca8af34521110782ed0eeb170e7ca872ac786d"
+dependencies = [
+ "bytes",
+ "derive_more",
+ "itertools 0.14.0",
+ "libc",
+ "lru",
+ "page_size",
+ "pathdiff",
+ "positioned-io",
+ "thiserror 2.0.20",
+ "walkdir",
+ "zarrs_storage",
 ]
 
 [[package]]
@@ -6721,6 +6771,34 @@ dependencies = [
  "crc32fast",
  "log",
  "simd-adler32",
+]
+
+[[package]]
+name = "zstd"
+version = "0.13.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e91ee311a569c327171651566e07972200e76fcfe2242a4fa446149a3881c08a"
+dependencies = [
+ "zstd-safe",
+]
+
+[[package]]
+name = "zstd-safe"
+version = "7.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "64d80649ab6db9d9f6f9c80a40becd948eda4714a0a5ac8c4d157a32231c7882"
+dependencies = [
+ "zstd-sys",
+]
+
+[[package]]
+name = "zstd-sys"
+version = "2.1.0+zstd.1.5.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0ef0a8027ec3ee71300ab3bcbcd0393f434aa72b91ca6d635a39941deae8eea0"
+dependencies = [
+ "cc",
+ "pkg-config",
 ]
 
 [[package]]

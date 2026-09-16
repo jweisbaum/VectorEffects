@@ -4,49 +4,49 @@ import type { MacroOutline } from "./MacroOutline";
 /**
  * One entry of the library, as the panels list it.
  */
-export type MacroEntry = {
+export type MacroEntry = { 
 /**
  * The file's stem, which is also how it is addressed.
  */
-id: string,
+id: string, 
 /**
  * The name the user gave it.
  */
-name: string,
+name: string, 
 /**
  * `"wind"` or `"current"`, from the project it was taken in.
  */
-field_kind: string,
+field_kind: string, 
 /**
  * Field planes actually present in the recording, for placement validation.
  */
-field_kinds: Array<string>,
+field_kinds: Array<string>, 
 /**
  * How many time slices it holds.
  */
-frames: number,
+frames: number, 
 /**
  * Hours from its first frame to its last.
  */
-span_hours: number,
+span_hours: number, 
 /**
  * The step size it was captured at, in hours.
  */
-step_hours: number,
+step_hours: number, 
 /**
  * Bytes on disk.
  */
-size_bytes: bigint,
+size_bytes: bigint, 
 /**
  * Whether any frame's region moved: a macro that records movement.
  */
-moves: boolean,
+moves: boolean, 
 /**
  * The region's shape about its centre, in degrees of the map, so the
  * insert tool can show where the macro will land before the click
  * (M24).
  */
-outline: MacroOutline,
+outline: MacroOutline, 
 /**
  * Where each frame's region sat relative to the first frame's, as
  * `[dx, dy]` in degrees — the recorded movement, for the hover to draw

@@ -152,6 +152,7 @@ pub fn run() -> anyhow::Result<()> {
                 edit::undo,
                 edit::redo,
                 export::export_grib,
+                export::export_zarr,
                 export::export_estimate,
                 export::cancel_export,
                 import::import_grib,

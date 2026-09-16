@@ -33,6 +33,10 @@ pub enum ZarrError {
     /// The import was cancelled by the user.
     #[error("cancelled")]
     Cancelled,
+
+    /// A Zarr export could not be created or written.
+    #[error("writing the Zarr export failed: {0}")]
+    Write(String),
 }
 
 /// Convenience alias for results in this crate.

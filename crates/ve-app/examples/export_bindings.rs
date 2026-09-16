@@ -20,7 +20,10 @@ use ve_app::document::{
 };
 use ve_app::edit::{BrushDirectionMode, BrushShape, BrushStroke};
 use ve_app::error::AppErrorPayload;
-use ve_app::export::{ExportEstimate, ExportProgress, ExportRequest, ExportResult};
+use ve_app::export::{
+    ExportEstimate, ExportProgress, ExportRequest, ExportResult, ExportZarrRequest,
+    ExportZarrResult,
+};
 use ve_app::history::HistoryProgress;
 use ve_app::palette::{
     GestureSelector, OptionDependency, PreviewKind, Sizing, ToolOptionSpec, ToolSchema,
@@ -121,6 +124,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ExportProgress::export_all(&cfg)?;
     HistoryProgress::export_all(&cfg)?;
     ExportEstimate::export_all(&cfg)?;
+    ExportZarrRequest::export_all(&cfg)?;
+    ExportZarrResult::export_all(&cfg)?;
 
     // Keep generated files deterministic and free of ts-rs's trailing spaces.
     for entry in std::fs::read_dir(&out_dir)? {

@@ -52,6 +52,8 @@ import type { PropertyView } from "./generated/PropertyView";
 import type { ExportEstimate } from "./generated/ExportEstimate";
 import type { ExportRequest } from "./generated/ExportRequest";
 import type { ExportResult } from "./generated/ExportResult";
+import type { ExportZarrRequest } from "./generated/ExportZarrRequest";
+import type { ExportZarrResult } from "./generated/ExportZarrResult";
 import type { Autosave } from "./generated/Autosave";
 import type { MeasurementKind } from "./generated/MeasurementKind";
 import type { MeasurementView } from "./generated/MeasurementView";
@@ -105,6 +107,7 @@ const LONG_RUNNING: Readonly<Record<string, string>> = {
   save_project: "Saving",
   save_project_as: "Saving",
   export_grib: "Exporting GRIB",
+  export_zarr: "Exporting Zarr",
   capture_region: "Copying the field",
   paste_capture: "Pasting the field",
   erase_stroke: "Erasing",
@@ -239,6 +242,10 @@ export const api = {
 
   /** Writes the open project to a GRIB2 file. */
   exportGrib: (request: ExportRequest) => call<ExportResult>("export_grib", { request }),
+
+  /** Writes the open project to a Zarr V3 directory. */
+  exportZarr: (request: ExportZarrRequest) =>
+    call<ExportZarrResult>("export_zarr", { request }),
 
   /** Asks a running export to stop. */
   cancelExport: () => call<void>("cancel_export"),

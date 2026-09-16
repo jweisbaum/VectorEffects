@@ -14,7 +14,7 @@ use ve_app::commands::AppState;
 use ve_app::document;
 use ve_app::edit::{self, BrushStroke};
 use ve_app::error::AppError;
-use ve_app::export::{self, ExportRequest};
+use ve_app::export::{self, ExportRequest, ExportZarrRequest};
 use ve_app::paths::AppPaths;
 use ve_app::projects::{self, NewProjectRequest};
 use ve_grib::reader::decode;
@@ -60,6 +60,16 @@ fn new_project(field_kind: &str) -> NewProjectRequest {
 
 fn request(path: &std::path::Path) -> ExportRequest {
     ExportRequest {
+        path: path.to_string_lossy().into_owned(),
+        year: 2026,
+        month: 9,
+        day: 2,
+        hour: 0,
+    }
+}
+
+fn zarr_request(path: &std::path::Path) -> ExportZarrRequest {
+    ExportZarrRequest {
         path: path.to_string_lossy().into_owned(),
         year: 2026,
         month: 9,
@@ -491,4 +501,286 @@ fn painted_calm_remains_defined_beside_missing_cells() {
         assert_eq!(message.values[90 * 360], 0.0);
         assert!(message.values[10 * 360 + 180].is_nan());
     }
+}
+
+/// The Zarr export is the GRIB export in another container: the same stroke
+/// lands at the same cell, read back through zarrs rather than our own writer.
+#[test]
+fn a_painted_stroke_reaches_the_zarr_store() {
+    use ve_zarr::export::f16;
+    use zarrs::array::Array;
+    use zarrs::filesystem::FilesystemStore;
+
+    let root = TempRoot::new("zarr");
+    let state = app(&root);
+    projects::create(&state, new_project("wind"), false).expect("create");
+    edit::paint(
+        &state,
+        BrushStroke {
+            points: vec![[-20.0, 0.0], [0.0, 0.0], [20.0, 0.0]],
+            size_km: 1000.0,
+            speed_mps: 20.0,
+            direction_toward_deg: 90.0,
+            feather: 0.0,
+            layer: None,
+            ..Default::default()
+        },
+    )
+    .expect("paint");
+
+    let path = root.0.join("out.zarr");
+    let project = {
+        let mut session = state.session.lock().expect("lock");
+        session.require_open().expect("open").project.clone()
+    };
+    let mut seen = Vec::new();
+    let result = export::run_zarr(
+        &project,
+        &zarr_request(&path),
+        &AtomicBool::new(false),
+        |progress| seen.push((progress.step, progress.total)),
+    )
+    .expect("export");
+
+    assert!(path.is_dir(), "the store is a directory");
+    assert!(
+        !root.0.join("out.zarr.partial").exists(),
+        "no temporary left"
+    );
+    // A 1° grid is 360 x 181; ten-degree chunks tile it 36 x 19, and two
+    // 3-hourly steps fit one 72-hour time chunk.
+    assert_eq!(result.chunks, 36 * 19);
+    assert_eq!(seen, vec![(1, 2), (2, 2)], "progress per evaluated step");
+
+    let store = std::sync::Arc::new(FilesystemStore::new(&path).expect("store"));
+    let array = Array::open(store, "/data").expect("open");
+    assert_eq!(array.shape(), &[2, 4, 181, 360]);
+    let regular: Vec<u64> = array
+        .chunk_shape(&[0, 0, 0, 0])
+        .expect("chunk shape")
+        .iter()
+        .map(|n| n.get())
+        .collect();
+    assert_eq!(regular, vec![24, 4, 10, 10]);
+
+    // What the dialog asked for and what a reader needs to place a cell.
+    let attributes = array.attributes();
+    assert_eq!(attributes["reference_time"], "2026-09-02T00:00:00Z");
+    assert_eq!(attributes["step_hours"], 3);
+    assert_eq!(attributes["latitude_start"], 90.0);
+    assert_eq!(attributes["latitude_step"], -1.0);
+    assert_eq!(attributes["longitude_start"], 0.0);
+    assert_eq!(attributes["longitude_step"], 1.0);
+    assert_eq!(
+        attributes["parameter_order"],
+        serde_json::json!([
+            "u10m_wind",
+            "v10m_wind",
+            "u_total_surface_current",
+            "v_total_surface_current"
+        ])
+    );
+
+    // The equator at longitude 0 is row 90, column 0: chunk [0, 0, 9, 0],
+    // local row 0, local column 0. Within a chunk the layout is
+    // [time][parameter][row][column], 10 x 10 cells per parameter.
+    let chunk: Vec<f32> = array
+        .retrieve_chunk::<Vec<f16>>(&[0, 0, 9, 0])
+        .expect("chunk")
+        .into_iter()
+        .map(f16::to_f32)
+        .collect();
+    assert_eq!(chunk.len(), 24 * 4 * 10 * 10);
+    let (u, v, cu, cv) = (chunk[0], chunk[100], chunk[200], chunk[300]);
+    assert!(
+        (u - 20.0).abs() < 0.05,
+        "20 m/s eastward at the stroke, got u={u}"
+    );
+    assert!(
+        v.abs() < 0.05,
+        "a due-east flow has no northward component, got v={v}"
+    );
+    assert!(
+        cu.is_nan() && cv.is_nan(),
+        "a wind project writes no current, only the mask"
+    );
+    // The second step holds the same still field, one frame stride on.
+    assert!((chunk[400] - 20.0).abs() < 0.05, "step 1 u");
+    // Beyond the project's two steps the chunk is padding: fill value only.
+    assert!(chunk[800].is_nan(), "time padding is the fill value");
+
+    // Away from the stroke the field is undefined, distinct from a painted calm.
+    let far: Vec<f16> = array
+        .retrieve_chunk::<Vec<f16>>(&[0, 0, 1, 18])
+        .expect("far chunk");
+    assert!(
+        far.iter().all(|value| value.is_nan()),
+        "should be undefined"
+    );
+}
+
+/// A cancelled Zarr export leaves nothing behind, and an existing destination
+/// is refused rather than overwritten.
+#[test]
+fn a_zarr_export_never_leaves_a_partial_store() {
+    let root = TempRoot::new("zarr-cancel");
+    let state = app(&root);
+    projects::create(&state, new_project("wind"), false).expect("create");
+
+    let project = {
+        let mut session = state.session.lock().expect("lock");
+        session.require_open().expect("open").project.clone()
+    };
+    let path = root.0.join("cancelled.zarr");
+    let outcome = export::run_zarr(
+        &project,
+        &zarr_request(&path),
+        &AtomicBool::new(true),
+        |_| {},
+    );
+    assert!(matches!(outcome, Err(AppError::ExportCancelled)));
+    assert!(!path.exists(), "no store");
+    assert!(
+        !root.0.join("cancelled.zarr.partial").exists(),
+        "no temporary either"
+    );
+    assert!(!root.0.join("cancelled.zarr.spool").exists(), "no spool");
+
+    std::fs::create_dir_all(&path).expect("an existing directory");
+    let outcome = export::run_zarr(
+        &project,
+        &zarr_request(&path),
+        &AtomicBool::new(false),
+        |_| {},
+    );
+    assert!(matches!(outcome, Err(AppError::Doing { .. })), "refused");
+    assert!(
+        std::fs::read_dir(&path).expect("read").next().is_none(),
+        "the existing directory is untouched"
+    );
+
+    let mut bad = zarr_request(&root.0.join("bad.zarr"));
+    bad.month = 13;
+    assert!(export::run_zarr(&project, &bad, &AtomicBool::new(false), |_| {}).is_err());
+    assert!(!root.0.join("bad.zarr").exists());
+}
+
+/// A project longer than 72 hours spans two time chunks; the second must hold
+/// its steps from its own start, not the array's.
+#[test]
+fn a_zarr_export_crosses_a_time_chunk_boundary() {
+    use ve_zarr::export::f16;
+    use zarrs::array::Array;
+    use zarrs::filesystem::FilesystemStore;
+
+    let root = TempRoot::new("zarr-chunks");
+    let state = app(&root);
+    // Daily steps: 72 hours is three steps, so five steps are two chunks.
+    projects::create(
+        &state,
+        NewProjectRequest {
+            step_hours: 24,
+            step_count: 5,
+            ..new_project("wind")
+        },
+        false,
+    )
+    .expect("create");
+    edit::paint(
+        &state,
+        BrushStroke {
+            points: vec![[0.0, 0.0]],
+            size_km: 2000.0,
+            speed_mps: 15.0,
+            direction_toward_deg: 0.0,
+            feather: 0.0,
+            layer: None,
+            ..Default::default()
+        },
+    )
+    .expect("paint");
+
+    let path = root.0.join("long.zarr");
+    let project = {
+        let mut session = state.session.lock().expect("lock");
+        session.require_open().expect("open").project.clone()
+    };
+    let result = export::run_zarr(
+        &project,
+        &zarr_request(&path),
+        &AtomicBool::new(false),
+        |_| {},
+    )
+    .expect("export");
+    assert_eq!(result.chunks, 36 * 19 * 2);
+
+    let store = std::sync::Arc::new(FilesystemStore::new(&path).expect("store"));
+    let array = Array::open(store, "/data").expect("open");
+    assert_eq!(array.shape(), &[5, 4, 181, 360]);
+    let second: Vec<f32> = array
+        .retrieve_chunk::<Vec<f16>>(&[1, 0, 9, 0])
+        .expect("chunk")
+        .into_iter()
+        .map(f16::to_f32)
+        .collect();
+    // Steps 3 and 4 are local 0 and 1 of the second chunk: 3 x 4 x 100 per
+    // step, v is the second plane.
+    assert!(
+        (second[100] - 15.0).abs() < 0.05,
+        "step 3 v, got {}",
+        second[100]
+    );
+    assert!(
+        (second[500] - 15.0).abs() < 0.05,
+        "step 4 v, got {}",
+        second[500]
+    );
+    assert!(second[900].is_nan(), "the third slot is padding");
+    assert!(second[0].abs() < 0.05, "northward flow has no u");
+}
+
+/// The cost the export panel sees: a 0.25° project, two steps, evaluated
+/// once per step. Printed, not asserted; `--nocapture` shows it.
+#[test]
+fn zarr_export_cost_at_quarter_degree() {
+    let root = TempRoot::new("zarr-cost");
+    let state = app(&root);
+    projects::create(
+        &state,
+        NewProjectRequest {
+            resolution: "0.25".to_owned(),
+            ..new_project("wind")
+        },
+        false,
+    )
+    .expect("create");
+    edit::paint(
+        &state,
+        BrushStroke {
+            points: vec![[-20.0, 0.0], [20.0, 10.0]],
+            size_km: 1500.0,
+            speed_mps: 12.0,
+            direction_toward_deg: 45.0,
+            feather: 0.5,
+            layer: None,
+            ..Default::default()
+        },
+    )
+    .expect("paint");
+    let project = {
+        let mut session = state.session.lock().expect("lock");
+        session.require_open().expect("open").project.clone()
+    };
+    let path = root.0.join("cost.zarr");
+    let result = export::run_zarr(
+        &project,
+        &zarr_request(&path),
+        &AtomicBool::new(false),
+        |_| {},
+    )
+    .expect("export");
+    println!(
+        "0.25 degree, 2 steps: {} chunks, {} bytes, {} ms",
+        result.chunks, result.bytes, result.elapsed_ms
+    );
 }

@@ -10,15 +10,17 @@ description = "Reads ERA5 wind and GlobCurrent surface current from the public Z
 [dependencies]
 thiserror = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 
 # `default-features = false` is load-bearing. The default set turns on
 # `blosc`, which builds c-blosc and its bundled Snappy through a C++
 # toolchain. The stores this crate reads are blosc/lz4 only, and `blosc.rs`
 # decodes that in Rust, so the C++ dependency buys nothing and costs the
 # three-platform build.
-zarrs = { version = "0.23", default-features = false }
+zarrs = { version = "0.23", default-features = false, features = ["filesystem", "zstd"] }
 zarrs_storage = "0.4"
 lz4_flex = { version = "0.14", default-features = false, features = ["std", "frame"] }
+half = "2.7"
 
 # The store is read over HTTPS by `http.rs` rather than by `zarrs_http`, which
 # takes `reqwest` with its default features: that is `native-tls`, and on Linux

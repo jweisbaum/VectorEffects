@@ -65,6 +65,8 @@ webdriver = ["dep:tauri-plugin-webdriver-automation"]
 # Reading a saved project's archive directly, to check what a capture writes.
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 ve-grib = { workspace = true, features = ["testing"] }
+# Reading a Zarr export back, to check what the writer put where.
+zarrs = { version = "0.23", default-features = false, features = ["filesystem", "zstd"] }
 
 [lints]
 workspace = true

@@ -61,6 +61,17 @@ export async function pickGribDestination(projectName: string): Promise<string |
   return typeof chosen === "string" ? chosen : null;
 }
 
+/** Asks where to write a Zarr V3 directory. */
+export async function pickZarrDestination(projectName: string): Promise<string | null> {
+  const chosen = await whileChoosing("Choosing where to export", () =>
+    save({
+      defaultPath: `${projectName}.zarr`,
+      filters: [{ name: "Zarr V3", extensions: ["zarr"] }],
+    }),
+  );
+  return typeof chosen === "string" ? chosen : null;
+}
+
 /** Asks where to save. Returns null if the user cancelled. */
 export async function pickProjectToSave(suggestedName: string): Promise<string | null> {
   const chosen = await whileChoosing("Choosing where to save", () =>

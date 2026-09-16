@@ -123,6 +123,12 @@ the **precision** — 8, 12, 16 or 24 bits per value, with the step each implies
 and the file size beside it. Sixteen is the default. The export runs in the
 background, can be cancelled, and never leaves a truncated file behind.
 
+**Export Zarr…** writes the same vectors as a Zarr V3 directory: one Float16
+array of wind u/v and current u/v, chunked 72 hours by 10°, Zstd compressed,
+with uncovered cells NaN. It asks for the same forecast start time, which the
+array records alongside its grid origin. It refuses to overwrite an existing
+directory.
+
 ## Settings
 
 `Cmd`-`,` or the ⚙ button: what autosave does, every shortcut (rebindable,

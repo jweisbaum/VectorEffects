@@ -23,6 +23,7 @@ pub mod blosc;
 pub mod codec;
 pub mod era5;
 pub mod error;
+pub mod export;
 pub mod globcurrent;
 pub mod http;
 mod parallel;

@@ -3579,6 +3579,43 @@ gain. There is no §11.
 
 ## 12. GRIB2 export
 
+### 12.3 Zarr V3 export
+
+The status bar also offers **Export Zarr**. It writes a filesystem Zarr V3
+group whose `/data` array has dimensions `[time, parameter, latitude,
+longitude]`. The parameter axis is length four and always has this order:
+
+1. `u10m_wind`
+2. `v10m_wind`
+3. `u_total_surface_current`
+4. `v_total_surface_current`
+
+Wind and current data are evaluated from the same CPU export path as GRIB2.
+A project that does not contain one kind writes NaN for that pair. Cells with
+no evaluated coverage are NaN as well, preserving the land mask; a covered
+calm cell remains a real zero. Values use IEEE Float16. The only bytes-to-bytes
+codec is Zstd (level 3); Blosc is never used.
+
+The regular chunk shape is `[72 / step_hours, 4, 10° / resolution,
+10° / resolution]`. Thus a 1-hour project uses 72 time steps per chunk, a
+3-hour project 24, and a 6-hour project 12. The latitude and longitude axes
+use the project's global regular grid, with smaller edge chunks where the
+grid does not divide evenly. One chunk therefore contains all four vector
+components together rather than four separate parameter groups.
+
+The lattice is the GRIB one (§12.2): row 0 is the north pole and column 0
+the prime meridian, longitude increasing eastward through `[0, 360)`, so the
+two exports of one project put every cell in the same place. The `/data`
+array's attributes say so — `latitude_start`, `latitude_step`,
+`longitude_start`, `longitude_step` — and carry `reference_time`, the ISO
+8601 UTC instant the dialog asked for, with `step_hours`: time index `t` is
+valid `t × step_hours` hours after it. Without those a reader could place a
+cell neither on the earth nor on the clock.
+
+Like the GRIB export it writes to a `.partial` beside the destination and
+renames on success, so a cancelled or failed export leaves no store behind;
+an existing destination is refused, never overwritten.
+
 ### 12.1 Output
 
 A single `.grib2` file containing concatenated messages: **one message per

@@ -3,6 +3,7 @@ import { useSelectionLifecycle } from "./selectionLifecycle";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import ExportDialog from "./project/ExportDialog";
+import ExportZarrDialog from "./project/ExportZarrDialog";
 import HistoryPanel from "./panels/HistoryPanel";
 import Inspector from "./panels/Inspector";
 import LayerPanel from "./panels/LayerPanel";
@@ -51,6 +52,7 @@ function EditorApp() {
   useEffect(() => reportError(null), [project?.image_token]);
   const [status, setStatus] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [exportingZarr, setExportingZarr] = useState(false);
   // Non-null while the New Project dialog is up; the boolean is the answer the
   // user already gave about unsaved changes, carried through to the command.
   const [creating, setCreating] = useState<{ discardUnsaved: boolean } | null>(null);
@@ -388,7 +390,7 @@ function EditorApp() {
   }, [openPath]);
 
   // Standard shortcuts, so saving does not require reaching for the toolbar.
-  const modal = exporting || creating !== null || askUnsaved !== null || recording !== null;
+  const modal = exporting || exportingZarr || creating !== null || askUnsaved !== null || recording !== null;
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       // A dialog is a decision in progress; undoing or saving behind it would
@@ -729,6 +731,9 @@ function EditorApp() {
       {exporting && (
         <ExportDialog project={project} onClose={() => setExporting(false)} />
       )}
+      {exportingZarr && (
+        <ExportZarrDialog project={project} onClose={() => setExportingZarr(false)} />
+      )}
 
       {creating !== null && (
         <NewProjectDialog
@@ -776,6 +781,9 @@ function EditorApp() {
         */}
         <button className="export" onClick={() => setExporting(true)}>
           Export GRIB…
+        </button>
+        <button className="export" onClick={() => setExportingZarr(true)}>
+          Export Zarr…
         </button>
       </div>
     </div>
