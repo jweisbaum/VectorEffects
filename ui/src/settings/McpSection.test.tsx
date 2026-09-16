@@ -43,6 +43,9 @@ beforeEach(() => {
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
+  held.mcpStatus.mockClear();
+  held.setMcp.mockClear();
+  held.rotateMcpToken.mockClear();
 });
 
 afterEach(() => {
@@ -73,6 +76,18 @@ describe("McpSection", () => {
     const snippet = host.querySelector("pre")?.textContent ?? "";
     expect(snippet).toContain("Bearer tok_abc");
     expect(snippet).toContain("claude mcp add");
+  });
+
+  it("fetches its status once, regardless of a new onError identity on re-render", async () => {
+    act(() => root.render(<McpSection onError={() => {}} />));
+    await flush();
+    expect(held.mcpStatus).toHaveBeenCalledTimes(1);
+    // A parent re-render (SettingsDialog holds several unrelated useStates)
+    // passes a *new* `onError` function each time; that alone must not
+    // re-trigger the fetch.
+    act(() => root.render(<McpSection onError={() => {}} />));
+    await flush();
+    expect(held.mcpStatus).toHaveBeenCalledTimes(1);
   });
 
   it("rotates the token through the command", async () => {

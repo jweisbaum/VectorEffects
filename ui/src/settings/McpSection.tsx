@@ -2,7 +2,7 @@
  * Settings → MCP service (spec 8.8): the switch, the port, and a client
  * configuration with the token filled in.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { McpStatus } from "../generated/McpStatus";
 import NumberField from "../NumberField";
@@ -23,16 +23,24 @@ export default function McpSection({ onError }: { onError: (err: unknown) => voi
   const [status, setStatus] = useState<McpStatus | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
 
-  useEffect(() => {
-    void api.mcpStatus().then(setStatus).catch(onError);
-  }, [onError]);
+  // `onError` is `SettingsDialog`'s inline `report`, a new function identity
+  // on every one of the dialog's re-renders (a shortcut rebind, a macro
+  // deletion, a gradient load — nothing to do with this section). Reading it
+  // through a ref, updated every render but never a dependency, keeps the
+  // fetch-once effect below from re-running on someone else's state change.
+  const onErrorRef = useRef(onError);
+  onErrorRef.current = onError;
 
-  const apply = useCallback(
-    (promise: Promise<McpStatus>) => {
-      void promise.then(setStatus).catch(onError);
-    },
-    [onError],
-  );
+  useEffect(() => {
+    void api
+      .mcpStatus()
+      .then(setStatus)
+      .catch((err) => onErrorRef.current(err));
+  }, []);
+
+  const apply = useCallback((promise: Promise<McpStatus>) => {
+    void promise.then(setStatus).catch((err) => onErrorRef.current(err));
+  }, []);
 
   const copy = useCallback((label: string, text: string) => {
     void navigator.clipboard
