@@ -27,7 +27,7 @@
  */
 import { execFile, spawn } from "node:child_process";
 import { createServer } from "node:net";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -41,6 +41,14 @@ import { launch } from "./client.mjs";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const project = join(root, "assets/samples/cyclone.veproj");
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
+
+/**
+ * A shorter wait for the port line than `launch`'s own, for exercising the
+ * failure path: `launch` orphaning its tree is the bug the cleanup below
+ * guards against, and the only way to see the guard work is a launch that
+ * fails. Unset in any ordinary run.
+ */
+const launchTimeoutMs = Number(process.env.VE_FOLLOW_LAUNCH_TIMEOUT_MS) || 0;
 
 /** A port nothing is using, released again before the app is told about it. */
 async function freePort() {
@@ -97,12 +105,19 @@ console.log(`automation root ${automation}`);
 console.log(`chose port ${port}`);
 
 let client = null;
-const app = await launch({
-  cwd: root,
-  env: { VE_AUTOMATION_ROOT: automation },
-  onLog: (line) => process.stderr.write(`${line}\n`),
-});
+let app = null;
 try {
+  // Inside the `try`, not before it: `launch` can reject — the application
+  // exits, or the port line never comes — and a rejection outside would skip
+  // the cleanup below and leave the temporary directories behind. `launch`
+  // stops its own tree on those branches, so there is nothing running left to
+  // orphan; what is left is the directories, and they are this block's.
+  app = await launch({
+    cwd: root,
+    env: { VE_AUTOMATION_ROOT: automation },
+    onLog: (line) => process.stderr.write(`${line}\n`),
+    ...(launchTimeoutMs ? { timeoutMs: launchTimeoutMs } : {}),
+  });
   await app.ready();
   // `help.mjs`'s assertion, for the same reason: if the app resolved its real
   // directories the run is about to edit the person's settings, and the only
@@ -188,8 +203,11 @@ try {
   // Closed before the app, so the session is released rather than dropped
   // under the listener.
   await client?.close().catch(() => {});
-  await app.close();
+  await app?.close();
   await rm(automation, { recursive: true, force: true });
+  // Kept when there are pictures in it, since those are the point; removed
+  // when the run failed before taking any, so a failure leaves nothing behind.
+  if ((await readdir(shots)).length === 0) await rm(shots, { recursive: true, force: true });
   // The promise this check makes is that the socket is gone with the app, so
   // it is worth one line to say so. By port, never by name: a pattern would
   // find the person's own application.

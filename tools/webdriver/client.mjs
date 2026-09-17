@@ -37,6 +37,42 @@ export function portFromLine(line) {
 const START_TIMEOUT_MS = 180_000;
 
 /**
+ * Signals a child's whole process *group*, falling back to the child alone.
+ *
+ * The negative pid is the group, which is why `launch` detaches: `npm run
+ * dev:webdriver` is a wrapper around the Tauri CLI, which starts Vite as its
+ * `beforeDevCommand` and then cargo, so signalling the wrapper alone leaves
+ * Vite holding port 5173 and the next run cannot start.
+ */
+function signalGroup(child, name) {
+  try {
+    process.kill(-child.pid, name);
+  } catch {
+    // Already gone, or never had a group of its own.
+    try {
+      child.kill(name);
+    } catch {
+      /* gone */
+    }
+  }
+}
+
+/**
+ * Stops the whole tree a `launch` started, and waits for it to go.
+ *
+ * Signals the group even when the child itself has already exited: the group
+ * outlives its leader, so `npm` having died says nothing about the Vite and
+ * cargo it started. That is exactly the case on the `exited` branch below.
+ */
+async function stopTree(child) {
+  signalGroup(child, "SIGTERM");
+  if (child.exitCode === null && child.signalCode === null) {
+    await Promise.race([once(child, "exit"), new Promise((r) => setTimeout(r, 5000).unref())]);
+  }
+  signalGroup(child, "SIGKILL");
+}
+
+/**
  * Starts the application with its automation endpoint and waits for the port.
  *
  * The endpoint binds `127.0.0.1:0` — a random port, announced on stdout and
@@ -47,8 +83,23 @@ const START_TIMEOUT_MS = 180_000;
  * `VE_AUTOMATION_ROOT` (`paths.rs`): a run that changes a setting — the MCP
  * service's, say — would otherwise write it into the person's real settings
  * file and leave their own application carrying it on its next launch.
+ *
+ * **A failure here stops the tree before it rethrows.** The group is detached
+ * and no `Driver` is returned on the losing branches, so a caller that put its
+ * cleanup in a `finally` after `await launch(...)` has nothing left to stop
+ * with: the whole tree — npm, Vite, cargo, the application — is orphaned, and
+ * the next run dies on port 5173. That happened, and the tree had to be found
+ * and signalled by hand.
+ *
+ * `timeoutMs` is how long the port line is waited for. It is a parameter so
+ * the failure path can be exercised without a cold build.
  */
-export async function launch({ cwd = process.cwd(), onLog, env = {} } = {}) {
+export async function launch({
+  cwd = process.cwd(),
+  onLog,
+  env = {},
+  timeoutMs = START_TIMEOUT_MS,
+} = {}) {
   // Its own process group, so it can be killed as a tree. `npm run
   // dev:webdriver` is a wrapper around the Tauri CLI, which starts Vite as
   // its `beforeDevCommand` and then cargo: signalling only the wrapper leaves
@@ -93,12 +144,17 @@ export async function launch({ cwd = process.cwd(), onLog, env = {} } = {}) {
   });
   const timeout = new Promise((_, reject) =>
     setTimeout(
-      () => reject(new Error(`no automation port announced within ${START_TIMEOUT_MS} ms`)),
-      START_TIMEOUT_MS,
+      () => reject(new Error(`no automation port announced within ${timeoutMs} ms`)),
+      timeoutMs,
     ).unref(),
   );
 
-  await Promise.race([announced, exited, timeout]);
+  try {
+    await Promise.race([announced, exited, timeout]);
+  } catch (failure) {
+    await stopTree(child);
+    throw failure;
+  }
   return new Driver(port, child);
 }
 
@@ -304,27 +360,11 @@ export class Driver {
   /**
    * Stops the application, if this driver started it — the whole tree of it.
    *
-   * The negative pid signals the process *group*, which is why `launch`
-   * detaches: the wrapper, Vite and cargo are three processes and killing the
-   * first leaves the others holding the dev port.
+   * `connect` makes a driver with no child of its own: that application
+   * belongs to whoever started it and is not this one's to stop.
    */
   async close() {
-    const child = this.child;
-    if (!child || child.exitCode !== null) return;
-    const signal = (name) => {
-      try {
-        process.kill(-child.pid, name);
-      } catch {
-        // Already gone, or never had a group of its own.
-        try {
-          child.kill(name);
-        } catch {
-          /* gone */
-        }
-      }
-    };
-    signal("SIGTERM");
-    await Promise.race([once(child, "exit"), new Promise((r) => setTimeout(r, 5000).unref())]);
-    if (child.exitCode === null) signal("SIGKILL");
+    if (!this.child) return;
+    await stopTree(this.child);
   }
 }
