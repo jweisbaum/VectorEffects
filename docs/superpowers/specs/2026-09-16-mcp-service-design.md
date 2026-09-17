@@ -40,7 +40,7 @@ Three decisions were taken in discussion and are fixed here:
   live in `AppState.mcp`. Nothing here runs when the setting is off: the
   module is compiled in, but it creates no socket, thread or task.
 - **Module:** `crates/ve-app/src/mcp/` (`server.rs` lifecycle and auth,
-  `tools.rs` the tool set, `events.rs` the frontend notifications). Nothing
+  `tools/` the tool set, `events.rs` the frontend notifications). Nothing
   outside `settings::mcp_set` and `lib.rs`'s setup calls into it.
 
 ## 3. Tool surface
@@ -142,7 +142,7 @@ with no project open the tool refuses before asking.
   tool surface; §15 gets a line; `plan.md` §5 gets the reasoning above.
 - `CLAUDE.md` invariant 5 gets the matching paragraph, and a recipe *Adding
   an MCP tool*: the call into the `#[tauri::command]` function with
-  `app.state::<AppState>()`, the tool in `tools.rs`, the
+  `app.state::<AppState>()`, the tool in `tools/<group>.rs`, the
   `document://changed` emit if it writes, and the integration test.
 - `docs/USER-GUIDE.md` and the Help topic for Settings describe the section.
 
@@ -227,3 +227,6 @@ with no project open the tool refuses before asking.
   no project open refuses before any request is made, and a frontend with
   no frame to give answers `refuse_capture(id, reason)` instead of leaving
   the tool to wait out the clock.
+- `mcp/tools.rs` is a directory: one file per spec §8.8 group, each an
+  `impl` block with its own `#[tool_router(router = …)]`, composed with `+`
+  in `tools/mod.rs`. Motion only; no tool changed.

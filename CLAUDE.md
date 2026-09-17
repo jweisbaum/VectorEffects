@@ -310,11 +310,15 @@ state all the same, so it is saved and undone like everything else.
 
 ### Adding an MCP tool
 
+0. Pick the group file in `mcp/tools/` (project, structure, time, field,
+   files, view, history); a new group is a new file with its own
+   `#[tool_router(router = …)]` block added to the sum in `tools/mod.rs`'s
+   `new`.
 1. The tool calls the `#[tauri::command]` function with `app.state()`; it
    never reimplements it. If the feature has no command, add the command
    first, for the interface.
-2. Parameters are a `schemars::JsonSchema` struct in `mcp/tools.rs` with a
-   doc comment per field; the client reads those.
+2. Parameters are a `schemars::JsonSchema` struct in `mcp/tools/<group>.rs`
+   beside the tool, with a doc comment per field; the client reads those.
 3. A tool that writes goes through `VectorEffects::write`, which emits
    `document://changed`. One that opens or closes a project passes
    `opened: true`. One that changes only frontend state emits its
