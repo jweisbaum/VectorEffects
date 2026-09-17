@@ -51,9 +51,9 @@ duplicates command logic**, and no split is made.
 
 Tools that change the document return the new `ProjectSummary`, so a client
 sees `revision`, `dirty` and `can_undo` exactly as the panels do. Errors are
-the `AppError` text the interface shows. Directions cross this boundary in
-the project's convention and speeds in the display unit, the way the IPC
-boundary already converts them; nothing below sees a "from" bearing.
+the `AppError` text the interface shows. Directions cross this boundary as
+azimuth toward and speeds in m/s, the domain's own units; a client that wants
+the project's display convention reads it from the summary.
 
 Names are `snake_case` nouns first. Each parameter struct derives
 `schemars::JsonSchema` so the description reaches the client.
@@ -197,5 +197,21 @@ Nothing is written to disk.
 - Multi-field tools (`layer_set`, `object_set`) apply per command, one undo
   step per field; `write` emits `document://changed` after the closure
   whether it returned Ok or Err, so a partial write is always reported.
+  `opened` on that event is true only when the closure actually succeeded —
+  a refused `project_open`/`project_new`/`project_close` must not tell the
+  frontend a different project opened, which would reset step, selection
+  and the active layer out from under an unchanged document.
 - The screenshot's pending capture and the progress relay are guards that
   clean up when a cancelled tool future is dropped.
+- §3's sentence on units was wrong: the domain sends azimuth toward and
+  m/s, the way `spec.md` §8.8 says, not the project's display convention.
+  §3 above has been corrected to match; this bullet records the deviation
+  from what this design originally specified.
+- `tool_catalogue` and `object_tracks` are read-only tools beyond §3's
+  table, listed alongside the rest in `spec.md` §8.8.
+- MCP tools do not pass through the frontend's `invoke_handler` beta gate
+  (`lib.rs`): a process already running when the beta expiry passes keeps
+  serving MCP clients after that instant, even while its own UI starts
+  refusing every IPC call. The other direction is closed: `setup` returns
+  before it reaches the MCP service's start, so no process launched after
+  expiry can open the socket at all.

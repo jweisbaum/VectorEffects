@@ -15,6 +15,8 @@ export interface FollowActions {
   setSelection: (objects: number[]) => void;
   setShapeEditing: (object: number | null) => void;
   setActiveLayer: (layer: number | null) => void;
+  /** What `openPath` clears with `reportError(null)` (App.tsx, M76). */
+  clearError: () => void;
 }
 
 export function applyDocumentChanged(payload: DocumentChanged, actions: FollowActions): void {
@@ -23,6 +25,7 @@ export function applyDocumentChanged(payload: DocumentChanged, actions: FollowAc
     actions.setShapeEditing(null);
     actions.setActiveLayer(null);
     actions.setStep(0);
+    actions.clearError();
   }
   actions.setProject(payload.project);
 }

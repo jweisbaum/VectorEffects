@@ -205,7 +205,14 @@ function EditorApp() {
   // The interface follows the MCP service (spec 8.8). Each event is what the
   // app would have done itself had it made the call.
   useEffect(() => {
-    const actions = { setProject, setStep, setSelection, setShapeEditing, setActiveLayer };
+    const actions = {
+      setProject,
+      setStep,
+      setSelection,
+      setShapeEditing,
+      setActiveLayer,
+      clearError: () => reportError(null),
+    };
     const subs = [
       listen<DocumentChanged>("document://changed", (e) => applyDocumentChanged(e.payload, actions)),
       listen<number>("view://step", (e) => setStep(e.payload)),

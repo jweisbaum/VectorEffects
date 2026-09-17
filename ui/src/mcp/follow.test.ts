@@ -13,6 +13,7 @@ function actions(): FollowActions & Record<string, ReturnType<typeof vi.fn>> {
     setSelection: vi.fn(),
     setShapeEditing: vi.fn(),
     setActiveLayer: vi.fn(),
+    clearError: vi.fn(),
   };
 }
 
@@ -23,6 +24,7 @@ describe("applyDocumentChanged", () => {
     expect(a.setProject).toHaveBeenCalledWith(summary("P", 2));
     expect(a.setStep).not.toHaveBeenCalled();
     expect(a.setSelection).not.toHaveBeenCalled();
+    expect(a.clearError).not.toHaveBeenCalled();
   });
 
   it("resets the editor state when a different project opens, as the open path does", () => {
@@ -32,6 +34,7 @@ describe("applyDocumentChanged", () => {
     expect(a.setShapeEditing).toHaveBeenCalledWith(null);
     expect(a.setActiveLayer).toHaveBeenCalledWith(null);
     expect(a.setStep).toHaveBeenCalledWith(0);
+    expect(a.clearError).toHaveBeenCalled();
     expect(a.setProject).toHaveBeenCalledWith(summary("Q", 1));
   });
 
@@ -40,6 +43,7 @@ describe("applyDocumentChanged", () => {
     applyDocumentChanged({ project: null, opened: true }, a);
     expect(a.setSelection).toHaveBeenCalledWith([]);
     expect(a.setStep).toHaveBeenCalledWith(0);
+    expect(a.clearError).toHaveBeenCalled();
     expect(a.setProject).toHaveBeenCalledWith(null);
   });
 });
