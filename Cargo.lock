@@ -5504,6 +5504,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-dialog",
  "tauri-plugin-webdriver-automation",
+ "tempfile",
  "thiserror 2.0.20",
  "tiff",
  "tokio",

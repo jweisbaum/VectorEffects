@@ -85,6 +85,7 @@ tauri = { version = "2.11.5", features = ["test"] }
 rmcp = { version = "3.4", default-features = false, features = ["client", "transport-streamable-http-client-reqwest"] }
 reqwest = { version = "0.13", default-features = false }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+tempfile = "3"
 
 [lints]
 workspace = true

@@ -283,6 +283,16 @@ impl Session {
         }
         std::fs::write(settings_file, json)
             .doing("write the settings to", settings_file.display())?;
+        // The file holds the MCP bearer token in plain text (design spec
+        // §7): owner-only is what makes "the file the person already owns"
+        // true in practice. `fs::write` keeps an existing file's mode, so
+        // this runs after the write, every time.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(settings_file, std::fs::Permissions::from_mode(0o600))
+                .doing("restrict the settings file at", settings_file.display())?;
+        }
         Ok(())
     }
 
@@ -439,6 +449,22 @@ mod tests {
         let session = Session::load(&file);
         assert!(session.recent.is_empty());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_settings_file_is_private_to_its_owner() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let file = dir.path().join("settings.json");
+        // A pre-existing world-readable file must be tightened too, not only
+        // a fresh one: `fs::write` keeps an existing file's mode.
+        std::fs::write(&file, "{}").expect("seed");
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).expect("chmod");
+        let session = Session::default();
+        session.save_settings(&file).expect("save");
+        let mode = std::fs::metadata(&file).expect("stat").permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "settings file mode was {mode:o}");
     }
 
     #[test]

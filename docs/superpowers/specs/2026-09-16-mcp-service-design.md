@@ -209,6 +209,9 @@ Nothing is written to disk.
   from what this design originally specified.
 - `tool_catalogue` and `object_tracks` are read-only tools beyond §3's
   table, listed alongside the rest in `spec.md` §8.8.
+- The settings file that holds the token is written owner-only (0600) on
+  Unix after every save, so the accepted plain-text risk matches its
+  justification. Windows has no mode bits and is unchanged.
 - MCP tools do not pass through the frontend's `invoke_handler` beta gate
   (`lib.rs`): a process already running when the beta expiry passes keeps
   serving MCP clients after that instant, even while its own UI starts
