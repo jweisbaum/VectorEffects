@@ -5553,20 +5553,22 @@ export default function MapView({
   // has the service on, with the same picture the capture suite takes.
   useEffect(() => {
     const pending = listen<CaptureRequest>("view://capture", async (event) => {
-      const png = await framebufferPng();
+      const id = event.payload.id;
       try {
+        const png = await framebufferPng();
         if (png === null) {
           // Say so at once: the tool would otherwise wait out its timeout
           // and report silence it cannot explain.
-          await api.refuseCapture(
-            event.payload.id,
-            "no frame to capture: is the window shown and the map settled?",
-          );
+          await api.refuseCapture(id, "no frame to capture: is the window shown and the map settled?");
           return;
         }
-        await api.deliverCapture(event.payload.id, png);
+        await api.deliverCapture(id, png);
       } catch (err) {
-        void api.frontendLog("warn", `capture ${event.payload.id} not answered: ${String(err)}`);
+        // A throw anywhere above is still an answer the tool can use. The
+        // refusal may itself fail if the request has already been forgotten;
+        // that is not worth a second warning.
+        void api.refuseCapture(id, `capture failed: ${String(err)}`).catch(() => {});
+        void api.frontendLog("warn", `capture ${id} not answered: ${String(err)}`);
       }
     });
     return () => {

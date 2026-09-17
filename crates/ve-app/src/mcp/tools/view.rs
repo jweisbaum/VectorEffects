@@ -87,16 +87,22 @@ impl<R: tauri::Runtime> VectorEffects<R> {
         description = "The map as the interface shows it, once its tiles have settled: a PNG. Needs an open project."
     )]
     async fn screenshot(&self) -> std::result::Result<CallToolResult, ToolError> {
-        // Neither `run` nor `write`: the work is the frontend's, so there is
-        // no closure to put on `spawn_blocking` and no document to report a
-        // change to. The activity note is what the other two would have done.
-        let service = self.app.state::<crate::mcp::McpService>();
-        service.note_tool(&self.app, "screenshot");
         // With no project the map is not mounted and nothing would answer;
-        // refuse now rather than after the timeout.
-        if crate::projects::current(&self.app.state::<AppState>())?.is_none() {
+        // refuse now rather than after the timeout. `run` does the activity
+        // note and, since `current` locks the session, keeps that lock off
+        // the async thread.
+        let open = self
+            .run("screenshot", |app| {
+                Ok(crate::projects::current(&app.state::<AppState>())?.is_some())
+            })
+            .await?;
+        if !open {
             return Err(ToolError::from(AppError::NoProjectOpen));
         }
+        // Neither `run` nor `write` for the capture itself: the work is the
+        // frontend's, so there is no closure to put on `spawn_blocking` and
+        // no document to report a change to.
+        let service = self.app.state::<crate::mcp::McpService>();
         // The guard forgets the request on every way out of here, the
         // dropped future included, so nothing has to be cleaned up by hand.
         let mut pending = service.captures.request(&self.app);

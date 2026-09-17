@@ -818,6 +818,33 @@ async fn invoke_refuses_an_argument_the_command_does_not_have() {
     client.cancel().await.expect("close");
 }
 
+/// A command with no fields at all (`Args {}`) still goes through
+/// `deny_unknown_fields`: `args` omitted and `args: {}` both deserialise as
+/// the empty struct, and any key in the payload is still an unknown field.
+#[tokio::test]
+async fn invoke_accepts_no_arguments_for_a_zero_field_command() {
+    let root = TempRoot::new("invoke-zero");
+    let app = mock_app(&root);
+    let (port, token) = serve(&app);
+    let client = client(port, &token).await;
+    call(&client, "project_new", new_project_args("Zero")).await;
+    call(&client, "invoke", json!({ "command": "clipboard_state" })).await;
+    call(
+        &client,
+        "invoke",
+        json!({ "command": "clipboard_state", "args": {} }),
+    )
+    .await;
+    let message = call_err(
+        &client,
+        "invoke",
+        json!({ "command": "clipboard_state", "args": { "x": 1 } }),
+    )
+    .await;
+    assert!(message.contains("unknown field"), "{message}");
+    client.cancel().await.expect("close");
+}
+
 #[tokio::test]
 async fn a_screenshot_with_no_project_open_is_refused_at_once() {
     let root = TempRoot::new("shot-none");
