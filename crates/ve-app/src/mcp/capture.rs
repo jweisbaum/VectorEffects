@@ -124,7 +124,11 @@ impl Drop for PendingCapture<'_> {
 }
 
 /// The frontend's answer to `view://capture`.
-#[tauri::command]
+///
+/// `async` so the base64 decode of a full-window PNG runs on Tauri's pool
+/// rather than the webview's thread; the function stays synchronous and is
+/// called directly by the tests.
+#[tauri::command(async)]
 pub fn deliver_capture(
     service: tauri::State<'_, super::McpService>,
     id: u64,
