@@ -284,7 +284,7 @@ impl Session {
         std::fs::write(settings_file, json)
             .doing("write the settings to", settings_file.display())?;
         // The file holds the MCP bearer token in plain text (design spec
-        // §7): owner-only is what makes "the file the person already owns"
+        // §5): owner-only is what makes "the file the person already owns"
         // true in practice. `fs::write` keeps an existing file's mode, so
         // this runs after the write, every time.
         #[cfg(unix)]

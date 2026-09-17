@@ -122,7 +122,8 @@ impl<R: tauri::Runtime> VectorEffects<R> {
                 "the map could not take the picture: {reason}"
             ))),
             _ => Err(ToolError::Internal(McpError::internal_error(
-                "the map did not answer the capture: is the window shown?",
+                "the map did not answer the capture: is the window shown and a project still \
+                 open?",
                 None,
             ))),
         }

@@ -216,7 +216,11 @@ with no project open the tool refuses before asking.
   justification. Windows has no mode bits and is unchanged.
 - `invoke` refuses an argument the command does not declare
   (`deny_unknown_fields`), so a misspelled key is an error the client reads,
-  not a default that applies silently.
+  not a default that applies silently — but only among the command's own
+  argument names. A misspelled key inside a nested payload struct (e.g.
+  `new_project`'s `request`, `create_object`'s `object`) is still ignored,
+  because those structs are the interface's own IPC types and are left as
+  they are.
 - MCP tools do not pass through the frontend's `invoke_handler` beta gate
   (`lib.rs`): a process already running when the beta expiry passes keeps
   serving MCP clients after that instant, even while its own UI starts

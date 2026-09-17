@@ -54,11 +54,11 @@ macro_rules! command {
 /// Commands the escape hatch will not run.
 ///
 /// Three kinds: the interface's own plumbing — the beta gate, the tile and
-/// log paths, the static catalogues, the service itself and the screenshot
-/// it delivers — which edits no document and tells a client nothing; the two
-/// that answer with bytes rather than JSON; and the four that take a handle
-/// or the cancel flag, which are curated tools so that a client gets the
-/// progress the relay carries.
+/// log paths, the static catalogues, the service itself and the frontend's
+/// answers to a screenshot request — which edits no document and tells a
+/// client nothing; the two that answer with bytes rather than JSON; and the
+/// four that take a handle or the cancel flag, which are curated tools so
+/// that a client gets the progress the relay carries.
 ///
 /// Every one of them also fails to fit the table's shape — no `AppState`, a
 /// different managed state, or `async` — so the exclusions and the mechanics
@@ -82,7 +82,8 @@ pub const EXCLUDED: &[&str] = &[
     "colour_gradients",
     "tool_palette",
     // The service itself, which a client reached through it could turn off
-    // under its own feet, and the frontend's answer to `screenshot`.
+    // under its own feet, and the frontend's two answers to a screenshot
+    // request (`deliver_capture`, `refuse_capture`).
     "mcp_status",
     "mcp_set",
     "mcp_rotate_token",

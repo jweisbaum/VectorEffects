@@ -311,9 +311,9 @@ state all the same, so it is saved and undone like everything else.
 ### Adding an MCP tool
 
 0. Pick the group file in `mcp/tools/` (project, structure, time, field,
-   files, view, history); a new group is a new file with its own
-   `#[tool_router(router = …)]` block added to the sum in `tools/mod.rs`'s
-   `new`.
+   files, view, history, escape — the last holding only `invoke`); a new
+   group is a new file with its own `#[tool_router(router = …)]` block added
+   to the sum in `tools/mod.rs`'s `new`.
 1. The tool calls the `#[tauri::command]` function with `app.state()`; it
    never reimplements it. If the feature has no command, add the command
    first, for the interface.
