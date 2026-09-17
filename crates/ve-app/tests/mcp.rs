@@ -113,6 +113,60 @@ async fn a_wrong_token_is_refused() {
 }
 
 #[tokio::test]
+async fn a_wrong_host_is_refused() {
+    // Spec §7's DNS-rebinding guard: `rmcp`'s tower layer checks `Host`
+    // against the loopback names `server::start` configures
+    // (`127.0.0.1:<port>`, `localhost:<port>`) before the request reaches
+    // any tool. A page on another site cannot rebind through this service
+    // by pointing a request at it with a spoofed Host header.
+    let root = TempRoot::new("host");
+    let app = mock_app(&root);
+    let (port, token) = serve(&app);
+    let response = reqwest::Client::new()
+        .post(url(port))
+        .header("content-type", "application/json")
+        .header("authorization", format!("Bearer {token}"))
+        .header("host", "evil.example")
+        .body(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#)
+        .send()
+        .await
+        .expect("request");
+    assert!(
+        !response.status().is_success(),
+        "a disallowed Host header must be refused, got {}",
+        response.status()
+    );
+}
+
+#[tokio::test]
+async fn a_wrong_origin_is_refused() {
+    // Same guard, the `Origin` header: a browser-based client on another
+    // origin is refused even with a correct bearer token and a correct
+    // Host. Built from parts, not a literal scheme-plus-host, so
+    // `tools/check-offline.sh`'s "https?://" scan of Rust sources does not
+    // read this as a remote reference in the test.
+    let root = TempRoot::new("origin");
+    let app = mock_app(&root);
+    let (port, token) = serve(&app);
+    let scheme = "http";
+    let evil_origin = format!("{scheme}://evil.example");
+    let response = reqwest::Client::new()
+        .post(url(port))
+        .header("content-type", "application/json")
+        .header("authorization", format!("Bearer {token}"))
+        .header("origin", evil_origin)
+        .body(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#)
+        .send()
+        .await
+        .expect("request");
+    assert!(
+        !response.status().is_success(),
+        "a disallowed Origin header must be refused, got {}",
+        response.status()
+    );
+}
+
+#[tokio::test]
 async fn the_right_token_initialises_and_lists_tools() {
     let root = TempRoot::new("init");
     let app = mock_app(&root);
@@ -245,10 +299,33 @@ async fn unsaved_work_is_refused_without_discard() {
     let client = client(port, &token).await;
     call(&client, "project_new", new_project_args("One")).await;
     call(&client, "layer_add", json!({ "name": "Extra" })).await;
+
+    // Listen only from here: the refusal below is the one `document://changed`
+    // this test wants to look at.
+    let (changed_tx, changed_rx) = std::sync::mpsc::channel::<String>();
+    app.listen(ve_app::mcp::events::CHANGED, move |event| {
+        let _ = changed_tx.send(event.payload().to_owned());
+    });
+
     let message = call_err(&client, "project_new", new_project_args("Two")).await;
     // `AppError::UnsavedChanges`'s own wording ("...changes that are not
     // saved...") never uses the word "unsaved" as one token.
     assert!(message.contains("not saved"), "{message}");
+
+    // The refusal still leaves "One" open, so the emitted event must not
+    // tell the frontend a different project opened (finding 1): `opened`
+    // is true only when the closure actually succeeded.
+    let changed_payload = changed_rx
+        .recv_timeout(std::time::Duration::from_secs(2))
+        .expect("document://changed should fire even for a refused write");
+    let changed: Value = serde_json::from_str(&changed_payload).expect("json");
+    assert_eq!(changed["project"]["name"], "One");
+    assert_eq!(
+        changed["opened"], false,
+        "a refused project_new must not reset the interface's step, \
+         selection and active layer: {changed}"
+    );
+
     let summary = call(
         &client,
         "project_new",

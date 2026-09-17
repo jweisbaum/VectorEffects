@@ -114,6 +114,12 @@ impl<R: tauri::Runtime> VectorEffects<R> {
     /// (task 3 review, fix round 1, finding 2). The closure's own error is
     /// what the caller needs to see, so a failure to emit alongside it is
     /// swallowed rather than replacing that error.
+    ///
+    /// `opened` is only ever true when the closure actually succeeded
+    /// (final review, finding 1): a refused `project_open`/`project_new`/
+    /// `project_close` leaves the previous project open, and telling the
+    /// frontend `opened: true` anyway makes it reset step, selection and the
+    /// active layer for a document that never changed.
     pub(crate) async fn write<T: Send + 'static>(
         &self,
         name: &'static str,
@@ -121,7 +127,7 @@ impl<R: tauri::Runtime> VectorEffects<R> {
         f: impl FnOnce(&tauri::AppHandle<R>) -> crate::error::Result<T> + Send + 'static,
     ) -> std::result::Result<T, ToolError> {
         let result = self.run(name, f).await;
-        let emitted = events::changed(&self.app, opened);
+        let emitted = events::changed(&self.app, opened && result.is_ok());
         match result {
             Ok(out) => {
                 emitted.map_err(ToolError::from)?;
@@ -1018,7 +1024,7 @@ impl<R: tauri::Runtime> VectorEffects<R> {
     // ----------------------------------------------------------------- files
 
     #[tool(
-        description = "Imports a GRIB2 file as a new layer of the open project. Slow for large files; progress is reported."
+        description = "Imports a GRIB2 file as a new layer of the open project. Slow for large files; no progress is reported, and the call returns when the import finishes."
     )]
     async fn import_grib(
         &self,
@@ -1353,16 +1359,16 @@ pub struct FollowParams {
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct TimelineParams {
     pub step_count: Option<u32>,
-    /// Unix seconds, `null` to clear it, or left out entirely to leave it
-    /// alone.
-    ///
-    /// Plain `Option<Option<i64>>` cannot tell an explicit `null` from an
-    /// absent field apart: `serde_json`'s `Option` deserialisation collapses
-    /// both to the outer `None` (verified: `{}"` and `{"x":null}` both
-    /// deserialise `x: Option<Option<i64>>` to `None`), which would make
-    /// clearing the start time unreachable through this tool.
-    /// `deserialize_present` runs only when the key is in the request, so a
-    /// present `null` reaches it and becomes `Some(None)`.
+    /// Unix seconds for step 0. `null` clears the project's start time;
+    /// leaving the field out entirely leaves it alone.
+    //
+    // Plain `Option<Option<i64>>` cannot tell an explicit `null` from an
+    // absent field apart: `serde_json`'s `Option` deserialisation collapses
+    // both to the outer `None` (verified: `{}"` and `{"x":null}` both
+    // deserialise `x: Option<Option<i64>>` to `None`), which would make
+    // clearing the start time unreachable through this tool.
+    // `deserialize_present` runs only when the key is in the request, so a
+    // present `null` reaches it and becomes `Some(None)`.
     #[serde(default, deserialize_with = "deserialize_present")]
     pub start_unix_s: Option<Option<i64>>,
 }
