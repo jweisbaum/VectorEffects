@@ -212,6 +212,9 @@ Nothing is written to disk.
 - The settings file that holds the token is written owner-only (0600) on
   Unix after every save, so the accepted plain-text risk matches its
   justification. Windows has no mode bits and is unchanged.
+- `invoke` refuses an argument the command does not declare
+  (`deny_unknown_fields`), so a misspelled key is an error the client reads,
+  not a default that applies silently.
 - MCP tools do not pass through the frontend's `invoke_handler` beta gate
   (`lib.rs`): a process already running when the beta expiry passes keeps
   serving MCP clients after that instant, even while its own UI starts

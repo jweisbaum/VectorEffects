@@ -794,3 +794,26 @@ async fn invoke_reaches_a_command_no_curated_tool_covers() {
     assert!(message.contains("unknown command"), "{message}");
     client.cancel().await.expect("close");
 }
+
+#[tokio::test]
+async fn invoke_refuses_an_argument_the_command_does_not_have() {
+    let root = TempRoot::new("invoke-unknown");
+    let app = mock_app(&root);
+    let (port, token) = serve(&app);
+    let client = client(port, &token).await;
+    call(&client, "project_new", new_project_args("Unknown")).await;
+    let message = call_err(
+        &client,
+        "invoke",
+        json!({ "command": "rename_project", "args": { "nmae": "Typo" } }),
+    )
+    .await;
+    assert!(message.contains("unknown field"), "{message}");
+    assert!(message.contains("nmae"), "{message}");
+    // Nothing was written: the project keeps its name.
+    let current = ve_app::projects::current(app.state::<AppState>().inner())
+        .expect("current")
+        .expect("open");
+    assert_eq!(current.name, "Unknown");
+    client.cancel().await.expect("close");
+}

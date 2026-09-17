@@ -33,10 +33,14 @@ fn bad(name: &str, why: impl std::fmt::Display) -> AppError {
 /// The arguments are named and typed exactly as the command declares them,
 /// so a signature that changes under the table is a compile error rather
 /// than a refusal at run time.
+///
+/// Unknown keys are refused rather than ignored: a client that misspells an
+/// argument hears about it instead of watching the default apply.
 macro_rules! command {
     ($name:ident, $path:path, { $($field:ident : $ty:ty),* $(,)? }) => {{
         fn handler(state: tauri::State<'_, AppState>, args: Value) -> Result<Value> {
             #[derive(serde::Deserialize)]
+            #[serde(deny_unknown_fields)]
             struct Args { $($field: $ty),* }
             let Args { $($field),* } =
                 serde_json::from_value(args).map_err(|e| bad(stringify!($name), e))?;
