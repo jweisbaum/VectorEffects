@@ -5554,11 +5554,19 @@ export default function MapView({
   useEffect(() => {
     const pending = listen<CaptureRequest>("view://capture", async (event) => {
       const png = await framebufferPng();
-      if (png === null) return;
       try {
+        if (png === null) {
+          // Say so at once: the tool would otherwise wait out its timeout
+          // and report silence it cannot explain.
+          await api.refuseCapture(
+            event.payload.id,
+            "no frame to capture: is the window shown and the map settled?",
+          );
+          return;
+        }
         await api.deliverCapture(event.payload.id, png);
       } catch (err) {
-        void api.frontendLog("warn", `capture ${event.payload.id} not delivered: ${String(err)}`);
+        void api.frontendLog("warn", `capture ${event.payload.id} not answered: ${String(err)}`);
       }
     });
     return () => {

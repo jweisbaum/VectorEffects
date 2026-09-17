@@ -663,6 +663,9 @@ export const api = {
   /** The map's answer to a `view://capture` request. */
   deliverCapture: (id: number, pngBase64: string) =>
     call<void>("deliver_capture", { id, pngBase64 }),
+  /** The map's "no" to a `view://capture` request, with the reason. */
+  refuseCapture: (id: number, reason: string) =>
+    call<void>("refuse_capture", { id, reason }),
   /** The open project's colour scale: a document write, undoable. */
   /** The top of the colour ramp for one kind of field, in knots (M29). */
   setColourScale: (kind: FieldKindName, maxKnots: number) =>

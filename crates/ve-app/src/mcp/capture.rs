@@ -27,11 +27,14 @@ pub struct CaptureRequest {
     pub id: u64,
 }
 
+/// What the frontend answers with: the PNG, or why there is none.
+pub type CaptureAnswer = std::result::Result<Vec<u8>, String>;
+
 /// Outstanding requests, keyed by id.
 #[derive(Debug, Default)]
 pub struct Captures {
     next: AtomicU64,
-    pending: Mutex<HashMap<u64, tokio::sync::oneshot::Sender<Vec<u8>>>>,
+    pending: Mutex<HashMap<u64, tokio::sync::oneshot::Sender<CaptureAnswer>>>,
 }
 
 impl Captures {
@@ -69,13 +72,13 @@ impl Captures {
         }
     }
 
-    fn deliver(&self, id: u64, png: Vec<u8>) -> Result<()> {
+    /// Answers a request, removing it. A closed receiver means the tool gave
+    /// up first; the answer is dropped, which is not the frontend's failure.
+    fn answer(&self, id: u64, answer: CaptureAnswer) -> Result<()> {
         let sender = self.pending.lock().ok().and_then(|mut p| p.remove(&id));
         match sender {
             Some(tx) => {
-                // A closed receiver means the tool gave up first; the picture
-                // is simply dropped, which is not the frontend's failure.
-                let _ = tx.send(png);
+                let _ = tx.send(answer);
                 Ok(())
             }
             None => Err(AppError::BadOption {
@@ -83,6 +86,16 @@ impl Captures {
                 value: id.to_string(),
             }),
         }
+    }
+
+    fn deliver(&self, id: u64, png: Vec<u8>) -> Result<()> {
+        self.answer(id, Ok(png))
+    }
+
+    /// The frontend had no picture to give; the tool hears why at once
+    /// instead of waiting out its timeout.
+    fn refuse(&self, id: u64, reason: String) -> Result<()> {
+        self.answer(id, Err(reason))
     }
 }
 
@@ -95,7 +108,7 @@ impl Captures {
 pub struct PendingCapture<'a> {
     captures: &'a Captures,
     id: u64,
-    rx: tokio::sync::oneshot::Receiver<Vec<u8>>,
+    rx: tokio::sync::oneshot::Receiver<CaptureAnswer>,
 }
 
 impl PendingCapture<'_> {
@@ -109,7 +122,7 @@ impl PendingCapture<'_> {
     /// Borrowed rather than taken so the guard outlives the await: a
     /// receiver moved out would drop the guard with it, and the entry would
     /// go before the answer could arrive.
-    pub fn receiver(&mut self) -> &mut tokio::sync::oneshot::Receiver<Vec<u8>> {
+    pub fn receiver(&mut self) -> &mut tokio::sync::oneshot::Receiver<CaptureAnswer> {
         &mut self.rx
     }
 }
@@ -140,6 +153,17 @@ pub fn deliver_capture(
     service.captures.deliver(id, png)
 }
 
+/// The frontend's "no" to `view://capture`: the map had no frame to give
+/// (no project, window not shown, or its own capture race lost).
+#[tauri::command(async)]
+pub fn refuse_capture(
+    service: tauri::State<'_, super::McpService>,
+    id: u64,
+    reason: String,
+) -> Result<()> {
+    service.captures.refuse(id, reason)
+}
+
 #[cfg(test)]
 mod tests {
     use tauri::Manager;
@@ -158,7 +182,7 @@ mod tests {
         // Held: the frontend's answer is accepted and arrives on the channel.
         let mut pending = captures.request(app.handle());
         assert!(captures.deliver(pending.id(), vec![1, 2, 3]).is_ok());
-        assert_eq!(pending.receiver().try_recv().ok(), Some(vec![1, 2, 3]));
+        assert_eq!(pending.receiver().try_recv().ok(), Some(Ok(vec![1, 2, 3])));
         drop(pending);
 
         // Asked for and then abandoned without ever being answered: the
@@ -172,6 +196,24 @@ mod tests {
             matches!(refused, AppError::BadOption { field, .. } if field == "capture id"),
             "{refused}"
         );
+    }
+
+    /// The frontend can decline a request, and the decline reaches the
+    /// waiting tool as a reason rather than as silence.
+    #[test]
+    fn a_refused_request_delivers_its_reason() {
+        let app = tauri::test::mock_app();
+        let captures = Captures::default();
+        let mut pending = captures.request(app.handle());
+        captures
+            .refuse(pending.id(), "no frame".to_owned())
+            .expect("refuse a live request");
+        assert_eq!(
+            pending.receiver().try_recv().ok(),
+            Some(Err("no frame".to_owned()))
+        );
+        // Refusing again finds nothing: the entry went with the answer.
+        assert!(captures.refuse(pending.id(), "again".to_owned()).is_err());
     }
 
     #[test]

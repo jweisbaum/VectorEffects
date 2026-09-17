@@ -1158,6 +1158,11 @@ impl<R: tauri::Runtime> VectorEffects<R> {
         // change to. The activity note is what the other two would have done.
         let service = self.app.state::<super::McpService>();
         service.note_tool(&self.app, "screenshot");
+        // With no project the map is not mounted and nothing would answer;
+        // refuse now rather than after the timeout.
+        if crate::projects::current(&self.app.state::<AppState>())?.is_none() {
+            return Err(ToolError::from(AppError::NoProjectOpen));
+        }
         // The guard forgets the request on every way out of here, the
         // dropped future included, so nothing has to be cleaned up by hand.
         let mut pending = service.captures.request(&self.app);
@@ -1166,15 +1171,18 @@ impl<R: tauri::Runtime> VectorEffects<R> {
         let answer =
             tokio::time::timeout(std::time::Duration::from_secs(35), pending.receiver()).await;
         match answer {
-            Ok(Ok(png)) => {
+            Ok(Ok(Ok(png))) => {
                 let data = base64::engine::general_purpose::STANDARD.encode(png);
                 Ok(CallToolResult::success(vec![ContentBlock::image(
                     data,
                     "image/png",
                 )]))
             }
+            Ok(Ok(Err(reason))) => Err(ToolError::Refused(format!(
+                "the map could not take the picture: {reason}"
+            ))),
             _ => Err(ToolError::Internal(McpError::internal_error(
-                "the map did not answer the capture: is a project open and the window shown?",
+                "the map did not answer the capture: is the window shown?",
                 None,
             ))),
         }

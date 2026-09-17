@@ -269,7 +269,8 @@ pub fn run() -> anyhow::Result<()> {
                 render_pool::render_ahead,
                 render_pool::frame_readiness,
                 protocol::tile_keys,
-                mcp::capture::deliver_capture
+                mcp::capture::deliver_capture,
+                mcp::capture::refuse_capture
             ];
             handler(invoke)
         })

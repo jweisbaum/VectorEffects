@@ -107,7 +107,9 @@ request id; `MapView` reads its framebuffer once the tiles have settled (the
 stays dev-only) and returns
 the PNG through a new `deliver_capture(id, bytes)` command; the tool waits
 35 s: the map's own 10 s for tiles and 20 s for a frame, and a margin.
-Nothing is written to disk.
+Nothing is written to disk. A frontend that cannot produce a frame answers
+`refuse_capture(id, reason)` and the tool returns the reason as a refusal;
+with no project open the tool refuses before asking.
 
 ## 5. Settings and indicator
 
@@ -221,3 +223,7 @@ Nothing is written to disk.
   refusing every IPC call. The other direction is closed: `setup` returns
   before it reaches the MCP service's start, so no process launched after
   expiry can open the socket at all.
+- A screenshot fails fast rather than costing the client the 35 s timeout:
+  no project open refuses before any request is made, and a frontend with
+  no frame to give answers `refuse_capture(id, reason)` instead of leaving
+  the tool to wait out the clock.

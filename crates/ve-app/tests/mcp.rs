@@ -817,3 +817,39 @@ async fn invoke_refuses_an_argument_the_command_does_not_have() {
     assert_eq!(current.name, "Unknown");
     client.cancel().await.expect("close");
 }
+
+#[tokio::test]
+async fn a_screenshot_with_no_project_open_is_refused_at_once() {
+    let root = TempRoot::new("shot-none");
+    let app = mock_app(&root);
+    let (port, token) = serve(&app);
+    let client = client(port, &token).await;
+    let started = std::time::Instant::now();
+    let message = call_err(&client, "screenshot", json!({})).await;
+    assert!(message.contains("No project is open"), "{message}");
+    assert!(started.elapsed() < std::time::Duration::from_secs(5));
+    client.cancel().await.expect("close");
+}
+
+#[tokio::test]
+async fn a_screenshot_the_map_declines_fails_with_the_reason() {
+    let root = TempRoot::new("shot-declined");
+    let app = mock_app(&root);
+    let (port, token) = serve(&app);
+    let client = client(port, &token).await;
+    call(&client, "project_new", new_project_args("Declined")).await;
+    // Stand in for MapView with no frame to give.
+    let handle = app.handle().clone();
+    app.listen(ve_app::mcp::capture::CAPTURE, move |event| {
+        let id = serde_json::from_str::<Value>(event.payload()).expect("json")["id"]
+            .as_u64()
+            .expect("id");
+        ve_app::mcp::capture::refuse_capture(handle.state(), id, "no frame to capture".to_owned())
+            .expect("refuse");
+    });
+    let started = std::time::Instant::now();
+    let message = call_err(&client, "screenshot", json!({})).await;
+    assert!(message.contains("no frame to capture"), "{message}");
+    assert!(started.elapsed() < std::time::Duration::from_secs(5));
+    client.cancel().await.expect("close");
+}

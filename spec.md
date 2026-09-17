@@ -3196,7 +3196,9 @@ return the `ProjectSummary` and emit `document://changed`, which the
 frontend applies as it applies its own call's result; `view://focus`,
 `view://step` and `view://selection` move what is frontend state. The
 `screenshot` tool asks the map for its own framebuffer through
-`view://capture` and `deliver_capture`; nothing is written to disk.
+`view://capture`, answered by `deliver_capture` or, when the map has no frame
+to give, by `refuse_capture` with the reason; it is refused at once with no
+project open. Nothing is written to disk.
 
 Groups: project (`project_status`, `project_new`, `project_open`,
 `project_save`, `project_close`, `recent_projects`, `tool_catalogue`),

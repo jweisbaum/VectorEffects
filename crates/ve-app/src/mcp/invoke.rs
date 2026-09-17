@@ -87,6 +87,7 @@ pub const EXCLUDED: &[&str] = &[
     "mcp_set",
     "mcp_rotate_token",
     "deliver_capture",
+    "refuse_capture",
     // A handle or the cancel flag rather than the state alone. The curated
     // tools carry these, with the progress a client needs.
     "cancel_export",
