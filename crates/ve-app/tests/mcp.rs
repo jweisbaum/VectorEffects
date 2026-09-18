@@ -193,9 +193,18 @@ async fn off_means_no_socket_and_stop_releases_the_port() {
     assert_eq!(service.running_port(), Some(port));
     service.apply(app.handle(), &ve_app::settings::McpSettings::default());
     assert_eq!(service.running_port(), None);
-    // The port is free again: a bind of our own succeeds.
-    let again = std::net::TcpListener::bind(("127.0.0.1", port));
-    assert!(again.is_ok(), "port still held after stop");
+    // The port is free again: a bind of our own succeeds. Waited for, since
+    // `stop` gives the accept loop two seconds to confirm and then returns
+    // regardless (`STOP_TIMEOUT`): on a loaded runner — the Intel Mac, with
+    // thirty of these tests at once — the socket closed a moment after, and
+    // binding in the same instant failed a test of something that held.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    let mut again = std::net::TcpListener::bind(("127.0.0.1", port));
+    while again.is_err() && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        again = std::net::TcpListener::bind(("127.0.0.1", port));
+    }
+    assert!(again.is_ok(), "port still held 15 s after stop: {again:?}");
 }
 
 #[tokio::test]
@@ -451,12 +460,22 @@ async fn a_write_tool_emits_document_changed_once_and_a_read_tool_emits_nothing(
         "document://changed fired more than once for one write tool call"
     );
 
-    let activity_payload = activity_rx
-        .recv_timeout(std::time::Duration::from_secs(2))
-        .expect("mcp://activity should have fired");
-    let activity: Value = serde_json::from_str(&activity_payload).expect("json");
-    assert_eq!(activity["last_tool"], "project_new");
-    assert_eq!(activity["sessions"], 1);
+    // Two things raise `mcp://activity` here — the session being counted,
+    // once the client's `initialized` notification is handled, and the tool
+    // being noted — and under load the notification can be handled after the
+    // call it was sent before. So the state is waited for rather than read
+    // off whichever event came first.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let mut activity = Value::Null;
+    while std::time::Instant::now() < deadline
+        && !(activity["last_tool"] == "project_new" && activity["sessions"] == 1)
+    {
+        if let Ok(payload) = activity_rx.recv_timeout(std::time::Duration::from_millis(200)) {
+            activity = serde_json::from_str(&payload).expect("json");
+        }
+    }
+    assert_eq!(activity["last_tool"], "project_new", "{activity}");
+    assert_eq!(activity["sessions"], 1, "{activity}");
 
     // A read tool: no `document://changed` at all.
     call(&client, "project_status", json!({})).await;
