@@ -1679,15 +1679,37 @@ body {
   padding: 2px 8px;
 }
 .chord.capturing { border-color: var(--accent); color: var(--accent); }
+/* Everything in the dialog starts at the left edge. A `label` field is a
+   stack, its text above its control (`.modal label` makes it a column); a
+   `div` field is a row. Both were centred once: `align-items: center` on the
+   column centred each label over its control, and `space-between` on the row
+   pushed the control to the far side. */
 .settings-field {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 12px;
   margin: 6px 0;
 }
-.settings-field input[type="text"] {
-  flex: 1;
+.modal label.settings-field { align-items: flex-start; gap: 4px; }
+/* A long value gives way before a button does: the token is 43 characters,
+   and it was the button that wrapped. */
+.settings-field button { flex: none; white-space: nowrap; }
+.settings-field code { min-width: 0; overflow-wrap: anywhere; }
+.modal label.settings-field select { max-width: 100%; }
+/* A checkbox and what it switches, on one row. `.modal input` gives every
+   input a text box's width, the checkbox included. */
+.modal label.settings-check {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  font-size: 13px;
+}
+.modal .settings-check input[type="checkbox"] { width: auto; margin: 0; }
+.modal label.settings-field input[type="text"] {
+  align-self: stretch;
+  width: auto;
   font: inherit;
   background: #0f1a2c;
   color: var(--text);

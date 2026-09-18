@@ -102,7 +102,7 @@ export default function McpSection({ onError }: { onError: (err: unknown) => voi
         Lets an AI client on this computer drive the application: open and edit projects, animate, import, export and take
         pictures of the map. Nothing outside this machine can reach it, and nothing can reach it while it is off.
       </p>
-      <label className="settings-field">
+      <label className="settings-field settings-check">
         <input
           type="checkbox"
           checked={status.enabled}
