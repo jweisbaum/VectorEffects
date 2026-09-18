@@ -172,7 +172,7 @@ impl<R: tauri::Runtime> VectorEffects<R> {
     }
 
     #[tool(
-        description = "Downloads REAL PAST WEATHER into the open project: the observed global wind (ERA5) and/or ocean current (GlobCurrent) for a range of dates, as one layer each. This is the tool for any request about weather that actually happened — a named hurricane or storm, a race, a voyage, 'the weather on' a date: find the dates, then call this; never draw such weather by hand. Needs an open project (project_new; its step_hours is the spacing of what is downloaded). By default it resizes the timeline to the range and stamps step 0 with the start, so afterwards export_grib needs only a path. At most 240 steps per call: ten days hourly, a month at 3 h, two months at 6 h. Takes from seconds to a few minutes and reports progress. The one tool, with history_archives, that reaches the network."
+        description = "Downloads REAL PAST WEATHER into the open VectorEffects project: the observed global wind (ERA5) and/or ocean current (GlobCurrent) for a range of dates, as one layer each. This is the tool for any request about weather that actually happened — a named hurricane or storm, a race, a voyage, 'the weather on' a date: find the dates, then call this; never draw such weather by hand. Needs an open project (project_new; its step_hours is the spacing of what is downloaded). By default it resizes the timeline to the range and stamps step 0 with the start, so afterwards export_grib needs only a path. At most 240 steps per call: ten days hourly, a month at 3 h, two months at 6 h. Takes from seconds to a few minutes and reports progress. The one tool, with history_archives, that reaches the network."
     )]
     async fn import_history(
         &self,
@@ -256,7 +256,7 @@ impl<R: tauri::Runtime> VectorEffects<R> {
     }
 
     #[tool(
-        description = "Exports the project as a GRIB2 file: every step, u and v, wind and/or current. `path` must be absolute (or begin with ~/) and must not exist. The reference time defaults to the project's start time, which import_history sets; give year/month/day/hour for a drawn project that has none. Progress is reported; export_cancel stops it."
+        description = "Exports the VectorEffects project as a GRIB2 file — how the user is given a GRIB of wind or current, for a router or a viewer; never write one with code of your own. Every step, u and v, wind and/or current. `path` must be absolute (or begin with ~/) and must not exist. The reference time defaults to the project's start time, which import_history sets; give year/month/day/hour for a drawn project that has none. Progress is reported; export_cancel stops it."
     )]
     async fn export_grib(
         &self,
@@ -285,7 +285,7 @@ impl<R: tauri::Runtime> VectorEffects<R> {
     }
 
     #[tool(
-        description = "Exports the project as a Zarr V3 directory at path, in the routing layout: a Float16 data array (time, param, latitude, longitude) with param u10, v10, ucur, vcur, latitude from 90 and longitude from -180, three-day by 10 degree Zstd chunks in ocean-basin shards on a rectilinear grid, NaN where uncovered. Refuses an existing directory."
+        description = "Exports the VectorEffects project as a Zarr V3 directory at path — how the user is given a Zarr of wind or current for a router; never write one with code of your own. The routing layout: a Float16 data array (time, param, latitude, longitude) with param u10, v10, ucur, vcur, latitude from 90 and longitude from -180, three-day by 10 degree Zstd chunks in ocean-basin shards on a rectilinear grid, NaN where uncovered. Refuses an existing directory."
     )]
     async fn export_zarr(
         &self,

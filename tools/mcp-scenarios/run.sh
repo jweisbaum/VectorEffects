@@ -6,6 +6,13 @@
 # instructions, no plugins, no memory of this repository. What it does with
 # the sentence is the test. The transcript lands in $VE_SCENARIO_DIR/NAME.jsonl;
 # read it with show.py.
+#
+# VE_SCENARIO_TOOLS=all gives it everything a person's own session has — a
+# shell, files, Python — beside the service. That is the condition a person
+# meets and the first runs never tested: with nothing else to hand an agent
+# uses the service because it must, and with a shell it can decide to write
+# the GRIB itself. Only the service and the web are *allowed*, so a reach for
+# the shell is refused and recorded, which is the thing to read for.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 OUT="${VE_SCENARIO_DIR:?set VE_SCENARIO_DIR to a scratch directory outside the repository}"
@@ -14,9 +21,11 @@ NAME=$1; PROMPT=$2; MODEL=${3:-sonnet}
 # Its own empty working directory: the agent's relative paths and its idea of
 # "here" must not be this repository.
 mkdir -p "$OUT/work/$NAME" && cd "$OUT/work/$NAME"
+TOOLS=(--tools "WebSearch,WebFetch,ToolSearch")
+[ "${VE_SCENARIO_TOOLS:-}" = all ] && TOOLS=()
 claude -p "$PROMPT" --model "$MODEL" --setting-sources project,local \
   --mcp-config "$OUT/mcp.json" --strict-mcp-config \
-  --tools "WebSearch,WebFetch,ToolSearch" \
+  ${TOOLS[@]+"${TOOLS[@]}"} \
   --allowedTools "mcp__vectoreffects,WebSearch,WebFetch,ToolSearch" \
   --no-session-persistence --output-format stream-json --verbose \
   > "$OUT/$NAME.jsonl" 2> "$OUT/$NAME.err" || true

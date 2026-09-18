@@ -24,6 +24,19 @@ python3 tools/mcp-scenarios/check_storm.py "$VE_SCENARIO_DIR/mcp.json"   # after
 | the last Newport Bermuda Race | The same tools — and the *right year*, counted back from today's date, which leads the server's instructions for exactly this. |
 | a tropical storm from Miami to Nova Scotia | `storm_create`, one call. `check_storm.py` reads the result back through `field_sample` and passes only a single `circle` object that turns counter-clockwise, starts at Miami, ends at Nova Scotia, starts at tropical-storm strength and **intensifies**. |
 
+**Run each with a shell in reach as well**: `VE_SCENARIO_TOOLS=all
+tools/mcp-scenarios/run.sh hurricane-all "Use vector effects to …"`. The three
+above give the agent the service and the web and nothing else, so it uses the
+service because there is nothing else to use. A person's own session has a
+shell and Python, and the service's tools sit unloaded behind a search; the
+question there is whether the agent reaches for VectorEffects *at all* or
+starts writing a GRIB with `eccodes`. Passing is a first tool call that is
+`vectoreffects_guide` (or a search that loads it) and no attempt at `Bash` or
+`Write` — those are refused, not allowed, so an attempt shows in the
+transcript and does nothing. Also read the transcript's first attachment for
+the instructions as the client kept them: Claude Code cuts them at 2,048
+characters, which the first version overran by half without anyone noticing.
+
 `list_tools.py CONFIG OUT.json` prints the instructions and every tool as a
 client receives them, flagging any schema a strict client refuses.
 

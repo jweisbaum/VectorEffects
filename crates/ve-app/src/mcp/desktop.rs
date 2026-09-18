@@ -144,15 +144,21 @@ fn launch(_bundle: &Path) -> Result<bool> {
     })
 }
 
-/// Writes the bundle beside the settings and opens it in Claude Desktop.
-pub fn register(settings_file: &Path) -> Result<()> {
+/// Writes the bundle and the skill beside the settings, opens the bundle in
+/// Claude Desktop, and returns where the skill is.
+///
+/// The skill is only written: an extension has no way to carry one, and
+/// Claude Desktop takes a skill as an upload in its own settings, so the
+/// dialog tells the person where the zip is (`super::skill`).
+pub fn register(settings_file: &Path) -> Result<std::path::PathBuf> {
     if !supported() {
-        return launch(Path::new(BUNDLE_NAME)).map(|_| ());
+        launch(Path::new(BUNDLE_NAME))?;
     }
-    let bundle = settings_file
-        .parent()
-        .unwrap_or_else(|| Path::new("."))
-        .join(BUNDLE_NAME);
+    let folder = settings_file.parent().unwrap_or_else(|| Path::new("."));
+    let bundle = folder.join(BUNDLE_NAME);
+    let skill = folder.join(super::skill::ZIP_NAME);
     write_bundle(&bundle, settings_file)?;
-    open_in_claude_desktop(&bundle)
+    super::skill::write_zip(&skill)?;
+    open_in_claude_desktop(&bundle)?;
+    Ok(skill)
 }

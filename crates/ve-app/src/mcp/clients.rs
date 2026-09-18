@@ -52,6 +52,16 @@ impl McpClient {
     }
 }
 
+/// What a registration left behind for the person to know about.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export, export_to = "McpRegistered.ts")]
+pub struct McpRegistered {
+    /// Where the skill was written (`mcp::skill`), when the client has
+    /// skills. Claude Code reads it from there; Claude Desktop has to be
+    /// given it, so the dialog shows the path.
+    pub skill: Option<String>,
+}
+
 /// The arguments of `claude mcp remove` and `claude mcp add`, in that order.
 ///
 /// Two calls because `add` refuses a name that exists, and the button has to
@@ -260,7 +270,10 @@ pub fn codex_home(home: &Path, codex_home_var: Option<OsString>) -> PathBuf {
 ///
 /// `async`: it starts a process and waits for it.
 #[tauri::command(async)]
-pub fn mcp_register_client(state: tauri::State<'_, AppState>, client: McpClient) -> Result<()> {
+pub fn mcp_register_client(
+    state: tauri::State<'_, AppState>,
+    client: McpClient,
+) -> Result<McpRegistered> {
     let mcp = with_session(&state, |session| Ok(session.settings.mcp.clone()))?;
     if !mcp.enabled || mcp.token.is_empty() {
         return Err(AppError::BadOption {
@@ -284,14 +297,29 @@ pub fn mcp_register_client(state: tauri::State<'_, AppState>, client: McpClient)
             })?;
             let child_path = std::env::join_paths(search_dirs(&home, path_var.as_deref()))
                 .map_err(|err| AppError::Internal(err.to_string()))?;
-            register_claude_code(&claude, &child_path, &url, &mcp.token)
+            register_claude_code(&claude, &child_path, &url, &mcp.token)?;
+            // After the server, so a refusal above leaves nothing behind.
+            let claude_home =
+                super::skill::claude_home(&home, std::env::var_os("CLAUDE_CONFIG_DIR"));
+            let skill = super::skill::install_for_claude_code(&claude_home)?;
+            Ok(McpRegistered {
+                skill: Some(skill.display().to_string()),
+            })
         }
-        McpClient::ClaudeDesktop => super::desktop::register(&state.paths.settings_file()),
-        McpClient::Codex => register_codex(
-            &codex_home(&home, std::env::var_os("CODEX_HOME")),
-            &url,
-            &mcp.token,
-        ),
+        McpClient::ClaudeDesktop => {
+            let skill = super::desktop::register(&state.paths.settings_file())?;
+            Ok(McpRegistered {
+                skill: Some(skill.display().to_string()),
+            })
+        }
+        McpClient::Codex => {
+            register_codex(
+                &codex_home(&home, std::env::var_os("CODEX_HOME")),
+                &url,
+                &mcp.token,
+            )?;
+            Ok(McpRegistered { skill: None })
+        }
     }
 }
 

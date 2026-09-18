@@ -1,5 +1,31 @@
 # VectorEffects — Implementation Plan
 
+**2026-09-18 (evening): The service's text, as a client actually keeps it.**
+Reported from use: with the service connected, Claude "defaults to not using
+VectorEffects even when asked to by name". Found, from a Claude Code
+transcript: **the instructions were cut at 2,048 characters** (they ran to
+3,450), ending mid-sentence in step 2b — the intensifying storm, animation,
+checking, and every convention never reached an agent, in the scenario runs
+too, so "prose was read and ignored" (above) was prose never sent. The
+first 400 characters were about dates and nothing said *when* to use the
+tools; no description said "VectorEffects"; and the three scenarios gave the
+agent nothing else to use, where a person's session has a shell and the
+service's tools unloaded behind a search. Changed: `guide.rs` holds the text
+at two lengths — instructions that lead with when and fit (a test holds them
+to the limit at the longest date), and the full guide, returned by a new
+`vectoreffects_guide` tool for clients that show no instructions; the eight
+tools a request starts from say whose they are and when; the bridge says
+what the application is for even while it is closed, since a client reads
+instructions once; and a skill (`mcp::skill`, the guide under a description)
+is written to `~/.claude/skills/vectoreffects/` by *Add to Claude Code* and
+as a zip by *Add to Claude Desktop*, with the dialog saying where.
+`run.sh` takes `VE_SCENARIO_TOOLS=all`. **Not done: no scenario has been run
+against this text** — they need the running application, the network and a
+paid model — so whether it changes what an agent does is still to be found
+out; and whether Claude Desktop shows a server's instructions to the model
+is not established either way (its bundle reads them at connect), which is
+why the guide is also a tool. The Desktop skill is a hand upload.
+
 **2026-09-18: The MCP service against three sentences.** Fresh agents with
 only the service and web search were given: a GRIB of the largest hurricane
 of 2024; a GRIB of the weather of the last Newport Bermuda Race; a tropical

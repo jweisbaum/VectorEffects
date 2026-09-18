@@ -3222,15 +3222,30 @@ sentences were handed to fresh agents that had the service and web search and
 nothing else (`tools/mcp-scenarios`), and what each did is why the following
 holds:
 
-- **The server's instructions** (`mcp/tools/guide.rs`) open with today's date
+- **The text is kept at two lengths, because no client can be relied on to
+  show the first** (`mcp/tools/guide.rs`). Claude Code keeps 2,048 characters
+  of a server's instructions and drops the rest; the first version ran to
+  3,450 and was cut mid-sentence, conventions and all, without anyone
+  noticing. So the *instructions* fit — a test holds them to the limit at the
+  longest date there is — and lead, after the date, with **when** to use the
+  application: whenever the user names it or wants a GRIB, a Zarr or a wind
+  or current field, and never by writing code instead. In a session that has
+  a shell, with the tools unloaded behind a search, those lines are all that
+  argues for the application. The *guide* is everything, step by step, and
+  is what the `vectoreffects_guide` tool returns; a client that shows no
+  instructions still lists that tool, whose description says to call it
+  first. The eight tools a request starts from name VectorEffects and say
+  when they are the one to use, and every description is held under the same
+  limit.
+- **The server's instructions** open with today's date
   and then say which of two ways a request is: *real past weather* — a named
   storm, a race, a date — is downloaded, never drawn (`history_archives`,
   `project_new`, `import_history`, `export_grib`); *invented weather* is
   drawn. Without them an agent asked for "the largest hurricane of 2024"
   drew a vortex by hand at its landfall; without the date one asked in
   September 2026 for "the last Newport Bermuda Race" fetched June 2024. A
-  test holds every tool, parameter and option the instructions name to
-  existing.
+  test holds every tool, parameter and option the instructions and the guide
+  name to existing.
 - **`import_history` is asked the way a person would ask**: `fields`
   (`"wind"`, `"current"`), `start` and `end` as ISO 8601 UTC (a bare end date
   is the whole of that day), never Unix seconds. By default it resizes the
@@ -3289,6 +3304,21 @@ and never as a side effect of another setting; it fetches nothing and
 listens to nothing (invariant 5). The command is excluded from `invoke`.
 Every other client gets the same configuration as text.
 
+**A client that has skills is given one** (`mcp::skill`): a `SKILL.md` whose
+description says when to reach for VectorEffects and whose body *is* the
+guide, so there is no second text to keep in step, followed by what it means
+when no VectorEffects tool is listed — the application is closed or the
+service is off, and the answer is to say so, never to make the file some
+other way. A skill's description is in front of the model from the first
+message, beside the skills that write spreadsheets, which is where a request
+for "a GRIB of Helene" is otherwise decided. *Add to Claude Code* writes it
+to `skills/vectoreffects/SKILL.md` under `$CLAUDE_CONFIG_DIR`, else
+`~/.claude`, after the server is registered, replacing what was there. *Add
+to Claude Desktop* writes `VectorEffects-skill.zip` beside the extension; an
+extension cannot carry a skill and Claude Desktop takes one only as an
+upload, so the dialog shows the path and says so. `mcp_register_client`
+returns where the skill went (`McpRegistered`). Codex is given none.
+
 **Claude Desktop is given an extension, not a configuration** (`mcp::desktop`).
 A desktop extension (`.mcpb`) is a zip of a `manifest.json` and a *local
 stdio server*; it cannot name an HTTP service. So *Add to Claude Desktop*
@@ -3310,6 +3340,9 @@ application has forgotten, because it was restarted, is opened again by
 replaying the client's own `initialize`; and with the application not running
 the extension still starts, offers one tool, `vectoreffects_status`, that
 says so, and announces `tools/list_changed` when the application appears.
+Both that tool and the stand-in instructions say what the application is
+*for* as well as that it is away: a client reads instructions once, at
+`initialize`, and Claude Desktop is usually the one started first.
 The button is offered only where Claude Desktop exists (`McpStatus.clients`):
 macOS and Windows.
 

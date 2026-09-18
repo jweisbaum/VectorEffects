@@ -1,7 +1,8 @@
 /**
  * Settings → MCP service (spec 8.8): the switch, the port, a button that
- * writes the service into Claude Code's or Codex's own configuration, and
- * the same configuration as text for every other client.
+ * writes the service into Claude Code's or Codex's own configuration — and
+ * the skill that says when to use it, where the client has skills — and the
+ * same configuration as text for every other client.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -60,6 +61,9 @@ export default function McpSection({ onError }: { onError: (err: unknown) => voi
   // offers "Add" again, and adding twice is harmless.
   const [given, setGiven] = useState<Partial<Record<McpClient, string>>>({});
   const [adding, setAdding] = useState<McpClient | null>(null);
+  // Where each client's skill was written. Claude Code reads its own; Claude
+  // Desktop's is a zip only the person can upload, so the path is shown.
+  const [skills, setSkills] = useState<Partial<Record<McpClient, string>>>({});
 
   // `onError` is `SettingsDialog`'s inline `report`, a new function identity
   // on every one of the dialog's re-renders (a shortcut rebind, a macro
@@ -91,7 +95,11 @@ export default function McpSection({ onError }: { onError: (err: unknown) => voi
     setAdding(client);
     void api
       .registerMcpClient(client)
-      .then(() => setGiven((held) => ({ ...held, [client]: registrationKey(current) })))
+      .then((registered) => {
+        setGiven((held) => ({ ...held, [client]: registrationKey(current) }));
+        const skill = registered.skill;
+        if (skill) setSkills((held) => ({ ...held, [client]: skill }));
+      })
       .catch((err) => onErrorRef.current(err))
       .finally(() => setAdding(null));
   }, []);
@@ -161,10 +169,22 @@ export default function McpSection({ onError }: { onError: (err: unknown) => voi
           {status.clients.some((client) => !INSTALLS_ITSELF.has(client) && given[client] === registrationKey(status)) && (
             <p className="settings-note">Added. A session that is already running picks it up when it is restarted.</p>
           )}
+          {skills.claude_code !== undefined && (
+            <p className="settings-note">
+              Claude Code was also given a skill that says when to use VectorEffects: <code>{skills.claude_code}</code>
+            </p>
+          )}
           {given.claude_desktop !== undefined && (
             <p className="settings-note">
               Claude Desktop is asking whether to install the VectorEffects extension; confirm it there. It needs
               installing once: a new token or port reaches it without another visit here.
+            </p>
+          )}
+          {skills.claude_desktop !== undefined && (
+            <p className="settings-note">
+              A skill that says when to use VectorEffects was written to <code>{skills.claude_desktop}</code>. An
+              extension cannot carry one, so add it yourself: in Claude Desktop's settings, under Skills, upload that
+              file.
             </p>
           )}
           <details>

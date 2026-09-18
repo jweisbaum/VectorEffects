@@ -905,6 +905,52 @@ async fn a_screenshot_the_map_declines_fails_with_the_reason() {
 // was a fresh agent failing at a sentence a person would type.
 // ---------------------------------------------------------------------------
 
+/// A description is what a model has of a tool, and in a client that shows
+/// no server instructions it is all it has of the application. Claude Code
+/// keeps 2,048 characters of the instructions and drops the rest (its
+/// transcripts show it, `guide::INSTRUCTIONS_LIMIT`) and is said to do the
+/// same to a description, so each is held to that; and a tool whose description never says "VectorEffects" is not found by
+/// someone asked to "use VectorEffects": the tools a request starts from
+/// have to say whose they are.
+#[tokio::test]
+async fn the_descriptions_fit_and_the_entry_points_say_whose_they_are() {
+    let root = TempRoot::new("descriptions");
+    let app = mock_app(&root);
+    let (port, token) = serve(&app);
+    let client = client(port, &token).await;
+    let tools = client.list_all_tools().await.expect("tools");
+    for tool in &tools {
+        let description = tool.description.as_deref().unwrap_or_default();
+        let units = description.encode_utf16().count();
+        assert!(
+            units <= ve_app::mcp::tools::guide::INSTRUCTIONS_LIMIT,
+            "{}: {units} units of description",
+            tool.name
+        );
+    }
+    for entry in [
+        "vectoreffects_guide",
+        "project_status",
+        "project_new",
+        "import_history",
+        "storm_create",
+        "object_create",
+        "export_grib",
+        "export_zarr",
+    ] {
+        let tool = tools
+            .iter()
+            .find(|tool| tool.name == entry)
+            .unwrap_or_else(|| panic!("{entry} is listed"));
+        let description = tool.description.as_deref().unwrap_or_default();
+        assert!(
+            description.contains("VectorEffects"),
+            "{entry} does not say it is VectorEffects: {description:.80}"
+        );
+    }
+    client.cancel().await.expect("close");
+}
+
 /// Every schema is one a strict client accepts. The reference is the MCP
 /// specification as the official TypeScript SDK enforces it: a property's
 /// schema is an object, and a tool's output schema describes an *object* —
@@ -943,9 +989,11 @@ async fn every_tool_schema_is_one_a_strict_client_accepts() {
 
 /// The instructions are read by every client for the whole session, and
 /// they name tools, parameters and options. A rename that leaves them
-/// behind sends an agent after something that is not there.
+/// behind sends an agent after something that is not there. The same holds
+/// for the longer guide the `vectoreffects_guide` tool returns, which is what
+/// a client that shows no instructions has instead.
 #[tokio::test]
-async fn the_instructions_name_only_what_exists() {
+async fn the_instructions_and_the_guide_name_only_what_exists() {
     let root = TempRoot::new("guide");
     let app = mock_app(&root);
     let (port, token) = serve(&app);
@@ -987,7 +1035,19 @@ async fn the_instructions_name_only_what_exists() {
         }
     }
 
-    let words = instructions
+    let guide = call(&client, "vectoreffects_guide", json!({})).await;
+    let guide = guide["guide"].as_str().expect("guide").to_owned();
+    assert!(
+        guide.starts_with("Today is "),
+        "the date leads: {guide:.80}"
+    );
+    // The guide is the instructions at length, never a different story: it
+    // is longer, and it sends nobody to a tool the instructions leave out.
+    assert!(guide.len() > instructions.len());
+    assert!(instructions.contains("vectoreffects_guide"));
+
+    let text = format!("{instructions}\n{guide}");
+    let words = text
         .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
         .filter(|word| !word.is_empty());
     for word in words {

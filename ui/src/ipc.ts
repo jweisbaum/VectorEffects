@@ -39,6 +39,7 @@ import type { ClipboardKind } from "./generated/ClipboardKind";
 import type { AutosaveMode } from "./generated/AutosaveMode";
 import type { AppSettings } from "./generated/AppSettings";
 import type { McpClient } from "./generated/McpClient";
+import type { McpRegistered } from "./generated/McpRegistered";
 import type { McpStatus } from "./generated/McpStatus";
 import type { GlyphSetting } from "./generated/GlyphSetting";
 import type { GlyphStyle } from "./generated/GlyphStyle";
@@ -662,8 +663,8 @@ export const api = {
   setMcp: (enabled: boolean, port: number) => call<McpStatus>("mcp_set", { enabled, port }),
   /** A new token, and the listener restarted with it. */
   rotateMcpToken: () => call<McpStatus>("mcp_rotate_token", {}),
-  /** Writes the service into a client's own configuration (spec 8.8). */
-  registerMcpClient: (client: McpClient) => call<void>("mcp_register_client", { client }),
+  /** Writes the service into a client's own configuration, and its skill (spec 8.8). */
+  registerMcpClient: (client: McpClient) => call<McpRegistered>("mcp_register_client", { client }),
   /** The map's answer to a `view://capture` request. */
   deliverCapture: (id: number, pngBase64: string) =>
     call<void>("deliver_capture", { id, pngBase64 }),

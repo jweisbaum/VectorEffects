@@ -7,6 +7,7 @@ pub mod desktop;
 pub mod events;
 pub mod invoke;
 pub mod server;
+pub mod skill;
 pub mod token;
 pub mod tools;
 

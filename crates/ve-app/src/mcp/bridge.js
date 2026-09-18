@@ -25,10 +25,15 @@ const readline = require("node:readline");
 const SETTINGS = process.env.VE_SETTINGS;
 const OFF =
   "VectorEffects is not running, or its MCP service is off. Open VectorEffects, then Settings > MCP service > Enable, and try again.";
+// What this is for, said even while the application is away. A client asks
+// for the instructions once, at `initialize`, and Claude Desktop is usually
+// started first: without this the whole session is told only that something
+// is off, and a request for a GRIB is answered with a script.
+const WHAT =
+  "VectorEffects is an application on this computer that makes global wind and ocean-current fields — real past weather downloaded, or invented weather drawn — and exports them as GRIB2 or Zarr. Use its tools whenever the user names VectorEffects or wants such a field or file, rather than writing code to make one.";
 const STATUS_TOOL = {
   name: "vectoreffects_status",
-  description:
-    "VectorEffects is not reachable right now, so its tools are not listed. Call this after opening VectorEffects (Settings > MCP service > Enable) to connect; the real tools then appear.",
+  description: `${WHAT} It is not reachable right now, so its tools are not listed. Ask the user to open VectorEffects (Settings > MCP service > Enable), then call this to connect; the real tools then appear, vectoreffects_guide first among them.`,
   inputSchema: { type: "object", properties: {} },
 };
 
@@ -168,7 +173,7 @@ async function forward(message) {
           protocolVersion: (message.params && message.params.protocolVersion) || "2025-06-18",
           capabilities: { tools: { listChanged: true } },
           serverInfo: { name: "VectorEffects", version: "0" },
-          instructions: OFF,
+          instructions: `${WHAT} ${OFF}`,
         },
       });
     }

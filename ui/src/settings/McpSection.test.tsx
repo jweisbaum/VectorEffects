@@ -14,9 +14,19 @@ import type { McpStatus } from "../generated/McpStatus";
 const held = vi.hoisted(() => {
   const off: McpStatus = { enabled: false, port: 47391, token: "", bound_port: null, bind_error: null, sessions: 0, last_tool: null, clients: ["claude_code", "codex", "claude_desktop"] };
   const on: McpStatus = { ...off, enabled: true, token: "tok_abc", bound_port: 47391 };
+  // What the command answers: where it wrote the client's skill, if it has one.
+  const registered = (client: string): { skill: string | null } => ({
+    skill:
+      client === "claude_code"
+        ? "/home/someone/.claude/skills/vectoreffects/SKILL.md"
+        : client === "claude_desktop"
+          ? "/home/someone/settings/VectorEffects-skill.zip"
+          : null,
+  });
   return {
     status: off,
     on,
+    registered,
     mcpStatus: vi.fn(async () => held.status),
     setMcp: vi.fn(async (enabled: boolean, port: number) => {
       held.status = enabled ? { ...held.on, port } : { ...held.on, enabled: false, token: "", bound_port: null, port };
@@ -26,7 +36,7 @@ const held = vi.hoisted(() => {
       held.status = { ...held.status, token: "tok_new" };
       return held.status;
     }),
-    registerMcpClient: vi.fn(async (_client: string): Promise<void> => {}),
+    registerMcpClient: vi.fn(async (client: string): Promise<{ skill: string | null }> => held.registered(client)),
   };
 });
 
@@ -53,7 +63,7 @@ beforeEach(() => {
   held.setMcp.mockClear();
   held.rotateMcpToken.mockClear();
   held.registerMcpClient.mockReset();
-  held.registerMcpClient.mockImplementation(async () => {});
+  held.registerMcpClient.mockImplementation(async (client: string) => held.registered(client));
 });
 
 afterEach(() => {
@@ -134,6 +144,8 @@ describe("McpSection", () => {
     // The other client was not touched and still says so.
     expect(button("Add to Codex")).toBeDefined();
     expect(host.textContent).toContain("restarted");
+    // It was given the skill too, and says where; Codex has none to be given.
+    expect(host.textContent).toContain("/home/someone/.claude/skills/vectoreffects/SKILL.md");
 
     // Claude Code now holds a token the listener no longer answers.
     const rotate = Array.from(host.querySelectorAll("button")).find((b) => b.textContent?.includes("Rotate"));
@@ -157,6 +169,9 @@ describe("McpSection", () => {
     expect(button("Opened in Claude Desktop")).toBeDefined();
     expect(host.textContent).toContain("confirm it there");
     expect(host.textContent).not.toContain("picks it up when it is restarted");
+    // The skill cannot ride in the extension: the person is told where it is.
+    expect(host.textContent).toContain("VectorEffects-skill.zip");
+    expect(host.textContent).toContain("upload");
 
     // The extension reads the token as it goes: a rotation stales nothing.
     const rotate = Array.from(host.querySelectorAll("button")).find((b) => b.textContent?.includes("Rotate"));

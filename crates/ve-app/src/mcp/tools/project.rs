@@ -83,7 +83,7 @@ pub struct Closed {
 #[tool_router(router = tool_router_project, vis = "pub(crate)")]
 impl<R: tauri::Runtime> VectorEffects<R> {
     #[tool(
-        description = "The open project's summary (name, path, dirty, grid, steps, revision, undo state), or null when none is open."
+        description = "What VectorEffects — the wind and ocean-current field application open on this computer — has open: the project's summary (name, path, dirty, grid, steps, revision, undo state), or null when none is open. A good first call after vectoreffects_guide: an open project that is dirty holds the user's unsaved work."
     )]
     async fn project_status(&self) -> std::result::Result<Json<ProjectStatus>, ToolError> {
         let project = self
@@ -95,7 +95,7 @@ impl<R: tauri::Runtime> VectorEffects<R> {
     }
 
     #[tool(
-        description = "Creates a new project and opens it in the interface. Refused while the open project has unsaved changes unless discard_unsaved is true."
+        description = "Starts a new VectorEffects project and opens it in the interface: the first step of making any wind or ocean-current field, GRIB2 or Zarr, whether the weather is then downloaded (import_history) or drawn (storm_create, object_create). Refused while the open project has unsaved changes unless discard_unsaved is true."
     )]
     async fn project_new(
         &self,

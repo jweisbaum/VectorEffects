@@ -278,7 +278,7 @@ impl<R: tauri::Runtime> VectorEffects<R> {
     }
 
     #[tool(
-        description = "Draws an object with a tool. `tool` is a name from tool_catalogue; `gesture` is that tool's gesture ({\"kind\":\"point\",\"at\":[lon,lat]}, {\"kind\":\"stroke\",\"points\":[[lon,lat],...]}, or the catalogue's drag form); `options` is a list of {\"property\",\"value\"} pairs (value tagged as object_set's are), omitted ones take defaults; `layer` null means the top layer. Returns the summary and the new object's id, which becomes the selection."
+        description = "Draws an object on the VectorEffects map with a tool — a front, a jet, a wind shift, a current, a calm patch; a cyclone that moves is storm_create, and weather that really happened is import_history. `tool` is a name from tool_catalogue; `gesture` is that tool's gesture ({\"kind\":\"point\",\"at\":[lon,lat]}, {\"kind\":\"stroke\",\"points\":[[lon,lat],...]}, or the catalogue's drag form); `options` is a list of {\"property\",\"value\"} pairs (value tagged as object_set's are), omitted ones take defaults; `layer` null means the top layer. Returns the summary and the new object's id, which becomes the selection."
     )]
     async fn object_create(
         &self,
