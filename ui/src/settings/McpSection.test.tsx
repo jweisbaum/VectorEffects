@@ -26,11 +26,17 @@ const held = vi.hoisted(() => {
       held.status = { ...held.status, token: "tok_new" };
       return held.status;
     }),
+    registerMcpClient: vi.fn(async (_client: string): Promise<void> => {}),
   };
 });
 
 vi.mock("../ipc", () => ({
-  api: { mcpStatus: held.mcpStatus, setMcp: held.setMcp, rotateMcpToken: held.rotateMcpToken },
+  api: {
+    mcpStatus: held.mcpStatus,
+    setMcp: held.setMcp,
+    rotateMcpToken: held.rotateMcpToken,
+    registerMcpClient: held.registerMcpClient,
+  },
   IpcError: class extends Error {},
 }));
 
@@ -46,6 +52,8 @@ beforeEach(() => {
   held.mcpStatus.mockClear();
   held.setMcp.mockClear();
   held.rotateMcpToken.mockClear();
+  held.registerMcpClient.mockReset();
+  held.registerMcpClient.mockImplementation(async () => {});
 });
 
 afterEach(() => {
@@ -101,5 +109,58 @@ describe("McpSection", () => {
     await flush();
     expect(held.rotateMcpToken).toHaveBeenCalled();
     expect(host.textContent).toContain("tok_new");
+  });
+
+  const button = (words: string) =>
+    Array.from(host.querySelectorAll("button")).find((b) => b.textContent === words);
+
+  it("offers no client button while the service is off", async () => {
+    act(() => root.render(<McpSection onError={() => {}} />));
+    await flush();
+    expect(button("Add to Claude Code")).toBeUndefined();
+    expect(button("Add to Codex")).toBeUndefined();
+  });
+
+  it("adds itself to a client through the command, and asks for an update once the token has moved on", async () => {
+    held.status = held.on;
+    act(() => root.render(<McpSection onError={() => {}} />));
+    await flush();
+    await act(async () => {
+      button("Add to Claude Code")?.click();
+    });
+    await flush();
+    expect(held.registerMcpClient).toHaveBeenCalledWith("claude_code");
+    expect(button("Added to Claude Code")).toBeDefined();
+    // The other client was not touched and still says so.
+    expect(button("Add to Codex")).toBeDefined();
+    expect(host.textContent).toContain("restarted");
+
+    // Claude Code now holds a token the listener no longer answers.
+    const rotate = Array.from(host.querySelectorAll("button")).find((b) => b.textContent?.includes("Rotate"));
+    await act(async () => {
+      rotate?.click();
+    });
+    await flush();
+    expect(button("Update in Claude Code")).toBeDefined();
+    expect(host.textContent).not.toContain("restarted");
+  });
+
+  it("reports a client that could not be written and does not claim it was", async () => {
+    held.status = held.on;
+    const refusal = new Error("the `claude` command was not found");
+    held.registerMcpClient.mockImplementation(async () => {
+      throw refusal;
+    });
+    const onError = vi.fn();
+    act(() => root.render(<McpSection onError={onError} />));
+    await flush();
+    await act(async () => {
+      button("Add to Codex")?.click();
+    });
+    await flush();
+    expect(held.registerMcpClient).toHaveBeenCalledWith("codex");
+    expect(onError).toHaveBeenCalledWith(refusal);
+    expect(button("Add to Codex")).toBeDefined();
+    expect(button("Added to Codex")).toBeUndefined();
   });
 });

@@ -3216,6 +3216,27 @@ command by name — the test in `mcp/invoke.rs` holds its table equal to the
 handler list minus a named exclusion list, so a command added later is
 reachable the day it lands.
 
+**Registering with a client** is a button for the two clients that have
+somewhere to be registered: *Add to Claude Code* and *Add to Codex*
+(`mcp::clients`, `mcp_register_client`). They are done differently, and on
+purpose. Claude Code's `~/.claude.json` is also its live state, rewritten by
+every running session, so the application never writes it: it runs `claude
+mcp remove` and then `claude mcp add --scope user`, since `add` refuses a name
+that exists and the button has to work again after a rotated token. `claude`
+is looked for in the places its installers put it before `PATH`, because a
+windowed application does not inherit the shell's. Codex's `codex mcp add`
+cannot carry a token — it takes the name of an environment variable and
+nothing else — so its `config.toml` (under `$CODEX_HOME`, else `~/.codex`) is
+edited in place with `http_headers`, every other line kept, written beside
+the file and renamed over it, owner-only since it now holds the token. Codex
+not being installed is a refusal, never a folder made for it. The dialog
+remembers what it gave each client only while it is open, and says *Update
+in …* once the port or the token has moved on. This starts a process and
+writes outside the application's own folders, so it happens on that click
+and never as a side effect of another setting; it fetches nothing and
+listens to nothing (invariant 5). The command is excluded from `invoke`.
+Every other client gets the same configuration as text.
+
 Transport: Streamable HTTP on loopback, bearer token, `Host` and `Origin`
 restricted to loopback names. Directions cross this boundary as azimuth
 toward and speeds in m/s, the domain's own units; a client that wants the

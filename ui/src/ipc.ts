@@ -38,6 +38,7 @@ import type { EraseStroke } from "./generated/EraseStroke";
 import type { ClipboardKind } from "./generated/ClipboardKind";
 import type { AutosaveMode } from "./generated/AutosaveMode";
 import type { AppSettings } from "./generated/AppSettings";
+import type { McpClient } from "./generated/McpClient";
 import type { McpStatus } from "./generated/McpStatus";
 import type { GlyphSetting } from "./generated/GlyphSetting";
 import type { GlyphStyle } from "./generated/GlyphStyle";
@@ -116,6 +117,7 @@ const LONG_RUNNING: Readonly<Record<string, string>> = {
   finish_capture: "Saving the macro",
   insert_macro: "Inserting the macro",
   set_step_count: "Changing the duration",
+  mcp_register_client: "Adding the MCP service",
 };
 
 async function call<T>(command: string, args?: Record<string, unknown>): Promise<T> {
@@ -660,6 +662,8 @@ export const api = {
   setMcp: (enabled: boolean, port: number) => call<McpStatus>("mcp_set", { enabled, port }),
   /** A new token, and the listener restarted with it. */
   rotateMcpToken: () => call<McpStatus>("mcp_rotate_token", {}),
+  /** Writes the service into a client's own configuration (spec 8.8). */
+  registerMcpClient: (client: McpClient) => call<void>("mcp_register_client", { client }),
   /** The map's answer to a `view://capture` request. */
   deliverCapture: (id: number, pngBase64: string) =>
     call<void>("deliver_capture", { id, pngBase64 }),

@@ -83,10 +83,13 @@ pub const EXCLUDED: &[&str] = &[
     "tool_palette",
     // The service itself, which a client reached through it could turn off
     // under its own feet, and the frontend's two answers to a screenshot
-    // request (`deliver_capture`, `refuse_capture`).
+    // request (`deliver_capture`, `refuse_capture`). Registering the service
+    // with a client is asked for by a person in Settings: a client that is
+    // connected has no use for it, and one that is not cannot call it.
     "mcp_status",
     "mcp_set",
     "mcp_rotate_token",
+    "mcp_register_client",
     "deliver_capture",
     "refuse_capture",
     // A handle or the cancel flag rather than the state alone. The curated

@@ -206,6 +206,7 @@ pub fn run() -> anyhow::Result<()> {
                 settings::mcp_status,
                 settings::mcp_set,
                 settings::mcp_rotate_token,
+                mcp::clients::mcp_register_client,
                 settings::set_autosave_mode,
                 settings::set_projection,
                 settings::set_auto_scale,

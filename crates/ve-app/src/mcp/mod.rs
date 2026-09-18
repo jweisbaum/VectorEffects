@@ -2,6 +2,7 @@
 //! drives the application, on only while the setting says so.
 
 pub mod capture;
+pub mod clients;
 pub mod events;
 pub mod invoke;
 pub mod server;

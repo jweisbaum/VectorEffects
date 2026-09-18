@@ -1,9 +1,11 @@
 /**
- * Settings → MCP service (spec 8.8): the switch, the port, and a client
- * configuration with the token filled in.
+ * Settings → MCP service (spec 8.8): the switch, the port, a button that
+ * writes the service into Claude Code's or Codex's own configuration, and
+ * the same configuration as text for every other client.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import type { McpClient } from "../generated/McpClient";
 import type { McpStatus } from "../generated/McpStatus";
 import NumberField from "../NumberField";
 import { api } from "../ipc";
@@ -13,15 +15,40 @@ export function clientSnippets(status: McpStatus): { claudeCode: string; json: s
   const url = `http://127.0.0.1:${status.port}/mcp`;
   const auth = `Bearer ${status.token}`;
   return {
-    claudeCode: `claude mcp add --transport http vectoreffects ${url} --header "Authorization: ${auth}"`,
+    claudeCode: `claude mcp add --scope user --transport http vectoreffects ${url} --header "Authorization: ${auth}"`,
     json: JSON.stringify({ mcpServers: { vectoreffects: { type: "http", url, headers: { Authorization: auth } } } }, null, 2),
     bridge: `npx -y mcp-remote ${url} --header "Authorization:${auth}"`,
   };
 }
 
+const CLIENTS: readonly { client: McpClient; name: string }[] = [
+  { client: "claude_code", name: "Claude Code" },
+  { client: "codex", name: "Codex" },
+];
+
+/**
+ * What a client was last given, so the button can say when that has gone
+ * stale: a rotated token or a changed port leaves the client holding a
+ * configuration the listener no longer answers.
+ */
+function registrationKey(status: McpStatus): string {
+  return `${status.port} ${status.token}`;
+}
+
+/** The button's words: not yet added, added as it stands, or added and since changed. */
+export function registerLabel(name: string, given: string | undefined, status: McpStatus): string {
+  if (given === undefined) return `Add to ${name}`;
+  return given === registrationKey(status) ? `Added to ${name}` : `Update in ${name}`;
+}
+
 export default function McpSection({ onError }: { onError: (err: unknown) => void }) {
   const [status, setStatus] = useState<McpStatus | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
+  // Remembered for as long as the dialog is open and no longer. The clients'
+  // files are theirs and are not read back to find out: a reopened dialog
+  // offers "Add" again, and adding twice is harmless.
+  const [given, setGiven] = useState<Partial<Record<McpClient, string>>>({});
+  const [adding, setAdding] = useState<McpClient | null>(null);
 
   // `onError` is `SettingsDialog`'s inline `report`, a new function identity
   // on every one of the dialog's re-renders (a shortcut rebind, a macro
@@ -47,6 +74,15 @@ export default function McpSection({ onError }: { onError: (err: unknown) => voi
       ?.writeText(text)
       .then(() => setCopied(label))
       .catch(() => setCopied(null));
+  }, []);
+
+  const register = useCallback((client: McpClient, current: McpStatus) => {
+    setAdding(client);
+    void api
+      .registerMcpClient(client)
+      .then(() => setGiven((held) => ({ ...held, [client]: registrationKey(current) })))
+      .catch((err) => onErrorRef.current(err))
+      .finally(() => setAdding(null));
   }, []);
 
   if (status === null)
@@ -104,8 +140,18 @@ export default function McpSection({ onError }: { onError: (err: unknown) => voi
                 : `${status.sessions} client${status.sessions === 1 ? "" : "s"} connected${status.last_tool ? `, last: ${status.last_tool}` : ""}`}
             </span>
           </div>
-          <details open>
-            <summary>Client configuration</summary>
+          <div className="settings-field">
+            {CLIENTS.map(({ client, name }) => (
+              <button key={client} disabled={adding !== null} onClick={() => register(client, status)}>
+                {registerLabel(name, given[client], status)}
+              </button>
+            ))}
+          </div>
+          {CLIENTS.some(({ client }) => given[client] === registrationKey(status)) && (
+            <p className="settings-note">Added. A session that is already running picks it up when it is restarted.</p>
+          )}
+          <details>
+            <summary>Configuration for other clients</summary>
             <pre className="settings-snippet">{snippets.claudeCode}</pre>
             <button onClick={() => copy("claude", snippets.claudeCode)}>Copy Claude Code command</button>
             <pre className="settings-snippet">{snippets.json}</pre>

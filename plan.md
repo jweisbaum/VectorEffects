@@ -1,5 +1,16 @@
 # VectorEffects — Implementation Plan
 
+**2026-09-18: Add to Claude Code, Add to Codex.** Settings → MCP service
+writes the service into a client's own configuration instead of only showing
+text to paste: Claude Code through its own `claude mcp add --scope user`
+(its config file is live state and is never written from here), Codex by
+editing `~/.codex/config.toml` in place, because its command line cannot
+carry a token. Spec §8.8. Not done: no button for Claude Desktop, which has
+no command line and whose file would have to be written through the
+`mcp-remote` bridge; and a local-scope entry made earlier from the pasted
+command is not found or removed, since it belongs to whichever folder it was
+pasted in.
+
 **2026-09-16: MCP service (M86).** An MCP server inside the application,
 on loopback, switched on in Settings. Tools call the IPC commands with a
 `tauri::State` from the handle, so nothing is duplicated; the frontend
