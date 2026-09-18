@@ -91,6 +91,10 @@ jobs:
           }
           exit 0
       - run: cargo build --workspace
+      - name: The Windows application carries its manifest
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./tools/check-windows-manifest.ps1 -Exe target/debug/ve-app.exe
 
   grib:
     name: grib validated by ecCodes

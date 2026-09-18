@@ -220,6 +220,13 @@ jobs:
           uploadUpdaterJson: false
           args: ${{ matrix.args }}
 
+      # A failure here keeps `publish` from running: an application without
+      # its manifest does not open on Windows.
+      - name: The Windows application carries its manifest
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./tools/check-windows-manifest.ps1 -Exe target/x86_64-pc-windows-msvc/release/ve-app.exe
+
   publish:
     name: checksums and publish beta
     needs: [prepare, bundle]

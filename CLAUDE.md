@@ -592,6 +592,18 @@ to the hash input is a correctness bug that shows up as stale frames.
   `__veCapture` settles by wall clock and gives up on a timeout, so a screenshot
   taken in the same second as a commit can show the frame before it and look
   exactly like a bug that is not there. Take several, spaced, and say which.
+- **On Windows the application manifest is embedded by the linker, for every
+  target, not by `tauri-build`'s resource** (`crates/ve-app/build.rs`). A
+  resource reaches the binaries only, and a test program that links the
+  dialogs or menus without the Common Controls 6 manifest dies before `main`
+  with `STATUS_ENTRYPOINT_NOT_FOUND` (0xc0000139) — which is how the whole
+  Windows test job failed, with no test named, once the MCP service made the
+  test programs reach that code. `tools/check-windows-manifest.ps1` holds the
+  built `ve-app.exe` to carrying it, in CI and before a release publishes.
+- **A CI job's log needs a GitHub login; its annotations do not.** The Rust
+  job keeps `cargo test`'s output and, on failure, publishes the failed test
+  names, the panics, or failing those the end of the log, as annotations:
+  `GET /repos/…/check-runs/<job id>/annotations` reads them with no token.
 - **The Tauri CLI always passes `--no-default-features`.** `tauri dev` runs
   `cargo run --no-default-features …`, with or without a `--features` flag of
   its own, so a `default = [...]` list on `ve-app` would do nothing under
