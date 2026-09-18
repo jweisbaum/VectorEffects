@@ -54,7 +54,30 @@ jobs:
         run: cargo test -p ve-render --lib --test empty_layers --test fidelity -- --nocapture
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo test --workspace
+      - name: Run cargo test --workspace
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test --workspace 2>&1 | tee "$RUNNER_TEMP/cargo-test.log"
+      # A job's log needs a GitHub login to read; its annotations do not. So
+      # what failed is said twice, and the second time anyone can see it:
+      # the failing tests by name, then each panic with the line after it.
+      - name: Name the tests that failed
+        if: failure()
+        shell: bash
+        run: |
+          log="$RUNNER_TEMP/cargo-test.log"
+          [ -f "$log" ] || exit 0
+          sed 's/\x1b\[[0-9;]*m//g' "$log" > "$log.plain"
+          grep -E '^test .* \.\.\. FAILED$' "$log.plain" | head -4 | while IFS= read -r line; do
+            echo "::error title=Failed test::${line}"
+          done
+          grep -A2 -E "panicked at" "$log.plain" | awk '
+            /^--$/ { if (block != "") print block; block = ""; next }
+            { block = (block == "" ? $0 : block "%0A" $0) }
+            END { if (block != "") print block }' | head -5 | while IFS= read -r block; do
+            echo "::error title=Panic::${block}"
+          done
       - run: cargo build --workspace
 
   grib:
