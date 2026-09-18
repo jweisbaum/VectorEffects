@@ -64,20 +64,32 @@ jobs:
       # the failing tests by name, then each panic with the line after it.
       - name: Name the tests that failed
         if: failure()
-        shell: bash
+        # PowerShell, which every hosted runner has: the Windows runner's bash
+        # did not have everything a text pipeline wants (exit 127).
+        shell: pwsh
         run: |
-          log="$RUNNER_TEMP/cargo-test.log"
-          [ -f "$log" ] || exit 0
-          sed 's/\x1b\[[0-9;]*m//g' "$log" > "$log.plain"
-          grep -E '^test .* \.\.\. FAILED$' "$log.plain" | head -4 | while IFS= read -r line; do
-            echo "::error title=Failed test::${line}"
-          done
-          grep -A2 -E "panicked at" "$log.plain" | awk '
-            /^--$/ { if (block != "") print block; block = ""; next }
-            { block = (block == "" ? $0 : block "%0A" $0) }
-            END { if (block != "") print block }' | head -5 | while IFS= read -r block; do
-            echo "::error title=Panic::${block}"
-          done
+          $log = Join-Path $env:RUNNER_TEMP 'cargo-test.log'
+          if (-not (Test-Path $log)) {
+            Write-Output "::error title=No test log::$log was never written"
+            exit 0
+          }
+          $lines = @((Get-Content $log) -replace "`e\[[0-9;]*m", '')
+          $failed = @($lines | Where-Object { $_ -match '^test .* \.\.\. FAILED$' } | Select-Object -First 4)
+          foreach ($line in $failed) { Write-Output "::error title=Failed test::$line" }
+          $panics = 0
+          for ($i = 0; $i -lt $lines.Count -and $panics -lt 5; $i++) {
+            if ($lines[$i] -match 'panicked at') {
+              $last = [Math]::Min($i + 2, $lines.Count - 1)
+              Write-Output ("::error title=Panic::" + ($lines[$i..$last] -join '%0A'))
+              $panics++
+            }
+          }
+          # Neither: a test program that would not build, link or start.
+          if ($failed.Count -eq 0 -and $panics -eq 0) {
+            $tail = @($lines | Where-Object { $_.Trim() } | Select-Object -Last 15) -join '%0A'
+            Write-Output "::error title=End of the test log::$tail"
+          }
+          exit 0
       - run: cargo build --workspace
 
   grib:
