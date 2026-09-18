@@ -13,7 +13,8 @@ path: string,
  */
 bytes: bigint, 
 /**
- * Number of data chunks written.
+ * Inner chunks stored. One the project says nothing about is left out,
+ * so a regional project stores far fewer than tile the globe.
  */
 chunks: bigint, 
 /**

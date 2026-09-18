@@ -3,6 +3,10 @@
     clippy::unwrap_used,
     reason = "test code; clippy's allow-in-tests does not reach tests/"
 )]
+#![allow(
+    clippy::single_range_in_vec_init,
+    reason = "a one-dimensional zarrs ArraySubset is built from a slice of one range"
+)]
 //! M4's end-to-end acceptance: paint, export, decode, and find the paint.
 //!
 //! This is the walking skeleton the whole plan is built around — a project, a
@@ -508,7 +512,7 @@ fn painted_calm_remains_defined_beside_missing_cells() {
 #[test]
 fn a_painted_stroke_reaches_the_zarr_store() {
     use ve_zarr::export::f16;
-    use zarrs::array::Array;
+    use zarrs::array::{Array, ArraySubset};
     use zarrs::filesystem::FilesystemStore;
 
     let root = TempRoot::new("zarr");
@@ -547,51 +551,79 @@ fn a_painted_stroke_reaches_the_zarr_store() {
         !root.0.join("out.zarr.partial").exists(),
         "no temporary left"
     );
-    // A 1° grid is 360 x 181; ten-degree chunks tile it 36 x 19, and two
-    // 3-hourly steps fit one 72-hour time chunk.
-    assert_eq!(result.chunks, 36 * 19);
     assert_eq!(seen, vec![(1, 2), (2, 2)], "progress per evaluated step");
-
-    let store = std::sync::Arc::new(FilesystemStore::new(&path).expect("store"));
-    let array = Array::open(store, "/data").expect("open");
-    assert_eq!(array.shape(), &[2, 4, 181, 360]);
-    let regular: Vec<u64> = array
-        .chunk_shape(&[0, 0, 0, 0])
-        .expect("chunk shape")
-        .iter()
-        .map(|n| n.get())
-        .collect();
-    assert_eq!(regular, vec![24, 4, 10, 10]);
-
-    // What the dialog asked for and what a reader needs to place a cell.
-    let attributes = array.attributes();
-    assert_eq!(attributes["reference_time"], "2026-09-02T00:00:00Z");
-    assert_eq!(attributes["step_hours"], 3);
-    assert_eq!(attributes["latitude_start"], 90.0);
-    assert_eq!(attributes["latitude_step"], -1.0);
-    assert_eq!(attributes["longitude_start"], 0.0);
-    assert_eq!(attributes["longitude_step"], 1.0);
-    assert_eq!(
-        attributes["parameter_order"],
-        serde_json::json!([
-            "u10m_wind",
-            "v10m_wind",
-            "u_total_surface_current",
-            "v_total_surface_current"
-        ])
+    // Only the tiles the stroke touches are stored: a band along the equator
+    // some fifty degrees long, out of the 36 x 18 that tile the globe.
+    assert!(
+        (4..60).contains(&result.chunks),
+        "{} chunks stored",
+        result.chunks
+    );
+    assert!(
+        !path.join("data/c/0/0/3/0").exists(),
+        "nothing was painted in the Southern Ocean, so that shard is not a file"
     );
 
-    // The equator at longitude 0 is row 90, column 0: chunk [0, 0, 9, 0],
-    // local row 0, local column 0. Within a chunk the layout is
-    // [time][parameter][row][column], 10 x 10 cells per parameter.
-    let chunk: Vec<f32> = array
-        .retrieve_chunk::<Vec<f16>>(&[0, 0, 9, 0])
-        .expect("chunk")
+    let store = std::sync::Arc::new(FilesystemStore::new(&path).expect("store"));
+    let array = Array::open(store.clone(), "/data").expect("open");
+    // One row short of the GRIB lattice's 181: the south pole is left out so
+    // that ten degrees divides the axis.
+    assert_eq!(array.shape(), &[2, 4, 180, 360]);
+    let metadata: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(path.join("data/zarr.json")).expect("metadata"),
+    )
+    .expect("json");
+    // Two 3-hourly steps fit one 72-hour chunk of 24.
+    assert_eq!(
+        metadata["codecs"][0]["configuration"]["chunk_shape"],
+        serde_json::json!([24, 4, 10, 10])
+    );
+    assert_eq!(
+        metadata["chunk_grid"]["configuration"]["chunk_shapes"],
+        serde_json::json!([24, 4, [20, 70, 60, 30], [80, 40, 80, 100, 60]])
+    );
+
+    // What the dialog asked for and what a reader needs to place a cell on
+    // the clock and on the earth.
+    let time = Array::open(store.clone(), "/time").expect("time");
+    assert_eq!(
+        time.attributes()["units"],
+        "hours since 2026-09-02T00:00:00"
+    );
+    let hours: Vec<i64> = time
+        .retrieve_array_subset(&ArraySubset::new_with_ranges(&[0..2]))
+        .expect("hours");
+    assert_eq!(hours, [0, 3]);
+    let axis = |name: &str, len: u64| -> Vec<f32> {
+        Array::open(store.clone(), name)
+            .expect("axis")
+            .retrieve_array_subset(&ArraySubset::new_with_ranges(&[0..len]))
+            .expect("values")
+    };
+    let (latitude, longitude) = (axis("/latitude", 180), axis("/longitude", 360));
+    assert_eq!(
+        (latitude[0], latitude[90], latitude[179]),
+        (90.0, 0.0, -89.0)
+    );
+    assert_eq!(
+        (longitude[0], longitude[180], longitude[359]),
+        (-180.0, 0.0, 179.0)
+    );
+
+    // The equator at longitude 0 is row 90, column 180, in the corner of the
+    // South Atlantic shard. All four parameters, both steps.
+    let cell: Vec<f32> = array
+        .retrieve_array_subset::<Vec<f16>>(&ArraySubset::new_with_ranges(&[
+            0..2,
+            0..4,
+            90..91,
+            180..181,
+        ]))
+        .expect("cell")
         .into_iter()
         .map(f16::to_f32)
         .collect();
-    assert_eq!(chunk.len(), 24 * 4 * 10 * 10);
-    let (u, v, cu, cv) = (chunk[0], chunk[100], chunk[200], chunk[300]);
+    let (u, v, cu, cv) = (cell[0], cell[1], cell[2], cell[3]);
     assert!(
         (u - 20.0).abs() < 0.05,
         "20 m/s eastward at the stroke, got u={u}"
@@ -604,15 +636,23 @@ fn a_painted_stroke_reaches_the_zarr_store() {
         cu.is_nan() && cv.is_nan(),
         "a wind project writes no current, only the mask"
     );
-    // The second step holds the same still field, one frame stride on.
-    assert!((chunk[400] - 20.0).abs() < 0.05, "step 1 u");
-    // Beyond the project's two steps the chunk is padding: fill value only.
-    assert!(chunk[800].is_nan(), "time padding is the fill value");
+    // The second step holds the same still field.
+    assert!((cell[4] - 20.0).abs() < 0.05, "step 1 u");
+    // The stroke runs from 20°W to 20°E and no further: the same row 15° past
+    // its western end is undefined, and 10° inside it is not. A store that
+    // still began at the prime meridian would have these the other way round.
+    let row: Vec<f16> = array
+        .retrieve_array_subset(&ArraySubset::new_with_ranges(&[0..1, 0..1, 90..91, 0..360]))
+        .expect("row");
+    assert!((row[170].to_f32() - 20.0).abs() < 0.05, "10°W is painted");
+    assert!((row[190].to_f32() - 20.0).abs() < 0.05, "10°E is painted");
+    assert!(row[145].is_nan(), "35°W is not");
+    assert!(row[0].is_nan() && row[359].is_nan(), "nor the antimeridian");
 
     // Away from the stroke the field is undefined, distinct from a painted calm.
     let far: Vec<f16> = array
-        .retrieve_chunk::<Vec<f16>>(&[0, 0, 1, 18])
-        .expect("far chunk");
+        .retrieve_array_subset(&ArraySubset::new_with_ranges(&[0..2, 0..4, 10..20, 0..10]))
+        .expect("far");
     assert!(
         far.iter().all(|value| value.is_nan()),
         "should be undefined"
@@ -670,7 +710,7 @@ fn a_zarr_export_never_leaves_a_partial_store() {
 #[test]
 fn a_zarr_export_crosses_a_time_chunk_boundary() {
     use ve_zarr::export::f16;
-    use zarrs::array::Array;
+    use zarrs::array::{Array, ArraySubset};
     use zarrs::filesystem::FilesystemStore;
 
     let root = TempRoot::new("zarr-chunks");
@@ -712,31 +752,41 @@ fn a_zarr_export_crosses_a_time_chunk_boundary() {
         |_| {},
     )
     .expect("export");
-    assert_eq!(result.chunks, 36 * 19 * 2);
+    // The same tiles in each of the two time chunks.
+    assert!(
+        result.chunks > 0 && result.chunks % 2 == 0,
+        "{}",
+        result.chunks
+    );
+    assert!(
+        path.join("data/c/1/0/1/2").is_file(),
+        "a second North Atlantic shard"
+    );
 
     let store = std::sync::Arc::new(FilesystemStore::new(&path).expect("store"));
     let array = Array::open(store, "/data").expect("open");
-    assert_eq!(array.shape(), &[5, 4, 181, 360]);
-    let second: Vec<f32> = array
-        .retrieve_chunk::<Vec<f16>>(&[1, 0, 9, 0])
-        .expect("chunk")
+    assert_eq!(array.shape(), &[5, 4, 180, 360]);
+    // Row 90, column 180 is the stroke's centre. Steps 3 and 4 are local 0
+    // and 1 of the second time chunk.
+    let cell: Vec<f32> = array
+        .retrieve_array_subset::<Vec<f16>>(&ArraySubset::new_with_ranges(&[
+            0..5,
+            0..2,
+            90..91,
+            180..181,
+        ]))
+        .expect("cell")
         .into_iter()
         .map(f16::to_f32)
         .collect();
-    // Steps 3 and 4 are local 0 and 1 of the second chunk: 3 x 4 x 100 per
-    // step, v is the second plane.
-    assert!(
-        (second[100] - 15.0).abs() < 0.05,
-        "step 3 v, got {}",
-        second[100]
-    );
-    assert!(
-        (second[500] - 15.0).abs() < 0.05,
-        "step 4 v, got {}",
-        second[500]
-    );
-    assert!(second[900].is_nan(), "the third slot is padding");
-    assert!(second[0].abs() < 0.05, "northward flow has no u");
+    for step in 0..5 {
+        let (u, v) = (cell[step * 2], cell[step * 2 + 1]);
+        assert!(
+            u.abs() < 0.05,
+            "northward flow has no u at step {step}: {u}"
+        );
+        assert!((v - 15.0).abs() < 0.05, "step {step} v, got {v}");
+    }
 }
 
 /// The cost the export panel sees: a 0.25° project, two steps, evaluated

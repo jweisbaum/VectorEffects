@@ -650,6 +650,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "crc32c"
+version = "0.6.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3a47af21622d091a8f0fb295b88bc886ac74efcc613efc19f5d0b21de5c89e47"
+dependencies = [
+ "rustc_version",
+]
+
+[[package]]
 name = "crc32fast"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5567,15 +5576,18 @@ dependencies = [
 name = "ve-zarr"
 version = "0.1.6"
 dependencies = [
+ "crc32c",
  "half",
  "lz4_flex",
  "reqwest",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.20",
  "url",
  "zarrs",
  "zarrs_storage",
+ "zstd",
 ]
 
 [[package]]
@@ -6623,6 +6635,7 @@ dependencies = [
  "base64 0.22.1",
  "bytemuck",
  "bytes",
+ "crc32c",
  "derive_more",
  "getrandom 0.3.4",
  "half",

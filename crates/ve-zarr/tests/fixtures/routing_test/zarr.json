@@ -1,0 +1,380 @@
+{
+  "attributes": {
+    "title": "ERA5 10m wind + zero currents, January 2012, for routing tests",
+    "source": "gs://weatherbench2/datasets/era5/1959-2023_01_10-full_37-1h-0p25deg-chunk-1.zarr",
+    "conventions": "param is a dimension; data array dims are (time, param, latitude, longitude)",
+    "land_mask": "NaN where ERA5 land_sea_mask > 0.5",
+    "shard_lat_edges_deg": [
+      90,
+      70,
+      0,
+      -60,
+      -90
+    ],
+    "shard_lon_edges_deg": [
+      -180,
+      -100,
+      -60,
+      20,
+      120,
+      180
+    ],
+    "shard_lat_bands": [
+      "arctic",
+      "northern",
+      "southern",
+      "southern_ocean"
+    ],
+    "shard_lon_bands": [
+      "pacific_east",
+      "americas",
+      "atlantic",
+      "indian",
+      "pacific_west"
+    ],
+    "shards": [
+      {
+        "name": "arctic_pacific_east",
+        "lat_band": "arctic",
+        "lon_band": "pacific_east",
+        "lat_deg": [
+          90,
+          70
+        ],
+        "lon_deg": [
+          -180,
+          -100
+        ],
+        "shard_index_lat_lon": [
+          0,
+          0
+        ]
+      },
+      {
+        "name": "arctic_americas",
+        "lat_band": "arctic",
+        "lon_band": "americas",
+        "lat_deg": [
+          90,
+          70
+        ],
+        "lon_deg": [
+          -100,
+          -60
+        ],
+        "shard_index_lat_lon": [
+          0,
+          1
+        ]
+      },
+      {
+        "name": "arctic_atlantic",
+        "lat_band": "arctic",
+        "lon_band": "atlantic",
+        "lat_deg": [
+          90,
+          70
+        ],
+        "lon_deg": [
+          -60,
+          20
+        ],
+        "shard_index_lat_lon": [
+          0,
+          2
+        ]
+      },
+      {
+        "name": "arctic_indian",
+        "lat_band": "arctic",
+        "lon_band": "indian",
+        "lat_deg": [
+          90,
+          70
+        ],
+        "lon_deg": [
+          20,
+          120
+        ],
+        "shard_index_lat_lon": [
+          0,
+          3
+        ]
+      },
+      {
+        "name": "arctic_pacific_west",
+        "lat_band": "arctic",
+        "lon_band": "pacific_west",
+        "lat_deg": [
+          90,
+          70
+        ],
+        "lon_deg": [
+          120,
+          180
+        ],
+        "shard_index_lat_lon": [
+          0,
+          4
+        ]
+      },
+      {
+        "name": "north_east_pacific",
+        "lat_band": "northern",
+        "lon_band": "pacific_east",
+        "lat_deg": [
+          70,
+          0
+        ],
+        "lon_deg": [
+          -180,
+          -100
+        ],
+        "shard_index_lat_lon": [
+          1,
+          0
+        ]
+      },
+      {
+        "name": "caribbean",
+        "lat_band": "northern",
+        "lon_band": "americas",
+        "lat_deg": [
+          70,
+          0
+        ],
+        "lon_deg": [
+          -100,
+          -60
+        ],
+        "shard_index_lat_lon": [
+          1,
+          1
+        ]
+      },
+      {
+        "name": "north_atlantic",
+        "lat_band": "northern",
+        "lon_band": "atlantic",
+        "lat_deg": [
+          70,
+          0
+        ],
+        "lon_deg": [
+          -60,
+          20
+        ],
+        "shard_index_lat_lon": [
+          1,
+          2
+        ]
+      },
+      {
+        "name": "arabian_sea_bay_of_bengal",
+        "lat_band": "northern",
+        "lon_band": "indian",
+        "lat_deg": [
+          70,
+          0
+        ],
+        "lon_deg": [
+          20,
+          120
+        ],
+        "shard_index_lat_lon": [
+          1,
+          3
+        ]
+      },
+      {
+        "name": "north_west_pacific",
+        "lat_band": "northern",
+        "lon_band": "pacific_west",
+        "lat_deg": [
+          70,
+          0
+        ],
+        "lon_deg": [
+          120,
+          180
+        ],
+        "shard_index_lat_lon": [
+          1,
+          4
+        ]
+      },
+      {
+        "name": "south_east_pacific",
+        "lat_band": "southern",
+        "lon_band": "pacific_east",
+        "lat_deg": [
+          0,
+          -60
+        ],
+        "lon_deg": [
+          -180,
+          -100
+        ],
+        "shard_index_lat_lon": [
+          2,
+          0
+        ]
+      },
+      {
+        "name": "south_america_west_atlantic",
+        "lat_band": "southern",
+        "lon_band": "americas",
+        "lat_deg": [
+          0,
+          -60
+        ],
+        "lon_deg": [
+          -100,
+          -60
+        ],
+        "shard_index_lat_lon": [
+          2,
+          1
+        ]
+      },
+      {
+        "name": "south_atlantic",
+        "lat_band": "southern",
+        "lon_band": "atlantic",
+        "lat_deg": [
+          0,
+          -60
+        ],
+        "lon_deg": [
+          -60,
+          20
+        ],
+        "shard_index_lat_lon": [
+          2,
+          2
+        ]
+      },
+      {
+        "name": "indian_ocean",
+        "lat_band": "southern",
+        "lon_band": "indian",
+        "lat_deg": [
+          0,
+          -60
+        ],
+        "lon_deg": [
+          20,
+          120
+        ],
+        "shard_index_lat_lon": [
+          2,
+          3
+        ]
+      },
+      {
+        "name": "south_west_pacific",
+        "lat_band": "southern",
+        "lon_band": "pacific_west",
+        "lat_deg": [
+          0,
+          -60
+        ],
+        "lon_deg": [
+          120,
+          180
+        ],
+        "shard_index_lat_lon": [
+          2,
+          4
+        ]
+      },
+      {
+        "name": "southern_ocean_pacific_east",
+        "lat_band": "southern_ocean",
+        "lon_band": "pacific_east",
+        "lat_deg": [
+          -60,
+          -90
+        ],
+        "lon_deg": [
+          -180,
+          -100
+        ],
+        "shard_index_lat_lon": [
+          3,
+          0
+        ]
+      },
+      {
+        "name": "southern_ocean_americas",
+        "lat_band": "southern_ocean",
+        "lon_band": "americas",
+        "lat_deg": [
+          -60,
+          -90
+        ],
+        "lon_deg": [
+          -100,
+          -60
+        ],
+        "shard_index_lat_lon": [
+          3,
+          1
+        ]
+      },
+      {
+        "name": "southern_ocean_atlantic",
+        "lat_band": "southern_ocean",
+        "lon_band": "atlantic",
+        "lat_deg": [
+          -60,
+          -90
+        ],
+        "lon_deg": [
+          -60,
+          20
+        ],
+        "shard_index_lat_lon": [
+          3,
+          2
+        ]
+      },
+      {
+        "name": "southern_ocean_indian",
+        "lat_band": "southern_ocean",
+        "lon_band": "indian",
+        "lat_deg": [
+          -60,
+          -90
+        ],
+        "lon_deg": [
+          20,
+          120
+        ],
+        "shard_index_lat_lon": [
+          3,
+          3
+        ]
+      },
+      {
+        "name": "southern_ocean_pacific_west",
+        "lat_band": "southern_ocean",
+        "lon_band": "pacific_west",
+        "lat_deg": [
+          -60,
+          -90
+        ],
+        "lon_deg": [
+          120,
+          180
+        ],
+        "shard_index_lat_lon": [
+          3,
+          4
+        ]
+      }
+    ]
+  },
+  "zarr_format": 3,
+  "node_type": "group"
+}

@@ -1,0 +1,98 @@
+{
+  "shape": [
+    744,
+    4,
+    720,
+    1440
+  ],
+  "data_type": "float16",
+  "chunk_grid": {
+    "name": "rectilinear",
+    "configuration": {
+      "kind": "inline",
+      "chunk_shapes": [
+        72,
+        4,
+        [
+          80,
+          280,
+          240,
+          120
+        ],
+        [
+          320,
+          160,
+          320,
+          400,
+          240
+        ]
+      ]
+    }
+  },
+  "chunk_key_encoding": {
+    "name": "default",
+    "configuration": {
+      "separator": "/"
+    }
+  },
+  "fill_value": "NaN",
+  "codecs": [
+    {
+      "name": "sharding_indexed",
+      "configuration": {
+        "chunk_shape": [
+          72,
+          4,
+          40,
+          40
+        ],
+        "codecs": [
+          {
+            "name": "bytes",
+            "configuration": {
+              "endian": "little"
+            }
+          },
+          {
+            "name": "zstd",
+            "configuration": {
+              "level": 5,
+              "checksum": false
+            }
+          }
+        ],
+        "index_codecs": [
+          {
+            "name": "bytes",
+            "configuration": {
+              "endian": "little"
+            }
+          },
+          {
+            "name": "crc32c"
+          }
+        ],
+        "index_location": "end"
+      }
+    }
+  ],
+  "attributes": {
+    "units": "m s-1",
+    "param_long_names": {
+      "u10": "10 metre U wind component (ERA5)",
+      "v10": "10 metre V wind component (ERA5)",
+      "ucur": "eastward sea water velocity (placeholder, always 0)",
+      "vcur": "northward sea water velocity (placeholder, always 0)"
+    },
+    "_FillValue": "NaN"
+  },
+  "dimension_names": [
+    "time",
+    "param",
+    "latitude",
+    "longitude"
+  ],
+  "zarr_format": 3,
+  "node_type": "array",
+  "storage_transformers": []
+}

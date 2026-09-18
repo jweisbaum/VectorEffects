@@ -85,7 +85,8 @@ pub struct ExportZarrResult {
     pub path: String,
     /// Total bytes in the Zarr directory.
     pub bytes: u64,
-    /// Number of data chunks written.
+    /// Inner chunks stored. One the project says nothing about is left out,
+    /// so a regional project stores far fewer than tile the globe.
     pub chunks: u64,
     /// How long it took, in milliseconds.
     pub elapsed_ms: u64,
@@ -349,6 +350,12 @@ pub fn run(
 
 /// Writes the project to a Zarr V3 store (spec §12.3).
 ///
+/// The store is the routing layout `ve_zarr::export` describes: latitude
+/// from the north pole to one row short of the south, longitude from −180°,
+/// inner chunks of three days by ten degrees gathered into ocean-basin
+/// shards. Each cell is evaluated at the very point the GRIB export
+/// evaluates it, so the two files of one project agree cell for cell.
+///
 /// A chunk spans 72 hours, so it cannot be written until every step in it
 /// has been evaluated, and a full time chunk of a fine grid does not fit in
 /// memory. So each time chunk goes in two phases: every step is evaluated
@@ -373,12 +380,11 @@ pub fn run_zarr(
         micro_degrees: settings.resolution.micro_degrees(),
     };
     let layout = ZarrLayout::new(
-        settings.resolution.degrees(),
+        grid.micro_degrees,
         settings.step_count,
         settings.step_hours.hours(),
-        grid.ni,
-        grid.nj,
-    );
+    )
+    .map_err(|error| AppError::Internal(error.to_string()))?;
     let path = PathBuf::from(&request.path);
     let temporary = PathBuf::from(format!("{}.partial", path.display()));
     let spool_path = PathBuf::from(format!("{}.spool", path.display()));
@@ -403,30 +409,42 @@ pub fn run_zarr(
     reference_time.validate()?;
 
     let outcome = (|| -> Result<(u64, u64)> {
+        // `time` counts hours since this; the units string is CF's, which
+        // has no zone suffix, and the project's clock is UTC throughout.
         let iso = format!(
-            "{:04}-{:02}-{:02}T{:02}:00:00Z",
+            "{:04}-{:02}-{:02}T{:02}:00:00",
             reference_time.year, reference_time.month, reference_time.day, reference_time.hour
         );
-        let writer = ZarrWriter::create(&temporary, layout, &iso, settings.start_unix_s)
+        let source = format!("VectorEffects {}", env!("CARGO_PKG_VERSION"));
+        let mut writer = ZarrWriter::create(&temporary, layout, &project.name, &source, &iso)
             .map_err(|error| AppError::Internal(error.to_string()))?;
-        let points: Vec<ve_core::LonLat> = grid
-            .points()
-            .map(|(lon, lat)| ve_core::LonLat { lon, lat })
+        // The GRIB lattice's own points, re-ordered rather than recomputed:
+        // the store starts at the antimeridian where the GRIB file starts at
+        // the prime meridian, and stops a row short of the south pole.
+        let grib_points: Vec<(f64, f64)> = grid.points().collect();
+        let ni = layout.shape[3] as usize;
+        let nj = layout.shape[2] as usize;
+        let points: Vec<ve_core::LonLat> = (0..nj)
+            .flat_map(|row| (0..ni).map(move |column| row * ni + (column + ni / 2) % ni))
+            .map(|index| {
+                let (lon, lat) = grib_points[index];
+                ve_core::LonLat { lon, lat }
+            })
             .collect();
+        drop(grib_points);
         let kinds = project.kinds_present();
-        let ni = grid.ni as usize;
-        let nj = grid.nj as usize;
         let plane = ni * nj;
-        let spatial = layout.spatial_chunk_points as usize;
+        let spatial = layout.tile as usize;
         let time_chunk = layout.time_chunk_steps as usize;
-        let spatial_x = ni.div_ceil(spatial);
-        let spatial_y = nj.div_ceil(spatial);
+        // Ten degrees divides both axes, so every tile is whole.
+        let spatial_x = ni / spatial;
+        let spatial_y = nj / spatial;
         let step_count = settings.step_count as usize;
         let time_chunks = step_count.div_ceil(time_chunk);
-        // A chunk is always the regular shape, even at the array's edge: the
-        // cells past the last row, column or step are padding and hold the
-        // fill value. Only the real cells are copied in; the rest stay NaN.
-        let chunk_len = time_chunk * 4 * spatial * spatial;
+        // A chunk is always the regular shape, even in the last time chunk:
+        // the cells past the last step are padding and hold the fill value.
+        // Only the real cells are copied in; the rest stay NaN.
+        let chunk_len = layout.chunk_len();
         // How many chunks of one band are assembled together. At 0.1° hourly a
         // chunk is 5.8 MB, so eleven at a time; a coarse project takes a band
         // in one group.
@@ -520,13 +538,17 @@ pub fn run_zarr(
                         }
                     }
                     for (buffer, x) in buffers.iter().zip(group_start..) {
-                        writer
-                            .write_chunk(&[time_index as u64, 0, y as u64, x as u64], buffer)
+                        // A tile the project says nothing about is not stored.
+                        let stored = writer
+                            .write_chunk(time_index as u64, y as u64, x as u64, buffer)
                             .map_err(|error| AppError::Internal(error.to_string()))?;
-                        chunks_written += 1;
+                        chunks_written += u64::from(stored);
                     }
                 }
             }
+            writer
+                .finish_time()
+                .map_err(|error| AppError::Internal(error.to_string()))?;
         }
         std::fs::remove_file(&spool_path).doing("remove", spool_path.display())?;
         Ok((chunks_written, directory_size(&temporary)?))

@@ -10,7 +10,10 @@ description = "Reads ERA5 wind and GlobCurrent surface current from the public Z
 [dependencies]
 thiserror = { workspace = true }
 serde = { workspace = true }
-serde_json = { workspace = true }
+# `preserve_order` so a metadata document's keys come out in the order they
+# were written. `zarrs` turns it on already; saying so here keeps the export's
+# documents from depending on that.
+serde_json = { workspace = true, features = ["preserve_order"] }
 
 # `default-features = false` is load-bearing. The default set turns on
 # `blosc`, which builds c-blosc and its bundled Snappy through a C++
@@ -21,6 +24,11 @@ zarrs = { version = "0.23", default-features = false, features = ["filesystem", 
 zarrs_storage = "0.4"
 lz4_flex = { version = "0.14", default-features = false, features = ["std", "frame"] }
 half = "2.7"
+# The export writes its shards itself (`export.rs`): the inner chunks' codec,
+# and the checksum the shard index ends with. `zstd` is the crate `zarrs`
+# already builds; `crc32c` is pure Rust.
+zstd = { version = "0.13", default-features = false }
+crc32c = "0.6"
 
 # The store is read over HTTPS by `http.rs` rather than by `zarrs_http`, which
 # takes `reqwest` with its default features: that is `native-tls`, and on Linux
@@ -37,6 +45,9 @@ url = "2"
 
 [dev-dependencies]
 serde_json = { workspace = true }
+# Reading an export back through an implementation that is not ours.
+zarrs = { version = "0.23", default-features = false, features = ["filesystem", "zstd", "sharding", "crc32c"] }
+tempfile = "3"
 
 [lints]
 workspace = true

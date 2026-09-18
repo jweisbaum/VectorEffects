@@ -1,5 +1,20 @@
 # VectorEffects — Implementation Plan
 
+**2026-09-18: The Zarr export is the routing layout.** The export now writes
+the format of `routing_test`, the ERA5 store the routing tools read, and is
+held to it by that store's own metadata documents as fixtures: `param`
+(`u10`, `v10`, `ucur`, `vcur`), `time`/`latitude`/`longitude` coordinate
+arrays, latitude 90° to one step short of −90° and longitude from −180°,
+`sharding_indexed` over a rectilinear grid of ocean-basin shards, inner
+chunks of three days by ten degrees at zstd level 5. Three days is 72, 24, 12
+or 3 steps by the project's step; nothing else differs. This supersedes the
+2026-09-15 layout below: the GRIB-ordered lattice, the long parameter names,
+the regular chunk grid, zstd 3 and the lattice and clock attributes on `data`
+are gone, and a store written before today is not in this format. The shards
+are written by hand so they stream; zarrs and zarr-python read them back.
+Spec §12.3. Not done: xarray cannot open a rectilinear store at all (nor
+`routing_test`), which is zarr-python's gap and not ours.
+
 **2026-09-18: Add to Claude Code, Add to Codex.** Settings → MCP service
 writes the service into a client's own configuration instead of only showing
 text to paste: Claude Code through its own `claude mcp add --scope user`

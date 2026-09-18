@@ -132,7 +132,7 @@ impl<R: tauri::Runtime> VectorEffects<R> {
     }
 
     #[tool(
-        description = "Exports the project as a Zarr V3 directory at path (Float16, 72 h by 10 degree chunks, Zstd, NaN where uncovered). Refuses an existing directory."
+        description = "Exports the project as a Zarr V3 directory at path, in the routing layout: a Float16 data array (time, param, latitude, longitude) with param u10, v10, ucur, vcur, latitude from 90 and longitude from -180, three-day by 10 degree Zstd chunks in ocean-basin shards on a rectilinear grid, NaN where uncovered. Refuses an existing directory."
     )]
     async fn export_zarr(
         &self,

@@ -3652,35 +3652,62 @@ gain. There is no §11.
 ### 12.3 Zarr V3 export
 
 The status bar also offers **Export Zarr**. It writes a filesystem Zarr V3
-group whose `/data` array has dimensions `[time, parameter, latitude,
-longitude]`. The parameter axis is length four and always has this order:
+store in the **routing layout** — the layout of `routing_test`, the ERA5
+store the routing tools read — and the two are held to be the same format:
+the metadata documents of that store are fixtures in `ve-zarr`, and the
+export's documents at the same resolution, step and length must be the same
+text. Only what says what the data *is* differs — the group's `title` (the
+project's name), `source` (`VectorEffects <version>`) and `land_mask`
+description, and the parameters' long names, which do not claim ERA5.
 
-1. `u10m_wind`
-2. `v10m_wind`
-3. `u_total_surface_current`
-4. `v_total_surface_current`
+The group holds five arrays:
 
-Wind and current data are evaluated from the same CPU export path as GRIB2.
-A project that does not contain one kind writes NaN for that pair. Cells with
+| Array | Type | Holds |
+|---|---|---|
+| `data` | Float16, fill `NaN` | `(time, param, latitude, longitude)` |
+| `time` | int64 | hours since the reference time the dialog asked for; `units` is CF's `hours since 2026-09-02T00:00:00`, `calendar` `proleptic_gregorian` |
+| `param` | `fixed_length_utf32`, 16 bytes | `u10`, `v10`, `ucur`, `vcur`, always in this order |
+| `latitude` | Float32 | 90° down to one step short of −90°, `degrees_north` |
+| `longitude` | Float32 | −180° up to one step short of 180°, `degrees_east` |
+
+**The lattice is not the GRIB one** (§12.2), which starts at the prime
+meridian and includes both poles: the store starts at the antimeridian, so
+the Atlantic is contiguous, and leaves out the south pole row, so that ten
+degrees divides the latitude axis — which sharding requires. Every cell is
+nonetheless evaluated at the very point the GRIB export evaluates it (the
+GRIB lattice's points, re-ordered, never recomputed), so the two exports of
+one project agree cell for cell wherever both have the cell.
+
+Wind and current are evaluated from the same CPU export path as GRIB2. A
+project that does not contain one kind writes NaN for that pair. Cells with
 no evaluated coverage are NaN as well, preserving the land mask; a covered
-calm cell remains a real zero. Values use IEEE Float16. The only bytes-to-bytes
-codec is Zstd (level 3); Blosc is never used.
+calm cell remains a real zero.
 
-The regular chunk shape is `[72 / step_hours, 4, 10° / resolution,
-10° / resolution]`. Thus a 1-hour project uses 72 time steps per chunk, a
-3-hour project 24, and a 6-hour project 12. The latitude and longitude axes
-use the project's global regular grid, with smaller edge chunks where the
-grid does not divide evenly. One chunk therefore contains all four vector
-components together rather than four separate parameter groups.
+**Chunks.** An inner chunk is `[72 / step_hours, 4, 10° / resolution,
+10° / resolution]`: three days of steps whatever the step — 72 hourly, 24
+three-hourly, 12 six-hourly, 3 daily — and all four components together, so
+a vector at a point is one read. This is the one thing that differs from
+`routing_test`, which is hourly. Inner chunks are `bytes` (little-endian)
+then `zstd` level 5 with no checksum; Blosc is never used.
 
-The lattice is the GRIB one (§12.2): row 0 is the north pole and column 0
-the prime meridian, longitude increasing eastward through `[0, 360)`, so the
-two exports of one project put every cell in the same place. The `/data`
-array's attributes say so — `latitude_start`, `latitude_step`,
-`longitude_start`, `longitude_step` — and carry `reference_time`, the ISO
-8601 UTC instant the dialog asked for, with `step_hours`: time index `t` is
-valid `t × step_hours` hours after it. Without those a reader could place a
-cell neither on the earth nor on the clock.
+**Shards.** The inner chunks are gathered by `sharding_indexed` (index at
+the end, `bytes` then `crc32c`) into shards on a **rectilinear** chunk grid:
+three days in time, and ocean basins in space — latitude edges 90, 70, 0,
+−60, −90 and longitude edges −180, −100, −60, 20, 120, 180, every edge on a
+ten-degree line. The group's attributes name the twenty boxes
+(`north_atlantic`, `caribbean`, `indian_ocean`, …) as `routing_test`'s do. A
+shard file is `data/c/<time>/0/<lat band>/<lon band>`.
+
+**What is not stored.** An inner chunk that is NaN throughout is the fill
+value and is left out of its shard's index, and a shard with no chunk in it
+is not a file — what zarr-python does, and what makes a regional project's
+store the size of the region rather than of the globe. A reader that
+follows the specification reads both as NaN.
+
+The shards are written by `ve-zarr` itself rather than through `zarrs`, so
+that a shard can be streamed: the largest at 0.1° hourly is 400 MB of
+Float16, and `zarrs` takes a shard whole. `zarrs` and zarr-python are the
+readers the tests and the release check use instead.
 
 Like the GRIB export it writes to a `.partial` beside the destination and
 renames on success, so a cancelled or failed export leaves no store behind;

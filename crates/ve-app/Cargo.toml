@@ -82,7 +82,7 @@ webdriver = ["dep:tauri-plugin-webdriver-automation"]
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 ve-grib = { workspace = true, features = ["testing"] }
 # Reading a Zarr export back, to check what the writer put where.
-zarrs = { version = "0.23", default-features = false, features = ["filesystem", "zstd"] }
+zarrs = { version = "0.23", default-features = false, features = ["filesystem", "zstd", "sharding", "crc32c"] }
 # A mock application gives the MCP tests a real AppHandle without a window.
 tauri = { version = "2.11.5", features = ["test"] }
 rmcp = { version = "3.4", default-features = false, features = ["client", "transport-streamable-http-client-reqwest"] }
