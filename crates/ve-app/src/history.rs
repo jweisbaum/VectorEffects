@@ -137,6 +137,90 @@ pub struct HistoryRequest {
     pub set_start_time: bool,
 }
 
+/// What one archive offers, for a caller choosing what to ask for.
+///
+/// The interface names the archives in its own panel; a client of the MCP
+/// service has only this. The coverage is the point: the archives trail the
+/// present by days to months, and a range past the end is refused only after
+/// the client has built a project around it.
+#[derive(Debug, Clone, Serialize, schemars::JsonSchema)]
+pub struct HistoryArchives {
+    /// The present moment, ISO 8601 UTC. A client asked for "the last" of
+    /// something has to count back from here, and a model's own sense of
+    /// the date is its training's, not the clock's.
+    pub now: String,
+    /// What can be downloaded.
+    pub archives: Vec<HistoryArchive>,
+}
+
+/// One archive of [`HistoryArchives`].
+#[derive(Debug, Clone, Serialize, schemars::JsonSchema)]
+pub struct HistoryArchive {
+    /// What `import_history` calls it: "wind" or "current".
+    pub field: String,
+    /// What the layer it makes is called.
+    pub label: String,
+    /// What the archive is, in a sentence.
+    pub description: String,
+    /// The first hour held, ISO 8601 UTC. Null if the archive was not reached.
+    pub first: Option<String>,
+    /// The last hour held, ISO 8601 UTC. Null if the archive was not reached.
+    pub last: Option<String>,
+    /// Why the archive could not be reached, when it could not.
+    pub unreachable: Option<String>,
+}
+
+/// The word a client uses for an archive: the field it holds.
+pub fn field_of(archive: Archive) -> &'static str {
+    match archive {
+        Archive::Era5Wind => "wind",
+        Archive::GlobCurrent => "current",
+    }
+}
+
+/// The archives and the hours each holds right now. Reaches the network, as
+/// [`import_history`] does and for the same reason: it was asked to.
+///
+/// One thread per archive, and plain threads for the reason `import_history`
+/// gives: the blocking client will not run on the async runtime.
+#[tauri::command(async)]
+pub fn history_archives() -> Result<HistoryArchives> {
+    let opened: Vec<_> = Archive::ALL
+        .into_iter()
+        .map(|archive| (archive, std::thread::spawn(move || archive.open())))
+        .collect();
+    let archives = opened
+        .into_iter()
+        .map(|(archive, handle)| {
+            let (coverage, unreachable) = match handle.join() {
+                Ok(Ok(source)) => (source.coverage(), None),
+                Ok(Err(err)) => (None, Some(err.to_string())),
+                Err(_) => (None, Some("the archive reader stopped".to_owned())),
+            };
+            HistoryArchive {
+                field: field_of(archive).to_owned(),
+                label: archive.label().to_owned(),
+                description: match archive {
+                    Archive::Era5Wind => {
+                        "ERA5 reanalysis 10 m wind: the observed global wind, hourly at 0.25°"
+                    }
+                    Archive::GlobCurrent => {
+                        "GlobCurrent total surface current: observed global ocean current, hourly at 0.25°"
+                    }
+                }
+                .to_owned(),
+                first: coverage.map(|(first, _)| first.to_iso()),
+                last: coverage.map(|(_, last)| last.to_iso()),
+                unreachable,
+            }
+        })
+        .collect();
+    Ok(HistoryArchives {
+        now: chrono::Utc::now().format("%Y-%m-%dT%H:%MZ").to_string(),
+        archives,
+    })
+}
+
 /// Imports the hours of a range that the project has steps for.
 ///
 /// # Why a plain thread rather than the command's own

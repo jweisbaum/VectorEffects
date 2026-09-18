@@ -608,6 +608,18 @@ pub fn set_property_with(
     with_session(state, |session| {
         let id = ve_core::Id::from_raw(object);
         let open = session.require_open()?;
+        // The keyframe commands refuse a step the timeline does not have
+        // (`animation::within`); this one keys a step too, under auto-key,
+        // and did not. The interface never sends one, so nothing noticed
+        // until a client did: keys at step 20 of a 20-step project, which no
+        // frame ever shows.
+        let last = open.project.settings.step_count.saturating_sub(1);
+        if step > last {
+            return Err(AppError::BadOption {
+                field: "step",
+                value: format!("{step} is past the last step, {last}"),
+            });
+        }
         let target = open
             .project
             .object(id)

@@ -3209,12 +3209,64 @@ time (`keyframe_set`, `keyframe_remove`, `keyframe_move`,
 `interpolation_set`, `motion_add`, `follow_set`, `timeline_set`,
 `object_tracks`), field (`field_sample`, `field_capture`, `field_paste`,
 `macro_list`, `macro_insert`), files (`import_grib`, `import_image`,
-`import_history`, `export_grib`, `export_zarr`, `export_cancel`), view
+`history_archives`, `import_history`, `export_grib`, `export_zarr`,
+`export_cancel`), weather (`storm_create`), view
 (`screenshot`, `view_focus`, `step_set`, `selection_set`), history (`undo`,
 `redo`, `history_list`, `history_jump`) and `invoke`, which runs any IPC
 command by name — the test in `mcp/invoke.rs` holds its table equal to the
 handler list minus a named exclusion list, so a command added later is
 reachable the day it lands.
+
+**The service routes a request, not only executes one** (2026-09-18). Three
+sentences were handed to fresh agents that had the service and web search and
+nothing else (`tools/mcp-scenarios`), and what each did is why the following
+holds:
+
+- **The server's instructions** (`mcp/tools/guide.rs`) open with today's date
+  and then say which of two ways a request is: *real past weather* — a named
+  storm, a race, a date — is downloaded, never drawn (`history_archives`,
+  `project_new`, `import_history`, `export_grib`); *invented weather* is
+  drawn. Without them an agent asked for "the largest hurricane of 2024"
+  drew a vortex by hand at its landfall; without the date one asked in
+  September 2026 for "the last Newport Bermuda Race" fetched June 2024. A
+  test holds every tool, parameter and option the instructions name to
+  existing.
+- **`import_history` is asked the way a person would ask**: `fields`
+  (`"wind"`, `"current"`), `start` and `end` as ISO 8601 UTC (a bare end date
+  is the whole of that day), never Unix seconds. By default it resizes the
+  timeline to the range — growing freely, shrinking only a project with no
+  objects — and stamps step 0, so an export afterwards needs only a path. A
+  range of more than 240 steps is refused with the step count and the advice
+  to use a longer step. `history_archives` gives each archive's first and
+  last hour as held right now, and the present moment.
+- **`storm_create`** draws a travelling cyclone as one `circle` object:
+  gradient fill, strongest at the centre, counter-clockwise for a track that
+  starts in the northern hemisphere and clockwise in the southern, keyed along
+  the track at the step each waypoint's distance earns it, with peak wind and
+  diameter running from a start value to an end value. Both winds are
+  **required**: told in prose that a storm develops as it travels, an agent
+  keyed the position twenty-one times and offered intensity as an
+  afterthought, so the question it could skip became a parameter it cannot.
+  It composes `create_object` and `set_object_property` and adds no way of
+  writing the document.
+- **A path is absolute, or begins with `~/`**, on every tool that takes one.
+  The application's working directory is nobody's idea of "here": a relative
+  export landed in the crate's source folder while the agent reported it "in
+  the current directory". `export_grib` and `export_zarr` take their
+  reference time from the project's start time when given none.
+- **Every schema is one a strict client accepts.** `gesture`, `options`,
+  `values` and a keyframe's `value` declare their real shape
+  (`#[schemars(with = …)]`) where they were `true`; a client with nothing to
+  go on sent the gesture as a *string* of JSON and was refused until it found
+  `invoke`. They are still received as plain JSON, so a malformed one is a
+  refusal the model can read rather than a protocol error, and a stringified
+  one is read. A tool's structured result is an object, so `tool_catalogue`
+  and `recent_projects` return `{tools}` and `{projects}`; the catalogue takes
+  a `tool` name for one entry. The official TypeScript SDK refused the whole
+  tool list before this.
+- **A property write past the last step is refused by the document**
+  (`set_property_with`), as the keyframe commands already did: `object_set`
+  with `auto_key` keyed step 20 of a 20-step project.
 
 **Registering with a client** is a button for the two clients that have
 somewhere to be registered: *Add to Claude Code* and *Add to Codex*

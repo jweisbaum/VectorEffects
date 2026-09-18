@@ -311,7 +311,7 @@ state all the same, so it is saved and undone like everything else.
 ### Adding an MCP tool
 
 0. Pick the group file in `mcp/tools/` (project, structure, time, field,
-   files, view, history, escape — the last holding only `invoke`); a new
+   files, weather, view, history, escape — the last holding only `invoke`); a new
    group is a new file with its own `#[tool_router(router = …)]` block added
    to the sum in `tools/mod.rs`'s `new`.
 1. The tool calls the `#[tauri::command]` function with `app.state()`; it
@@ -327,6 +327,22 @@ state all the same, so it is saved and undone like everything else.
    reason in the comment; the coverage test fails otherwise.
 5. An integration test in `tests/mcp.rs` drives it over HTTP and checks the
    document through the interface's own read.
+6. **A structured parameter declares its shape and is received as JSON**:
+   `#[schemars(with = "TheRealType")] pub gesture: Value`, read with
+   `tools::typed`. Typed outright, a malformed value fails in `rmcp` as a
+   protocol error the model never sees; left as a bare `Value` its schema is
+   `true`, and a client with nothing to go on sends the object as a string.
+   A result is a struct, never a bare `Vec` — `structuredContent` is an
+   object, and the official SDK refuses the whole tool list otherwise.
+   `every_tool_schema_is_one_a_strict_client_accepts` holds both.
+7. **A path goes through `files::absolute`**, a time is ISO 8601 through
+   `files::parse_utc`. Never Unix seconds, never a relative path.
+8. If an agent should reach for the tool on its own, say when in
+   `mcp/tools/guide.rs` — the server's instructions, which route a request —
+   and then **find out**: `tools/mcp-scenarios/run.sh` hands a sentence to a
+   fresh agent. A description says what a tool does; only a run says whether
+   it gets picked. When prose is not enough, make the question a required
+   parameter (`storm_create`'s two winds).
 
 ### Adding a numeric input
 

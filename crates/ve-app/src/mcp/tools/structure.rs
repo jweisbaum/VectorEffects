@@ -51,17 +51,27 @@ pub struct ObjectsListParams {
 }
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ObjectCreateParams {
+    /// A tool name from `tool_catalogue`: "circle", "brush", "curve", …
     pub tool: String,
+    /// Where it is drawn, in the form the catalogue names for the tool.
+    /// Coordinates are `[lon, lat]` in degrees, longitude in -180..180.
+    #[schemars(with = "crate::create::Gesture")]
     pub gesture: Value,
+    /// The tool's options; any left out take the catalogue's defaults.
     #[serde(default)]
-    pub options: Vec<Value>,
+    #[schemars(with = "Vec<crate::create::ToolOption>")]
+    pub options: Value,
+    /// A layer id from `layers_list`; null or absent is the top layer.
     pub layer: Option<u64>,
 }
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ObjectSetParams {
     pub object: u64,
+    /// The step the change is made at, from 0 to step_count - 1.
     pub step: u32,
-    pub values: serde_json::Map<String, Value>,
+    /// Property id (`object_get`'s `id`) to tagged value.
+    #[schemars(with = "std::collections::BTreeMap<String, crate::document::PropertyValue>")]
+    pub values: Value,
     #[serde(default)]
     pub auto_key: bool,
 }
@@ -274,13 +284,16 @@ impl<R: tauri::Runtime> VectorEffects<R> {
         &self,
         Parameters(p): Parameters<ObjectCreateParams>,
     ) -> std::result::Result<Json<crate::create::Created>, ToolError> {
-        let object: crate::create::NewObject = serde_json::from_value(serde_json::json!({
-            "tool": p.tool,
-            "gesture": p.gesture,
-            "options": p.options,
-            "layer": p.layer
-        }))
-        .map_err(|e| ToolError::Refused(format!("object_create: {e}")))?;
+        let options = match p.options {
+            Value::Null => Vec::new(),
+            raw => super::typed("options", raw)?,
+        };
+        let object = crate::create::NewObject {
+            tool: super::typed("tool", Value::String(p.tool))?,
+            gesture: super::typed("gesture", p.gesture)?,
+            options,
+            layer: p.layer,
+        };
         let created = self
             .write("object_create", false, move |app| {
                 crate::create::create_object(app.state(), object)
@@ -307,11 +320,12 @@ impl<R: tauri::Runtime> VectorEffects<R> {
         // round 1, finding 2b): a malformed value used to be caught only
         // when its own turn in the loop came around, after any values ahead
         // of it in the map had already written.
+        let values: serde_json::Map<String, Value> = super::typed("values", values)?;
         let parsed = values
             .into_iter()
             .map(|(property, raw)| {
-                let value: crate::document::PropertyValue = serde_json::from_value(raw)
-                    .map_err(|e| ToolError::Refused(format!("values.{property}: {e}")))?;
+                let value: crate::document::PropertyValue =
+                    super::typed(&format!("values.{property}"), raw)?;
                 Ok((property, value))
             })
             .collect::<std::result::Result<Vec<_>, ToolError>>()?;

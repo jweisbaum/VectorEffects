@@ -18,8 +18,9 @@ pub struct KeyframeSetParams {
     /// A property id (`object_get`'s `id`, e.g. `"Position"`, `"Speed"`).
     pub property: String,
     pub step: u32,
-    /// A tagged `PropertyValue` (object_set's shape), or null to key the
-    /// value the property has at this step right now.
+    /// A tagged value (object_set's shape), or null to key the value the
+    /// property has at this step right now.
+    #[schemars(with = "Option<crate::document::PropertyValue>")]
     pub value: Option<Value>,
 }
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -103,9 +104,8 @@ impl<R: tauri::Runtime> VectorEffects<R> {
     ) -> std::result::Result<Json<ProjectSummary>, ToolError> {
         let value = p
             .value
-            .map(serde_json::from_value::<crate::document::PropertyValue>)
-            .transpose()
-            .map_err(|e| ToolError::Refused(format!("value: {e}")))?;
+            .map(|raw| super::typed::<crate::document::PropertyValue>("value", raw))
+            .transpose()?;
         self.write("keyframe_set", false, move |app| {
             crate::animation::set_keyframe(app.state(), p.object, p.property, p.step, value)
         })

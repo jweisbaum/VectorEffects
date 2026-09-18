@@ -30,7 +30,9 @@ impl<R: tauri::Runtime> VectorEffects<R> {
             .map(Json)
     }
 
-    #[tool(description = "The history list with the current position.")]
+    #[tool(
+        description = "The UNDO history: the edits made to this project, with the current position. Nothing to do with past weather, which is import_history."
+    )]
     async fn history_list(
         &self,
     ) -> std::result::Result<Json<crate::document::HistoryView>, ToolError> {
@@ -41,7 +43,7 @@ impl<R: tauri::Runtime> VectorEffects<R> {
         .map(Json)
     }
 
-    #[tool(description = "Jumps to an entry of history_list.")]
+    #[tool(description = "Jumps to an entry of the undo history that history_list returns.")]
     async fn history_jump(
         &self,
         Parameters(p): Parameters<HistoryJumpParams>,

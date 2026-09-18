@@ -18,9 +18,12 @@ pub struct ProjectNewParams {
     pub field_kind: String,
     /// Grid resolution in degrees as a string: "1.0", "0.5", "0.25", "0.1".
     pub resolution: String,
-    /// Hours between steps: 1, 3 or 6.
+    /// Hours between steps: 1, 3, 6 or 24. Fixed for the life of the
+    /// project. 6 suits an event of several days, 1 or 3 a day or two.
     pub step_hours: u32,
-    /// Number of steps.
+    /// Number of steps, 1 to 240; the timeline spans
+    /// (step_count - 1) x step_hours hours. `import_history` resizes it to
+    /// the range it downloads, so any value does before one.
     pub step_count: u32,
     /// Discard unsaved changes in the open project. Refused without it.
     #[serde(default)]
@@ -29,7 +32,7 @@ pub struct ProjectNewParams {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ProjectOpenParams {
-    /// Path to a .veproj file.
+    /// Path to a .veproj file: absolute, or beginning with `~/`.
     pub path: String,
     #[serde(default)]
     pub discard_unsaved: bool,
@@ -37,7 +40,8 @@ pub struct ProjectOpenParams {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ProjectSaveParams {
-    /// Save here instead of the project's own path (a Save As).
+    /// Save here instead of the project's own path (a Save As). Absolute, or
+    /// beginning with `~/`.
     pub path: Option<String>,
 }
 
@@ -53,6 +57,24 @@ pub struct ProjectStatus {
     pub project: Option<ProjectSummary>,
 }
 
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+pub struct CatalogueParams {
+    /// One tool's name ("circle", "brush", …) for that entry alone; absent
+    /// or null for every tool, which is long.
+    #[serde(default)]
+    pub tool: Option<String>,
+}
+/// A tool's structured result is an object (MCP, `structuredContent`), so a
+/// list travels inside one.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct Catalogue {
+    pub tools: Vec<crate::palette::ToolSchema>,
+}
+/// See [`Catalogue`].
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct RecentProjects {
+    pub projects: Vec<crate::projects::RecentProject>,
+}
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct Closed {
     pub closed: bool,
@@ -99,19 +121,23 @@ impl<R: tauri::Runtime> VectorEffects<R> {
         &self,
         Parameters(p): Parameters<ProjectOpenParams>,
     ) -> std::result::Result<Json<ProjectSummary>, ToolError> {
+        let path = super::files::absolute(&p.path)?;
         self.write("project_open", true, move |app| {
-            crate::projects::open_project(app.state(), p.path, p.discard_unsaved)
+            crate::projects::open_project(app.state(), path, p.discard_unsaved)
         })
         .await
         .map(Json)
     }
 
-    #[tool(description = "Saves the project to its own path, or to `path` as a Save As.")]
+    #[tool(
+        description = "Saves the project to its own path, or to `path` as a Save As: absolute or beginning with ~/, ending in .veproj. A project that has never been saved needs `path`. Saving is not needed before an export."
+    )]
     async fn project_save(
         &self,
         Parameters(p): Parameters<ProjectSaveParams>,
     ) -> std::result::Result<Json<ProjectSummary>, ToolError> {
-        self.write("project_save", false, move |app| match p.path {
+        let path = p.path.as_deref().map(super::files::absolute).transpose()?;
+        self.write("project_save", false, move |app| match path {
             Some(path) => crate::projects::save_project_as(app.state(), path),
             None => crate::projects::save_project(app.state()),
         })
@@ -134,24 +160,41 @@ impl<R: tauri::Runtime> VectorEffects<R> {
     }
 
     #[tool(description = "Recently opened projects, newest first.")]
-    async fn recent_projects(
-        &self,
-    ) -> std::result::Result<Json<Vec<crate::projects::RecentProject>>, ToolError> {
+    async fn recent_projects(&self) -> std::result::Result<Json<RecentProjects>, ToolError> {
         self.run("recent_projects", |app| {
             crate::projects::recent_projects(app.state())
         })
         .await
-        .map(Json)
+        .map(|projects| Json(RecentProjects { projects }))
     }
 
     #[tool(
-        description = "Every drawing tool with its options, defaults, ranges and gesture shape. Read this before object_create."
+        description = "The drawing tools with their options, defaults, ranges and gesture shape. Read a tool's entry before object_create: pass `tool` (\"circle\", \"brush\", \"curve\", \"shape_fill\", \"mask\", …) for that one entry, or nothing for all of them. A choice option's value is {\"kind\":\"choice\",\"index\":i}, i indexing the option's `variants`; `depends_on` says which choice makes an option live."
     )]
     async fn tool_catalogue(
         &self,
-    ) -> std::result::Result<Json<Vec<crate::palette::ToolSchema>>, ToolError> {
-        self.run("tool_catalogue", |_| crate::palette::tool_palette())
-            .await
-            .map(Json)
+        Parameters(p): Parameters<CatalogueParams>,
+    ) -> std::result::Result<Json<Catalogue>, ToolError> {
+        let mut tools = self
+            .run("tool_catalogue", |_| crate::palette::tool_palette())
+            .await?;
+        if let Some(wanted) = p.tool {
+            // A tool's name as the catalogue spells it, which is how a
+            // client names it back.
+            let name_of = |tool: &crate::palette::ToolSchema| {
+                serde_json::to_value(tool.tool)
+                    .ok()
+                    .and_then(|name| name.as_str().map(str::to_owned))
+            };
+            let known: Vec<String> = tools.iter().filter_map(name_of).collect();
+            tools.retain(|tool| name_of(tool).as_deref() == Some(wanted.as_str()));
+            if tools.is_empty() {
+                return Err(ToolError::Refused(format!(
+                    "there is no tool named {wanted:?}; the tools are {}",
+                    known.join(", ")
+                )));
+            }
+        }
+        Ok(Json(Catalogue { tools }))
     }
 }

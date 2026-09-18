@@ -21,11 +21,13 @@ use crate::error::AppError;
 mod escape;
 mod field;
 mod files;
+mod guide;
 mod history;
 mod project;
 mod structure;
 mod time;
 mod view;
+mod weather;
 
 pub use escape::{InvokeParams, Invoked};
 pub use field::*;
@@ -35,6 +37,7 @@ pub use project::*;
 pub use structure::*;
 pub use time::*;
 pub use view::*;
+pub use weather::*;
 
 /// One handler per client session, holding the application it drives.
 ///
@@ -96,6 +99,29 @@ impl IntoCallToolResult for ToolError {
             ToolError::Internal(err) => Err(err),
         }
     }
+}
+
+/// Reads a structured parameter: a gesture, a list of options, a tagged value.
+///
+/// These are declared to the client with their real schema
+/// (`#[schemars(with = …)]`) and received as plain JSON, for two reasons. A
+/// value that does not parse is then a **refusal the model can read**
+/// (`gesture: missing field at`), where a typed parameter would fail in
+/// `rmcp` as a protocol error before the tool ran. And a client that was
+/// given no usable schema — these were once `true`, "anything" — sends an
+/// object as a *string* of JSON, which is read here rather than refused:
+/// every first `object_create` of the test agents arrived that way.
+pub(crate) fn typed<T: serde::de::DeserializeOwned>(
+    field: &str,
+    raw: serde_json::Value,
+) -> std::result::Result<T, ToolError> {
+    let raw = match raw {
+        serde_json::Value::String(text) if text.trim_start().starts_with(['{', '[']) => {
+            serde_json::from_str(&text).unwrap_or(serde_json::Value::String(text))
+        }
+        other => other,
+    };
+    serde_json::from_value(raw).map_err(|e| ToolError::Refused(format!("{field}: {e}")))
 }
 
 impl<R: tauri::Runtime> VectorEffects<R> {
@@ -261,6 +287,7 @@ impl<R: tauri::Runtime> VectorEffects<R> {
             + Self::tool_router_files()
             + Self::tool_router_view()
             + Self::tool_router_history()
+            + Self::tool_router_weather()
             + Self::tool_router_escape();
         Self { app, tool_router }
     }
@@ -274,10 +301,7 @@ impl<R: tauri::Runtime> ServerHandler for VectorEffects<R> {
                 "VectorEffects",
                 env!("CARGO_PKG_VERSION"),
             ))
-            .with_instructions(
-                "Paints global wind and current fields. Open or create a project first; every \
-                 edit is undoable and shows on the map.",
-            )
+            .with_instructions(guide::instructions(chrono::Utc::now()))
     }
 
     /// Counts the session once the client has finished initialising, paired

@@ -880,3 +880,438 @@ async fn a_screenshot_the_map_declines_fails_with_the_reason() {
     assert!(started.elapsed() < std::time::Duration::from_secs(5));
     client.cancel().await.expect("close");
 }
+
+// ---------------------------------------------------------------------------
+// What the three agent scenarios found (tools/mcp-scenarios). Each of these
+// was a fresh agent failing at a sentence a person would type.
+// ---------------------------------------------------------------------------
+
+/// Every schema is one a strict client accepts. The reference is the MCP
+/// specification as the official TypeScript SDK enforces it: a property's
+/// schema is an object, and a tool's output schema describes an *object* —
+/// `gesture: true` and two tools returning bare arrays made that client
+/// refuse the whole list, and made a laxer one send the gesture as a string.
+#[tokio::test]
+async fn every_tool_schema_is_one_a_strict_client_accepts() {
+    let root = TempRoot::new("schemas");
+    let app = mock_app(&root);
+    let (port, token) = serve(&app);
+    let client = client(port, &token).await;
+    let tools = client.list_all_tools().await.expect("tools");
+    for tool in &tools {
+        let input = Value::Object((*tool.input_schema).clone());
+        assert_eq!(input["type"], "object", "{}: input", tool.name);
+        if let Some(properties) = input["properties"].as_object() {
+            for (name, schema) in properties {
+                assert!(
+                    schema.is_object(),
+                    "{}.{name}: a property's schema is {schema}, which says nothing",
+                    tool.name
+                );
+            }
+        }
+        if let Some(output) = &tool.output_schema {
+            assert_eq!(
+                output.get("type"),
+                Some(&json!("object")),
+                "{}: structuredContent is an object, so its schema is one",
+                tool.name
+            );
+        }
+    }
+    client.cancel().await.expect("close");
+}
+
+/// The instructions are read by every client for the whole session, and
+/// they name tools, parameters and options. A rename that leaves them
+/// behind sends an agent after something that is not there.
+#[tokio::test]
+async fn the_instructions_name_only_what_exists() {
+    let root = TempRoot::new("guide");
+    let app = mock_app(&root);
+    let (port, token) = serve(&app);
+    let client = client(port, &token).await;
+    let instructions = client
+        .peer_info()
+        .and_then(|info| info.instructions.clone())
+        .expect("instructions");
+    assert!(
+        instructions.starts_with("Today is "),
+        "the date leads: {instructions:.80}"
+    );
+
+    fn names_in(schema: &Value, into: &mut Vec<String>) {
+        match schema {
+            Value::Object(map) => {
+                if let Some(properties) = map.get("properties").and_then(Value::as_object) {
+                    into.extend(properties.keys().cloned());
+                }
+                map.values().for_each(|v| names_in(v, into));
+            }
+            Value::Array(items) => items.iter().for_each(|v| names_in(v, into)),
+            _ => {}
+        }
+    }
+    let tools = client.list_all_tools().await.expect("tools");
+    let mut known: Vec<String> = tools.iter().map(|t| t.name.to_string()).collect();
+    for tool in &tools {
+        names_in(&Value::Object((*tool.input_schema).clone()), &mut known);
+    }
+    let catalogue = call(&client, "tool_catalogue", json!({})).await;
+    let mut options = Vec::new();
+    for tool in catalogue["tools"].as_array().expect("tools") {
+        for option in tool["options"].as_array().expect("options") {
+            options.push(option["property"].as_str().expect("property").to_owned());
+            for variant in option["variants"].as_array().expect("variants") {
+                known.push(variant.as_str().expect("variant").to_owned());
+            }
+        }
+    }
+
+    let words = instructions
+        .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+        .filter(|word| !word.is_empty());
+    for word in words {
+        let snake = word.contains('_') && word.chars().all(|c| !c.is_ascii_uppercase());
+        if snake {
+            assert!(
+                known.iter().any(|k| k == word),
+                "the instructions say `{word}`, which is no tool, parameter or variant"
+            );
+        }
+        // FillMode, SpeedMin: an option id. `Position` is every object's.
+        let camel = word.chars().next().is_some_and(|c| c.is_ascii_uppercase())
+            && word.chars().skip(1).any(|c| c.is_ascii_uppercase())
+            && word.chars().any(|c| c.is_ascii_lowercase());
+        if camel && !["VectorEffects", "GRIB2"].contains(&word) {
+            assert!(
+                options.iter().any(|o| o == word),
+                "the instructions say `{word}`, which is no tool option"
+            );
+        }
+    }
+    client.cancel().await.expect("close");
+}
+
+/// The winds of a storm, north, east, south and west of a centre.
+async fn around<H: rmcp::ClientHandler>(
+    client: &rmcp::service::RunningService<rmcp::RoleClient, H>,
+    centre: [f64; 2],
+    step: u32,
+) -> Vec<Value> {
+    let [lon, lat] = centre;
+    let points = json!([
+        [lon, lat + 1.0],
+        [lon + 1.0, lat],
+        [lon, lat - 1.0],
+        [lon - 1.0, lat]
+    ]);
+    call(
+        client,
+        "field_sample",
+        json!({ "points": points, "steps": [step], "kind": "wind" }),
+    )
+    .await["samples"]
+        .as_array()
+        .expect("samples")
+        .clone()
+}
+
+/// Counter-clockwise, by what the words mean rather than by which option was
+/// set: north of the centre the air moves west, east of it north, south of
+/// it east and west of it south. Clockwise is each of those reversed.
+fn turns_counter_clockwise(samples: &[Value]) -> bool {
+    let (u, v) = (
+        |i: usize| samples[i]["u_mps"].as_f64().expect("u"),
+        |i: usize| samples[i]["v_mps"].as_f64().expect("v"),
+    );
+    u(0) < -1.0 && v(1) > 1.0 && u(2) > 1.0 && v(3) < -1.0
+}
+
+#[tokio::test]
+async fn a_storm_travels_turns_with_its_hemisphere_and_intensifies() {
+    let root = TempRoot::new("storm");
+    let app = mock_app(&root);
+    let (port, token) = serve(&app);
+    let client = client(port, &token).await;
+    call(
+        &client,
+        "project_new",
+        json!({ "name": "Storm", "field_kind": "wind", "resolution": "1.0", "step_hours": 6, "step_count": 21 }),
+    )
+    .await;
+    let miami = [-80.2, 25.8];
+    let halifax = [-63.6, 44.6];
+    let storm = call(
+        &client,
+        "storm_create",
+        json!({
+            "track": [miami, [-75.0, 34.0], halifax],
+            "peak_wind_start_mps": 18.0, "peak_wind_end_mps": 32.0,
+            "diameter_start_km": 600.0, "diameter_end_km": 900.0
+        }),
+    )
+    .await;
+    assert_eq!(storm["rotation"], "ccw", "{storm}");
+    let keys = storm["keys"].as_array().expect("keys");
+    assert_eq!(keys.first().expect("first")["step"], 0);
+    assert_eq!(keys.last().expect("last")["step"], 20);
+
+    // It is one circle, where it was asked to be at each end of the track.
+    let object = storm["object"].as_u64().expect("object");
+    let listed = call(&client, "layers_list", json!({ "step": 0 })).await;
+    assert!(listed.to_string().contains("circle"), "{listed}");
+    for (step, [lon, lat]) in [(0, miami), (20, halifax)] {
+        let properties = call(
+            &client,
+            "object_get",
+            json!({ "object": object, "step": step }),
+        )
+        .await;
+        let position = properties["properties"]
+            .as_array()
+            .expect("properties")
+            .iter()
+            .find(|p| p["id"] == "Position")
+            .expect("Position")["value"]
+            .clone();
+        assert!(
+            (position["lon"].as_f64().expect("lon") - lon).abs() < 1e-6,
+            "{position}"
+        );
+        assert!(
+            (position["lat"].as_f64().expect("lat") - lat).abs() < 1e-6,
+            "{position}"
+        );
+    }
+
+    let born = around(&client, miami, 0).await;
+    let grown = around(&client, halifax, 20).await;
+    assert!(turns_counter_clockwise(&born), "{born:?}");
+    assert!(turns_counter_clockwise(&grown), "{grown:?}");
+    let speed = |samples: &[Value]| samples[0]["speed_mps"].as_f64().expect("speed");
+    assert!(
+        speed(&grown) > speed(&born) + 3.0,
+        "it arrives stronger than it left: {} then {}",
+        speed(&born),
+        speed(&grown)
+    );
+
+    // South of the equator a cyclone turns the other way.
+    let south = call(
+        &client,
+        "storm_create",
+        json!({
+            "track": [[60.0, -12.0], [55.0, -22.0]],
+            "peak_wind_start_mps": 20.0, "peak_wind_end_mps": 30.0,
+            "diameter_start_km": 600.0, "diameter_end_km": 600.0
+        }),
+    )
+    .await;
+    assert_eq!(south["rotation"], "cw", "{south}");
+    let mirrored: Vec<Value> = around(&client, [60.0, -12.0], 0).await;
+    assert!(!turns_counter_clockwise(&mirrored), "{mirrored:?}");
+    assert!(
+        mirrored[0]["u_mps"].as_f64().expect("u") > 1.0,
+        "clockwise: north of the centre the air moves east, {mirrored:?}"
+    );
+
+    let message = call_err(
+        &client,
+        "storm_create",
+        json!({
+            "track": [miami],
+            "peak_wind_start_mps": 18.0, "peak_wind_end_mps": 32.0,
+            "diameter_start_km": 600.0, "diameter_end_km": 900.0
+        }),
+    )
+    .await;
+    assert!(message.contains("two"), "{message}");
+    client.cancel().await.expect("close");
+}
+
+/// A client given no schema for `gesture` sent it as a string of JSON, and
+/// was refused three times before finding `invoke`. It is read now, and a
+/// key past the last step — which `object_set` used to write, where no frame
+/// would ever show it — is refused.
+#[tokio::test]
+async fn a_stringified_gesture_is_read_and_a_step_past_the_end_is_refused() {
+    let root = TempRoot::new("lenient");
+    let app = mock_app(&root);
+    let (port, token) = serve(&app);
+    let client = client(port, &token).await;
+    call(&client, "project_new", new_project_args("Lenient")).await;
+    let created = call(
+        &client,
+        "object_create",
+        json!({ "tool": "circle", "gesture": "{\"kind\":\"point\",\"at\":[10.0,20.0]}" }),
+    )
+    .await;
+    let object = created["object"].as_u64().expect("object");
+
+    let message = call_err(
+        &client,
+        "object_create",
+        json!({ "tool": "circle", "gesture": { "kind": "point" } }),
+    )
+    .await;
+    assert!(
+        message.contains("gesture"),
+        "a refusal that says what: {message}"
+    );
+
+    // Four steps, 0 to 3.
+    let value = json!({ "Position": { "kind": "position", "lon": 11.0, "lat": 21.0 } });
+    call(
+        &client,
+        "object_set",
+        json!({ "object": object, "step": 3, "auto_key": true, "values": value }),
+    )
+    .await;
+    let message = call_err(
+        &client,
+        "object_set",
+        json!({ "object": object, "step": 4, "auto_key": true, "values": value }),
+    )
+    .await;
+    assert!(message.contains("past the last step"), "{message}");
+    let tracks = call(
+        &client,
+        "object_tracks",
+        json!({ "object": object, "step": 0 }),
+    )
+    .await;
+    assert!(
+        !tracks.to_string().contains("\"step\":4"),
+        "nothing was keyed there: {tracks}"
+    );
+    client.cancel().await.expect("close");
+}
+
+/// A relative path lands in the application's folder, not the caller's: an
+/// agent exported `hurricane.grib2`, told its user it was "in the current
+/// directory", and it was in the crate's source folder.
+#[tokio::test]
+async fn an_export_needs_an_absolute_path_and_takes_its_time_from_the_project() {
+    let root = TempRoot::new("export-defaults");
+    let app = mock_app(&root);
+    let (port, token) = serve(&app);
+    let client = client(port, &token).await;
+    call(&client, "project_new", new_project_args("Defaults")).await;
+    call(
+        &client,
+        "object_create",
+        json!({ "tool": "circle", "gesture": { "kind": "point", "at": [0.0, 0.0] } }),
+    )
+    .await;
+
+    let message = call_err(&client, "export_grib", json!({ "path": "storm.grib2" })).await;
+    assert!(message.contains("absolute"), "{message}");
+    assert!(!std::path::Path::new("storm.grib2").exists());
+
+    let out = root.0.join("timed.grib2");
+    let message = call_err(
+        &client,
+        "export_grib",
+        json!({ "path": out.to_string_lossy() }),
+    )
+    .await;
+    assert!(message.contains("no start time"), "{message}");
+
+    // 2024-09-24T06:00Z.
+    call(
+        &client,
+        "timeline_set",
+        json!({ "start_unix_s": 1_727_157_600 }),
+    )
+    .await;
+    call(
+        &client,
+        "export_grib",
+        json!({ "path": out.to_string_lossy() }),
+    )
+    .await;
+    let bytes = std::fs::read(&out).expect("the file");
+    // Section 1 follows the 16 octets of section 0; its octets 13-19 are the
+    // reference time (WMO GRIB2, section 1): year, month, day, hour, minute,
+    // second.
+    let time = &bytes[16 + 12..16 + 19];
+    assert_eq!(u16::from_be_bytes([time[0], time[1]]), 2024);
+    assert_eq!(&time[2..7], &[9, 24, 6, 0, 0]);
+    client.cancel().await.expect("close");
+}
+
+/// What `import_history` decides before it reaches the network.
+#[tokio::test]
+async fn a_history_import_is_refused_in_words_before_anything_is_fetched() {
+    let root = TempRoot::new("history-refusals");
+    let app = mock_app(&root);
+    let (port, token) = serve(&app);
+    let client = client(port, &token).await;
+    let range = json!({ "fields": ["wind"], "start": "2024-09-24", "end": "2024-09-27" });
+    let message = call_err(&client, "import_history", range.clone()).await;
+    assert!(message.contains("No project is open"), "{message}");
+
+    call(
+        &client,
+        "project_new",
+        json!({ "name": "Hourly", "field_kind": "wind", "resolution": "1.0", "step_hours": 1, "step_count": 1 }),
+    )
+    .await;
+    let message = call_err(
+        &client,
+        "import_history",
+        json!({ "fields": ["wind"], "start": "2024-09-01", "end": "2024-09-30" }),
+    )
+    .await;
+    // Thirty days hourly: 30 x 24 = 720 steps against the 240 a project holds.
+    assert!(message.contains("720 steps"), "{message}");
+    assert!(
+        message.contains("step_hours"),
+        "and what to do about it: {message}"
+    );
+
+    for (args, says) in [
+        (
+            json!({ "fields": ["wind"], "start": "2024-09-27", "end": "2024-09-24" }),
+            "before",
+        ),
+        (
+            json!({ "fields": [], "start": "2024-09-24", "end": "2024-09-27" }),
+            "fields",
+        ),
+        (
+            json!({ "fields": ["wind"], "start": "last tuesday", "end": "2024-09-27" }),
+            "2024-09-24T00:00Z",
+        ),
+    ] {
+        let message = call_err(&client, "import_history", args).await;
+        assert!(message.contains(says), "{message}");
+    }
+    let status = call(&client, "project_status", json!({})).await;
+    assert_eq!(
+        status["project"]["step_count"], 1,
+        "a refused import resizes nothing"
+    );
+    client.cancel().await.expect("close");
+}
+
+#[tokio::test]
+async fn the_catalogue_gives_one_tool_when_asked_for_one() {
+    let root = TempRoot::new("catalogue");
+    let app = mock_app(&root);
+    let (port, token) = serve(&app);
+    let client = client(port, &token).await;
+    let all = call(&client, "tool_catalogue", json!({})).await;
+    assert!(all["tools"].as_array().expect("tools").len() > 5);
+    let one = call(&client, "tool_catalogue", json!({ "tool": "circle" })).await;
+    let tools = one["tools"].as_array().expect("tools");
+    assert_eq!(tools.len(), 1);
+    assert_eq!(tools[0]["tool"], "circle");
+    let message = call_err(&client, "tool_catalogue", json!({ "tool": "hurricane" })).await;
+    assert!(
+        message.contains("circle"),
+        "it says what there is: {message}"
+    );
+    client.cancel().await.expect("close");
+}

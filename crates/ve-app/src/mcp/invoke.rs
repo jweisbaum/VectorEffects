@@ -98,6 +98,9 @@ pub const EXCLUDED: &[&str] = &[
     "export_grib",
     "export_zarr",
     "import_history",
+    // No state to hand it, which is the one shape the table holds; the
+    // curated tool of the same name carries it.
+    "history_archives",
 ];
 
 /// Every command reachable by name.

@@ -1,5 +1,27 @@
 # VectorEffects — Implementation Plan
 
+**2026-09-18: The MCP service against three sentences.** Fresh agents with
+only the service and web search were given: a GRIB of the largest hurricane
+of 2024; a GRIB of the weather of the last Newport Bermuda Race; a tropical
+storm from Miami to Nova Scotia (`tools/mcp-scenarios`). As shipped in 0.1.7
+the first was *drawn by hand* and never downloaded, and the third was a
+hurricane-strength disc, strongest at its rim, that did not develop. All three
+pass now, checked against the output and not the agent's account of it: the
+GRIB holds Helene's counter-clockwise 30 m/s circulation at 28°N 84.5°W on
+27 September 2024; the race is June 2026, not 2024; the storm is one circle,
+counter-clockwise in the evaluated field, 19.8 to 32.5 m/s along its track
+(43 turns became 5). What changed: instructions that route a request and
+lead with today's date; `history_archives`; `import_history` in ISO times
+that fits the timeline; `storm_create`; absolute paths only; real schemas
+for `gesture`/`options`/`values`. Bugs found on the way: the official MCP
+SDK refused the entire tool list (`gesture: true`, two array outputs); the
+documented archive name `"era5"` was one the importer refused; `object_set`
+keyed steps past the end; a relative export path wrote into `crates/ve-app`.
+Spec §8.8. Not done: exports are global, so a race is a 100 MB file where a
+regional one would be a few — a region on export is its own piece of work;
+and the scenarios run by hand, since they need a running application, the
+network and a paid model.
+
 **2026-09-18: The Zarr export is the routing layout.** The export now writes
 the format of `routing_test`, the ERA5 store the routing tools read, and is
 held to it by that store's own metadata documents as fixtures: `param`

@@ -127,7 +127,7 @@ impl Tool {
 }
 
 /// One node of a drawn path, in geographic coordinates.
-#[derive(Debug, Clone, Copy, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, Deserialize, schemars::JsonSchema, TS)]
 #[ts(export, export_to = "PathPoint.ts")]
 pub struct PathPoint {
     /// The on-curve point, as `[lon, lat]`.
@@ -149,7 +149,7 @@ pub struct PathPoint {
 /// of one gesture is true for every tool that uses it. The mask and the clone
 /// stamp are brush-like *because* all three send a [`Self::Stroke`], not
 /// because three separate code paths were written to match.
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema, TS)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[ts(export, export_to = "Gesture.ts")]
 pub enum Gesture {
@@ -200,7 +200,7 @@ impl Gesture {
 }
 
 /// One tool option, frozen onto the object at creation (spec.md 6.1).
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema, TS)]
 #[ts(export, export_to = "ToolOption.ts")]
 pub struct ToolOption {
     /// The property id, spelled as the inspector spells it.
