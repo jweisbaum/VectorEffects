@@ -18,7 +18,7 @@ use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::commands::AppState;
@@ -29,12 +29,27 @@ use crate::projects::with_session;
 pub const SERVER_NAME: &str = "vectoreffects";
 
 /// A client the Settings dialog can register the service with.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export, export_to = "McpClient.ts")]
 pub enum McpClient {
     ClaudeCode,
     Codex,
+    /// Not a configuration entry but an extension: see [`super::desktop`].
+    ClaudeDesktop,
+}
+
+impl McpClient {
+    /// The clients this platform has, in the order the dialog offers them.
+    /// Claude Desktop does not exist on Linux, and a button that can only
+    /// refuse is worse than no button.
+    pub fn available() -> Vec<Self> {
+        let mut clients = vec![Self::ClaudeCode, Self::Codex];
+        if super::desktop::supported() {
+            clients.push(Self::ClaudeDesktop);
+        }
+        clients
+    }
 }
 
 /// The arguments of `claude mcp remove` and `claude mcp add`, in that order.
@@ -271,6 +286,7 @@ pub fn mcp_register_client(state: tauri::State<'_, AppState>, client: McpClient)
                 .map_err(|err| AppError::Internal(err.to_string()))?;
             register_claude_code(&claude, &child_path, &url, &mcp.token)
         }
+        McpClient::ClaudeDesktop => super::desktop::register(&state.paths.settings_file()),
         McpClient::Codex => register_codex(
             &codex_home(&home, std::env::var_os("CODEX_HOME")),
             &url,

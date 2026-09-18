@@ -3,6 +3,7 @@
 
 pub mod capture;
 pub mod clients;
+pub mod desktop;
 pub mod events;
 pub mod invoke;
 pub mod server;
@@ -118,6 +119,7 @@ impl McpService {
             bind_error: self.bind_error.lock().ok().and_then(|e| e.clone()),
             sessions: activity.as_ref().map_or(0, |a| a.sessions),
             last_tool: activity.and_then(|a| a.last_tool.clone()),
+            clients: clients::McpClient::available(),
         }
     }
 }

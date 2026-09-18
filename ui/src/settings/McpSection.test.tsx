@@ -12,7 +12,7 @@ import type { McpStatus } from "../generated/McpStatus";
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const held = vi.hoisted(() => {
-  const off: McpStatus = { enabled: false, port: 47391, token: "", bound_port: null, bind_error: null, sessions: 0, last_tool: null };
+  const off: McpStatus = { enabled: false, port: 47391, token: "", bound_port: null, bind_error: null, sessions: 0, last_tool: null, clients: ["claude_code", "codex", "claude_desktop"] };
   const on: McpStatus = { ...off, enabled: true, token: "tok_abc", bound_port: 47391 };
   return {
     status: off,
@@ -59,7 +59,7 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   host.remove();
-  held.status = { enabled: false, port: 47391, token: "", bound_port: null, bind_error: null, sessions: 0, last_tool: null };
+  held.status = { enabled: false, port: 47391, token: "", bound_port: null, bind_error: null, sessions: 0, last_tool: null, clients: ["claude_code", "codex", "claude_desktop"] };
 });
 
 async function flush() {
@@ -143,6 +143,37 @@ describe("McpSection", () => {
     await flush();
     expect(button("Update in Claude Code")).toBeDefined();
     expect(host.textContent).not.toContain("restarted");
+  });
+
+  it("opens the extension in Claude Desktop, never claims it was installed, and never asks for an update", async () => {
+    held.status = held.on;
+    act(() => root.render(<McpSection onError={() => {}} />));
+    await flush();
+    await act(async () => {
+      button("Add to Claude Desktop")?.click();
+    });
+    await flush();
+    expect(held.registerMcpClient).toHaveBeenCalledWith("claude_desktop");
+    expect(button("Opened in Claude Desktop")).toBeDefined();
+    expect(host.textContent).toContain("confirm it there");
+    expect(host.textContent).not.toContain("picks it up when it is restarted");
+
+    // The extension reads the token as it goes: a rotation stales nothing.
+    const rotate = Array.from(host.querySelectorAll("button")).find((b) => b.textContent?.includes("Rotate"));
+    await act(async () => {
+      rotate?.click();
+    });
+    await flush();
+    expect(button("Opened in Claude Desktop")).toBeDefined();
+    expect(button("Update in Claude Desktop")).toBeUndefined();
+  });
+
+  it("offers only the clients this platform has", async () => {
+    held.status = { ...held.on, clients: ["claude_code", "codex"] };
+    act(() => root.render(<McpSection onError={() => {}} />));
+    await flush();
+    expect(button("Add to Codex")).toBeDefined();
+    expect(button("Add to Claude Desktop")).toBeUndefined();
   });
 
   it("reports a client that could not be written and does not claim it was", async () => {

@@ -3,4 +3,4 @@
 /**
  * A client the Settings dialog can register the service with.
  */
-export type McpClient = "claude_code" | "codex";
+export type McpClient = "claude_code" | "codex" | "claude_desktop";

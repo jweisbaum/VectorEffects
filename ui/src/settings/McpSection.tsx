@@ -21,10 +21,19 @@ export function clientSnippets(status: McpStatus): { claudeCode: string; json: s
   };
 }
 
-const CLIENTS: readonly { client: McpClient; name: string }[] = [
-  { client: "claude_code", name: "Claude Code" },
-  { client: "codex", name: "Codex" },
-];
+const CLIENT_NAMES: Readonly<Record<McpClient, string>> = {
+  claude_code: "Claude Code",
+  codex: "Codex",
+  claude_desktop: "Claude Desktop",
+};
+
+/**
+ * Claude Desktop is not given a configuration but an extension, which reads
+ * the port and the token from the settings file as it goes. Nothing it holds
+ * goes stale, and the installing is Claude Desktop's own dialog to finish: the
+ * button can say it was opened there, never that it was added.
+ */
+const INSTALLS_ITSELF: ReadonlySet<McpClient> = new Set<McpClient>(["claude_desktop"]);
 
 /**
  * What a client was last given, so the button can say when that has gone
@@ -36,8 +45,10 @@ function registrationKey(status: McpStatus): string {
 }
 
 /** The button's words: not yet added, added as it stands, or added and since changed. */
-export function registerLabel(name: string, given: string | undefined, status: McpStatus): string {
+export function registerLabel(client: McpClient, given: string | undefined, status: McpStatus): string {
+  const name = CLIENT_NAMES[client];
   if (given === undefined) return `Add to ${name}`;
+  if (INSTALLS_ITSELF.has(client)) return `Opened in ${name}`;
   return given === registrationKey(status) ? `Added to ${name}` : `Update in ${name}`;
 }
 
@@ -141,14 +152,20 @@ export default function McpSection({ onError }: { onError: (err: unknown) => voi
             </span>
           </div>
           <div className="settings-field">
-            {CLIENTS.map(({ client, name }) => (
+            {status.clients.map((client) => (
               <button key={client} disabled={adding !== null} onClick={() => register(client, status)}>
-                {registerLabel(name, given[client], status)}
+                {registerLabel(client, given[client], status)}
               </button>
             ))}
           </div>
-          {CLIENTS.some(({ client }) => given[client] === registrationKey(status)) && (
+          {status.clients.some((client) => !INSTALLS_ITSELF.has(client) && given[client] === registrationKey(status)) && (
             <p className="settings-note">Added. A session that is already running picks it up when it is restarted.</p>
+          )}
+          {given.claude_desktop !== undefined && (
+            <p className="settings-note">
+              Claude Desktop is asking whether to install the VectorEffects extension; confirm it there. It needs
+              installing once: a new token or port reaches it without another visit here.
+            </p>
           )}
           <details>
             <summary>Configuration for other clients</summary>

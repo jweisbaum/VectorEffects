@@ -620,6 +620,13 @@ to the hash input is a correctness bug that shows up as stale frames.
   job keeps `cargo test`'s output and, on failure, publishes the failed test
   names, the panics, or failing those the end of the log, as annotations:
   `GET /repos/…/check-runs/<job id>/annotations` reads them with no token.
+- **`mcp/bridge.js` runs under Claude Desktop's Node with nothing installed**
+  (spec §8.8): no `require` of anything but `node:` built-ins, ever, and
+  nothing on stdout but JSON-RPC — stderr is its log. It is `include_str!`ed
+  into the bundle, so `tests/mcp.rs` runs the copy *from the zip* under
+  `node`, through a restart of the service and an off-and-on. It lives under
+  the crate, so saving it restarts a running `tauri dev`; a bridge test
+  against the live application fails during that rebuild and looks like a bug.
 - **The Tauri CLI always passes `--no-default-features`.** `tauri dev` runs
   `cargo run --no-default-features …`, with or without a `--features` flag of
   its own, so a `default = [...]` list on `ve-app` would do nothing under

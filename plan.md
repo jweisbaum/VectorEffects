@@ -37,16 +37,20 @@ are written by hand so they stream; zarrs and zarr-python read them back.
 Spec §12.3. Not done: xarray cannot open a rectilinear store at all (nor
 `routing_test`), which is zarr-python's gap and not ours.
 
-**2026-09-18: Add to Claude Code, Add to Codex.** Settings → MCP service
-writes the service into a client's own configuration instead of only showing
-text to paste: Claude Code through its own `claude mcp add --scope user`
-(its config file is live state and is never written from here), Codex by
-editing `~/.codex/config.toml` in place, because its command line cannot
-carry a token. Spec §8.8. Not done: no button for Claude Desktop, which has
-no command line and whose file would have to be written through the
-`mcp-remote` bridge; and a local-scope entry made earlier from the pasted
-command is not found or removed, since it belongs to whichever folder it was
-pasted in.
+**2026-09-18: Add to Claude Code, Add to Codex, Add to Claude Desktop.**
+Settings → MCP service writes the service into a client's own configuration
+instead of only showing text to paste: Claude Code through its own `claude
+mcp add --scope user` (its config file is live state and is never written
+from here), Codex by editing `~/.codex/config.toml` in place, because its
+command line cannot carry a token. Claude Desktop takes no configuration for
+a local HTTP service, so it gets an extension: the application writes a
+`.mcpb` holding a dependency-free stdio bridge and opens it in Claude
+Desktop's installer. The bundle holds no secret — the bridge reads the port
+and token from the settings file — and follows the application through
+restarts and being switched off. Spec §8.8. Not done: the bundle is unsigned,
+which Claude Desktop says at install; and a local-scope Claude Code entry
+made earlier from the pasted command is not found or removed, since it
+belongs to whichever folder it was pasted in.
 
 **2026-09-16: MCP service (M86).** An MCP server inside the application,
 on loopback, switched on in Settings. Tools call the IPC commands with a

@@ -3289,6 +3289,30 @@ and never as a side effect of another setting; it fetches nothing and
 listens to nothing (invariant 5). The command is excluded from `invoke`.
 Every other client gets the same configuration as text.
 
+**Claude Desktop is given an extension, not a configuration** (`mcp::desktop`).
+A desktop extension (`.mcpb`) is a zip of a `manifest.json` and a *local
+stdio server*; it cannot name an HTTP service. So *Add to Claude Desktop*
+writes `VectorEffects.mcpb` beside the settings — the manifest, the
+application's icon, and `bridge.js`, which passes every JSON-RPC message from
+Claude Desktop's stdin to the loopback endpoint and every answer back, with
+no dependencies, since Claude Desktop runs it with the Node it ships — and
+opens it in Claude Desktop (`open -a Claude` on macOS, the file's association
+on Windows), whose own dialog installs it on the person's confirmation. The
+application writes the zip itself, because the people pressing the button
+have neither Node nor the `mcpb` tool; the official tool validates what it
+writes. **The bundle holds no secret**: the bridge reads the port and the
+token from the settings file, whose path the manifest hands it, each time it
+needs them. A rotated token or a changed port therefore needs no reinstall,
+and the button never says *Update*. It says *Opened in*, never *Added*: the
+installing is not this application's to see. The application comes and goes
+while Claude Desktop stays open, so the bridge assumes nothing: a session the
+application has forgotten, because it was restarted, is opened again by
+replaying the client's own `initialize`; and with the application not running
+the extension still starts, offers one tool, `vectoreffects_status`, that
+says so, and announces `tools/list_changed` when the application appears.
+The button is offered only where Claude Desktop exists (`McpStatus.clients`):
+macOS and Windows.
+
 Transport: Streamable HTTP on loopback, bearer token, `Host` and `Origin`
 restricted to loopback names. Directions cross this boundary as azimuth
 toward and speeds in m/s, the domain's own units; a client that wants the

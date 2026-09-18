@@ -55,6 +55,9 @@ base64 = "0.22"
 # Editing Codex's `config.toml` without disturbing the rest of it
 # (`mcp::clients`). Pure Rust, and already in the tree under the macros.
 toml_edit = "0.25"
+# Writing the Claude Desktop extension, which is a zip (`mcp::desktop`). Pure
+# Rust; the tests already read a saved project's archive with it.
+zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 # End-to-end automation, and **never in a shipped build** — see `[features]`.
 tauri-plugin-webdriver-automation = { version = "0.1.3", optional = true }
 
@@ -78,8 +81,6 @@ tauri-plugin-webdriver-automation = { version = "0.1.3", optional = true }
 webdriver = ["dep:tauri-plugin-webdriver-automation"]
 
 [dev-dependencies]
-# Reading a saved project's archive directly, to check what a capture writes.
-zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 ve-grib = { workspace = true, features = ["testing"] }
 # Reading a Zarr export back, to check what the writer put where.
 zarrs = { version = "0.23", default-features = false, features = ["filesystem", "zstd", "sharding", "crc32c"] }

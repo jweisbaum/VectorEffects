@@ -1247,6 +1247,8 @@ pub struct McpStatus {
     pub sessions: u32,
     /// The last tool a client called, if any.
     pub last_tool: Option<String>,
+    /// The clients the dialog can add the service to on this platform.
+    pub clients: Vec<crate::mcp::clients::McpClient>,
 }
 
 /// Reads the service's settings and live state.
