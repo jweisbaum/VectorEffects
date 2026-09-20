@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import { PROJECTIONS, projectionOf } from "./projection";
 
 import {
+  MAX_PX_PER_DEG,
   MAX_TILE_LEVEL,
+  TILE_SIZE,
   clampCamera,
   minPxPerDeg,
   normalizeLon,
@@ -134,7 +136,7 @@ describe("zoomAbout", () => {
 
 describe("tileLevelFor", () => {
   it("stays inside the pyramid", () => {
-    for (const px of [0.01, 1, 4, 40, 512, 100000]) {
+    for (const px of [0.01, 1, 4, 40, MAX_PX_PER_DEG, 100000]) {
       const z = tileLevelFor(px);
       expect(z).toBeGreaterThanOrEqual(0);
       expect(z).toBeLessThanOrEqual(MAX_TILE_LEVEL);
@@ -144,7 +146,7 @@ describe("tileLevelFor", () => {
 
   it("never decreases as you zoom in", () => {
     let previous = -1;
-    for (let px = 0.5; px < 512; px *= 1.3) {
+    for (let px = 0.5; px <= MAX_PX_PER_DEG; px *= 1.3) {
       const z = tileLevelFor(px);
       expect(z).toBeGreaterThanOrEqual(previous);
       previous = z;
@@ -153,11 +155,50 @@ describe("tileLevelFor", () => {
 
   /// Tiles must be at least as fine as the screen or the map looks soft.
   it("chooses tiles no coarser than the screen", () => {
-    for (const px of [1, 3, 9, 40, 200]) {
+    for (const px of [1, 3, 9, 40, 200, MAX_PX_PER_DEG]) {
       const z = tileLevelFor(px);
       const tilePxPerDeg = (tileColumns(z) * 256) / 360;
       expect(tilePxPerDeg).toBeGreaterThanOrEqual(px * 0.999);
     }
+  });
+});
+
+describe("MAX_PX_PER_DEG", () => {
+  /**
+   * The cap belongs exactly where the pyramid runs out, and the pyramid is
+   * the independent reference: `MAX_TILE_LEVEL` lays `tileColumns` tiles of
+   * `TILE_SIZE` pixels across 360 degrees, so that is the finest scale at
+   * which a tile pixel is still a screen pixel. Set lower, the map refuses to
+   * zoom to levels the backend already renders; set higher, it zooms into
+   * tiles coarser than the screen and goes soft.
+   */
+  it("stops exactly where the pyramid does", () => {
+    expect(MAX_PX_PER_DEG).toBeCloseTo(
+      (tileColumns(MAX_TILE_LEVEL) * TILE_SIZE) / 360,
+      6,
+    );
+    expect(tileLevelFor(MAX_PX_PER_DEG)).toBe(MAX_TILE_LEVEL);
+  });
+
+  /** However far the map is asked to zoom, its tiles stay screen-sharp. */
+  it("never lets the map outrun the pyramid", () => {
+    for (const wanted of [MAX_PX_PER_DEG, MAX_PX_PER_DEG * 2, 1e6]) {
+      const c = clampCamera({ centerLon: 0, centerLat: 0, pxPerDeg: wanted }, view);
+      const tilePxPerDeg = (tileColumns(tileLevelFor(c.pxPerDeg)) * TILE_SIZE) / 360;
+      expect(tilePxPerDeg).toBeGreaterThanOrEqual(c.pxPerDeg * 0.999);
+    }
+  });
+
+  /**
+   * What the zoom is *for*, against a real-world reference rather than the
+   * constant: an S-57 band 6 cell is a berthing plan, and a berth is tens of
+   * metres. One metre of latitude is one degree over
+   * `2 * PI * EARTH_RADIUS_M / 360`, so the cap has to buy a pixel well under
+   * the size of a boat's berth.
+   */
+  it("reaches berthing scale", () => {
+    const metresPerDegree = (2 * Math.PI * 6_371_229) / 360;
+    expect(metresPerDegree / MAX_PX_PER_DEG).toBeLessThan(25);
   });
 });
 
@@ -264,7 +305,7 @@ describe("visibleTiles", () => {
   });
 
   it("respects the budget", () => {
-    const c = clampCamera({ centerLon: 0, centerLat: 0, pxPerDeg: 512 }, view);
+    const c = clampCamera({ centerLon: 0, centerLat: 0, pxPerDeg: MAX_PX_PER_DEG }, view);
     expect(visibleTiles(c, view, 16).length).toBeLessThanOrEqual(16);
   });
 });
@@ -287,7 +328,7 @@ describe("tileBounds", () => {
 
 describe("glyph lattice", () => {
   it("picks a step that clears the target spacing without huge gaps", () => {
-    for (const px of [0.5, 2, 8, 24, 60, 200, 512]) {
+    for (const px of [0.5, 2, 8, 24, 60, 200, MAX_PX_PER_DEG]) {
       const step = glyphStepDegrees(px, 40);
       const spacing = step * px;
       expect(spacing).toBeGreaterThanOrEqual(40);
@@ -300,7 +341,7 @@ describe("glyph lattice", () => {
 
   it("never gets sparser as you zoom in", () => {
     let previous = Infinity;
-    for (let px = 0.5; px < 512; px *= 1.4) {
+    for (let px = 0.5; px <= MAX_PX_PER_DEG; px *= 1.4) {
       const step = glyphStepDegrees(px, 40);
       expect(step).toBeLessThanOrEqual(previous);
       previous = step;

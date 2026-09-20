@@ -10,7 +10,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { azimuthalTiles, project, tileBounds, unproject, validGeo, type Camera } from "../camera";
+import { MAX_PX_PER_DEG, azimuthalTiles, project, tileBounds, unproject, validGeo, type Camera } from "../camera";
 import { projectionOf, shaderMode, type ProjectionId } from "../projection";
 import { AZIMUTHAL, AZIMUTHAL_MODE, GPU_AZIMUTHALS } from "../projectionShaders";
 
@@ -118,7 +118,7 @@ describe("the globe's shader and the pointer's", () => {
    */
   it("keeps its digits at the closest zoom in single precision", () => {
     const f = Math.fround;
-    const camera: Camera = { projection: "orthographic", centerLon: -70.123456, centerLat: 41.654321, pxPerDeg: 512 };
+    const camera: Camera = { projection: "orthographic", centerLon: -70.123456, centerLat: 41.654321, pxPerDeg: MAX_PX_PER_DEG };
     for (const [dLon, dLat] of [[0.4, 0.3], [-0.9, 0.05], [0.001, -0.7]] as const) {
       const lon = camera.centerLon + dLon, lat = camera.centerLat + dLat;
       // The shader's arithmetic, rounded to a float at every step.
@@ -147,7 +147,7 @@ describe("the tiles a globe shows", () => {
   const cameras: Camera[] = [];
   for (const id of IDS) {
     for (const [centerLon, centerLat] of CENTRES) {
-      for (const pxPerDeg of [3, 12, 60, 400]) cameras.push({ projection: id as ProjectionId, centerLon, centerLat, pxPerDeg });
+      for (const pxPerDeg of [3, 12, 60, 400, MAX_PX_PER_DEG]) cameras.push({ projection: id as ProjectionId, centerLon, centerLat, pxPerDeg });
     }
   }
 

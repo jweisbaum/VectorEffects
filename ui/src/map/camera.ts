@@ -48,8 +48,21 @@ export function projectionFor(camera: Camera): Projection {
 export const MAX_TILE_LEVEL = 12;
 /** Tile edge in pixels. Mirrors `ve_render::tile`. */
 export const TILE_SIZE = 256;
-/** Sharpest zoom, in pixels per degree. About 1 px per 0.002 degrees. */
-export const MAX_PX_PER_DEG = 512;
+/**
+ * Sharpest zoom, in pixels per degree: the scale at which the deepest tile
+ * level's pixels are 1:1 with the screen's.
+ *
+ * Derived, not chosen. `MAX_TILE_LEVEL` lays `tileColumns` tiles of
+ * `TILE_SIZE` across 360 degrees, and past that scale `tileLevelFor` has no
+ * deeper level to ask for, so the map goes soft rather than sharper — which
+ * makes this the one honest place to stop. About 19 m a pixel.
+ *
+ * It was a flat 512 from the first commit, about 217 m a pixel, which spent
+ * nine of the twelve levels the backend already renders and could show
+ * neither an S-57 berthing chart (spec 4.11) nor an OpenStreetMap street
+ * (spec 5.4) at the scale either was drawn for.
+ */
+export const MAX_PX_PER_DEG = (TILE_SIZE * 2 ** (MAX_TILE_LEVEL + 1)) / 360;
 
 /** Camera state. */
 export interface Camera {
