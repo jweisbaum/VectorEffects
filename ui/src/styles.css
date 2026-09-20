@@ -65,9 +65,15 @@ body {
   flex-direction: column;
 }
 /* The layer panel's header keeps layer creation and import actions together in
-   one compact row. */
-.sidebar.left { flex-basis: 310px; width: 310px; border-right: 1px solid var(--border); }
-.layer-panel header { flex-wrap: nowrap; }
+   one compact row, and the panel is wide enough to hold that row whole.
+   Measured, not guessed: at 310px the row was 342px of buttons in 309px of
+   space, so the history calendar sat behind a horizontal scroll where nobody
+   would find it. Widened for the row, with slack for the platforms whose
+   fonts run wider than this one's. */
+.sidebar.left { flex-basis: 364px; width: 364px; border-right: 1px solid var(--border); }
+/* And if a font is wider still, the row wraps rather than hiding its end:
+   a second line is a worse layout, a hidden button is a lost feature. */
+.layer-panel header { flex-wrap: wrap; row-gap: 6px; }
 .sidebar.right { border-left: 1px solid var(--border); }
 
 /* A capture in progress greys the panels out entirely (spec.md 8.7, M26). */
