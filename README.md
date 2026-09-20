@@ -8,7 +8,7 @@ When you're ready, export the grib and use it to route in your routing app of ch
 
 [Download releases](https://github.com/jweisbaum/VectorEffects/releases) ·
 [Build status](https://github.com/jweisbaum/VectorEffects/actions) ·
-[Release notes](docs/releases/0.1.8.md)
+[Release notes](docs/releases/0.1.9.md)
 
 ![VectorEffects workspace](ui/public/help/workspace.png)
 
