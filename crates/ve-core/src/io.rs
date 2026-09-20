@@ -1759,6 +1759,33 @@ mod tests {
             layer
         });
 
+        // An image layer's control points reach the file too: two more pairs
+        // of f64s (spec.md 4.9), chosen with the same hostile digit counts as
+        // `control_points_survive_a_round_trip`.
+        project.layers.push({
+            let mut layer = crate::document::Layer::new("Chart");
+            layer.source = crate::document::LayerSource::Image {
+                path: std::path::PathBuf::from("/tmp/chart.png"),
+                placement: crate::document::Placement::spanning(-71.0, 42.0, -70.0, 41.0, 800, 600),
+                opacity: 0.75,
+                control_points: vec![
+                    crate::document::ControlPoint {
+                        u: 1234.567891,
+                        v: 98.7654321,
+                        lon: -70.123456789,
+                        lat: 41.987654321,
+                    },
+                    crate::document::ControlPoint {
+                        u: 0.000001,
+                        v: 65535.999999,
+                        lon: 179.999999999,
+                        lat: -89.999999999,
+                    },
+                ],
+            };
+            layer
+        });
+
         // One cycle canonicalises; every later cycle must be a fixed point.
         let first = to_canonical_json(&project).unwrap();
         let once = from_json(&first).unwrap();
@@ -1776,11 +1803,95 @@ mod tests {
         );
         assert!(
             matches!(
-                once.layers.last().map(|layer| &layer.source),
+                once.layers
+                    .get(once.layers.len() - 2)
+                    .map(|layer| &layer.source),
                 Some(crate::document::LayerSource::Gis { .. })
             ),
             "the GIS layer did not survive the file"
         );
+        assert!(
+            matches!(
+                once.layers.last().map(|layer| &layer.source),
+                Some(crate::document::LayerSource::Image { control_points, .. })
+                    if control_points.len() == 2
+            ),
+            "the image layer's control points did not survive the file"
+        );
+    }
+
+    /// Control points are document state and must survive a save and a load
+    /// exactly. The values are chosen to be hostile: each has more digits than
+    /// a `f64` prints by default, which is what catches a missing canonical
+    /// helper (see `canonical.rs`).
+    ///
+    /// The expected values are rounded through `canonical::ratio`/`degrees`
+    /// directly rather than compared against the raw input: canonical
+    /// rounding is deliberately lossy (it quantises so `serde_json`'s parser
+    /// stays correct), so `v: 98.7654321` legitimately becomes `98.765432`
+    /// once it has a helper. Comparing to the un-rounded input would fail
+    /// even with a correct implementation; comparing to the rounded value
+    /// fails if the helper is missing, since then the field would still hold
+    /// the raw `98.7654321`.
+    #[test]
+    fn control_points_survive_a_round_trip() {
+        use crate::canonical::{degrees, ratio};
+        use crate::document::ControlPoint;
+        let points = vec![
+            ControlPoint {
+                u: 1234.567891,
+                v: 98.7654321,
+                lon: -70.123456789,
+                lat: 41.987654321,
+            },
+            ControlPoint {
+                u: 0.000001,
+                v: 65535.999999,
+                lon: 179.999999999,
+                lat: -89.999999999,
+            },
+        ];
+        let source = crate::document::LayerSource::Image {
+            path: std::path::PathBuf::from("/tmp/chart.png"),
+            placement: crate::document::Placement::spanning(-71.0, 42.0, -70.0, 41.0, 800, 600),
+            opacity: 0.75,
+            control_points: points.clone(),
+        };
+        let json = serde_json::to_string(&source).expect("serialise");
+        let back: crate::document::LayerSource = serde_json::from_str(&json).expect("deserialise");
+        let crate::document::LayerSource::Image {
+            control_points: back,
+            ..
+        } = back
+        else {
+            panic!("not an image");
+        };
+        let expected: Vec<ControlPoint> = points
+            .iter()
+            .map(|p| ControlPoint {
+                u: ratio(p.u),
+                v: ratio(p.v),
+                lon: degrees(p.lon),
+                lat: degrees(p.lat),
+            })
+            .collect();
+        assert_eq!(
+            back, expected,
+            "a control point did not round-trip to canonical precision"
+        );
+    }
+
+    /// An older project has no control points and must open exactly as before.
+    #[test]
+    fn a_project_without_control_points_opens_with_none() {
+        let json = r#"{"kind":"image","path":"/tmp/chart.png",
+            "placement":{"a":1.0,"b":0.0,"c":-71.0,"d":0.0,"e":-1.0,"f":42.0},
+            "opacity":1.0}"#;
+        let back: crate::document::LayerSource = serde_json::from_str(json).expect("deserialise");
+        let crate::document::LayerSource::Image { control_points, .. } = back else {
+            panic!("not an image");
+        };
+        assert!(control_points.is_empty());
     }
 
     #[test]

@@ -184,6 +184,7 @@ pub fn view(layer: Id, source: &LayerSource) -> Option<ImageLayerView> {
         path,
         placement,
         opacity,
+        ..
     } = source
     else {
         return None;
@@ -646,6 +647,7 @@ pub fn image_imported(
             path: path.clone(),
             placement,
             opacity: 1.0,
+            control_points: Vec::new(),
         };
         let command = ve_core::command::Command::AddLayer {
             index: open.project.layers.len(),

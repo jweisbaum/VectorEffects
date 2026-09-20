@@ -632,6 +632,12 @@ pub enum LayerSource {
         /// How strongly it shows, `0.0` to `1.0`.
         #[serde(with = "crate::canonical::ratio_field")]
         opacity: f64,
+        /// The pairs that warp it, in the order they were placed.
+        ///
+        /// Empty means the `placement` above is used unchanged, which is
+        /// what every project made before this existed holds.
+        #[serde(default)]
+        control_points: Vec<ControlPoint>,
     },
     /// Vector GIS data, drawn under the field (spec.md 4.11).
     ///
@@ -841,6 +847,32 @@ impl Placement {
             self.place(0.0, h),
         ]
     }
+}
+
+/// One pair the user placed: a point in the picture, and where on the earth
+/// it belongs (spec.md §4.9).
+///
+/// `u` and `v` are the image's own pixels, **not** degrees, which is what
+/// makes a pair independent of whatever placement was in force when it was
+/// made — so pairs accumulate and re-fit without drift. `lon` and `lat` are
+/// where that pixel should land.
+///
+/// The warp is computed from these and never stored: it is derived state,
+/// like a render (invariants 1 and 2).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ControlPoint {
+    /// Across the image, in pixels from the left edge.
+    #[serde(with = "crate::canonical::ratio_field")]
+    pub u: f64,
+    /// Down the image, in pixels from the top edge.
+    #[serde(with = "crate::canonical::ratio_field")]
+    pub v: f64,
+    /// Where it belongs: longitude in degrees.
+    #[serde(with = "crate::canonical::degrees_field")]
+    pub lon: f64,
+    /// Where it belongs: latitude in degrees.
+    #[serde(with = "crate::canonical::degrees_field")]
+    pub lat: f64,
 }
 
 /// Which of an object's own movements reach the field it paints (spec.md 9.3,
