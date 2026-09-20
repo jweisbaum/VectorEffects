@@ -1770,16 +1770,16 @@ mod tests {
                 opacity: 0.75,
                 control_points: vec![
                     crate::document::ControlPoint {
-                        u: 1234.567891,
+                        u: 1234.5678912,
                         v: 98.7654321,
-                        lon: -70.123456789,
-                        lat: 41.987654321,
+                        lon: -70.1234567891,
+                        lat: 41.9876543211,
                     },
                     crate::document::ControlPoint {
-                        u: 0.000001,
-                        v: 65535.999999,
-                        lon: 179.999999999,
-                        lat: -89.999999999,
+                        u: 0.0000012,
+                        v: 65535.9999992,
+                        lon: 179.9999999991,
+                        lat: -89.9999999991,
                     },
                 ],
             };
@@ -1821,34 +1821,41 @@ mod tests {
     }
 
     /// Control points are document state and must survive a save and a load
-    /// exactly. The values are chosen to be hostile: each has more digits than
-    /// a `f64` prints by default, which is what catches a missing canonical
-    /// helper (see `canonical.rs`).
+    /// exactly. Every literal here has one more decimal digit than its
+    /// field's canonical precision keeps — `RATIO_PLACES` (6) for `u`/`v`,
+    /// `DEGREE_PLACES` (9) for `lon`/`lat` — and a nonzero trailing digit, so
+    /// canonical rounding is guaranteed to change every one of the eight
+    /// values, not just one of them. That is what makes each field's helper
+    /// individually load-bearing: dropping any single `#[serde(with = ...)]`
+    /// falls back to a raw `f64`, which round-trips a value this exact
+    /// (`serde_json`'s writer is correct, and the workspace's
+    /// `float_roundtrip` feature makes its parser correct too) losslessly —
+    /// so only the deliberate quantisation below can be what changes it.
     ///
     /// The expected values are rounded through `canonical::ratio`/`degrees`
     /// directly rather than compared against the raw input: canonical
     /// rounding is deliberately lossy (it quantises so `serde_json`'s parser
-    /// stays correct), so `v: 98.7654321` legitimately becomes `98.765432`
-    /// once it has a helper. Comparing to the un-rounded input would fail
-    /// even with a correct implementation; comparing to the rounded value
-    /// fails if the helper is missing, since then the field would still hold
-    /// the raw `98.7654321`.
+    /// stays correct without the feature), so `v: 98.7654321` legitimately
+    /// becomes `98.765432` once it has a helper. Comparing to the un-rounded
+    /// input would fail even with a correct implementation; comparing to the
+    /// rounded value fails if the helper is missing, since then the field
+    /// would still hold the raw, un-rounded input.
     #[test]
     fn control_points_survive_a_round_trip() {
         use crate::canonical::{degrees, ratio};
         use crate::document::ControlPoint;
         let points = vec![
             ControlPoint {
-                u: 1234.567891,
+                u: 1234.5678912,
                 v: 98.7654321,
-                lon: -70.123456789,
-                lat: 41.987654321,
+                lon: -70.1234567891,
+                lat: 41.9876543211,
             },
             ControlPoint {
-                u: 0.000001,
-                v: 65535.999999,
-                lon: 179.999999999,
-                lat: -89.999999999,
+                u: 0.0000012,
+                v: 65535.9999992,
+                lon: 179.9999999991,
+                lat: -89.9999999991,
             },
         ];
         let source = crate::document::LayerSource::Image {
