@@ -20,7 +20,7 @@
  * stop landing where the field is.
  */
 
-import { EXTRA_CYLINDRICAL } from "./projectionShaders";
+import { AZIMUTHAL, EXTRA_CYLINDRICAL } from "./projectionShaders";
 import { GLYPH_SIZE_SCALE, GLYPH_TARGET_PX } from "./glyph";
 
 /** Shared projection helper, prefixed to every vertex shader. */
@@ -37,6 +37,7 @@ uniform highp int uProjection;  // Stable mode from the projection catalogue.
 
 const float VE_DEG = 0.017453292519943295;
 ${EXTRA_CYLINDRICAL}
+${AZIMUTHAL}
 
 // The vertical map coordinate of a latitude, in units of longitudinal degrees. The
 // port of Projection.yOf in projection.ts, decision for decision. (No
@@ -66,7 +67,18 @@ float yToLat(float y) {
   return y;
 }
 
+// Set for a tile drawn as the whole viewport, its place found per pixel
+// (mode 15 up only). Two azimuthal maps show everything but the antipode,
+// smeared round their whole rim; a grid cell that holds it, or lies beside
+// it, has its corners on that rim in different directions, and drawn through
+// its vertices it is a chord across the map. The few tiles near the antipode
+// are drawn this way instead, which is exact wherever they fall.
+uniform highp int uExact;
+
 vec2 geoToScreen(vec2 lonLat) {
+  // The globe and its azimuthal kin (mode 15 up) are projected here, vertex
+  // by vertex, and say through veHorizon which side of the earth each is on.
+  if (uProjection >= 15) return azimuthalScreen(lonLat);
   return vec2(
     (lonLat.x + uLonOffset - uCamera.x) * uCamera.z + uViewport.x * 0.5,
     (uCamera.y - latToY(lonLat.y)) * uCamera.z + uViewport.y * 0.5
@@ -82,21 +94,91 @@ vec4 screenToClip(vec2 screen) {
 }
 `;
 
+/**
+ * Fragment stage only, after the projection helper: it reads the pixel's own
+ * position, which a vertex shader has none of.
+ */
+const EXACT_TILE = `
+// Where in a tile the pixel being shaded is, by the exact inverse. Fragment
+// stage only. The second component is past 10 where the tile does not hold it.
+vec2 exactTileUV(vec4 tileGeo) {
+  vec2 geo = azimuthalInverse(vec2(gl_FragCoord.x, uViewport.y - gl_FragCoord.y));
+  if (geo.x > 1000.0) return vec2(0.0, 99.0);
+  vec2 uv = vec2((geo.x - tileGeo.x) / tileGeo.z, (tileGeo.y - geo.y) / tileGeo.w);
+  // Half open, so a pixel on the seam between two tiles belongs to one.
+  if (uv.x < 0.0 || uv.x >= 1.0 || uv.y < 0.0 || uv.y >= 1.0) return vec2(0.0, 99.0);
+  return uv;
+}
+`;
+
 /** Draws land polygons, coastlines and the graticule from lon/lat vertices. */
 export const GEO_VERT = `#version 300 es
 precision highp float;
 layout(location=0) in vec2 aLonLat;
 ${PROJECTION}
+out float vHorizon;
 void main() {
-  gl_Position = screenToClip(uProjection >= 14 ? aLonLat : geoToScreen(aLonLat));
+  gl_Position = screenToClip(uProjection == 14 ? aLonLat : geoToScreen(aLonLat));
+  vHorizon = veHorizon;
 }
 `;
 
 export const GEO_FRAG = `#version 300 es
 precision highp float;
 uniform vec4 uColor;
+in float vHorizon;
 out vec4 fragColor;
-void main() { fragColor = uColor; }
+void main() {
+  // The far side of a globe (mode 15 up); always positive on a flat map.
+  if (vHorizon < 0.0) discard;
+  fragColor = uColor;
+}
+`;
+
+/**
+ * Land and coast on a globe: a cached source tile (388 texels, two of bleed
+ * a side, rendered y-up) drawn through the same static grid as the field's
+ * tiles. Only the GPU-projected modes use it; a general projection's mesh
+ * carries the same texture coordinates in its vertices.
+ */
+export const BASE_VERT = `#version 300 es
+precision highp float;
+layout(location=0) in vec2 aCorner;            // 0..1 across the tile
+uniform vec4 uTileGeo;      // west, north, spanX, spanY
+${PROJECTION}
+out vec2 vUV;
+out float vHorizon;
+void main() {
+  vUV = vec2((2.0 + aCorner.x * 384.0) / 388.0, (386.0 - aCorner.y * 384.0) / 388.0);
+  vec2 lonLat = vec2(
+    uTileGeo.x + aCorner.x * uTileGeo.z,
+    uTileGeo.y - aCorner.y * uTileGeo.w
+  );
+  gl_Position = uExact == 1 ? vec4(aCorner * 2.0 - 1.0, 0.0, 1.0) : screenToClip(geoToScreen(lonLat));
+  vHorizon = uExact == 1 ? 1.0 : veHorizon;
+}
+`;
+
+export const BASE_FRAG = `#version 300 es
+precision highp float;
+uniform sampler2D uTexture;
+uniform vec4 uTileGeo;
+${PROJECTION}
+${EXACT_TILE}
+in vec2 vUV;
+in float vHorizon;
+out vec4 fragColor;
+void main() {
+  if (vHorizon < 0.0) discard;
+  vec2 uv = vUV;
+  if (uExact == 1) {
+    vec2 exact = exactTileUV(uTileGeo);
+    if (exact.y > 10.0) discard;
+    uv = vec2((2.0 + exact.x * 384.0) / 388.0, (386.0 - exact.y * 384.0) / 388.0);
+  }
+  fragColor = texture(uTexture, uv);
+  if (fragColor.a > 0.0) fragColor.rgb /= fragColor.a;
+}
 `;
 
 /**
@@ -129,7 +211,11 @@ void main() {
     uPlaceLat.x * aCell.x + uPlaceLat.y * aCell.y + uPlaceLat.z
   );
   vGeo = lonLat;
-  gl_Position = screenToClip(uProjection >= 14 ? aScreen : geoToScreen(lonLat));
+  // On a globe (mode 15 up) the cells are the whole viewport and the
+  // fragment stage finds the image under each pixel: see IMAGE_FRAG.
+  gl_Position = uProjection >= 15
+    ? vec4(aCell * 2.0 - 1.0, 0.0, 1.0)
+    : screenToClip(uProjection == 14 ? aScreen : geoToScreen(lonLat));
 }
 `;
 
@@ -138,6 +224,9 @@ precision highp float;
 precision highp int;
 in vec2 vUV;
 in vec2 vGeo;
+${PROJECTION}
+uniform vec3 uPlaceLon;
+uniform vec3 uPlaceLat;
 uniform sampler2D uImage;
 uniform float uOpacity;
 uniform bool uFiltered;
@@ -147,16 +236,35 @@ uniform vec4 uFilterGeo;
 uniform float uSpeedScale;
 out vec4 fragColor;
 void main() {
+  vec2 geo = vGeo;
+  vec2 cell = vUV;
+  if (uProjection >= 15) {
+    // On a globe the place is taken from the pixel, not from a mesh. An
+    // image can span the earth, and a mesh of it fine enough to follow the
+    // sphere at every zoom is a mesh made per frame, which is what the globe
+    // stopped doing. So the draw is the whole viewport, each pixel is asked
+    // where on the earth it is, and the placement is inverted for the texel:
+    // exact at the limb, at the antipode and at any zoom, for a few
+    // operations a pixel.
+    geo = azimuthalInverse(vec2(gl_FragCoord.x, uViewport.y - gl_FragCoord.y));
+    if (geo.x > 1000.0) discard;
+    float centre = uPlaceLon.z + 0.5 * (uPlaceLon.x + uPlaceLon.y);
+    geo.x += 360.0 * floor((centre - geo.x) / 360.0 + 0.5);
+    float det = uPlaceLon.x * uPlaceLat.y - uPlaceLon.y * uPlaceLat.x;
+    vec2 d = vec2(geo.x - uPlaceLon.z, geo.y - uPlaceLat.z);
+    cell = vec2(d.x * uPlaceLat.y - d.y * uPlaceLon.y, d.y * uPlaceLon.x - d.x * uPlaceLat.x) / det;
+    if (any(lessThan(cell, vec2(0.0))) || any(greaterThan(cell, vec2(1.0)))) discard;
+  }
   if (uFiltered) {
-    float lon = mod(vGeo.x + 180.0, 360.0) - 180.0;
-    vec2 uv = vec2((lon - uFilterGeo.x) / uFilterGeo.z, (uFilterGeo.y - vGeo.y) / uFilterGeo.w);
+    float lon = mod(geo.x + 180.0, 360.0) - 180.0;
+    vec2 uv = vec2((lon - uFilterGeo.x) / uFilterGeo.z, (uFilterGeo.y - geo.y) / uFilterGeo.w);
     if (any(lessThan(uv, vec2(0.0))) || any(greaterThanEqual(uv, vec2(1.0)))) discard;
     uvec4 b = uvec4(texture(uFilterTile, uv) * 255.0 + 0.5);
     uint w = b.r | (b.g << 8u) | (b.b << 16u) | (b.a << 24u);
     float speed = float(w & 16383u) / 16383.0 * uSpeedScale;
     if (((w >> 26u) & 31u) == 0u || speed < uSpeedRange.x || speed > uSpeedRange.y) discard;
   }
-  vec4 texel = texture(uImage, vUV);
+  vec4 texel = texture(uImage, cell);
   // The image's own alpha is kept and scaled: a chart scan with a transparent
   // margin must not gain an opaque one on the way to the screen.
   fragColor = vec4(texel.rgb, texel.a * uOpacity);
@@ -340,13 +448,17 @@ layout(location=1) in vec2 aScreen;
 uniform vec4 uTileGeo;      // west, north, spanX, spanY
 ${PROJECTION}
 out vec2 vUV;
+out float vHorizon;
 void main() {
   vUV = aCorner;
   vec2 lonLat = vec2(
     uTileGeo.x + aCorner.x * uTileGeo.z,
     uTileGeo.y - aCorner.y * uTileGeo.w
   );
-  gl_Position = screenToClip(uProjection >= 14 ? aScreen : geoToScreen(lonLat));
+  gl_Position = uExact == 1
+    ? vec4(aCorner * 2.0 - 1.0, 0.0, 1.0)
+    : screenToClip(uProjection == 14 ? aScreen : geoToScreen(lonLat));
+  vHorizon = uExact == 1 ? 1.0 : veHorizon;
 }
 `;
 
@@ -393,7 +505,9 @@ export const RAMP_MAX_STOPS = 12;
 export const RASTER_FRAG = `#version 300 es
 precision highp float;
 in vec2 vUV;
+in float vHorizon;
 ${PROJECTION}
+${EXACT_TILE}
 uniform vec4 uTileGeo;      // west, north, spanX, spanY
 uniform sampler2D uTile;
 uniform float uSpeedScale;  // full-scale speed, m/s
@@ -477,6 +591,11 @@ vec3 ramp(float t, bool wind) {
  * the app grew up in draws precisely the pixels it always did.
  */
 vec2 tileUV() {
+  if (uExact == 1) {
+    vec2 exact = exactTileUV(uTileGeo);
+    if (exact.y > 10.0) discard;
+    return exact;
+  }
   if (uProjection == 0 || uProjection >= 14) return vUV;
   // gl_FragCoord is y-up from the bottom; the camera's y is y-down from the top.
   float screenY = uViewport.y - gl_FragCoord.y;
@@ -485,6 +604,8 @@ vec2 tileUV() {
 }
 
 void main() {
+  // The far side of a globe (mode 15 up); always positive on a flat map.
+  if (vHorizon < 0.0) discard;
   vec2 uv = tileUV();
   Field field = sampleField(uv);
   if (uCoverageOnly == 1) {

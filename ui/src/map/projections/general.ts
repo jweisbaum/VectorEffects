@@ -138,7 +138,17 @@ function azimuthal(method: NonNullable<GeneralMap["movable"]>, origin: LL): MapT
   };
 }
 const transforms = new Map<string,MapTransform>();
+/** The last answer. A frame asks for the same transform tens of thousands of
+ * times — once a point projected — and building the key below for each was a
+ * measurable share of turning a globe with glyphs on. */
+let last: {map: GeneralMap; lon: number; lat: number; transform: MapTransform} | null = null;
 export function mapTransform(map: GeneralMap, origin: LL): MapTransform {
+  if (last && last.map === map && (!map.movable || (last.lon === origin.lon && last.lat === origin.lat))) return last.transform;
+  const transform = keyedTransform(map, origin);
+  last = {map, lon: origin.lon, lat: origin.lat, transform};
+  return transform;
+}
+function keyedTransform(map: GeneralMap, origin: LL): MapTransform {
   const key=map.movable ? `${map.id}/${origin.lon}/${origin.lat}` : map.id;
   const cached=transforms.get(key); if (cached) return cached;
   let transform: MapTransform;

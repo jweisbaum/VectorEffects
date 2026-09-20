@@ -111,6 +111,43 @@ export async function projectionsFixture(basemapBase64: string) {
     ctx.fillText(projection.label, x + 12, y + 24);
   }
   const image = montage.toDataURL("image/png");
+
+  // What turning costs: a globe at the size of a real window, its centre
+  // moved every frame so nothing about the last one can be reused, with the
+  // frame finished on the GPU before the clock is read. Glyphs are timed
+  // apart because they are placed on the CPU under these projections.
+  canvas.width = 2880; canvas.height = 1590;
+  const large = { width: canvas.width, height: canvas.height };
+  const turning = [];
+  for (const projection of MAP_PROJECTIONS.filter(p => p.general?.movable)) {
+    for (const showGlyphs of [false, true]) {
+      const base = cameraForProjection({centerLon: 0, centerLat: 20, pxPerDeg: 2}, large, projection.id);
+      const times: number[] = [];
+      for (let frame = 0; frame < 16; frame++) {
+        const state: RenderState = {
+          camera: {...base, centerLon: -40 + frame * 1.7, centerLat: 15 + frame * 0.6}, view: large,
+          frame: "fixture/0", heldFrame: null,
+          ramps: { wind: { min: 0, max: 20 }, current: { min: 0, max: 20 } },
+          gradients: { wind: [[0, 0, 0], [1, 1, 1]], current: [[0.03, 0.12, 0.15], [0.1, 0.3, 0.5]] },
+          showGlyphs, showGraticule: true, pixelRatio: 2,
+        };
+        const start = performance.now(); renderer.render(state); gl.finish();
+        times.push(performance.now() - start);
+        // Let the endpoint's poll in between frames: a script that finds the
+        // webview busy for thirty seconds times out, and takes the endpoint
+        // with it. A message, not a timer — an uncomposited webview's timers
+        // are throttled to tens of seconds.
+        await new Promise(resolve => { const channel = new MessageChannel();
+          channel.port1.onmessage = () => resolve(null); channel.port2.postMessage(0); });
+      }
+      // The first frames render the base map's source tiles; turning is the rest.
+      const steady = times.slice(4).sort((a, b) => a - b);
+      turning.push({ projection: projection.id, glyphs: showGlyphs,
+        medianMs: Math.round(steady[steady.length >> 1]!), worstMs: Math.round(steady[steady.length - 1]!) });
+      const error = gl.getError(); if (error !== 0) throw new Error(`${projection.id}: GL error ${error} while turning`);
+    }
+  }
+
   renderer.dispose(); gl.deleteTexture(texture); gl.getExtension("WEBGL_lose_context")?.loseContext();
-  return { metrics, image, count: selected.length };
+  return { metrics, turning, image, count: selected.length };
 }

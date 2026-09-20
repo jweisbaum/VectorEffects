@@ -1165,9 +1165,34 @@ transforms are offline; bundled Helmert datum parameters are used where availabl
 without downloadable survey correction grids. This is a map display, not a
 survey-grade coordinate conversion/export facility.
 
-General projections use adaptive inverse screen-to-geographic meshes, clipped
-per source tile at world seams. Images, land, coastlines and vector rasters
-share that mesh. Glyphs use a screen lattice with geographic east/north
+**The globe and the four azimuthal views are projected on the GPU.** Turning
+one changes the mapping itself, so nothing built for the last frame survives
+to the next, and the mesh described below was rebuilt on every pointer move:
+600 ms a frame with the whole earth in view, 3.8 s with glyphs on. These five
+are closed forms, so each source tile is drawn through a static 32-cell grid
+of its own lon/lat and the vertex shader projects it (`AZIMUTHAL` in
+`projectionShaders.ts`, shader modes 15 to 19; `Projection.mode`, which is
+persisted as the stamp space, stays 14). The far side is discarded per
+fragment from the angular distance the vertex shader passes down. The forward
+is written around the differences from the centre, not the textbook sums,
+which in single precision lose their digits at a close zoom. Three things are
+found per pixel by the exact inverse rather than through the grid: an image
+layer, which can span the earth and whose placement is inverted for the
+texel; and, on the equidistant and equal-area maps only, the few tiles within
+half their width of the antipode, which those two smear round the whole rim —
+a grid cell there is a wedge of that rim, and drawn through its corners it is
+a chord across the map. The graticule is the flat map's own lines in
+half-degree pieces, stopped three quarters of a degree short of the antipode
+for the same reason. The visible tiles are found by walking the pyramid from
+its two roots, keeping a tile that has a point on screen *or* is under a point
+of the screen (`azimuthalTiles`); both questions are needed. A frame of
+turning is 4 ms on the main thread, 10 ms with glyphs, at 2880 × 1590. The
+shader and `azimuthal` in `general.ts` are the same formulas twice, held
+together by `azimuthalShader.test.ts`, which runs the shader's own text.
+
+Every other general projection uses adaptive inverse screen-to-geographic
+meshes, clipped per source tile at world seams. Images, land, coastlines and
+vector rasters share that mesh. Glyphs use a screen lattice with geographic east/north
 Jacobians for grid convergence. Graticules are curved and horizon-clipped.
 Pointer inverses outside the map are invalid and cannot initiate edits.
 Ground tools retain their geodesic geometry; in these views px resolves to a

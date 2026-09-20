@@ -13,6 +13,7 @@
  */
 
 import { GENERAL_MAPS, generalMap, type GeneralMap } from "./projections/general";
+import { AZIMUTHAL_MODE, GPU_AZIMUTHALS } from "./projectionShaders";
 
 /** The original cylindrical spaces are also persisted by pixel tools. */
 export type CylindricalProjectionId =
@@ -235,4 +236,24 @@ export function projectionOf(id: ProjectionId): Projection {
  */
 export function worldHeightDeg(projection: Projection): number {
   return projection.yOf(projection.maxLat) - projection.yOf(-projection.maxLat);
+}
+
+/**
+ * The mode the shaders branch on, which is not always `Projection.mode`.
+ *
+ * `mode` is persisted — a pixel tool's stamp space is `mode + 1` — and every
+ * general projection shares 14 there, the globe included. The shaders need
+ * to tell the globe and its azimuthal kin apart from the rest, because those
+ * five are projected on the GPU (projectionShaders.ts) rather than from a
+ * mesh built here. So the distinction is made at the uniform and nowhere a
+ * file can see it.
+ */
+export function shaderMode(projection: Projection): number {
+  const movable = projection.general?.movable;
+  return movable ? AZIMUTHAL_MODE + GPU_AZIMUTHALS.indexOf(movable) : projection.mode;
+}
+
+/** Whether the GPU projects this one itself: the globe and the azimuthals. */
+export function projectedOnGpu(projection: Projection): boolean {
+  return Boolean(projection.general?.movable);
 }

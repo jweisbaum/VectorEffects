@@ -1,5 +1,34 @@
 # VectorEffects — Implementation Plan
 
+**2026-09-20 (afternoon): Turning the globe, from 1.2 frames a second to
+sixty.** Reported: "the performance of rotating the globe projection is
+terrible". Measured before anything was changed. In the application, through
+the driver, a frame of turning with the whole earth in view cost **794 ms**
+of the main thread; in the WebGL fixture at 2880 x 1590, 519 ms, and
+**3,851 ms with glyphs on**. Two causes, neither of them the projection
+maths, which was a sixth of it. (1) Every general projection drew through a
+screen mesh built on the CPU per camera: 190,000 inverse projections found
+through a string-keyed map, 55,000 triangles clipped against tiles, 217,000
+vertices uploaded twice — and on a globe the camera *is* the mapping, so none
+of it survived a pointer move. 45% of the triangles were under 2 px², from
+refining the limb to one pixel; loosening that to 16 px still left 180 ms, so
+no setting fixes it. (2) Glyph placement sorted twenty thousand lattice sites
+and asked every placed glyph about every site, each frame. Done: the five
+azimuthals are projected by the vertex shader through a static grid, with an
+exact per-pixel inverse for image layers and for the tiles beside the
+antipode (spec 5.1 has the reasoning, including why a discard margin was
+tried first and drew the equidistant map's rim as a polygon); the tiles are
+found by a pyramid walk; glyph sites are generated in rank order and binned,
+for the same glyphs. After: **4 ms, 10 ms with glyphs** in the fixture,
+**20 ms** in the application's development build. Against the old renderer's
+picture: every fixed projection byte-identical (which is what says the glyph
+change is an equivalent), the azimuthals differing only along hairlines —
+coast, graticule and limb antialiasing. **Not done yet:** the fixed general
+projections (Robinson, Mollweide, every EPSG code) still build that mesh per
+camera, 420 ms a frame for Robinson at a world zoom; their mesh does not
+depend on the camera if it is built in the projection's own plane, which is
+the next piece.
+
 **2026-09-20: A loading page, and opening made ten to thirty times faster.**
 Asked for: a loading page with a progress bar when a project opens, and
 whatever could be done for the speed of opening projects and Zarr stores.

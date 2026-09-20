@@ -60,15 +60,15 @@ try {
     }, 0);
     done({started: true});`, [basemap]);
   let result;
-  const deadline = Date.now() + 120_000;
+  const deadline = Date.now() + 600_000;
   do {
     await new Promise(resolve => setTimeout(resolve, 1000));
     result = await driver.evaluate("arguments[arguments.length - 1](window.__projectionCheck);");
   } while (!result && Date.now() < deadline);
-  if (!result) throw new Error("Rendering check did not finish within two minutes");
+  if (!result) throw new Error("Rendering check did not finish within ten minutes");
   if (result.error) throw new Error(result.message);
   if (result.metrics?.length !== result.count) throw new Error("Missing projection results");
   await writeFile(join(root, "projections.png"), Buffer.from(result.image.split(",")[1], "base64"));
   await writeFile(join(root, "results.json"), JSON.stringify(result.metrics, null, 2));
-  console.log(JSON.stringify(result.metrics)); console.log(root);
+  console.log(JSON.stringify(result.metrics)); console.table(result.turning); console.log(root);
 } finally { child.kill("SIGTERM"); if (page.listening) page.close(); }

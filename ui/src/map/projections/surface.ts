@@ -77,6 +77,21 @@ export class ProjectedSurface {
     draw:(camera:Camera,view:Viewport,kind:"land"|"coast")=>void):void {
     const gl=this.gl;
     for(const tile of tiles){
+      const texture=this.baseTexture(view,tile,kind,lod,draw);
+      gl.useProgram(this.program);gl.uniform2f(this.viewport,view.width,view.height);gl.uniform1i(this.sampler,0);
+      gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,texture);
+      // Reuse the camera's mesh with FBO y-up UVs and the texture bleed.
+      this.ensure(camera,view);
+      const mesh=this.baseMeshes.get(keyOf(tile));if(!mesh)continue;
+      gl.bindVertexArray(mesh.vao);gl.drawArrays(gl.TRIANGLES,0,mesh.count);
+    }
+  }
+  /** One source tile of land or coast, rendered on first use and kept. Shared
+   * by the mesh path above and the renderer's own GPU-projected one. */
+  baseTexture(view:Viewport,tile:VisibleTile,kind:"land"|"coast",lod:number,
+    draw:(camera:Camera,view:Viewport,kind:"land"|"coast")=>void):WebGLTexture {
+    const gl=this.gl;
+    {
       const key=`${kind}/${lod}/${tile.z}/${tile.x}/${tile.y}`;
       let base=this.baseTiles.get(key);
       if(!base){
@@ -96,12 +111,7 @@ export class ProjectedSurface {
         base={texture};this.baseTiles.set(key,base);
         if(this.baseTiles.size>384){const oldest=this.baseTiles.keys().next().value!;gl.deleteTexture(this.baseTiles.get(oldest)!.texture);this.baseTiles.delete(oldest);}
       }
-      gl.useProgram(this.program);gl.uniform2f(this.viewport,view.width,view.height);gl.uniform1i(this.sampler,0);
-      gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,base.texture);
-      // Reuse the camera's mesh with FBO y-up UVs and the texture bleed.
-      this.ensure(camera,view);
-      const mesh=this.baseMeshes.get(keyOf(tile));if(!mesh)continue;
-      gl.bindVertexArray(mesh.vao);gl.drawArrays(gl.TRIANGLES,0,mesh.count);
+      return base.texture;
     }
   }
   /** Clip the inverse screen mesh against an affine georeferenced image. */

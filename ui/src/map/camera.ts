@@ -338,7 +338,9 @@ export function visibleTiles(
   view: Viewport,
   budget = 192,
 ): VisibleTile[] {
-  if (projectionFor(camera).general) return projectedMesh(camera,view,budget).tiles;
+  const general = projectionFor(camera).general;
+  if (general?.movable) return azimuthalTiles(camera, view, budget);
+  if (general) return projectedMesh(camera,view,budget).tiles;
   const bounds = visibleBounds(camera, view, true);
   const ideal = tileLevelFor(camera.pxPerDeg);
 
@@ -472,6 +474,85 @@ export function glyphLattice(
 export function validGeo(point: GeoPoint): boolean {
   return Number.isFinite(point.lon) && Number.isFinite(point.lat) && Math.abs(point.lat)<=90;
 }
+/** How many points a side a tile is tried at when asking whether it shows. */
+const TILE_PROBE = 4;
+/** The screen is asked what is under it on a lattice this many cells a side. */
+const SCREEN_PROBE = { columns: 12, rows: 8 };
+const azimuthalTileSets = new Map<string, VisibleTile[]>();
+
+/**
+ * The tiles a globe or one of its azimuthal kin is showing.
+ *
+ * These are drawn by the GPU from a static grid (projectionShaders.ts), so
+ * there is no screen mesh to read the tiles off, and building one was the
+ * cost being removed. The pyramid is walked from its two root tiles instead,
+ * keeping a tile that either has a point on screen or is under a point of
+ * the screen. Both questions are needed: a tile far larger than the view has
+ * every probe of its own off screen, and a tile squeezed against the limb is
+ * thinner than the gap between the screen's. A tile kept in error costs a
+ * fetch; one dropped in error is a hole in the map, so ties go to keeping.
+ */
+export function azimuthalTiles(camera: Camera, view: Viewport, budget = 192): VisibleTile[] {
+  const key = JSON.stringify([camera, view, budget]);
+  const cached = azimuthalTileSets.get(key);
+  if (cached) return cached;
+
+  const under: GeoPoint[] = [];
+  for (let j = 0; j <= SCREEN_PROBE.rows; j++) {
+    for (let i = 0; i <= SCREEN_PROBE.columns; i++) {
+      const geo = unproject(camera, view, {
+        x: (view.width * i) / SCREEN_PROBE.columns,
+        y: (view.height * j) / SCREEN_PROBE.rows,
+      });
+      if (validGeo(geo)) under.push({ lon: normalizeLon(geo.lon), lat: geo.lat });
+    }
+  }
+  // The centre is always on the map, whatever the corners are.
+  under.push({ lon: normalizeLon(camera.centerLon), lat: camera.centerLat });
+
+  const shows = (b: ViewBounds): boolean => {
+    if (under.some((p) => p.lon >= b.west && p.lon <= b.east && p.lat <= b.north && p.lat >= b.south)) {
+      return true;
+    }
+    let west = Infinity, east = -Infinity, top = Infinity, bottom = -Infinity;
+    for (let j = 0; j <= TILE_PROBE; j++) {
+      for (let i = 0; i <= TILE_PROBE; i++) {
+        const p = project(camera, view, {
+          lon: b.west + ((b.east - b.west) * i) / TILE_PROBE,
+          lat: b.north - ((b.north - b.south) * j) / TILE_PROBE,
+        });
+        if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) continue;
+        west = Math.min(west, p.x); east = Math.max(east, p.x);
+        top = Math.min(top, p.y); bottom = Math.max(bottom, p.y);
+      }
+    }
+    const slack = 8;
+    return east >= -slack && west <= view.width + slack && bottom >= -slack && top <= view.height + slack;
+  };
+
+  let tiles: VisibleTile[] = [];
+  // The level the general mesh chose, so a view keeps the sharpness it had.
+  let level = Math.min(MAX_TILE_LEVEL, Math.max(0, Math.ceil(Math.log2((360 * camera.pxPerDeg) / TILE_SIZE)) - 1));
+  for (; ; level--) {
+    tiles = [];
+    const visit = (z: number, x: number, y: number): void => {
+      if (tiles.length > budget || !shows(tileBounds(z, x, y))) return;
+      if (z === level) {
+        tiles.push({ z, x, y, lonOffset: 0 });
+        return;
+      }
+      for (const [dx, dy] of [[0, 0], [1, 0], [0, 1], [1, 1]] as const) visit(z + 1, x * 2 + dx, y * 2 + dy);
+    };
+    for (let x = 0; x < tileColumns(0); x++) visit(0, x, 0);
+    // Step back a level rather than truncate, as `visibleTiles` does.
+    if (tiles.length <= budget || level === 0) break;
+  }
+
+  azimuthalTileSets.set(key, tiles);
+  if (azimuthalTileSets.size > 8) azimuthalTileSets.delete(azimuthalTileSets.keys().next().value!);
+  return tiles;
+}
+
 const projectedMeshes = new Map<string,GeographicMesh>();
 export function projectedMesh(camera:Camera,view:Viewport,budget=192):GeographicMesh {
   const key=JSON.stringify([camera,view,budget]);

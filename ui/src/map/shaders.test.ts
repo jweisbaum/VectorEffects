@@ -14,6 +14,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  BASE_FRAG,
+  BASE_VERT,
   GEO_FRAG,
   GEO_VERT,
   GLYPH_FRAG,
@@ -28,6 +30,7 @@ import { PROJECTIONS, projectionOf } from "./projection";
 /** The programs, as the renderer links them. */
 const PROGRAMS = {
   geo: [GEO_VERT, GEO_FRAG],
+  base: [BASE_VERT, BASE_FRAG],
   raster: [RASTER_VERT, RASTER_FRAG],
   glyph: [GLYPH_VERT, GLYPH_FRAG],
   smear: [SMEAR_VERT, SMEAR_FRAG],
@@ -244,7 +247,7 @@ describe("the renderer's uniform lookups", () => {
     // The renderer names them in one place; this is that list, restated so a
     // shader gaining a uniform has to be noticed here too.
     const known = new Set([
-      "uCamera", "uViewport", "uLonOffset", "uProjection",
+      "uCamera", "uViewport", "uLonOffset", "uProjection", "uOrigin", "uRim", "uExact", "uTexture",
       "uSourceCoverage", "uUseSourceCoverage", "uMask", "uMaskSize", "uOpKind", "uOpAmount", "uOpCount", "uOpRadius", "uOpFeather",
       "uField",
       "uTileGeo", "uTile", "uSpeedScale", "uRampWind", "uRampCurrent", "uDim",

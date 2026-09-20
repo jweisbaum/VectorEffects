@@ -12,6 +12,7 @@ import {
   type Camera,
   type Viewport,
   glyphLattice,
+  normalizeLon,
   projectionFor,
   project,
   unproject,
@@ -24,14 +25,17 @@ import {
 } from "./camera";
 import { destination } from "./geo";
 import { ProjectedSurface } from "./projections/surface";
+import { projectedOnGpu, shaderMode } from "./projection";
 import type { Basemap } from "./format";
 import { KINDS, type FieldKindName } from "../kind";
 import { DEFAULT_GLYPHS, glyphDisplayLayout, glyphRgb } from "./glyphAppearance";
 import type { GlyphSettings } from "../generated/GlyphSettings";
 import type { GlyphStyle } from "../generated/GlyphStyle";
-import { GLYPH_SUBDIVISIONS, glyphCovered, glyphTileIsFull, glyphTileIsEmpty, spacedGlyphs } from "./glyphPlacement";
+import { GLYPH_SUBDIVISIONS, PlacedGlyphs, glyphCovered, glyphTileIsFull, glyphTileIsEmpty, rankedSites, spacedGlyphs } from "./glyphPlacement";
 import { SPEED_MAX } from "./tileRange";
 import {
+  BASE_FRAG,
+  BASE_VERT,
   GEO_FRAG,
   GEO_VERT,
   GLYPH_FRAG,
@@ -76,6 +80,21 @@ const GLYPH_VERTICES = 54;
  * worst error at a fraction of a pixel even for an image spanning the globe.
  */
 const IMAGE_CELLS = 16;
+
+/**
+ * Cells a side of the grid a globe's tiles are drawn through.
+ *
+ * On a globe the vertex shader projects each tile's own lon/lat grid, and
+ * what lies between the vertices is interpolated straight across the screen.
+ * A tile is chosen to be a few hundred pixels wide, so at thirty-two cells a
+ * side a cell is ten or so, and the bow of the sphere across one is a few
+ * hundredths of a pixel. Six thousand vertices a tile is nothing to a GPU,
+ * and unlike the mesh this replaced none of it is made per frame.
+ */
+const GLOBE_CELLS = 32;
+
+/** Degrees between the vertices of a globe's graticule lines. */
+const GRATICULE_PIECE_DEG = 0.5;
 
 /** One georeferenced image, as the renderer draws it (spec.md 4.9, M18). */
 export interface ImageDraw {
@@ -342,6 +361,10 @@ export class MapRenderer {
   private readonly imageProgram: WebGLProgram;
   private readonly imageUniforms: Uniforms;
   private readonly imageMesh: { vao: WebGLVertexArrayObject; count: number };
+  /** The unit grid a globe's tiles, base map and images are drawn through. */
+  private readonly globeGrid: { vao: WebGLVertexArrayObject; count: number };
+  private readonly baseProgram: WebGLProgram;
+  private readonly baseUniforms: Uniforms;
   private readonly geoProgram: WebGLProgram;
   private readonly rasterProgram: WebGLProgram;
   private readonly glyphProgram: WebGLProgram;
@@ -387,8 +410,10 @@ export class MapRenderer {
     this.rasterProgram = link(gl, RASTER_VERT, RASTER_FRAG);
     this.glyphProgram = link(gl, GLYPH_VERT, GLYPH_FRAG);
     this.smearProgram = link(gl, SMEAR_VERT, SMEAR_FRAG);
+    this.baseProgram = link(gl, BASE_VERT, BASE_FRAG);
 
-    const shared = ["uCamera", "uViewport", "uLonOffset", "uProjection"];
+    const shared = ["uCamera", "uViewport", "uLonOffset", "uProjection", "uOrigin", "uRim", "uExact"];
+    this.baseUniforms = uniforms(gl, this.baseProgram, [...shared, "uTileGeo", "uTexture"]);
     this.geoUniforms = uniforms(gl, this.geoProgram, [...shared, "uColor"]);
     const mask = [
       "uMask", "uMaskSize", "uOpKind", "uOpAmount", "uOpCount", "uOpPoints", "uOpDeltas",
@@ -421,7 +446,8 @@ export class MapRenderer {
 
     this.projectedSurface = new ProjectedSurface(gl);
     this.quadVao = this.buildQuad();
-    this.imageMesh = this.buildImageMesh();
+    this.imageMesh = this.buildImageMesh(IMAGE_CELLS);
+    this.globeGrid = this.buildImageMesh(GLOBE_CELLS);
     // Only stations are uploaded; each mark's geometry comes from gl_VertexID.
     const glyphVao = gl.createVertexArray();
     const glyphBuffer = gl.createBuffer();
@@ -482,16 +508,16 @@ export class MapRenderer {
    * Built once: the mesh is in the image's own 0-to-1 coordinates, so every
    * image of every size and every placement draws from this one buffer.
    */
-  private buildImageMesh(): { vao: WebGLVertexArrayObject; count: number } {
+  private buildImageMesh(cellsASide: number): { vao: WebGLVertexArrayObject; count: number } {
     const gl = this.gl;
     const vao = gl.createVertexArray();
     const vbo = gl.createBuffer();
     if (!vao || !vbo) throw new Error("could not allocate image mesh buffers");
 
-    const step = 1 / IMAGE_CELLS;
+    const step = 1 / cellsASide;
     const cells: number[] = [];
-    for (let row = 0; row < IMAGE_CELLS; row++) {
-      for (let col = 0; col < IMAGE_CELLS; col++) {
+    for (let row = 0; row < cellsASide; row++) {
+      for (let col = 0; col < cellsASide; col++) {
         const u = col * step;
         const v = row * step;
         cells.push(
@@ -526,6 +552,7 @@ export class MapRenderer {
     camera: Camera,
     view: Viewport,
     lonOffset: number,
+    rimDeg = 0,
   ): void {
     const gl = this.gl;
     const projection = projectionFor(camera);
@@ -541,7 +568,40 @@ export class MapRenderer {
     );
     gl.uniform2f(u.uViewport ?? null, view.width, view.height);
     gl.uniform1f(u.uLonOffset ?? null, lonOffset);
-    gl.uniform1i(u.uProjection ?? null, projection.mode);
+    gl.uniform1i(u.uProjection ?? null, shaderMode(projection));
+    // A globe's centre, for the shader that projects it (projectionShaders.ts).
+    // The sine and cosine are taken here, in double precision, once a draw.
+    const lat0 = (camera.centerLat * Math.PI) / 180;
+    gl.uniform3f(u.uOrigin ?? null, camera.centerLat, Math.sin(lat0), Math.cos(lat0));
+    gl.uniform1f(u.uRim ?? null, (rimDeg * Math.PI) / 180);
+  }
+
+  /**
+   * Whether a tile is drawn as the viewport, its place found per pixel,
+   * rather than through the grid (see `uExact` in shaders.ts).
+   *
+   * Only the two maps that show the antipode need it, and only for the tiles
+   * within half their own width of it: beside the antipode a cell is a wedge
+   * of the rim, which straight edges between its corners do not follow. That
+   * is two tiles at a world zoom and a handful at any other, so the cost is
+   * a few viewports of a cheap inverse, and only while the rim is in view.
+   */
+  private drawnExactly(camera: Camera, tile: VisibleTile): boolean {
+    const movable = projectionFor(camera).general?.movable;
+    if (movable !== "aeqd" && movable !== "laea") return false;
+    const b = tileBounds(tile.z, tile.x, tile.y);
+    const antipode = { lon: normalizeLon(camera.centerLon + 180), lat: -camera.centerLat };
+    // The tile's nearest place to it: the antipode itself, held to the tile.
+    const lat = Math.min(Math.max(antipode.lat, b.south), b.north);
+    const middle = (b.west + b.east) / 2;
+    const half = (b.east - b.west) / 2;
+    const lon = middle + Math.min(Math.max(normalizeLon(antipode.lon - middle), -half), half);
+    const rad = Math.PI / 180;
+    const cos =
+      Math.sin(lat * rad) * Math.sin(antipode.lat * rad) +
+      Math.cos(lat * rad) * Math.cos(antipode.lat * rad) * Math.cos((lon - antipode.lon) * rad);
+    const away = Math.acos(Math.min(1, Math.max(-1, cos))) / rad;
+    return away < (b.east - b.west) / 2;
   }
 
   /** The centreline arrays, padded to what the shaders declare. */
@@ -691,6 +751,7 @@ export class MapRenderer {
     this.setGradients(state);
     this.setOperator(this.rasterUniforms, state.view, state.operator ?? null, stage);
     gl.uniform1i(this.rasterUniforms.uBelow ?? null, BELOW_UNIT);
+    const onGpu = projectedOnGpu(projectionFor(camera));
 
     for (const tile of tiles) {
       const shown = this.textureFor(state, tile, frame);
@@ -701,14 +762,23 @@ export class MapRenderer {
       gl.activeTexture(gl.TEXTURE0);
       const b = tileBounds(tile.z, tile.x, tile.y);
       this.setShared(this.rasterUniforms, camera, state.view, tile.lonOffset);
+      const exact = onGpu && this.drawnExactly(camera, tile);
+      gl.uniform1i(this.rasterUniforms.uExact ?? null, exact ? 1 : 0);
       gl.uniform1f(this.rasterUniforms.uDim ?? null, held ? HELD_DIM : 1.0);
       gl.uniform4f(
         this.rasterUniforms.uTileGeo ?? null,
         b.west, b.north, b.east - b.west, b.north - b.south,
       );
       gl.bindTexture(gl.TEXTURE_2D, texture);
-      const count = projectionFor(camera).general
-        ? this.projectedSurface.bindTile(camera, state.view, tile) : 6;
+      let count = 6;
+      if (exact) {
+        gl.bindVertexArray(this.quadVao);
+      } else if (onGpu) {
+        gl.bindVertexArray(this.globeGrid.vao);
+        count = this.globeGrid.count;
+      } else if (projectionFor(camera).general) {
+        count = this.projectedSurface.bindTile(camera, state.view, tile);
+      }
       gl.drawArrays(gl.TRIANGLES, 0, count);
     }
   }
@@ -725,9 +795,16 @@ export class MapRenderer {
     gl.bindVertexArray(this.imageMesh.vao);
     gl.uniform1i(this.imageUniforms.uImage ?? null, 0);
     gl.activeTexture(gl.TEXTURE0);
+    const onGpu = projectedOnGpu(projectionFor(state.camera));
     for (const image of images) {
-      const count = projectionFor(state.camera).general
-        ? this.projectedSurface.bindImage(state.camera, state.view, image) : this.imageMesh.count;
+      let count = this.imageMesh.count;
+      if (onGpu) {
+        // The viewport, as two triangles: IMAGE_FRAG finds the image itself.
+        gl.bindVertexArray(this.quadVao);
+        count = 6;
+      } else if (projectionFor(state.camera).general) {
+        count = this.projectedSurface.bindImage(state.camera, state.view, image);
+      }
       if (!image.texture || image.opacity <= 0) continue;
       gl.uniform3f(this.imageUniforms.uPlaceLon ?? null, ...image.placeLon);
       gl.uniform3f(this.imageUniforms.uPlaceLat ?? null, ...image.placeLat);
@@ -921,19 +998,28 @@ export class MapRenderer {
     return chosen;
   }
 
-  private ensureGraticule(state: RenderState): void {
+  private ensureGraticule(state: RenderState, pieceDeg = 0): void {
     const gl = this.gl;
     const step = this.graticuleInterval(state.camera.pxPerDeg);
-    const key = `${step}`;
+    const key = `${step}/${pieceDeg}`;
     if (this.graticuleKey === key && this.graticule) return;
 
+    // A line is one piece on a flat map, where it is straight. On a globe it
+    // is cut into `pieceDeg` lengths, each projected at both ends.
     const points: number[] = [];
-    for (let lon = -180; lon <= 180; lon += step) {
-      points.push(lon, -90, lon, 90);
-    }
-    for (let lat = -90; lat <= 90; lat += step) {
-      points.push(-180, lat, 180, lat);
-    }
+    const line = (lon0: number, lat0: number, lon1: number, lat1: number) => {
+      const pieces = pieceDeg > 0 ? Math.ceil(Math.max(lon1 - lon0, lat1 - lat0) / pieceDeg) : 1;
+      for (let i = 0; i < pieces; i++) {
+        const a = i / pieces;
+        const b = (i + 1) / pieces;
+        points.push(
+          lon0 + (lon1 - lon0) * a, lat0 + (lat1 - lat0) * a,
+          lon0 + (lon1 - lon0) * b, lat0 + (lat1 - lat0) * b,
+        );
+      }
+    };
+    for (let lon = -180; lon <= 180; lon += step) line(lon, -90, lon, 90);
+    for (let lat = -90; lat <= 90; lat += step) line(-180, lat, 180, lat);
 
     if (!this.graticule) {
       const vao = gl.createVertexArray();
@@ -951,6 +1037,36 @@ export class MapRenderer {
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(points), gl.DYNAMIC_DRAW);
     this.graticule.count = points.length / 2;
     this.graticuleKey = key;
+  }
+
+  /**
+   * Land or coast on a globe: the cached source tiles, through the static
+   * grid and the vertex shader's own projection. Nothing here is made per
+   * frame but the uniforms.
+   */
+  private drawGlobeBase(
+    state: RenderState,
+    tiles: readonly VisibleTile[],
+    kind: "land" | "coast",
+    lod: number,
+    draw: (camera: Camera, view: Viewport, kind: "land" | "coast") => void,
+  ): void {
+    const gl = this.gl;
+    for (const tile of tiles) {
+      // May render the tile, which leaves another program and target bound.
+      const texture = this.projectedSurface.baseTexture(state.view, tile, kind, lod, draw);
+      const exact = this.drawnExactly(state.camera, tile);
+      gl.useProgram(this.baseProgram);
+      gl.bindVertexArray(exact ? this.quadVao : this.globeGrid.vao);
+      this.setShared(this.baseUniforms, state.camera, state.view, 0);
+      gl.uniform1i(this.baseUniforms.uExact ?? null, exact ? 1 : 0);
+      const b = tileBounds(tile.z, tile.x, tile.y);
+      gl.uniform4f(this.baseUniforms.uTileGeo ?? null, b.west, b.north, b.east - b.west, b.north - b.south);
+      gl.uniform1i(this.baseUniforms.uTexture ?? null, 0);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      gl.drawArrays(gl.TRIANGLES, 0, exact ? 6 : this.globeGrid.count);
+    }
   }
 
   /** Coarse coastlines when zoomed out; the detailed set is wasted there. */
@@ -1122,7 +1238,9 @@ export class MapRenderer {
     const batches=tiles.map(tile=>({tile,...this.textureFor(state,tile,frame),data:[] as number[]}));
     const lookup=new Map(batches.map((batch,index)=>[`${batch.tile.x}/${batch.tile.y}`,index]));
     const z=tiles[0]!.z, columns=tileColumns(z), rows=tileRows(z);
-    const occupied:Array<{x:number;y:number;gap:number}>=[];
+    // No gap is wider than the widest style's, which is what the bins need.
+    const reach=Math.max(...(["arrow","barb"] as const).map(style=>glyphDisplayLayout(style,camera.pxPerDeg,state.pixelRatio,glyphs[style]).spacing*0.8));
+    const occupied=new PlacedGlyphs(reach);
     for (const style of ["arrow","barb"] as const) {
       if (glyphs[style].opacity_percent<=0) continue;
       const layout=glyphDisplayLayout(style,camera.pxPerDeg,state.pixelRatio,glyphs[style]);
@@ -1130,14 +1248,9 @@ export class MapRenderer {
       if(masks.every(({coverage,wind})=>!coverage||!wind||(style==="barb"?glyphTileIsEmpty(wind):glyphTileIsFull(wind))))continue;
       const solid=masks.every(({coverage,wind})=>coverage&&wind&&(style==="barb"?glyphTileIsFull(wind):glyphTileIsFull(coverage)&&glyphTileIsEmpty(wind)));
       const fine=layout.spacing/(solid?1:4),margin=layout.lengthPx;
-      const candidates:Array<{x:number;y:number;rank:number}>=[];
-      for(let row=-4;row<=Math.ceil((state.view.height+margin)/fine);row++)for(let col=-4;col<=Math.ceil((state.view.width+margin)/fine);col++){
-        candidates.push({x:col*fine,y:row*fine,rank:col%4===0&&row%4===0?0:col%2===0&&row%2===0?1:2});
-      }
-      candidates.sort((a,b)=>a.rank-b.rank||a.y-b.y||a.x-b.x);
-      for (const site of candidates) {
+      for (const site of rankedSites(state.view.width,state.view.height,fine,margin)) {
         const gap=layout.spacing*0.8;
-        if(occupied.some(p=>Math.hypot(p.x-site.x,p.y-site.y)<(p.gap+gap)/2))continue;
+        if(occupied.crowds(site.x,site.y,gap))continue;
         const geo=unproject(camera,state.view,site);if(!validGeo(geo))continue;
         let sample=geo;
         const operator=state.operator;
@@ -1160,7 +1273,7 @@ export class MapRenderer {
         const east=project(camera,state.view,destination(geo,90,100));
         const north=project(camera,state.view,destination(geo,0,100));
         if(!Number.isFinite(east.x)||!Number.isFinite(north.x))continue;
-        occupied.push({...site,gap});
+        occupied.place(site.x,site.y,gap);
         batch.data.push(sample.lon,sample.lat,site.x,site.y,east.x-site.x,east.y-site.y,north.x-site.x,north.y-site.y);
       }
     }
@@ -1257,7 +1370,9 @@ export class MapRenderer {
         gl.drawElements(kind === "land" ? gl.TRIANGLES : gl.LINES, geo.indexCount, gl.UNSIGNED_INT, 0);
       }
     };
-    if (general) this.projectedSurface.drawBase(state.camera, state.view, tiles, "land", lod, drawGeographicTile);
+    const onGpu = projectedOnGpu(projectionFor(state.camera));
+    if (onGpu) this.drawGlobeBase(state, tiles, "land", lod, drawGeographicTile);
+    else if (general) this.projectedSurface.drawBase(state.camera, state.view, tiles, "land", lod, drawGeographicTile);
 
     // --- Land and coastlines ---
     gl.useProgram(this.geoProgram);
@@ -1357,7 +1472,8 @@ export class MapRenderer {
     // --- Coastlines, above the raster ---
     // The field covers land as well as sea, so a coastline drawn underneath it
     // is almost invisible. Drawn here it stays legible at any wind speed.
-    if (general) this.projectedSurface.drawBase(state.camera, state.view, tiles, "coast", lod, drawGeographicTile);
+    if (onGpu) this.drawGlobeBase(state, tiles, "coast", lod, drawGeographicTile);
+    else if (general) this.projectedSurface.drawBase(state.camera, state.view, tiles, "coast", lod, drawGeographicTile);
     if (coast && !general) {
       gl.useProgram(this.geoProgram);
       gl.bindVertexArray(coast.vao);
@@ -1369,7 +1485,21 @@ export class MapRenderer {
     }
 
     // --- Graticule ---
-    if (state.showGraticule && general) {
+    if (state.showGraticule && onGpu) {
+      // The flat map's own lines, in pieces short enough to follow a sphere,
+      // through the same vertex shader as everything else on the globe. A
+      // piece that holds the antipode is a chord across the map, so the lines
+      // stop a piece and a half short of it: a hair at the rim of the two
+      // maps that show it, and nothing at all on the globe.
+      this.ensureGraticule(state, GRATICULE_PIECE_DEG);
+      if (this.graticule) {
+        gl.useProgram(this.geoProgram);
+        gl.bindVertexArray(this.graticule.vao);
+        gl.uniform4f(this.geoUniforms.uColor ?? null, ...GRATICULE);
+        this.setShared(this.geoUniforms, state.camera, state.view, 0, 1.5 * GRATICULE_PIECE_DEG);
+        gl.drawArrays(gl.LINES, 0, this.graticule.count);
+      }
+    } else if (state.showGraticule && general) {
       gl.useProgram(this.geoProgram);
       const count = this.projectedSurface.bindGraticule(state.camera, state.view, this.graticuleInterval(state.camera.pxPerDeg));
       this.setShared(this.geoUniforms, state.camera, state.view, 0);

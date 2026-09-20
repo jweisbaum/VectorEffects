@@ -854,6 +854,26 @@ to the hash input is a correctness bug that shows up as stale frames.
   showing up as glyphs sitting slightly off the colour they describe. The mode
   is `Projection.mode`, which is what the shader branches on; equirectangular
   must stay 0, since that is the GLSL default branch.
+- **The globe and the azimuthals live three times**, not twice: `azimuthal`
+  in `projections/general.ts` for the pointer, the overlay and the tile cull;
+  `AZIMUTHAL` in `projectionShaders.ts` for every pixel of the map, forward
+  *and* inverse. `azimuthalShader.test.ts` runs the shader's own text against
+  the TypeScript, poles and antimeridian included, and
+  `node tools/webdriver/projections.mjs` compiles it in a real WebKit, checks
+  an image lands on the globe's centre, and **times a turn** — run it after
+  touching either. The shaders branch on `shaderMode()` (15–19), never on
+  `Projection.mode`: that one is persisted as a stamp space and every general
+  projection shares 14 there.
+- **Nothing on a movable projection may be built per camera.** Turning a
+  globe changes the mapping, so anything keyed on the camera is rebuilt every
+  pointer move: the screen mesh was 600 ms a frame and the glyph placement
+  3.3 s. Tiles go through the static `globeGrid`; an image, and a tile beside
+  the antipode, through the viewport quad and the exact inverse (`uExact`).
+  A helper that is called per *point* must not build a string to look itself
+  up (`mapTransform` remembers its last answer for that reason).
+- **`gl_FragCoord` is fragment-only, and the projection prelude is included by
+  both stages.** A helper that reads the pixel goes in `EXACT_TILE`, after the
+  prelude, in fragment sources only, or every vertex shader fails to compile.
 - **The projection rides on the `Camera`**, not beside it. Everything that
   needs it — `project`, `unproject`, `panBy`, `visibleBounds`, the footprint
   radii, the renderer's uniforms — reads it off the camera it was already

@@ -125,3 +125,48 @@ describe("resident glyph coverage", () => {
     expect(glyphCovered(mask, 0.5, 0.5)).toBe(false);
   });
 });
+
+/**
+ * The two pieces that replaced a sort and an all-pairs search in the glyph
+ * placement of a general projection, which runs every frame a globe turns.
+ * Each is held to the plain statement of what it is for.
+ */
+describe("placing glyphs on a screen lattice", () => {
+  it("offers the coarse lattice first, then the finer ones, each row by row", async () => {
+    const { rankedSites } = await import("./glyphPlacement");
+    const [width, height, fine, margin] = [310, 170, 8.5, 20];
+    // The definition: every site of the lattice, ordered by rank, then down, then across.
+    const expected: Array<{ x: number; y: number; rank: number }> = [];
+    for (let row = -4; row <= Math.ceil((height + margin) / fine); row++) {
+      for (let col = -4; col <= Math.ceil((width + margin) / fine); col++) {
+        expected.push({ x: col * fine, y: row * fine,
+          rank: col % 4 === 0 && row % 4 === 0 ? 0 : col % 2 === 0 && row % 2 === 0 ? 1 : 2 });
+      }
+    }
+    expected.sort((a, b) => a.rank - b.rank || a.y - b.y || a.x - b.x);
+    expect([...rankedSites(width, height, fine, margin)]).toEqual(expected.map(({ x, y }) => ({ x, y })));
+  });
+
+  it("finds a crowding glyph exactly when asking every placed one would", async () => {
+    const { PlacedGlyphs } = await import("./glyphPlacement");
+    // A fixed pseudo-random scatter, two gap sizes, sites off screen included.
+    let seed = 12345;
+    const random = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+    const gaps = [27.2, 36.8];
+    const placed = new PlacedGlyphs(Math.max(...gaps));
+    const all: Array<{ x: number; y: number; gap: number }> = [];
+    let accepted = 0, refused = 0;
+    for (let i = 0; i < 4000; i++) {
+      const site = { x: random() * 900 - 60, y: random() * 600 - 60, gap: gaps[i % 2]! };
+      const crowded = all.some((p) => Math.hypot(p.x - site.x, p.y - site.y) < (p.gap + site.gap) / 2);
+      expect(placed.crowds(site.x, site.y, site.gap), `site ${i}`).toBe(crowded);
+      if (crowded) { refused++; continue; }
+      accepted++;
+      all.push(site);
+      placed.place(site.x, site.y, site.gap);
+    }
+    // Both answers were exercised, or the agreement above says little.
+    expect(accepted).toBeGreaterThan(300);
+    expect(refused).toBeGreaterThan(300);
+  });
+});
