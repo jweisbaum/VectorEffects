@@ -564,7 +564,23 @@ pub const EDGE_MODES: &[&str] = &["blend", "replace"];
 pub const BRUSH_SHAPES: &[&str] = &["circle", "square"];
 /// Variants of [`PropId::StampSpace`]. Index 0 keeps existing objects on the
 /// ground, which is what they were painted as.
-pub const STAMP_SPACES: &[&str] = &["geodesic", "projected", "mercator", "miller"];
+pub const STAMP_SPACES: &[&str] = &[
+    "geodesic",
+    "projected",
+    "mercator",
+    "miller",
+    "lambert",
+    "behrmann",
+    "gall_peters",
+    "hobo_dyer",
+    "gall_stereographic",
+    "braun",
+    "central_cylindrical",
+    "patterson",
+    "compact_miller",
+    "equidistant_30",
+    "equidistant_45",
+];
 /// Variants of [`PropId::FillMode`].
 pub const FILL_MODES: &[&str] = &["filled", "perimeter", "filled_gradient"];
 /// Variants of [`PropId::RotationSense`].

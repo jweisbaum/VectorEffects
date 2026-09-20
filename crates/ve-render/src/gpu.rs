@@ -15,7 +15,6 @@ use std::sync::{Arc, Mutex};
 use ve_core::project::FieldKind;
 use ve_core::vector::Uv;
 
-use crate::aeqd::Space;
 use crate::error::{RenderError, Result};
 use crate::evaluator::{FieldEvaluator, Sample, SamplePoint};
 use crate::scene::{DirectionMode, EdgeMode, Modifier, Scene, SpeedMode};
@@ -318,15 +317,7 @@ fn pack(scene: &Scene) -> Packed {
 
         push_u32(&mut objects, path_offset);
         push_u32(&mut objects, path_count);
-        push_u32(
-            &mut objects,
-            match object.frame.space {
-                Space::Geodesic => 0,
-                Space::Projected => 1,
-                Space::Mercator => 2,
-                Space::Miller => 3,
-            },
-        );
+        push_u32(&mut objects, u32::from(object.frame.space.choice()));
         push_u32(&mut objects, u32::from(object.invert));
 
         // The object's own movement (spec.md 9.3). Four words, so the struct

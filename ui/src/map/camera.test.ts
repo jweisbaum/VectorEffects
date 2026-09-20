@@ -162,6 +162,23 @@ describe("tileLevelFor", () => {
 });
 
 describe("visibleTiles", () => {
+  it("covers both sides of repeated worlds when tall projections fit vertically", () => {
+    for (const projection of PROJECTIONS) for (const centerLon of [-179, 0, 179]) {
+      const c: Camera = { centerLon, centerLat: 0, projection: projection.id,
+        pxPerDeg: minPxPerDeg(view, projection) };
+      const tiles = visibleTiles(c, view);
+      const bounds = visibleBounds(c, view, true);
+      expect(bounds.west).toBeCloseTo(centerLon - view.width / (2 * c.pxPerDeg), 8);
+      for (const x of [1, view.width / 2, view.width - 1]) {
+        const lon = centerLon + (x - view.width / 2) / c.pxPerDeg;
+        expect(tiles.some(tile => {
+          const b = tileBounds(tile.z, tile.x, tile.y);
+          return lon >= b.west + tile.lonOffset && lon <= b.east + tile.lonOffset;
+        }), `${projection.id} at pixel ${x}`).toBe(true);
+      }
+    }
+  });
+
   it("returns addresses inside the pyramid", () => {
     for (const c of [
       camera,
@@ -423,7 +440,7 @@ describe("the cylindrical projections (M11)", () => {
     // further the higher the latitude.
     for (const projection of PROJECTIONS) {
       const camera = clampCamera(
-        { centerLon: 0, centerLat: 55, pxPerDeg: 12, projection: projection.id },
+        { centerLon: 0, centerLat: 20, pxPerDeg: 12, projection: projection.id },
         view,
       );
       const grabbed = { x: 300, y: 140 };

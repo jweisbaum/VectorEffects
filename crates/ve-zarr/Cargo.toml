@@ -20,7 +20,7 @@ serde_json = { workspace = true, features = ["preserve_order"] }
 # toolchain. The stores this crate reads are blosc/lz4 only, and `blosc.rs`
 # decodes that in Rust, so the C++ dependency buys nothing and costs the
 # three-platform build.
-zarrs = { version = "0.23", default-features = false, features = ["filesystem", "zstd"] }
+zarrs = { version = "0.23", default-features = false, features = ["filesystem", "zstd", "sharding", "crc32c"] }
 zarrs_storage = "0.4"
 lz4_flex = { version = "0.14", default-features = false, features = ["std", "frame"] }
 half = "2.7"

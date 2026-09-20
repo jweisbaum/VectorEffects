@@ -125,6 +125,8 @@ pub const TABLE: &[(&str, Handler)] = &[
     command!(export_estimate, crate::export::export_estimate, {}),
     command!(import_grib, crate::import::import_grib, { path: String }),
     command!(new_project_from_grib, crate::import::new_project_from_grib, { path: String, discard_unsaved: bool }),
+    command!(import_zarr, crate::zarr::import_zarr, { path: String }),
+    command!(new_project_from_zarr, crate::zarr::new_project_from_zarr, { path: String, discard_unsaved: bool }),
     command!(document_tree, crate::document::document_tree, { step: u32 }),
     command!(object_properties, crate::document::object_properties, { object: u64, step: u32 }),
     command!(set_object_property, crate::document::set_object_property, { object: u64, property: String, value: crate::document::PropertyValue, step: u32, auto_key: bool, gesture: Option<String> }),

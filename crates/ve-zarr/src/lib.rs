@@ -28,6 +28,7 @@ pub mod globcurrent;
 pub mod http;
 mod parallel;
 pub mod regrid;
+pub mod routing;
 pub mod source;
 pub mod store;
 pub mod time;

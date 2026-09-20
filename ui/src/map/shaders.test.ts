@@ -280,43 +280,34 @@ describe("the renderer's uniform lookups", () => {
  * the actual string that gets compiled, not a copy of it.
  */
 function glslFn(source: string, name: string): (arg: number, mode: number) => number {
-  const signature = new RegExp(`float ${name}\\(float (\\w+)\\) \\{`).exec(source);
-  if (!signature) throw new Error(`no ${name} in the shader`);
-  const parameter = signature[1] as string;
-  let depth = 0;
-  let end = source.indexOf("{", signature.index);
-  const open = end;
-  do {
-    if (source[end] === "{") depth += 1;
-    if (source[end] === "}") depth -= 1;
-    end += 1;
-  } while (depth > 0 && end < source.length);
-
-  // The shader's own top-level constants, so the test reads VE_DEG from the
-  // source rather than restating it.
+  const names = ["equalAreaK", "cylindricalPolynomial", "cylindricalY", "cylindricalLat", name];
   const constants = [...source.matchAll(/const float (\w+) = ([^;]+);/g)]
-    .map((match) => `const ${match[1]} = ${match[2]};`)
-    .join("\n");
-
-  const body = constants + source
-    .slice(open + 1, end - 1)
-    .replace(/\/\/[^\n]*/g, "")
-    .replace(/\bfloat\s+/g, "const ")
-    .replace(/\b(log|tan|atan|exp|clamp)\(/g, "M.$1(");
-  // eslint-disable-next-line @typescript-eslint/no-implied-eval
-  const compiled = new Function(parameter, "uProjection", "M", body) as (
-    arg: number,
-    mode: number,
-    maths: unknown,
-  ) => number;
-  const M = {
-    log: Math.log,
-    tan: Math.tan,
-    atan: Math.atan,
-    exp: Math.exp,
+    .map(match => `const ${match[1]} = ${match[2]};`).join("\n");
+  const functions = names.map(fn => {
+    const signature = new RegExp(`(?:float|vec2) ${fn}\\(([^)]*)\\) \\{`).exec(source);
+    if (!signature) throw new Error(`no ${fn} in the shader`);
+    const parameters = signature[1]!.replace(/\b(?:int|float)\s+/g, "");
+    const open = source.indexOf("{", signature.index);
+    let end = open, depth = 0;
+    do {
+      if (source[end] === "{") depth++;
+      if (source[end] === "}") depth--;
+      end++;
+    } while (depth > 0 && end < source.length);
+    const body = source.slice(open + 1, end - 1)
+      .replace(/\/\/[^\n]*/g, "")
+      .replace(/\b(?:float|int|vec2)\s+/g, "let ")
+      .replace(/\b(log|tan|atan|exp|sin|asin|clamp|vec2)\(/g, "M.$1(");
+    return `function ${fn}(${parameters}) { ${body} }`;
+  }).join("\n");
+  const compiled = new Function("arg", "uProjection", "M", `${constants}\n${functions}\nreturn ${name}(arg);`);
+  const maths = {
+    log: Math.log, tan: Math.tan, atan: Math.atan, exp: Math.exp,
+    sin: Math.sin, asin: Math.asin,
     clamp: (x: number, low: number, high: number) => Math.min(Math.max(x, low), high),
+    vec2: (x: number, y: number) => ({ x, y }),
   };
-  return (arg, mode) => compiled(arg, mode, M);
+  return (arg, mode) => compiled(arg, mode, maths) as number;
 }
 
 describe("the shader's projection and the pointer's", () => {
@@ -349,7 +340,7 @@ describe("the shader's projection and the pointer's", () => {
   it("numbers the projections the way the shader branches", () => {
     // The default branch is mode 0, so equirectangular has to be it: anything
     // else would draw flat wherever its own branch was not written.
-    expect(PROJECTIONS.map((p) => p.mode)).toEqual([0, 1, 2]);
+    expect(PROJECTIONS.map((p) => p.mode)).toEqual(Array.from({ length: 14 }, (_, i) => i));
     expect(projectionOf("equirectangular").mode).toBe(0);
   });
 });

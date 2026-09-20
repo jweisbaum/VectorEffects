@@ -1,3 +1,4 @@
+import ProjectionPicker from "./ProjectionPicker";
 import ToolSelect from "../ToolSelect";
 import { hitShapePoint, movedShapePoint, type ShapePointHit } from "./shapeEditing";
 import type { ShapeControls } from "../generated/ShapeControls";
@@ -45,6 +46,8 @@ import {
   type Camera,
   type Viewport,
   clampCamera,
+  cameraForProjection,
+  validGeo,
   minPxPerDeg,
   normalizeLon,
   panBy,
@@ -79,7 +82,6 @@ import { GLYPH_SUBDIVISIONS, spacedGlyphs } from "./glyphPlacement";
 import { DEFAULT_GLYPHS, glyphDisplayLayout, glyphOpacity } from "./glyphAppearance";
 import {
   DEFAULT_PROJECTION,
-  PROJECTIONS,
   type ProjectionId,
   projectionOf,
 } from "./projection";
@@ -1429,6 +1431,7 @@ export default function MapView({
     const placement = committedTransformRef.current;
     if (!canvas || !placement) return;
     const camera = cameraRef.current;
+    if (projectionFor(camera).general) return;
     const view = viewRef.current;
     const at = toScreen(camera, view, { lon: placement.lon, lat: placement.lat });
     const { rx, ry } = footprintRadii(camera, placement.lat, placement.radius_m / 1000);
@@ -2552,10 +2555,7 @@ export default function MapView({
       (settings?.projection ?? DEFAULT_PROJECTION) as ProjectionId,
     ).id;
     if (cameraRef.current.projection === wanted) return;
-    cameraRef.current = clampCamera(
-      { ...cameraRef.current, projection: wanted },
-      viewRef.current,
-    );
+    cameraRef.current = cameraForProjection(cameraRef.current, viewRef.current, wanted);
     requestDraw();
   }, [requestDraw, settings?.projection]);
 
@@ -2604,9 +2604,16 @@ export default function MapView({
 
       for (const [lon, lat] of at) {
         const point = toScreen(camera, view, { lon, lat });
+        if (!Number.isFinite(point.x)) continue;
+        let angle = azimuthAt(lon, lat);
+        if (projectionFor(camera).general) {
+          const ahead = toScreen(camera, view, destination({lon, lat}, angle, 100));
+          if (!Number.isFinite(ahead.x)) continue;
+          angle = Math.atan2(ahead.x - point.x, point.y - ahead.y) * 180 / Math.PI;
+        }
         const geometry = glyphGeometry(
           glyphStyle,
-          azimuthAt(lon, lat),
+          angle,
           knots,
           lengthPx,
           lat,
@@ -3427,7 +3434,7 @@ export default function MapView({
       if (first !== undefined) {
         // px chooses a space here as it does on every other tool (M67): a
         // circle on the map, not a ground circle that flattens going north.
-        const { radiusKm: fresh, space } = eraserStamp(brush, camera, first[1]);
+        const { radiusKm: fresh, space } = eraserStamp(brush, camera, first[1], first[0]);
         // Frozen at the press once a stroke is under way, as every px size is.
         const radiusKm = drag?.radiusKm ?? fresh;
         context.save();
@@ -4036,9 +4043,13 @@ export default function MapView({
     requestDraw();
   }, [rampsKey, requestDraw]);
 
+  const lastMapPointer = useRef<{x:number;y:number} | null>(null);
+
   const onPointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    event.currentTarget.setPointerCapture(event.pointerId);
     const point = toDevice(event);
+    if (!validGeo(unproject(cameraRef.current, viewRef.current, point))) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    lastMapPointer.current = point;
 
     if (shapeEditing !== null && picking === null) {
       const controls = shapeControls.current;
@@ -4163,7 +4174,7 @@ export default function MapView({
       eraseDrag.current = {
         points: [[geo.lon, geo.lat]],
         step: event.shiftKey ? stepRef.current : null,
-        radiusKm: eraserStamp(brush, cameraRef.current, geo.lat).radiusKm,
+        radiusKm: eraserStamp(brush, cameraRef.current, geo.lat, geo.lon).radiusKm,
       };
       if (refreshEraser()) requestDraw();
       requestOverlay();
@@ -4506,7 +4517,19 @@ export default function MapView({
 
   const onPointerMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
     const point = toDevice(event);
-    cursorRef.current = point;
+    const geographic = validGeo(unproject(cameraRef.current, viewRef.current, point));
+    cursorRef.current = geographic ? point : null;
+    if (!geographic) {
+      if (dragging.current) {
+        const old = dragging.current; dragging.current = point;
+        cameraRef.current = panBy(cameraRef.current, viewRef.current, old.x - point.x, old.y - point.y);
+        requestDraw();
+      }
+      readoutStore.current?.set({sample: null});
+      requestOverlay();
+      return;
+    }
+    lastMapPointer.current = point;
 
     const pointDrag = shapeDrag.current;
     if (pointDrag && pointDrag.pointer === event.pointerId) {
@@ -4562,6 +4585,7 @@ export default function MapView({
           : [native];
       for (const sample of samples) {
         const geo = unproject(cameraRef.current, viewRef.current, toDevice(sample));
+        if (!validGeo(geo)) continue;
         shaping.points.push([geo.lon, geo.lat]);
       }
       requestOverlay();
@@ -4587,6 +4611,7 @@ export default function MapView({
       const spacing = 6 * (window.devicePixelRatio || 1);
       for (const sample of samples) {
         const geo = unproject(cameraRef.current, viewRef.current, toDevice(sample));
+        if (!validGeo(geo)) continue;
         const last = drag.points[drag.points.length - 1];
         const moved =
           last === undefined ||
@@ -4660,6 +4685,7 @@ export default function MapView({
       const spacing = 6 * (window.devicePixelRatio || 1);
       for (const sample of samples) {
         const geo = unproject(cameraRef.current, viewRef.current, toDevice(sample));
+        if (!validGeo(geo)) continue;
         const last = drawing.points[drawing.points.length - 1];
         const moved =
           last === undefined ||
@@ -4918,6 +4944,7 @@ export default function MapView({
    * flight, the newest position waiting behind it.
    */
   const sampleAt = (geo: { lon: number; lat: number }) => {
+    if (!validGeo(geo)) { readoutStore.current?.set({ sample: null }); return; }
     // Nobody is reading the number: the readout is hidden and the eyedropper
     // is not armed (M77). It costs a field evaluation per pointer report, so
     // it is not asked for. The magnifier shares this one stream deliberately,
@@ -5085,7 +5112,7 @@ export default function MapView({
    */
   const startGesture = useCallback(
     (geo: { lon: number; lat: number }, event: React.PointerEvent<HTMLCanvasElement>) => {
-      if (!schema || tool === HAND) return;
+      if (!schema || tool === HAND || !validGeo(geo)) return;
       // A stroke aimed at a hidden layer does nothing, and must be seen to do
       // nothing (M68). The backend refuses it, but only on release — and for
       // the whole drag before that the preview would show the edit happening
@@ -5141,6 +5168,8 @@ export default function MapView({
   );
 
   const endDrag = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    const rawPoint = toDevice(event);
+    const releasePoint = validGeo(unproject(cameraRef.current, viewRef.current, rawPoint)) ? rawPoint : lastMapPointer.current ?? rawPoint;
     const pointDrag = shapeDrag.current;
     if (pointDrag?.pointer === event.pointerId) shapeDrag.current = null;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
@@ -5171,7 +5200,7 @@ export default function MapView({
       pressOrigin.current = null;
       dragging.current = null;
       applyCursor(false, false);
-      const point = toDevice(event);
+      const point = releasePoint;
       const slack = 4 * (window.devicePixelRatio || 1);
       if (origin && Math.hypot(point.x - origin.x, point.y - origin.y) <= slack) {
         const geo = unproject(cameraRef.current, viewRef.current, point);
@@ -5328,7 +5357,7 @@ export default function MapView({
       // finished on: the last one in flight can be a round trip behind a fast
       // flick, and it is what stays on screen until the tiles arrive. It has to
       // go first — `endGesture` drops the baseline it reads.
-      const release = unproject(cameraRef.current, viewRef.current, toDevice(event));
+      const release = unproject(cameraRef.current, viewRef.current, releasePoint);
       void api
         .previewTransform(release.lon, release.lat)
         .then((final) => {
@@ -5369,7 +5398,7 @@ export default function MapView({
     const origin = pressOrigin.current;
     pressOrigin.current = null;
     if (tool === "hand" && origin) {
-      const point = toDevice(event);
+      const point = releasePoint;
       const slack = 4 * (window.devicePixelRatio || 1);
       if (Math.hypot(point.x - origin.x, point.y - origin.y) <= slack) {
         const geo = unproject(cameraRef.current, viewRef.current, point);
@@ -6349,20 +6378,8 @@ export default function MapView({
         </label>
         <label>
           Projection
-          <ToolSelect
-            value={settings?.projection ?? "equirectangular"}
-            disabled={settings === null}
-            onChange={(e) => {
-              void api.setProjection(e.target.value).then(onSettings);
-            }}
-            title="How the map lays the world out. A view setting: it never changes what is stored or exported."
-          >
-            {PROJECTIONS.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.label}
-              </option>
-            ))}
-          </ToolSelect>
+          <ProjectionPicker value={settings?.projection ?? "equirectangular"} disabled={settings === null}
+            onChange={id => api.setProjection(id).then(onSettings)} />
         </label>
         <label>
           <input

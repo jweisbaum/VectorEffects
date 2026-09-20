@@ -13,10 +13,17 @@ import {
   type Viewport,
   glyphLattice,
   projectionFor,
+  project,
+  unproject,
+  validGeo,
+  tileColumns,
+  tileRows,
   tileBounds,
   visibleBounds,
   visibleTiles,
 } from "./camera";
+import { destination } from "./geo";
+import { ProjectedSurface } from "./projections/surface";
 import type { Basemap } from "./format";
 import { KINDS, type FieldKindName } from "../kind";
 import { DEFAULT_GLYPHS, glyphDisplayLayout, glyphRgb } from "./glyphAppearance";
@@ -329,6 +336,7 @@ interface GeoBuffers {
 
 export class MapRenderer {
   private readonly gl: WebGL2RenderingContext;
+  private readonly projectedSurface: ProjectedSurface;
   private readonly tiles: TileCache;
 
   private readonly imageProgram: WebGLProgram;
@@ -411,6 +419,7 @@ export class MapRenderer {
       this.coastByLod.set(lod.marker, this.buildGeo(lod.lineVertices, lod.lineIndices));
     }
 
+    this.projectedSurface = new ProjectedSurface(gl);
     this.quadVao = this.buildQuad();
     this.imageMesh = this.buildImageMesh();
     // Only stations are uploaded; each mark's geometry comes from gl_VertexID.
@@ -503,7 +512,8 @@ export class MapRenderer {
 
   /** World copies to draw so the map wraps seamlessly at the dateline. */
   private worldOffsets(state: RenderState): number[] {
-    const bounds = visibleBounds(state.camera, state.view);
+    if (projectionFor(state.camera).general) return [0];
+    const bounds = visibleBounds(state.camera, state.view, true);
     const first = Math.floor((bounds.west + 180) / 360);
     const last = Math.floor((bounds.east + 180) / 360);
     const out: number[] = [];
@@ -697,7 +707,9 @@ export class MapRenderer {
         b.west, b.north, b.east - b.west, b.north - b.south,
       );
       gl.bindTexture(gl.TEXTURE_2D, texture);
-      gl.drawArrays(gl.TRIANGLES, 0, 6);
+      const count = projectionFor(camera).general
+        ? this.projectedSurface.bindTile(camera, state.view, tile) : 6;
+      gl.drawArrays(gl.TRIANGLES, 0, count);
     }
   }
 
@@ -714,6 +726,8 @@ export class MapRenderer {
     gl.uniform1i(this.imageUniforms.uImage ?? null, 0);
     gl.activeTexture(gl.TEXTURE0);
     for (const image of images) {
+      const count = projectionFor(state.camera).general
+        ? this.projectedSurface.bindImage(state.camera, state.view, image) : this.imageMesh.count;
       if (!image.texture || image.opacity <= 0) continue;
       gl.uniform3f(this.imageUniforms.uPlaceLon ?? null, ...image.placeLon);
       gl.uniform3f(this.imageUniforms.uPlaceLat ?? null, ...image.placeLat);
@@ -738,14 +752,14 @@ export class MapRenderer {
           gl.bindTexture(gl.TEXTURE_2D, shown.texture);
           for (const offset of offsets) {
             this.setShared(this.imageUniforms, state.camera, state.view, offset);
-            gl.drawArrays(gl.TRIANGLES, 0, this.imageMesh.count);
+            gl.drawArrays(gl.TRIANGLES, 0, count);
           }
         }
         continue;
       }
       for (const offset of offsets) {
         this.setShared(this.imageUniforms, state.camera, state.view, offset);
-        gl.drawArrays(gl.TRIANGLES, 0, this.imageMesh.count);
+        gl.drawArrays(gl.TRIANGLES, 0, count);
       }
     }
   }
@@ -900,10 +914,11 @@ export class MapRenderer {
 
   /** Graticule interval that keeps lines at least ~70 px apart. */
   private graticuleInterval(pxPerDeg: number): number {
-    for (const step of [30, 15, 10, 5, 2, 1, 0.5, 0.25]) {
-      if (step * pxPerDeg >= 70) return step;
+    let chosen = 30;
+    for (const step of [30, 15, 10, 5, 2, 1, 0.5, 0.25, 0.1]) {
+      if (step * pxPerDeg >= 70) chosen = step;
     }
-    return 0.25;
+    return chosen;
   }
 
   private ensureGraticule(state: RenderState): void {
@@ -984,6 +999,10 @@ export class MapRenderer {
     this.setOperator(this.glyphUniforms, state.view, state.operator ?? null, stage);
     gl.uniform1i(this.glyphUniforms.uBelow ?? null, BELOW_UNIT);
 
+    if (projectionFor(camera).general) {
+      this.drawGeneralGlyphs(state, camera, tiles, stage, frame, scope);
+      return;
+    }
     const projection = projectionFor(camera);
     const centreY = projection.yOf(camera.centerLat);
     const batches: Array<{ tile: VisibleTile; texture: WebGLTexture; coverage: Uint8Array; wind: Uint8Array }> = [];
@@ -1091,6 +1110,81 @@ export class MapRenderer {
     }
   }
 
+  /** A screen lattice gives globe and regional maps evenly spaced glyphs.
+   * Each station still samples a geographic tile and uses a true east/north
+   * differential, so grid convergence never changes the stored direction. */
+  private drawGeneralGlyphs(
+    state: RenderState, camera: Camera, tiles: readonly VisibleTile[], stage: OpStage,
+    frame?: string, scope?: string,
+  ): void {
+    if (!tiles.length) return;
+    const gl=this.gl, glyphs=state.glyphs??DEFAULT_GLYPHS;
+    const batches=tiles.map(tile=>({tile,...this.textureFor(state,tile,frame),data:[] as number[]}));
+    const lookup=new Map(batches.map((batch,index)=>[`${batch.tile.x}/${batch.tile.y}`,index]));
+    const z=tiles[0]!.z, columns=tileColumns(z), rows=tileRows(z);
+    const occupied:Array<{x:number;y:number;gap:number}>=[];
+    for (const style of ["arrow","barb"] as const) {
+      if (glyphs[style].opacity_percent<=0) continue;
+      const layout=glyphDisplayLayout(style,camera.pxPerDeg,state.pixelRatio,glyphs[style]);
+      const masks=batches.map(batch=>({coverage:this.tiles.coverageOf(batch.frame,z,batch.tile.x,batch.tile.y),wind:this.tiles.windCoverageOf(batch.frame,z,batch.tile.x,batch.tile.y)}));
+      if(masks.every(({coverage,wind})=>!coverage||!wind||(style==="barb"?glyphTileIsEmpty(wind):glyphTileIsFull(wind))))continue;
+      const solid=masks.every(({coverage,wind})=>coverage&&wind&&(style==="barb"?glyphTileIsFull(wind):glyphTileIsFull(coverage)&&glyphTileIsEmpty(wind)));
+      const fine=layout.spacing/(solid?1:4),margin=layout.lengthPx;
+      const candidates:Array<{x:number;y:number;rank:number}>=[];
+      for(let row=-4;row<=Math.ceil((state.view.height+margin)/fine);row++)for(let col=-4;col<=Math.ceil((state.view.width+margin)/fine);col++){
+        candidates.push({x:col*fine,y:row*fine,rank:col%4===0&&row%4===0?0:col%2===0&&row%2===0?1:2});
+      }
+      candidates.sort((a,b)=>a.rank-b.rank||a.y-b.y||a.x-b.x);
+      for (const site of candidates) {
+        const gap=layout.spacing*0.8;
+        if(occupied.some(p=>Math.hypot(p.x-site.x,p.y-site.y)<(p.gap+gap)/2))continue;
+        const geo=unproject(camera,state.view,site);if(!validGeo(geo))continue;
+        let sample=geo;
+        const operator=state.operator;
+        if(stage==="apply"&&operator?.kind==="smear") {
+          let dx=0,dy=0;const radius=operator.radiusPx??0,band=(operator.feather??0)*radius;
+          for(let i=0;i<(operator.points?.length??0);i++){
+            const p=operator.points![i]!,delta=operator.deltas?.[i];if(!delta)continue;
+            const inside=radius-Math.hypot(site.x-p[0],state.view.height-site.y-p[1]);if(inside<0)continue;
+            const t=band>0?Math.min(1,inside/band):1,w=t*t*(3-2*t);dx+=delta[0]*w;dy+=delta[1]*w;
+          }
+          sample=unproject(camera,state.view,{x:site.x-dx,y:site.y+dy});if(!validGeo(sample))continue;
+        }
+        const col=Math.min(columns-1,Math.floor((sample.lon+180)/360*columns));
+        const row=Math.min(rows-1,Math.floor((90-sample.lat)/180*rows));
+        const index=lookup.get(`${col}/${row}`);if(index===undefined)continue;
+        const batch=batches[index]!;if(!batch.texture)continue;
+        const bounds=tileBounds(z,col,row),u=(sample.lon-bounds.west)/(bounds.east-bounds.west),v=(bounds.north-sample.lat)/(bounds.north-bounds.south);
+        const coverage=this.tiles.coverageOf(batch.frame,z,col,row),wind=this.tiles.windCoverageOf(batch.frame,z,col,row);
+        if(!coverage||!wind||!glyphCovered(coverage,u,v)||glyphCovered(wind,u,v)!==(style==="barb"))continue;
+        const east=project(camera,state.view,destination(geo,90,100));
+        const north=project(camera,state.view,destination(geo,0,100));
+        if(!Number.isFinite(east.x)||!Number.isFinite(north.x))continue;
+        occupied.push({...site,gap});
+        batch.data.push(sample.lon,sample.lat,site.x,site.y,east.x-site.x,east.y-site.y,north.x-site.x,north.y-site.y);
+      }
+    }
+    gl.bindVertexArray(this.glyphVao);gl.bindBuffer(gl.ARRAY_BUFFER,this.glyphBuffer);
+    gl.vertexAttribPointer(0,2,gl.FLOAT,false,32,0);
+    gl.enableVertexAttribArray(1);gl.vertexAttribPointer(1,2,gl.FLOAT,false,32,8);gl.vertexAttribDivisor(1,1);
+    gl.enableVertexAttribArray(2);gl.vertexAttribPointer(2,4,gl.FLOAT,false,32,16);gl.vertexAttribDivisor(2,1);
+    const shadows=glyphs.arrow.shadow.enabled||glyphs.barb.shadow.enabled;
+    for(const shadow of shadows?[true,false]:[false]){
+      gl.uniform1i(this.glyphUniforms.uShadowPass??null,shadow?1:0);
+      for(const batch of batches){
+        if(!batch.texture||!batch.data.length)continue;
+        this.bindScope(this.glyphUniforms,scope,batch.tile,batch.texture,state.belowHeldFrame);
+        this.setShared(this.glyphUniforms,camera,state.view,0);
+        const b=tileBounds(z,batch.tile.x,batch.tile.y);
+        gl.uniform4f(this.glyphUniforms.uTileGeo??null,b.west,b.north,b.east-b.west,b.north-b.south);
+        gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,batch.texture);
+        gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(batch.data),gl.STREAM_DRAW);
+        gl.drawArraysInstanced(gl.TRIANGLES,0,GLYPH_VERTICES,batch.data.length/8);
+      }
+    }
+    gl.vertexAttribPointer(0,2,gl.FLOAT,false,0,0);gl.disableVertexAttribArray(1);gl.disableVertexAttribArray(2);
+  }
+
   /**
    * Draws a frame and returns the range of speeds of each kind across the
    * tiles it drew, in m/s — null for a kind none held. What the auto scale
@@ -1104,7 +1198,8 @@ export class MapRenderer {
     const lod = this.lodFor(state.camera.pxPerDeg);
 
     gl.viewport(0, 0, state.view.width, state.view.height);
-    gl.clearColor(...SEA);
+    if (projectionFor(state.camera).general) gl.clearColor(0.02, 0.03, 0.05, 1);
+    else gl.clearColor(...SEA);
     gl.clear(gl.COLOR_BUFFER_BIT);
 
     // The gesture in progress, if it operates on the field rather than adding
@@ -1150,11 +1245,25 @@ export class MapRenderer {
     gl.activeTexture(gl.TEXTURE0 + SOURCE_COVERAGE_UNIT);
     gl.bindTexture(gl.TEXTURE_2D, this.maskTexture);
 
+    const general = Boolean(projectionFor(state.camera).general);
+    const drawGeographicTile = (camera: Camera, view: Viewport, kind: "land" | "coast") => {
+      const geo = (kind === "land" ? this.landByLod : this.coastByLod).get(lod);
+      if (!geo) return;
+      gl.useProgram(this.geoProgram); gl.bindVertexArray(geo.vao);
+      gl.uniform4f(this.geoUniforms.uColor ?? null, ...(kind === "land" ? LAND : COAST));
+      // Bleed also samples the adjoining copy at the dateline.
+      for (const offset of [-360, 0, 360]) {
+        this.setShared(this.geoUniforms, camera, view, offset);
+        gl.drawElements(kind === "land" ? gl.TRIANGLES : gl.LINES, geo.indexCount, gl.UNSIGNED_INT, 0);
+      }
+    };
+    if (general) this.projectedSurface.drawBase(state.camera, state.view, tiles, "land", lod, drawGeographicTile);
+
     // --- Land and coastlines ---
     gl.useProgram(this.geoProgram);
     const land = this.landByLod.get(lod);
     const coast = this.coastByLod.get(lod);
-    if (land) {
+    if (land && !general) {
       gl.bindVertexArray(land.vao);
       gl.uniform4f(this.geoUniforms.uColor ?? null, ...LAND);
       for (const offset of offsets) {
@@ -1248,7 +1357,8 @@ export class MapRenderer {
     // --- Coastlines, above the raster ---
     // The field covers land as well as sea, so a coastline drawn underneath it
     // is almost invisible. Drawn here it stays legible at any wind speed.
-    if (coast) {
+    if (general) this.projectedSurface.drawBase(state.camera, state.view, tiles, "coast", lod, drawGeographicTile);
+    if (coast && !general) {
       gl.useProgram(this.geoProgram);
       gl.bindVertexArray(coast.vao);
       gl.uniform4f(this.geoUniforms.uColor ?? null, ...COAST);
@@ -1259,7 +1369,13 @@ export class MapRenderer {
     }
 
     // --- Graticule ---
-    if (state.showGraticule) {
+    if (state.showGraticule && general) {
+      gl.useProgram(this.geoProgram);
+      const count = this.projectedSurface.bindGraticule(state.camera, state.view, this.graticuleInterval(state.camera.pxPerDeg));
+      this.setShared(this.geoUniforms, state.camera, state.view, 0);
+      gl.uniform4f(this.geoUniforms.uColor ?? null, ...GRATICULE);
+      gl.drawArrays(gl.LINES, 0, count);
+    } else if (state.showGraticule) {
       this.ensureGraticule(state);
       if (this.graticule) {
         gl.useProgram(this.geoProgram);
@@ -1331,6 +1447,7 @@ export class MapRenderer {
   }
 
   dispose(): void {
+    this.projectedSurface.dispose();
     const gl = this.gl;
     gl.deleteProgram(this.smearProgram);
     if (this.fieldTarget) {

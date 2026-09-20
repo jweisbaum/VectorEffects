@@ -1,40 +1,36 @@
 /**
  * How the map draws the earth (spec.md 5.1, M11).
  *
- * **Nothing below the view is coupled to this.** Objects are stored in
- * geodesic AEQD frames, the evaluator works in lat/lon and true bearings, and
- * the GRIB writer has its own grid — so a projection cannot affect a stored
- * project or an exported file (invariant 3). The whole cost is here.
+ * Switching the view leaves stored geometry and exports unchanged. Ground
+ * tools use geodesic frames; pixel tools freeze their creation projection.
+ * The evaluator works in lat/lon and true bearings, and the GRIB writer has
+ * its own grid (invariant 3).
  *
- * # Why this family and no other, yet
- *
- * Every projection in this module is **cylindrical**: longitude maps linearly
- * to `x`, and latitude maps to `y` through a function of latitude alone. That
- * one property is what keeps everything above it unchanged — a lat/lon
- * rectangle is still an axis-aligned screen rectangle, so a tile is still two
- * triangles, the world still repeats horizontally, and the inverse is still
- * closed-form and exact.
- *
- * The pseudo-cylindrical projections (Mollweide, Robinson, Winkel Tripel) and
- * the globe break all four at once: curved quads need subdivision, two of them
- * have no closed-form inverse, and a globe needs back-face culling, spherical
- * tile selection and a different interaction model. They are not here.
- *
- * # `y` is in *degrees*, not in pixels
- *
- * Every projection reports `y` on the same scale equirectangular uses —
- * degrees of latitude at the equator — so the camera's `pxPerDeg`, the zoom
- * limits, the tile ladder and the glyph spacing all keep meaning exactly what
- * they meant. A projection changes where a latitude lands, not what a pixel is
- * worth.
+ * Cylindrical projections keep longitude linear, so tiles, dateline wrapping,
+ * and map editing share one coordinate system. Each is uniformly rescaled to
+ * x = longitude in degrees; standard parallels still retain the projection's
+ * correct aspect ratio. Vertical scale need not equal one at the equator.
  */
 
-/** The projections the map offers. */
-export type ProjectionId = "equirectangular" | "mercator" | "miller";
+import { GENERAL_MAPS, generalMap, type GeneralMap } from "./projections/general";
+
+/** The original cylindrical spaces are also persisted by pixel tools. */
+export type CylindricalProjectionId =
+  | "equirectangular" | "mercator" | "miller"
+  | "lambert" | "behrmann" | "gall_peters" | "hobo_dyer"
+  | "gall_stereographic" | "braun" | "central_cylindrical"
+  | "patterson" | "compact_miller" | "equidistant_30" | "equidistant_45";
+
+export type ProjectionId = CylindricalProjectionId | `epsg_${number}` | `custom:${string}`
+  | "orthographic" | "robinson" | "mollweide" | "winkel_tripel" | "equal_earth" | "sinusoidal"
+  | "azimuthal_equidistant" | "azimuthal_equal_area" | "stereographic" | "gnomonic"
+  | "hawaii_harn_utm4" | "hawaii_albers";
 
 /** One projection: latitude to and from the vertical map coordinate. */
 export interface Projection {
   id: ProjectionId;
+  /** A two-dimensional projection, rendered through an adaptive geographic mesh. */
+  general?: GeneralMap;
   /** What the menu calls it. */
   label: string;
   /**
@@ -46,7 +42,7 @@ export interface Projection {
    */
   mode: number;
   /**
-   * The vertical map coordinate of a latitude, in degrees at the equator.
+   * The vertical map coordinate of a latitude, in units of longitudinal degrees.
    * Increases northward.
    */
   yOf: (lat: number) => number;
@@ -74,9 +70,10 @@ export interface Projection {
 }
 
 const DEG = Math.PI / 180;
+const clamp = (value: number, limit: number) => Math.max(-limit, Math.min(limit, value));
 
 /** Equirectangular: `y` *is* the latitude. The projection the app grew up in. */
-const EQUIRECTANGULAR: Projection = {
+const EQUIRECTANGULAR: Projection & { id: CylindricalProjectionId } = {
   id: "equirectangular",
   label: "Equirectangular",
   mode: 0,
@@ -94,7 +91,7 @@ const EQUIRECTANGULAR: Projection = {
  * is the bearing sailed. It cannot reach a pole: `tan` goes to infinity, so
  * the latitude clamps.
  */
-const MERCATOR: Projection = {
+const MERCATOR: Projection & { id: CylindricalProjectionId } = {
   id: "mercator",
   label: "Mercator",
   mode: 1,
@@ -119,7 +116,7 @@ const MERCATOR_MAX = 85.051_129;
  * global wind field is drawn whole with far less of Mercator's polar
  * exaggeration.
  */
-const MILLER: Projection = {
+const MILLER: Projection & { id: CylindricalProjectionId } = {
   id: "miller",
   label: "Miller",
   mode: 2,
@@ -133,15 +130,101 @@ const MILLER: Projection = {
   maxLat: 90,
 };
 
-/** Every projection, in the order the menu offers them. */
-export const PROJECTIONS: readonly Projection[] = [EQUIRECTANGULAR, MERCATOR, MILLER];
+/** Equal-area cylinders, uniformly rescaled from x = cos(standard) * longitude. */
+function equalArea(id: CylindricalProjectionId, label: string, mode: number, standard: number): Projection & { id: CylindricalProjectionId } {
+  const k = Math.cos(standard * DEG) ** 2;
+  return { id, label, mode, maxLat: 90,
+    yOf: lat => Math.sin(clamp(lat, 90) * DEG) / (DEG * k),
+    latOf: y => Math.asin(clamp(y * DEG * k, 1)) / DEG,
+    scaleAt: lat => Math.cos(clamp(lat, 90) * DEG) / k,
+  };
+}
+
+/** Perspective cylinders: Gall uses standard parallels at 45°, Braun at 0°. */
+function stereographic(id: CylindricalProjectionId, label: string, mode: number, k: number): Projection & { id: CylindricalProjectionId } {
+  return { id, label, mode, maxLat: 90,
+    yOf: lat => k * Math.tan(clamp(lat, 90) * DEG / 2) / DEG,
+    latOf: y => clamp(2 * Math.atan(y * DEG / k) / DEG, 90),
+    scaleAt: lat => k / (2 * Math.cos(clamp(lat, 90) * DEG / 2) ** 2),
+  };
+}
+
+function equidistant(id: CylindricalProjectionId, label: string, mode: number, standard: number): Projection & { id: CylindricalProjectionId } {
+  const k = Math.cos(standard * DEG);
+  return { id, label, mode, maxLat: 90,
+    yOf: lat => clamp(lat, 90) / k,
+    latOf: y => clamp(y * k, 90),
+    scaleAt: () => 1 / k,
+  };
+}
+
+/** The published Patterson and Compact Miller polynomials, in radians.
+ * Coefficients verified against OSGeo PROJ's patterson.cpp and comill.cpp.
+ * Newton's method is bounded and clamped, including outside the world. */
+function polynomial(id: CylindricalProjectionId, label: string, mode: number, coefficients: readonly number[]): Projection & { id: CylindricalProjectionId } {
+  const forward = (phi: number) => coefficients.reduce((sum, c, i) => sum + c * phi ** (2 * i + 1), 0);
+  const slope = (phi: number) => coefficients.reduce((sum, c, i) => sum + (2 * i + 1) * c * phi ** (2 * i), 0);
+  const maxY = forward(Math.PI / 2);
+  return { id, label, mode, maxLat: 90,
+    yOf: lat => forward(clamp(lat, 90) * DEG) / DEG,
+    latOf: y => {
+      const target = clamp(y * DEG, maxY);
+      let phi = clamp(target, Math.PI / 2);
+      for (let i = 0; i < 12; i++) phi = clamp(phi - (forward(phi) - target) / slope(phi), Math.PI / 2);
+      return phi / DEG;
+    },
+    scaleAt: lat => slope(clamp(lat, 90) * DEG),
+  };
+}
+
+/** Stable order: mode + 1 is the persisted pixel-tool space. Append only. */
+export const PROJECTIONS: readonly (Projection & { id: CylindricalProjectionId })[] = [
+  EQUIRECTANGULAR, MERCATOR, MILLER,
+  equalArea("lambert", "Lambert cylindrical equal-area", 3, 0),
+  equalArea("behrmann", "Behrmann", 4, 30),
+  equalArea("gall_peters", "Gall–Peters", 5, 45),
+  equalArea("hobo_dyer", "Hobo–Dyer", 6, 37.5),
+  stereographic("gall_stereographic", "Gall stereographic", 7, 1 + Math.SQRT2),
+  stereographic("braun", "Braun stereographic", 8, 2),
+  { id: "central_cylindrical", label: "Central cylindrical (±80°)", mode: 9, maxLat: 80,
+    yOf: lat => Math.tan(clamp(lat, 80) * DEG) / DEG,
+    latOf: y => Math.atan(y * DEG) / DEG,
+    scaleAt: lat => 1 / Math.cos(clamp(lat, 80) * DEG) ** 2,
+  },
+  polynomial("patterson", "Patterson", 10, [1.0148, 0, 0.23185, -0.14499, 0.02406]),
+  polynomial("compact_miller", "Compact Miller", 11, [0.9902, 0.1604, -0.03054]),
+  equidistant("equidistant_30", "Equidistant cylindrical (30°)", 12, 30),
+  equidistant("equidistant_45", "Equidistant cylindrical (45°)", 13, 45),
+];
+
+/** Index zero is geodesic; the original projected/mercator/miller indices stay fixed. */
+export const STAMP_SPACES = ["geodesic", "projected", ...PROJECTIONS.slice(1).map(p => p.id)] as const;
 
 /** What a camera with no projection of its own is drawn in. */
 export const DEFAULT_PROJECTION: ProjectionId = "equirectangular";
 
 /** The projection with an id, falling back to the one the app grew up in. */
+const generalProjections = new Map<string, Projection>();
+function fromGeneral(map: GeneralMap): Projection {
+  const existing = generalProjections.get(map.id);
+  if (existing) return existing;
+  const projection: Projection = {
+    id: map.id as ProjectionId, label: map.label, mode: 14, general: map, maxLat: 90,
+    // Geographic latitude helpers remain available for ground-tool sizing.
+    // All camera and rendering coordinates use mapTransform for these maps.
+    yOf: lat => lat, latOf: y => Math.max(-90, Math.min(90, y)), scaleAt: () => 1,
+  };
+  generalProjections.set(map.id, projection);
+  return projection;
+}
+export const MAP_PROJECTIONS: readonly Projection[] = [...PROJECTIONS, ...GENERAL_MAPS.map(fromGeneral)];
 export function projectionOf(id: ProjectionId): Projection {
-  return PROJECTIONS.find((p) => p.id === id) ?? EQUIRECTANGULAR;
+  const cylindrical = PROJECTIONS.find(p => p.id === id);
+  if (cylindrical) return cylindrical;
+  const cached = generalProjections.get(id);
+  if (cached) return cached;
+  const map = generalMap(id);
+  return map ? fromGeneral(map) : EQUIRECTANGULAR;
 }
 
 /**

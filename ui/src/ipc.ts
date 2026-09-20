@@ -102,8 +102,10 @@ export const HISTORY_LABEL = "Fetching history";
  */
 const LONG_RUNNING: Readonly<Record<string, string>> = {
   import_grib: "Importing GRIB",
+  import_zarr: "Importing Zarr",
   import_history: HISTORY_LABEL,
   new_project_from_grib: "Opening GRIB",
+  new_project_from_zarr: "Opening Zarr",
   import_image: "Importing image",
   open_project: "Opening project",
   recover_autosave: "Recovering project",
@@ -189,6 +191,9 @@ export const api = {
   /** Creates a project shaped by a GRIB2 file and imports the file into it (spec 4.8). */
   newProjectFromGrib: (path: string, discardUnsaved = false) =>
     call<ProjectSummary>("new_project_from_grib", { path, discardUnsaved }),
+  /** Creates a project from a local routing Zarr directory. */
+  newProjectFromZarr: (path: string, discardUnsaved = false) =>
+    call<ProjectSummary>("new_project_from_zarr", { path, discardUnsaved }),
 
   /** Saves the open project to its existing path. */
   saveProject: () => call<ProjectSummary>("save_project"),
@@ -434,6 +439,8 @@ export const api = {
   addLayer: (name: string) => call<ProjectSummary>("add_layer", { name }),
   /** Imports a GRIB2 file as one layer per field kind it holds (spec 4.8). */
   importGrib: (path: string) => call<ProjectSummary>("import_grib", { path }),
+  /** Imports a local routing Zarr directory as wind and current layers. */
+  importZarr: (path: string) => call<ProjectSummary>("import_zarr", { path }),
   /**
    * Fetches a range of hours from the history archives, one layer each
    * (spec 4.10). The only command that reaches the network, and only because

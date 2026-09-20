@@ -1,3 +1,4 @@
+import { PROJECTIONS } from "./projection";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -516,7 +517,7 @@ function shapeRecorder(): {
 }
 
 it("keeps a 100 px tool circular in all projections at every latitude", () => {
-  for (const projection of ["equirectangular", "mercator", "miller"] as const) {
+  for (const { id: projection } of PROJECTIONS) {
     const space = projection === "equirectangular" ? "projected" : projection;
     for (const lat of [-75, 0, 60, 75]) {
       const camera = { centerLon: 0, centerLat: lat, pxPerDeg: 8, projection };

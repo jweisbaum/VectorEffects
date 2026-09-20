@@ -14,7 +14,6 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Condvar, Mutex};
 
-use crate::aeqd::Space;
 use crate::error::{RenderError, Result};
 use crate::preview::Quality;
 use crate::scene::{
@@ -143,12 +142,7 @@ fn hash_object(hasher: &mut blake3::Hasher, object: &FlatObject) {
     hash_f64(hasher, object.frame.scale);
     // The space changes what the geometry means, so two objects that differ
     // only in it must not share a tile.
-    hasher.update(&[match object.frame.space {
-        Space::Geodesic => 0,
-        Space::Projected => 1,
-        Space::Mercator => 2,
-        Space::Miller => 3,
-    }]);
+    hasher.update(&[object.frame.space.choice()]);
     hash_f64(hasher, object.cap_radius_m);
     hash_f64(hasher, object.feather);
     hash_f64(hasher, object.gradient_axis.degrees());

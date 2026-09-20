@@ -429,7 +429,7 @@ pub struct RasterErasure {
     /// Defaulting to false is what every erasure written before M67 meant.
     #[serde(default)]
     pub projected: bool,
-    /// Frozen cylindrical projection: 0 legacy, 2 Mercator, 3 Miller.
+    /// Frozen cylindrical projection: a STAMP_SPACES index (0 is legacy).
     #[serde(default)]
     pub projection: u8,
     /// Edge falloff, 0 to 1, as a fraction of the radius.
@@ -507,11 +507,11 @@ pub struct Layer {
     /// Where the eraser has been over an imported layer's field (M29).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub erased: Vec<RasterErasure>,
-    /// The decoded field of a [`LayerSource::Grib`] layer.
+    /// The decoded field of a GRIB, history, or local Zarr layer.
     ///
     /// **Never serialised** (invariants 1 and 2): the file keeps the path in
-    /// `source` and the app re-reads the GRIB when the project opens. `None`
-    /// on a GRIB layer means the file could not be read, and the layer then
+    /// `source` and the app re-reads it when the project opens. `None`
+    /// on an imported layer means the source could not be read, and the layer then
     /// contributes nothing until it can be. Shared rather than owned because
     /// the document is cloned freely — into history, into render snapshots —
     /// and a decoded field can run to hundreds of megabytes.
@@ -608,6 +608,14 @@ pub enum LayerSource {
         /// wind and currents imports as two layers.
         field: FieldKind,
     },
+    /// A local routing Zarr v3 directory. The field and frame edits behave
+    /// exactly like GRIB; reopening reads the original directory again.
+    ZarrFile {
+        /// The directory selected by the user, not embedded in the project.
+        path: PathBuf,
+        /// Wind or surface current from the store's parameter axis.
+        field: FieldKind,
+    },
     /// A georeferenced image, drawn under the field (spec.md 4.9, M18).
     ///
     /// **Display only.** It is never composited into the field, never
@@ -658,21 +666,23 @@ impl LayerSource {
     pub fn path(&self) -> Option<&std::path::Path> {
         match self {
             Self::Painted => None,
-            Self::Grib { path, .. } | Self::Image { path, .. } | Self::Zarr { path, .. } => {
-                Some(path)
-            }
+            Self::Grib { path, .. }
+            | Self::Image { path, .. }
+            | Self::Zarr { path, .. }
+            | Self::ZarrFile { path, .. } => Some(path),
         }
     }
 
-    /// The GRIB2 file and field this layer's raster is read from, if it has
-    /// one (M38).
+    /// The file or directory and field this layer's raster is read from.
     ///
     /// A history layer is a GRIB layer that remembers where it came from, so
     /// everything that reads a raster off a file asks this rather than
     /// matching on the variant and forgetting one of them.
     pub fn raster_file(&self) -> Option<(&std::path::Path, crate::project::FieldKind)> {
         match self {
-            Self::Grib { path, field } | Self::Zarr { path, field, .. } => Some((path, *field)),
+            Self::Grib { path, field }
+            | Self::Zarr { path, field, .. }
+            | Self::ZarrFile { path, field } => Some((path, *field)),
             Self::Painted | Self::Image { .. } => None,
         }
     }
@@ -842,7 +852,9 @@ impl Layer {
     /// layer's own otherwise (M29).
     pub fn parameter(&self) -> crate::project::FieldKind {
         match &self.source {
-            LayerSource::Grib { field, .. } | LayerSource::Zarr { field, .. } => *field,
+            LayerSource::Grib { field, .. }
+            | LayerSource::Zarr { field, .. }
+            | LayerSource::ZarrFile { field, .. } => *field,
             _ => self.parameter,
         }
     }

@@ -3,4 +3,4 @@
 /**
  * Which space a stamp's footprint is a circle in (spec.md 3.5).
  */
-export type StampSpace = "geodesic" | "projected" | "mercator" | "miller";
+export type StampSpace = "geodesic" | "projected" | "mercator" | "miller" | "lambert" | "behrmann" | "gall_peters" | "hobo_dyer" | "gall_stereographic" | "braun" | "central_cylindrical" | "patterson" | "compact_miller" | "equidistant_30" | "equidistant_45";

@@ -221,12 +221,7 @@ fn object(rng: &mut Rng) -> FlatObject {
     // local frame in different languages, so an object whose frame is projected
     // on one side and geodesic on the other, or rotated the other way round,
     // shows up here and nowhere else.
-    let space = [
-        Space::Geodesic,
-        Space::Projected,
-        Space::Mercator,
-        Space::Miller,
-    ][rng.index(4)];
+    let space = Space::ALL[rng.index(Space::ALL.len())];
 
     // A quarter of the objects modify what is beneath them instead of painting
     // a field of their own (spec.md 6.3). Only the three that transform the

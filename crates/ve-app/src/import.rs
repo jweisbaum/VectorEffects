@@ -66,7 +66,7 @@ pub fn grib_import(state: &AppState, path: String) -> Result<ProjectSummary> {
             );
         }
         let open = session.require_open()?;
-        add_layers(open, &path, imported.sequences)?;
+        add_layers(open, &path, imported.sequences, false)?;
         Ok(ProjectSummary::of(session.require_open()?))
     })
 }
@@ -86,7 +86,12 @@ fn resample_into(project: &mut Project, path: &Path) -> Result<import::Imported>
 
 /// Adds one layer per imported field above the open project's top, as one
 /// history entry.
-fn add_layers(open: &mut OpenProject, path: &Path, sequences: Vec<RasterSequence>) -> Result<()> {
+pub(crate) fn add_layers(
+    open: &mut OpenProject,
+    path: &Path,
+    sequences: Vec<RasterSequence>,
+    zarr: bool,
+) -> Result<()> {
     let mut commands = Vec::with_capacity(sequences.len());
     for sequence in sequences {
         let kind = sequence.kind;
@@ -95,9 +100,9 @@ fn add_layers(open: &mut OpenProject, path: &Path, sequences: Vec<RasterSequence
             ?kind,
             frames = sequence.frames.len(),
             span_hours = sequence.span_hours(),
-            "imported grib field"
+            "imported raster field"
         );
-        let layer = Layer::from_grib(
+        let mut layer = Layer::from_grib(
             layer_name(kind, path),
             path.to_path_buf(),
             Arc::new(sequence),
@@ -106,6 +111,12 @@ fn add_layers(open: &mut OpenProject, path: &Path, sequences: Vec<RasterSequence
             // turns to, not one to hide.
             true,
         );
+        if zarr {
+            layer.source = ve_core::document::LayerSource::ZarrFile {
+                path: path.to_path_buf(),
+                field: kind,
+            };
+        }
         // Each layer goes on top of the last: the index is where it will
         // land once the ones before it in the batch have been added.
         commands.push(Command::AddLayer {
@@ -257,7 +268,7 @@ pub fn grib_project(
         );
         session.open = Some(OpenProject::created(project));
         let open = session.require_open()?;
-        add_layers(open, &path, imported.sequences)?;
+        add_layers(open, &path, imported.sequences, false)?;
         // The import is what the project is, not an edit to it: the history
         // starts empty, as it does for a project just created.
         open.history = Default::default();
@@ -279,6 +290,8 @@ pub fn attach_rasters(project: &mut Project) -> Vec<(String, AppError)> {
     // Taken out for the loop's sake and put back after, sets and all.
     let resolution = project.settings.resolution;
     let mut cache = std::mem::take(&mut project.regrid);
+    // Wind and current from one local store share a decode on reopen.
+    let mut zarrs = std::collections::BTreeMap::<PathBuf, Vec<Arc<RasterSequence>>>::new();
     for layer in &mut project.layers {
         // A history layer reads a GRIB file of its own (M38), so it comes
         // back the same way a forecast does.
@@ -286,6 +299,40 @@ pub fn attach_rasters(project: &mut Project) -> Vec<(String, AppError)> {
             continue;
         };
         let (path, field) = (path.to_path_buf(), field);
+        if matches!(
+            layer.source,
+            ve_core::document::LayerSource::ZarrFile { .. }
+        ) {
+            let result = if let Some(sequences) = zarrs.get(&path) {
+                Ok(sequences.clone())
+            } else {
+                crate::zarr::read(&path).map(|sequences| {
+                    let sequences: Vec<_> = sequences.into_iter().map(Arc::new).collect();
+                    zarrs.insert(path.clone(), sequences.clone());
+                    sequences
+                })
+            };
+            match result {
+                Ok(sequences) => {
+                    layer.raster = sequences.into_iter().find(|s| s.kind == field);
+                    if layer.raster.is_none() {
+                        failures.push((
+                            layer.name.clone(),
+                            AppError::Internal(format!(
+                                "{} no longer holds a {field:?} field",
+                                path.display()
+                            )),
+                        ));
+                    }
+                }
+                Err(err) => {
+                    layer.raster = None;
+                    tracing::warn!(layer = %layer.name, %err, "Zarr layer could not be read");
+                    failures.push((layer.name.clone(), err));
+                }
+            }
+            continue;
+        }
         let target = resolution.target_grid();
         let result = {
             let mut resampling = import::Resampling::new(target, &mut cache);

@@ -1779,3 +1779,17 @@ body {
   .help-body article { padding: 10px 14px; }
   .help-parameters th, .help-parameters td { padding: 7px; }
 }
+
+/* The projection catalogue is searchable because national zones outnumber world views. */
+.modal.projection-picker { width: min(660px, 92vw); max-height: 88vh; display: flex; flex-direction: column; gap: 10px; }
+.projection-picker p { margin: 0; font-size: 12px; }
+.modal.projection-picker input { width: 100%; box-sizing: border-box; }
+.projection-list { overflow-y: auto; min-height: 120px; flex: 1; }
+.projection-list h3 { color: var(--muted); font-size: 12px; margin: 14px 0 5px; }
+.projection-list button { display: flex; justify-content: space-between; text-align: left; gap: 12px; width: 100%; padding: 7px 9px; border: 0; border-radius: 4px; background: transparent; color: inherit; cursor: pointer; }
+.projection-list button:hover, .projection-list button[aria-pressed="true"] { background: #1d3651; }
+.projection-list small { flex-shrink: 0; color: var(--muted); }
+.projection-picker summary { cursor: pointer; font-size: 12px; }
+.projection-picker textarea { width: 100%; box-sizing: border-box; resize: vertical; color: inherit; background: #101827; border: 1px solid var(--border); padding: 8px; }
+.projection-picker details p { margin-top: 8px; }
+.projection-trigger { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

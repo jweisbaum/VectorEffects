@@ -15,11 +15,12 @@
  * taken identically by every vertex in a draw, and a shader that differs from
  * another only in one `if` is a shader worth not having twice.
  *
- * `ui/src/map/projection.ts` holds the same three formulas in TypeScript, for
+ * `ui/src/map/projection.ts` holds the same formulas in TypeScript, for
  * the overlay and the pointer. Change one and change the other, or the arrows
  * stop landing where the field is.
  */
 
+import { EXTRA_CYLINDRICAL } from "./projectionShaders";
 import { GLYPH_SIZE_SCALE, GLYPH_TARGET_PX } from "./glyph";
 
 /** Shared projection helper, prefixed to every vertex shader. */
@@ -32,14 +33,16 @@ uniform float uLonOffset;  // world copy: -360, 0 or 360
 // bare "uniform int" declared in a block both stages include fails to link
 // with "precisions differ between VERTEX and FRAGMENT shaders". Floats are
 // safe only because every source here opens with precision highp float.
-uniform highp int uProjection;  // 0 equirectangular, 1 Mercator, 2 Miller
+uniform highp int uProjection;  // Stable mode from the projection catalogue.
 
 const float VE_DEG = 0.017453292519943295;
+${EXTRA_CYLINDRICAL}
 
-// The vertical map coordinate of a latitude, in degrees at the equator. The
+// The vertical map coordinate of a latitude, in units of longitudinal degrees. The
 // port of Projection.yOf in projection.ts, decision for decision. (No
 // backticks in here: this is a template literal, and one would end it.)
 float latToY(float lat) {
+  if (uProjection >= 3) return cylindricalY(uProjection, lat);
   if (uProjection == 1) {
     float clamped = clamp(lat, -85.051129, 85.051129);
     return log(tan(0.7853981633974483 + clamped * VE_DEG * 0.5)) / VE_DEG;
@@ -53,6 +56,7 @@ float latToY(float lat) {
 
 // And back. Only the raster needs it, but it belongs beside its forward.
 float yToLat(float y) {
+  if (uProjection >= 3) return cylindricalLat(uProjection, y);
   if (uProjection == 1) {
     return (2.0 * atan(exp(y * VE_DEG)) - 1.5707963267948966) / VE_DEG;
   }
@@ -81,10 +85,10 @@ vec4 screenToClip(vec2 screen) {
 /** Draws land polygons, coastlines and the graticule from lon/lat vertices. */
 export const GEO_VERT = `#version 300 es
 precision highp float;
-in vec2 aLonLat;
+layout(location=0) in vec2 aLonLat;
 ${PROJECTION}
 void main() {
-  gl_Position = screenToClip(geoToScreen(aLonLat));
+  gl_Position = screenToClip(uProjection >= 14 ? aLonLat : geoToScreen(aLonLat));
 }
 `;
 
@@ -111,7 +115,8 @@ void main() { fragColor = uColor; }
  */
 export const IMAGE_VERT = `#version 300 es
 precision highp float;
-in vec2 aCell;              // 0..1 across the image
+layout(location=0) in vec2 aCell;              // 0..1 across the image
+layout(location=1) in vec2 aScreen;
 ${PROJECTION}
 uniform vec3 uPlaceLon;     // lon = x*u + y*v + z, with u and v in 0..1
 uniform vec3 uPlaceLat;     // and the same for the latitude
@@ -124,7 +129,7 @@ void main() {
     uPlaceLat.x * aCell.x + uPlaceLat.y * aCell.y + uPlaceLat.z
   );
   vGeo = lonLat;
-  gl_Position = screenToClip(geoToScreen(lonLat));
+  gl_Position = screenToClip(uProjection >= 14 ? aScreen : geoToScreen(lonLat));
 }
 `;
 
@@ -330,7 +335,8 @@ bool editedHere(vec2 uv) {
 
 export const RASTER_VERT = `#version 300 es
 precision highp float;
-in vec2 aCorner;            // 0..1 across the tile
+layout(location=0) in vec2 aCorner;            // 0..1 across the tile
+layout(location=1) in vec2 aScreen;
 uniform vec4 uTileGeo;      // west, north, spanX, spanY
 ${PROJECTION}
 out vec2 vUV;
@@ -340,7 +346,7 @@ void main() {
     uTileGeo.x + aCorner.x * uTileGeo.z,
     uTileGeo.y - aCorner.y * uTileGeo.w
   );
-  gl_Position = screenToClip(geoToScreen(lonLat));
+  gl_Position = screenToClip(uProjection >= 14 ? aScreen : geoToScreen(lonLat));
 }
 `;
 
@@ -471,7 +477,7 @@ vec3 ramp(float t, bool wind) {
  * the app grew up in draws precisely the pixels it always did.
  */
 vec2 tileUV() {
-  if (uProjection == 0) return vUV;
+  if (uProjection == 0 || uProjection >= 14) return vUV;
   // gl_FragCoord is y-up from the bottom; the camera's y is y-down from the top.
   float screenY = uViewport.y - gl_FragCoord.y;
   float y = uCamera.y - (screenY - uViewport.y * 0.5) / uCamera.z;
@@ -518,6 +524,8 @@ export const GLYPH_VERT = `#version 300 es
 precision highp float;
 ${PROJECTION}
 layout(location = 0) in vec2 aStation; // longitude, latitude
+layout(location = 1) in vec2 aScreen;
+layout(location = 2) in vec4 aBasis; // east.xy, north.xy in screen coordinates
 uniform vec4 uTileGeo;      // west, north, spanX, spanY
 uniform sampler2D uTile;
 // The same tile without the layer being edited, and whether it is bound
@@ -563,7 +571,7 @@ void main() {
     return;
   }
 
-  vec2 station = geoToScreen(vec2(lon, lat));
+  vec2 station = uProjection >= 14 ? aScreen : geoToScreen(vec2(lon, lat));
   // The station with y up, as the operator measures things.
   vec2 stationUp = vec2(station.x, uViewport.y - station.y);
   float covered = opCoverageAt(stationUp);
@@ -574,7 +582,7 @@ void main() {
   // A liquify reads the field from where it moved it from (M32). Outside
   // this tile the texel is another tile's, which this instance cannot read:
   // the glyph goes, and the tile the source is in draws its own.
-  if (uOpKind == 6 && covered > 0.0) {
+  if (uProjection < 14 && uOpKind == 6 && covered > 0.0) {
     vec2 sourceUp = stationUp - opDisplacement(stationUp);
     vec2 source = vec2(sourceUp.x, uViewport.y - sourceUp.y);
     float sourceLon = (source.x - uViewport.x * 0.5) / uCamera.z + uCamera.x - uLonOffset;
@@ -623,7 +631,7 @@ void main() {
 
   // Screen space is y-down, so north is -y. Azimuth is clockwise from north.
   float az = azimuth * DEG;
-  vec2 toward = vec2(sin(az), -cos(az));
+  vec2 toward = uProjection >= 14 ? normalize(aBasis.xy * sin(az) + aBasis.zw * cos(az)) : vec2(sin(az), -cos(az));
   float length_px = barb ? uLengthBarb : uLengthArrow;
   float stroke_px = barb ? uStrokeBarb : uStrokeArrow;
 

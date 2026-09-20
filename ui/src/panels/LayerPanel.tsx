@@ -5,7 +5,7 @@ import { api } from "../ipc";
 import type { DocumentTree } from "../generated/DocumentTree";
 import type { ProjectSummary } from "../generated/ProjectSummary";
 import type { ImageLayerView } from "../generated/ImageLayerView";
-import { pickGribToImport, pickImageToImport } from "../project/dialogs";
+import { pickGribToImport, pickImageToImport, pickZarrToImport } from "../project/dialogs";
 import { layerForSelection, layerToActivate } from "./activeLayer";
 import { CalendarIcon } from "./CalendarIcon";
 import { EyeIcon } from "./EyeIcon";
@@ -234,6 +234,13 @@ export default function LayerPanel({
     const path = await pickGribToImport();
     if (path === null) return;
     run(api.importGrib(path));
+  };
+
+  const importZarr = async () => {
+    setError(null);
+    const path = await pickZarrToImport();
+    if (path === null) return;
+    run(api.importZarr(path));
   };
 
   /**
@@ -492,6 +499,13 @@ export default function LayerPanel({
         </button>
         <button
           className="import-grib"
+          title="Import wind and currents from a routing Zarr directory as layers"
+          onClick={() => void importZarr()}
+        >
+          Import Zarr
+        </button>
+        <button
+          className="import-grib"
           title="Lay a georeferenced image under the field. A GeoTIFF or an image with a world file lands where it says; anything else lands on the view, to be placed by its corners."
           onClick={() => void importImage()}
         >
@@ -651,7 +665,7 @@ export default function LayerPanel({
               {(layer.source === "raster" || layer.source === "zarr") && (
                 <div className="layer-parameter muted">
                   Field: {KIND_LABELS[kindOf(layer.parameter)]} ·{" "}
-                  {layer.source === "zarr" ? "from the archive" : "from the file"}
+                  {layer.grib?.history ? "from the archive" : "from the file"}
                 </div>
               )}
               {(

@@ -1,0 +1,3442 @@
+[
+  {
+    "id": "epsg_3413",
+    "code": 3413,
+    "label": "WGS 84 / NSIDC Sea Ice Polar Stereographic North",
+    "group": "Polar and sea ice",
+    "definition": "+proj=stere +lat_0=90 +lat_ts=70 +lon_0=-45 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -180,
+      60,
+      180,
+      90
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_3995",
+    "code": 3995,
+    "label": "WGS 84 / Arctic Polar Stereographic",
+    "group": "Polar and sea ice",
+    "definition": "+proj=stere +lat_0=90 +lat_ts=71 +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -180,
+      60,
+      180,
+      90
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_3031",
+    "code": 3031,
+    "label": "WGS 84 / Antarctic Polar Stereographic",
+    "group": "Polar and sea ice",
+    "definition": "+proj=stere +lat_0=-90 +lat_ts=-71 +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -180,
+      -90,
+      180,
+      -60
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_3411",
+    "code": 3411,
+    "label": "NSIDC Sea Ice Polar Stereographic North",
+    "group": "Polar and sea ice",
+    "definition": "+proj=stere +lat_0=90 +lat_ts=70 +lon_0=-45 +x_0=0 +y_0=0 +a=6378273 +b=6356889.449 +units=m +no_defs",
+    "bbox": [
+      -180,
+      60,
+      180,
+      90
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_3412",
+    "code": 3412,
+    "label": "NSIDC Sea Ice Polar Stereographic South",
+    "group": "Polar and sea ice",
+    "definition": "+proj=stere +lat_0=-90 +lat_ts=-70 +lon_0=0 +x_0=0 +y_0=0 +a=6378273 +b=6356889.449 +units=m +no_defs",
+    "bbox": [
+      -180,
+      -90,
+      180,
+      -60
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_6931",
+    "code": 6931,
+    "label": "WGS 84 / NSIDC EASE-Grid 2.0 North",
+    "group": "Polar and sea ice",
+    "definition": "+proj=laea +lat_0=90 +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -180,
+      0,
+      180,
+      90
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_6932",
+    "code": 6932,
+    "label": "WGS 84 / NSIDC EASE-Grid 2.0 South",
+    "group": "Polar and sea ice",
+    "definition": "+proj=laea +lat_0=-90 +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -180,
+      -90,
+      180,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32661",
+    "code": 32661,
+    "label": "WGS 84 / UPS North (N,E)",
+    "group": "Polar and sea ice",
+    "definition": "+proj=stere +lat_0=90 +lon_0=0 +k=0.994 +x_0=2000000 +y_0=2000000 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -180,
+      60,
+      180,
+      90
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32761",
+    "code": 32761,
+    "label": "WGS 84 / UPS South (N,E)",
+    "group": "Polar and sea ice",
+    "definition": "+proj=stere +lat_0=-90 +lon_0=0 +k=0.994 +x_0=2000000 +y_0=2000000 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -180,
+      -90,
+      180,
+      -60
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_3571",
+    "code": 3571,
+    "label": "WGS 84 / North Pole LAEA Bering Sea",
+    "group": "Polar and sea ice",
+    "definition": "+proj=laea +lat_0=90 +lon_0=180 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -180,
+      45,
+      180,
+      90
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_3572",
+    "code": 3572,
+    "label": "WGS 84 / North Pole LAEA Alaska",
+    "group": "Polar and sea ice",
+    "definition": "+proj=laea +lat_0=90 +lon_0=-150 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -180,
+      45,
+      180,
+      90
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_3573",
+    "code": 3573,
+    "label": "WGS 84 / North Pole LAEA Canada",
+    "group": "Polar and sea ice",
+    "definition": "+proj=laea +lat_0=90 +lon_0=-100 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -180,
+      45,
+      180,
+      90
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_3574",
+    "code": 3574,
+    "label": "WGS 84 / North Pole LAEA Atlantic",
+    "group": "Polar and sea ice",
+    "definition": "+proj=laea +lat_0=90 +lon_0=-40 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -180,
+      45,
+      180,
+      90
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_3575",
+    "code": 3575,
+    "label": "WGS 84 / North Pole LAEA Europe",
+    "group": "Polar and sea ice",
+    "definition": "+proj=laea +lat_0=90 +lon_0=10 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -180,
+      45,
+      180,
+      90
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_3576",
+    "code": 3576,
+    "label": "WGS 84 / North Pole LAEA Russia",
+    "group": "Polar and sea ice",
+    "definition": "+proj=laea +lat_0=90 +lon_0=90 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -180,
+      45,
+      180,
+      90
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_27700",
+    "code": 27700,
+    "label": "OSGB36 / British National Grid",
+    "group": "Europe",
+    "definition": "+proj=tmerc +lat_0=49 +lon_0=-2 +k=0.9996012717 +x_0=400000 +y_0=-100000 +ellps=airy +units=m +no_defs +datum=OSGB36",
+    "bbox": [
+      -9.01,
+      49.75,
+      2.01,
+      61.01
+    ],
+    "keywords": "United Kingdom Britain UK England Scotland Wales"
+  },
+  {
+    "id": "epsg_2154",
+    "code": 2154,
+    "label": "RGF93 v1 / Lambert-93",
+    "group": "Europe",
+    "definition": "+proj=lcc +lat_0=46.5 +lon_0=3 +lat_1=49 +lat_2=44 +x_0=700000 +y_0=6600000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      -9.86,
+      41.15,
+      10.38,
+      51.56
+    ],
+    "keywords": "France French"
+  },
+  {
+    "id": "epsg_3942",
+    "code": 3942,
+    "label": "RGF93 v1 / CC42",
+    "group": "Europe",
+    "definition": "+proj=lcc +lat_0=42 +lon_0=3 +lat_1=41.25 +lat_2=42.75 +x_0=1700000 +y_0=1200000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      -1.06,
+      41.31,
+      9.63,
+      43.07
+    ],
+    "keywords": "France French"
+  },
+  {
+    "id": "epsg_3943",
+    "code": 3943,
+    "label": "RGF93 v1 / CC43",
+    "group": "Europe",
+    "definition": "+proj=lcc +lat_0=43 +lon_0=3 +lat_1=42.25 +lat_2=43.75 +x_0=1700000 +y_0=2200000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      -1.79,
+      42.33,
+      7.65,
+      44.01
+    ],
+    "keywords": "France French"
+  },
+  {
+    "id": "epsg_3944",
+    "code": 3944,
+    "label": "RGF93 v1 / CC44",
+    "group": "Europe",
+    "definition": "+proj=lcc +lat_0=44 +lon_0=3 +lat_1=43.25 +lat_2=44.75 +x_0=1700000 +y_0=3200000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      -1.79,
+      42.92,
+      7.71,
+      45
+    ],
+    "keywords": "France French"
+  },
+  {
+    "id": "epsg_3945",
+    "code": 3945,
+    "label": "RGF93 v1 / CC45",
+    "group": "Europe",
+    "definition": "+proj=lcc +lat_0=45 +lon_0=3 +lat_1=44.25 +lat_2=45.75 +x_0=1700000 +y_0=4200000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      -1.46,
+      44,
+      7.71,
+      46
+    ],
+    "keywords": "France French"
+  },
+  {
+    "id": "epsg_3946",
+    "code": 3946,
+    "label": "RGF93 v1 / CC46",
+    "group": "Europe",
+    "definition": "+proj=lcc +lat_0=46 +lon_0=3 +lat_1=45.25 +lat_2=46.75 +x_0=1700000 +y_0=5200000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      -2.21,
+      45,
+      7.16,
+      47
+    ],
+    "keywords": "France French"
+  },
+  {
+    "id": "epsg_3947",
+    "code": 3947,
+    "label": "RGF93 v1 / CC47",
+    "group": "Europe",
+    "definition": "+proj=lcc +lat_0=47 +lon_0=3 +lat_1=46.25 +lat_2=47.75 +x_0=1700000 +y_0=6200000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      -4.77,
+      46,
+      7.63,
+      48
+    ],
+    "keywords": "France French"
+  },
+  {
+    "id": "epsg_3948",
+    "code": 3948,
+    "label": "RGF93 v1 / CC48",
+    "group": "Europe",
+    "definition": "+proj=lcc +lat_0=48 +lon_0=3 +lat_1=47.25 +lat_2=48.75 +x_0=1700000 +y_0=7200000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      -4.87,
+      47,
+      8.23,
+      49
+    ],
+    "keywords": "France French"
+  },
+  {
+    "id": "epsg_3949",
+    "code": 3949,
+    "label": "RGF93 v1 / CC49",
+    "group": "Europe",
+    "definition": "+proj=lcc +lat_0=49 +lon_0=3 +lat_1=48.25 +lat_2=49.75 +x_0=1700000 +y_0=8200000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      -4.87,
+      48,
+      8.23,
+      50
+    ],
+    "keywords": "France French"
+  },
+  {
+    "id": "epsg_3950",
+    "code": 3950,
+    "label": "RGF93 v1 / CC50",
+    "group": "Europe",
+    "definition": "+proj=lcc +lat_0=50 +lon_0=3 +lat_1=49.25 +lat_2=50.75 +x_0=1700000 +y_0=9200000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      -2.03,
+      49,
+      8.08,
+      51.14
+    ],
+    "keywords": "France French"
+  },
+  {
+    "id": "epsg_3812",
+    "code": 3812,
+    "label": "ETRS89 / Belgian Lambert 2008",
+    "group": "Europe",
+    "definition": "+proj=lcc +lat_0=50.797815 +lon_0=4.35921583333333 +lat_1=49.8333333333333 +lat_2=51.1666666666667 +x_0=649328 +y_0=665262 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      2.5,
+      49.5,
+      6.4,
+      51.51
+    ],
+    "keywords": "Belgium Belgian"
+  },
+  {
+    "id": "epsg_2056",
+    "code": 2056,
+    "label": "CH1903+ / LV95",
+    "group": "Europe",
+    "definition": "+proj=somerc +lat_0=46.9524055555556 +lon_0=7.43958333333333 +k_0=1 +x_0=2600000 +y_0=1200000 +ellps=bessel +towgs84=674.374,15.056,405.346,0,0,0,0 +units=m +no_defs +towgs84=674.374,15.056,405.346,0,0,0,0",
+    "bbox": [
+      5.95,
+      45.81,
+      10.5,
+      47.81
+    ],
+    "keywords": "Switzerland Swiss"
+  },
+  {
+    "id": "epsg_28992",
+    "code": 28992,
+    "label": "Amersfoort / RD New",
+    "group": "Europe",
+    "definition": "+proj=sterea +lat_0=52.1561605555556 +lon_0=5.38763888888889 +k=0.9999079 +x_0=155000 +y_0=463000 +ellps=bessel +units=m +no_defs +towgs84=565.4171,50.3319,465.5524,-0.398957,0.343988,-1.8774,4.0725",
+    "bbox": [
+      3.2,
+      50.75,
+      7.22,
+      53.7
+    ],
+    "keywords": "Netherlands Dutch"
+  },
+  {
+    "id": "epsg_5514",
+    "code": 5514,
+    "label": "S-JTSK / Krovak East North",
+    "group": "Europe",
+    "definition": "+proj=krovak +lat_0=49.5 +lon_0=24.8333333333333 +alpha=30.2881397527778 +k=0.9999 +x_0=0 +y_0=0 +ellps=bessel +towgs84=589,76,480,0,0,0,0 +units=m +no_defs +towgs84=589,76,480,0,0,0,0",
+    "bbox": [
+      12.09,
+      47.73,
+      22.56,
+      51.06
+    ],
+    "keywords": "Czechia Czech Republic Slovakia"
+  },
+  {
+    "id": "epsg_3006",
+    "code": 3006,
+    "label": "SWEREF99 TM",
+    "group": "Europe",
+    "definition": "+proj=utm +zone=33 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      10.03,
+      54.96,
+      24.17,
+      69.07
+    ],
+    "keywords": "Sweden Swedish"
+  },
+  {
+    "id": "epsg_3007",
+    "code": 3007,
+    "label": "SWEREF99 12 00",
+    "group": "Europe",
+    "definition": "+proj=tmerc +lat_0=0 +lon_0=12 +k=1 +x_0=150000 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      10.93,
+      56.74,
+      13.11,
+      60.13
+    ],
+    "keywords": "Sweden Swedish"
+  },
+  {
+    "id": "epsg_3008",
+    "code": 3008,
+    "label": "SWEREF99 13 30",
+    "group": "Europe",
+    "definition": "+proj=tmerc +lat_0=0 +lon_0=13.5 +k=1 +x_0=150000 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      12.12,
+      55.28,
+      14.79,
+      62.28
+    ],
+    "keywords": "Sweden Swedish"
+  },
+  {
+    "id": "epsg_3009",
+    "code": 3009,
+    "label": "SWEREF99 15 00",
+    "group": "Europe",
+    "definition": "+proj=tmerc +lat_0=0 +lon_0=15 +k=1 +x_0=150000 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      13.54,
+      55.95,
+      16.15,
+      61.62
+    ],
+    "keywords": "Sweden Swedish"
+  },
+  {
+    "id": "epsg_3010",
+    "code": 3010,
+    "label": "SWEREF99 16 30",
+    "group": "Europe",
+    "definition": "+proj=tmerc +lat_0=0 +lon_0=16.5 +k=1 +x_0=150000 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      15.41,
+      56.15,
+      17.63,
+      62.26
+    ],
+    "keywords": "Sweden Swedish"
+  },
+  {
+    "id": "epsg_3011",
+    "code": 3011,
+    "label": "SWEREF99 18 00",
+    "group": "Europe",
+    "definition": "+proj=tmerc +lat_0=0 +lon_0=18 +k=1 +x_0=150000 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      17.08,
+      58.66,
+      19.61,
+      60.7
+    ],
+    "keywords": "Sweden Swedish"
+  },
+  {
+    "id": "epsg_3012",
+    "code": 3012,
+    "label": "SWEREF99 14 15",
+    "group": "Europe",
+    "definition": "+proj=tmerc +lat_0=0 +lon_0=14.25 +k=1 +x_0=150000 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      11.93,
+      61.55,
+      15.55,
+      64.39
+    ],
+    "keywords": "Sweden Swedish"
+  },
+  {
+    "id": "epsg_3013",
+    "code": 3013,
+    "label": "SWEREF99 15 45",
+    "group": "Europe",
+    "definition": "+proj=tmerc +lat_0=0 +lon_0=15.75 +k=1 +x_0=150000 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      13.66,
+      60.44,
+      17.01,
+      65.13
+    ],
+    "keywords": "Sweden Swedish"
+  },
+  {
+    "id": "epsg_3014",
+    "code": 3014,
+    "label": "SWEREF99 17 15",
+    "group": "Europe",
+    "definition": "+proj=tmerc +lat_0=0 +lon_0=17.25 +k=1 +x_0=150000 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      14.31,
+      62.12,
+      19.04,
+      67.19
+    ],
+    "keywords": "Sweden Swedish"
+  },
+  {
+    "id": "epsg_3015",
+    "code": 3015,
+    "label": "SWEREF99 18 45",
+    "group": "Europe",
+    "definition": "+proj=tmerc +lat_0=0 +lon_0=18.75 +k=1 +x_0=150000 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      17.18,
+      56.86,
+      20.22,
+      66.17
+    ],
+    "keywords": "Sweden Swedish"
+  },
+  {
+    "id": "epsg_3016",
+    "code": 3016,
+    "label": "SWEREF99 20 15",
+    "group": "Europe",
+    "definition": "+proj=tmerc +lat_0=0 +lon_0=20.25 +k=1 +x_0=150000 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      16.08,
+      63.45,
+      23.28,
+      69.07
+    ],
+    "keywords": "Sweden Swedish"
+  },
+  {
+    "id": "epsg_3017",
+    "code": 3017,
+    "label": "SWEREF99 21 45",
+    "group": "Europe",
+    "definition": "+proj=tmerc +lat_0=0 +lon_0=21.75 +k=1 +x_0=150000 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      19.63,
+      65.01,
+      22.91,
+      66.43
+    ],
+    "keywords": "Sweden Swedish"
+  },
+  {
+    "id": "epsg_3018",
+    "code": 3018,
+    "label": "SWEREF99 23 15",
+    "group": "Europe",
+    "definition": "+proj=tmerc +lat_0=0 +lon_0=23.25 +k=1 +x_0=150000 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      21.85,
+      65.49,
+      24.17,
+      68.14
+    ],
+    "keywords": "Sweden Swedish"
+  },
+  {
+    "id": "epsg_3338",
+    "code": 3338,
+    "label": "NAD83 / Alaska Albers",
+    "group": "Alaska and Hawaii",
+    "definition": "+proj=aea +lat_0=50 +lon_0=-154 +lat_1=55 +lat_2=65 +x_0=0 +y_0=0 +datum=NAD83 +units=m +no_defs",
+    "bbox": [
+      172.42,
+      51.3,
+      -129.99,
+      71.4
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_26931",
+    "code": 26931,
+    "label": "NAD83 / Alaska zone 1",
+    "group": "Alaska and Hawaii",
+    "definition": "+proj=omerc +no_uoff +lat_0=57 +lonc=-133.666666666667 +alpha=323.130102361111 +gamma=323.130102361111 +k=0.9999 +x_0=5000000 +y_0=-5000000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      -141,
+      54.61,
+      -129.99,
+      60.35
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_26932",
+    "code": 26932,
+    "label": "NAD83 / Alaska zone 2",
+    "group": "Alaska and Hawaii",
+    "definition": "+proj=tmerc +lat_0=54 +lon_0=-142 +k=0.9999 +x_0=500000 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      -144.01,
+      59.72,
+      -140.98,
+      70.16
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_26933",
+    "code": 26933,
+    "label": "NAD83 / Alaska zone 3",
+    "group": "Alaska and Hawaii",
+    "definition": "+proj=tmerc +lat_0=54 +lon_0=-146 +k=0.9999 +x_0=500000 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      -148,
+      59.72,
+      -144,
+      70.38
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_26934",
+    "code": 26934,
+    "label": "NAD83 / Alaska zone 4",
+    "group": "Alaska and Hawaii",
+    "definition": "+proj=tmerc +lat_0=54 +lon_0=-150 +k=0.9999 +x_0=500000 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      -152.01,
+      59.11,
+      -147.99,
+      70.63
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_26935",
+    "code": 26935,
+    "label": "NAD83 / Alaska zone 5",
+    "group": "Alaska and Hawaii",
+    "definition": "+proj=tmerc +lat_0=54 +lon_0=-154 +k=0.9999 +x_0=500000 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      -156,
+      55.72,
+      -151.86,
+      71.28
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_26936",
+    "code": 26936,
+    "label": "NAD83 / Alaska zone 6",
+    "group": "Alaska and Hawaii",
+    "definition": "+proj=tmerc +lat_0=54 +lon_0=-158 +k=0.9999 +x_0=500000 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      -160,
+      54.89,
+      -155.99,
+      71.4
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_26937",
+    "code": 26937,
+    "label": "NAD83 / Alaska zone 7",
+    "group": "Alaska and Hawaii",
+    "definition": "+proj=tmerc +lat_0=54 +lon_0=-162 +k=0.9999 +x_0=500000 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      -164.01,
+      54.32,
+      -160,
+      70.74
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_26938",
+    "code": 26938,
+    "label": "NAD83 / Alaska zone 8",
+    "group": "Alaska and Hawaii",
+    "definition": "+proj=tmerc +lat_0=54 +lon_0=-166 +k=0.9999 +x_0=500000 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      -168.26,
+      54.34,
+      -164,
+      69.05
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_26939",
+    "code": 26939,
+    "label": "NAD83 / Alaska zone 9",
+    "group": "Alaska and Hawaii",
+    "definition": "+proj=tmerc +lat_0=54 +lon_0=-170 +k=0.9999 +x_0=500000 +y_0=0 +datum=NAD83 +units=m +no_defs",
+    "bbox": [
+      -173.16,
+      56.49,
+      -168,
+      65.82
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_26940",
+    "code": 26940,
+    "label": "NAD83 / Alaska zone 10",
+    "group": "Alaska and Hawaii",
+    "definition": "+proj=lcc +lat_0=51 +lon_0=-176 +lat_1=53.8333333333333 +lat_2=51.8333333333333 +x_0=1000000 +y_0=0 +ellps=GRS80 +towgs84=-2,0,4,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      172.42,
+      51.3,
+      -164.84,
+      54.34
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_26961",
+    "code": 26961,
+    "label": "NAD83 / Hawaii zone 1",
+    "group": "Alaska and Hawaii",
+    "definition": "+proj=tmerc +lat_0=18.8333333333333 +lon_0=-155.5 +k=0.999966667 +x_0=500000 +y_0=0 +ellps=GRS80 +towgs84=1,1,-1,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      -156.1,
+      18.87,
+      -154.74,
+      20.33
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_26962",
+    "code": 26962,
+    "label": "NAD83 / Hawaii zone 2",
+    "group": "Alaska and Hawaii",
+    "definition": "+proj=tmerc +lat_0=20.3333333333333 +lon_0=-156.666666666667 +k=0.999966667 +x_0=500000 +y_0=0 +ellps=GRS80 +towgs84=1,1,-1,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      -157.36,
+      20.45,
+      -155.93,
+      21.26
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_26963",
+    "code": 26963,
+    "label": "NAD83 / Hawaii zone 3",
+    "group": "Alaska and Hawaii",
+    "definition": "+proj=tmerc +lat_0=21.1666666666667 +lon_0=-158 +k=0.99999 +x_0=500000 +y_0=0 +ellps=GRS80 +towgs84=1,1,-1,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      -158.33,
+      21.2,
+      -157.61,
+      21.75
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_26964",
+    "code": 26964,
+    "label": "NAD83 / Hawaii zone 4",
+    "group": "Alaska and Hawaii",
+    "definition": "+proj=tmerc +lat_0=21.8333333333333 +lon_0=-159.5 +k=0.99999 +x_0=500000 +y_0=0 +ellps=GRS80 +towgs84=1,1,-1,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      -159.85,
+      21.81,
+      -159.23,
+      22.29
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_26965",
+    "code": 26965,
+    "label": "NAD83 / Hawaii zone 5",
+    "group": "Alaska and Hawaii",
+    "definition": "+proj=tmerc +lat_0=21.6666666666667 +lon_0=-160.166666666667 +k=1 +x_0=500000 +y_0=0 +ellps=GRS80 +towgs84=1,1,-1,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      -160.3,
+      21.73,
+      -159.99,
+      22.07
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_3978",
+    "code": 3978,
+    "label": "NAD83 / Canada Atlas Lambert",
+    "group": "Canada",
+    "definition": "+proj=lcc +lat_0=49 +lon_0=-95 +lat_1=49 +lat_2=77 +x_0=0 +y_0=0 +datum=NAD83 +units=m +no_defs",
+    "bbox": [
+      -141.01,
+      38.21,
+      -40.73,
+      86.46
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_3347",
+    "code": 3347,
+    "label": "NAD83 / Statistics Canada Lambert",
+    "group": "Canada",
+    "definition": "+proj=lcc +lat_0=63.390675 +lon_0=-91.8666666666667 +lat_1=49 +lat_2=77 +x_0=6200000 +y_0=3000000 +datum=NAD83 +units=m +no_defs",
+    "bbox": [
+      -141.01,
+      38.21,
+      -40.73,
+      86.46
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_2193",
+    "code": 2193,
+    "label": "NZGD2000 / New Zealand Transverse Mercator 2000",
+    "group": "New Zealand",
+    "definition": "+proj=tmerc +lat_0=0 +lon_0=173 +k=0.9996 +x_0=1600000 +y_0=10000000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      166.37,
+      -47.33,
+      178.63,
+      -34.1
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_27200",
+    "code": 27200,
+    "label": "NZGD49 / New Zealand Map Grid",
+    "group": "New Zealand",
+    "definition": "+proj=nzmg +lat_0=-41 +lon_0=173 +x_0=2510000 +y_0=6023150 +ellps=intl +units=m +no_defs +datum=nzgd49",
+    "bbox": [
+      166.37,
+      -47.33,
+      178.63,
+      -34.1
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_2105",
+    "code": 2105,
+    "label": "NZGD2000 / Mount Eden 2000",
+    "group": "New Zealand",
+    "definition": "+proj=tmerc +lat_0=-36.8797222222222 +lon_0=174.764166666667 +k=0.9999 +x_0=400000 +y_0=800000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      171.99,
+      -39.01,
+      176.12,
+      -34.1
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_2106",
+    "code": 2106,
+    "label": "NZGD2000 / Bay of Plenty 2000",
+    "group": "New Zealand",
+    "definition": "+proj=tmerc +lat_0=-37.7611111111111 +lon_0=176.466111111111 +k=1 +x_0=400000 +y_0=800000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      175.75,
+      -39.13,
+      177.23,
+      -37.22
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_2107",
+    "code": 2107,
+    "label": "NZGD2000 / Poverty Bay 2000",
+    "group": "New Zealand",
+    "definition": "+proj=tmerc +lat_0=-38.6244444444444 +lon_0=177.885555555556 +k=1 +x_0=400000 +y_0=800000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      176.73,
+      -39.04,
+      178.63,
+      -37.49
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_2108",
+    "code": 2108,
+    "label": "NZGD2000 / Hawkes Bay 2000",
+    "group": "New Zealand",
+    "definition": "+proj=tmerc +lat_0=-39.6508333333333 +lon_0=176.673611111111 +k=1 +x_0=400000 +y_0=800000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      175.8,
+      -40.57,
+      178.07,
+      -38.87
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_2109",
+    "code": 2109,
+    "label": "NZGD2000 / Taranaki 2000",
+    "group": "New Zealand",
+    "definition": "+proj=tmerc +lat_0=-39.1355555555556 +lon_0=174.227777777778 +k=1 +x_0=400000 +y_0=800000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      173.68,
+      -39.78,
+      175.44,
+      -38.4
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_2110",
+    "code": 2110,
+    "label": "NZGD2000 / Tuhirangi 2000",
+    "group": "New Zealand",
+    "definition": "+proj=tmerc +lat_0=-39.5122222222222 +lon_0=175.64 +k=1 +x_0=400000 +y_0=800000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      174.88,
+      -39.55,
+      176.33,
+      -38.87
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_2111",
+    "code": 2111,
+    "label": "NZGD2000 / Wanganui 2000",
+    "group": "New Zealand",
+    "definition": "+proj=tmerc +lat_0=-40.2419444444444 +lon_0=175.488055555556 +k=1 +x_0=400000 +y_0=800000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      174.4,
+      -40.97,
+      176.27,
+      -39.46
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_2112",
+    "code": 2112,
+    "label": "NZGD2000 / Wairarapa 2000",
+    "group": "New Zealand",
+    "definition": "+proj=tmerc +lat_0=-40.9252777777778 +lon_0=175.647222222222 +k=1 +x_0=400000 +y_0=800000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      175.01,
+      -41.67,
+      176.55,
+      -40.29
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_2113",
+    "code": 2113,
+    "label": "NZGD2000 / Wellington 2000",
+    "group": "New Zealand",
+    "definition": "+proj=tmerc +lat_0=-41.3011111111111 +lon_0=174.776388888889 +k=1 +x_0=400000 +y_0=800000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      174.52,
+      -41.5,
+      175.36,
+      -40.91
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_2114",
+    "code": 2114,
+    "label": "NZGD2000 / Collingwood 2000",
+    "group": "New Zealand",
+    "definition": "+proj=tmerc +lat_0=-40.7147222222222 +lon_0=172.671944444444 +k=1 +x_0=400000 +y_0=800000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      172.16,
+      -41.22,
+      173.13,
+      -40.44
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_2115",
+    "code": 2115,
+    "label": "NZGD2000 / Nelson 2000",
+    "group": "New Zealand",
+    "definition": "+proj=tmerc +lat_0=-41.2744444444444 +lon_0=173.299166666667 +k=1 +x_0=400000 +y_0=800000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      172.4,
+      -42.18,
+      174.08,
+      -40.66
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_2116",
+    "code": 2116,
+    "label": "NZGD2000 / Karamea 2000",
+    "group": "New Zealand",
+    "definition": "+proj=tmerc +lat_0=-41.2897222222222 +lon_0=172.108888888889 +k=1 +x_0=400000 +y_0=800000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      171.96,
+      -41.49,
+      172.7,
+      -40.75
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_2117",
+    "code": 2117,
+    "label": "NZGD2000 / Buller 2000",
+    "group": "New Zealand",
+    "definition": "+proj=tmerc +lat_0=-41.8105555555556 +lon_0=171.581111111111 +k=1 +x_0=400000 +y_0=800000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      171.27,
+      -42.19,
+      172.41,
+      -41.42
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_2118",
+    "code": 2118,
+    "label": "NZGD2000 / Grey 2000",
+    "group": "New Zealand",
+    "definition": "+proj=tmerc +lat_0=-42.3336111111111 +lon_0=171.549722222222 +k=1 +x_0=400000 +y_0=800000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      171.15,
+      -42.74,
+      172.75,
+      -41.5
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_2119",
+    "code": 2119,
+    "label": "NZGD2000 / Amuri 2000",
+    "group": "New Zealand",
+    "definition": "+proj=tmerc +lat_0=-42.6888888888889 +lon_0=173.01 +k=1 +x_0=400000 +y_0=800000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      171.88,
+      -42.95,
+      173.55,
+      -42.09
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_2120",
+    "code": 2120,
+    "label": "NZGD2000 / Marlborough 2000",
+    "group": "New Zealand",
+    "definition": "+proj=tmerc +lat_0=-41.5444444444444 +lon_0=173.801944444444 +k=1 +x_0=400000 +y_0=800000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      172.95,
+      -42.65,
+      174.46,
+      -40.85
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_2121",
+    "code": 2121,
+    "label": "NZGD2000 / Hokitika 2000",
+    "group": "New Zealand",
+    "definition": "+proj=tmerc +lat_0=-42.8861111111111 +lon_0=170.979722222222 +k=1 +x_0=400000 +y_0=800000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      170.39,
+      -43.23,
+      171.89,
+      -42.41
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_2122",
+    "code": 2122,
+    "label": "NZGD2000 / Okarito 2000",
+    "group": "New Zealand",
+    "definition": "+proj=tmerc +lat_0=-43.11 +lon_0=170.260833333333 +k=1 +x_0=400000 +y_0=800000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      169.21,
+      -43.85,
+      170.89,
+      -43
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_2123",
+    "code": 2123,
+    "label": "NZGD2000 / Jacksons Bay 2000",
+    "group": "New Zealand",
+    "definition": "+proj=tmerc +lat_0=-43.9777777777778 +lon_0=168.606111111111 +k=1 +x_0=400000 +y_0=800000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      168.02,
+      -44.4,
+      170.01,
+      -43.67
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_2124",
+    "code": 2124,
+    "label": "NZGD2000 / Mount Pleasant 2000",
+    "group": "New Zealand",
+    "definition": "+proj=tmerc +lat_0=-43.5905555555556 +lon_0=172.726944444444 +k=1 +x_0=400000 +y_0=800000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      171.11,
+      -43.96,
+      173.38,
+      -42.69
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_2125",
+    "code": 2125,
+    "label": "NZGD2000 / Gawler 2000",
+    "group": "New Zealand",
+    "definition": "+proj=tmerc +lat_0=-43.7486111111111 +lon_0=171.360555555556 +k=1 +x_0=400000 +y_0=800000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      170.68,
+      -44.25,
+      172.26,
+      -43.13
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_2126",
+    "code": 2126,
+    "label": "NZGD2000 / Timaru 2000",
+    "group": "New Zealand",
+    "definition": "+proj=tmerc +lat_0=-44.4019444444444 +lon_0=171.057222222222 +k=1 +x_0=400000 +y_0=800000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      169.82,
+      -44.98,
+      171.55,
+      -43.35
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_2127",
+    "code": 2127,
+    "label": "NZGD2000 / Lindis Peak 2000",
+    "group": "New Zealand",
+    "definition": "+proj=tmerc +lat_0=-44.735 +lon_0=169.4675 +k=1 +x_0=400000 +y_0=800000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      168.62,
+      -45.4,
+      170.24,
+      -43.71
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_2128",
+    "code": 2128,
+    "label": "NZGD2000 / Mount Nicholas 2000",
+    "group": "New Zealand",
+    "definition": "+proj=tmerc +lat_0=-45.1327777777778 +lon_0=168.398611111111 +k=1 +x_0=400000 +y_0=800000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      167.72,
+      -45.58,
+      169.11,
+      -44.29
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_2129",
+    "code": 2129,
+    "label": "NZGD2000 / Mount York 2000",
+    "group": "New Zealand",
+    "definition": "+proj=tmerc +lat_0=-45.5636111111111 +lon_0=167.738611111111 +k=1 +x_0=400000 +y_0=800000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      166.37,
+      -46.33,
+      168.21,
+      -44.53
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_2130",
+    "code": 2130,
+    "label": "NZGD2000 / Observation Point 2000",
+    "group": "New Zealand",
+    "definition": "+proj=tmerc +lat_0=-45.8161111111111 +lon_0=170.628333333333 +k=1 +x_0=400000 +y_0=800000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      169.77,
+      -45.82,
+      171.24,
+      -44.61
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_2131",
+    "code": 2131,
+    "label": "NZGD2000 / North Taieri 2000",
+    "group": "New Zealand",
+    "definition": "+proj=tmerc +lat_0=-45.8613888888889 +lon_0=170.2825 +k=0.99996 +x_0=400000 +y_0=800000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      168.64,
+      -46.73,
+      170.87,
+      -45.23
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_2132",
+    "code": 2132,
+    "label": "NZGD2000 / Bluff 2000",
+    "group": "New Zealand",
+    "definition": "+proj=tmerc +lat_0=-46.6 +lon_0=168.342777777778 +k=1 +x_0=400000 +y_0=800000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      167.29,
+      -47.33,
+      168.97,
+      -45.33
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_6669",
+    "code": 6669,
+    "label": "JGD2011 / Japan Plane Rectangular CS I",
+    "group": "Japan",
+    "definition": "+proj=tmerc +lat_0=33 +lon_0=129.5 +k=0.9999 +x_0=0 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      128.17,
+      26.96,
+      130.46,
+      34.74
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_6670",
+    "code": 6670,
+    "label": "JGD2011 / Japan Plane Rectangular CS II",
+    "group": "Japan",
+    "definition": "+proj=tmerc +lat_0=33 +lon_0=131 +k=0.9999 +x_0=0 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      129.76,
+      30.18,
+      132.05,
+      33.99
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_6671",
+    "code": 6671,
+    "label": "JGD2011 / Japan Plane Rectangular CS III",
+    "group": "Japan",
+    "definition": "+proj=tmerc +lat_0=36 +lon_0=132.166666666667 +k=0.9999 +x_0=0 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      130.81,
+      33.72,
+      133.49,
+      36.38
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_6672",
+    "code": 6672,
+    "label": "JGD2011 / Japan Plane Rectangular CS IV",
+    "group": "Japan",
+    "definition": "+proj=tmerc +lat_0=33 +lon_0=133.5 +k=0.9999 +x_0=0 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      131.95,
+      32.69,
+      134.81,
+      34.45
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_6673",
+    "code": 6673,
+    "label": "JGD2011 / Japan Plane Rectangular CS V",
+    "group": "Japan",
+    "definition": "+proj=tmerc +lat_0=36 +lon_0=134.333333333333 +k=0.9999 +x_0=0 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      133.13,
+      34.13,
+      135.47,
+      35.71
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_6674",
+    "code": 6674,
+    "label": "JGD2011 / Japan Plane Rectangular CS VI",
+    "group": "Japan",
+    "definition": "+proj=tmerc +lat_0=36 +lon_0=136 +k=0.9999 +x_0=0 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      134.86,
+      33.4,
+      136.99,
+      36.33
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_6675",
+    "code": 6675,
+    "label": "JGD2011 / Japan Plane Rectangular CS VII",
+    "group": "Japan",
+    "definition": "+proj=tmerc +lat_0=36 +lon_0=137.166666666667 +k=0.9999 +x_0=0 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      136.22,
+      34.51,
+      137.84,
+      37.58
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_6676",
+    "code": 6676,
+    "label": "JGD2011 / Japan Plane Rectangular CS VIII",
+    "group": "Japan",
+    "definition": "+proj=tmerc +lat_0=36 +lon_0=138.5 +k=0.9999 +x_0=0 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      137.32,
+      34.54,
+      139.91,
+      38.58
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_6677",
+    "code": 6677,
+    "label": "JGD2011 / Japan Plane Rectangular CS IX",
+    "group": "Japan",
+    "definition": "+proj=tmerc +lat_0=36 +lon_0=139.833333333333 +k=0.9999 +x_0=0 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      138.4,
+      29.31,
+      141.11,
+      37.98
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_6678",
+    "code": 6678,
+    "label": "JGD2011 / Japan Plane Rectangular CS X",
+    "group": "Japan",
+    "definition": "+proj=tmerc +lat_0=40 +lon_0=140.833333333333 +k=0.9999 +x_0=0 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      139.49,
+      37.73,
+      142.14,
+      41.58
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_6679",
+    "code": 6679,
+    "label": "JGD2011 / Japan Plane Rectangular CS XI",
+    "group": "Japan",
+    "definition": "+proj=tmerc +lat_0=44 +lon_0=140.25 +k=0.9999 +x_0=0 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      139.34,
+      41.34,
+      141.46,
+      43.42
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_6680",
+    "code": 6680,
+    "label": "JGD2011 / Japan Plane Rectangular CS XII",
+    "group": "Japan",
+    "definition": "+proj=tmerc +lat_0=44 +lon_0=142.25 +k=0.9999 +x_0=0 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      140.89,
+      42.15,
+      143.61,
+      45.54
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_6681",
+    "code": 6681,
+    "label": "JGD2011 / Japan Plane Rectangular CS XIII",
+    "group": "Japan",
+    "definition": "+proj=tmerc +lat_0=44 +lon_0=144.25 +k=0.9999 +x_0=0 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      142.61,
+      41.87,
+      145.87,
+      44.4
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_6682",
+    "code": 6682,
+    "label": "JGD2011 / Japan Plane Rectangular CS XIV",
+    "group": "Japan",
+    "definition": "+proj=tmerc +lat_0=26 +lon_0=142 +k=0.9999 +x_0=0 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      141.2,
+      24.67,
+      142.33,
+      27.8
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_6683",
+    "code": 6683,
+    "label": "JGD2011 / Japan Plane Rectangular CS XV",
+    "group": "Japan",
+    "definition": "+proj=tmerc +lat_0=26 +lon_0=127.5 +k=0.9999 +x_0=0 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      126.63,
+      26.02,
+      128.4,
+      26.91
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_6684",
+    "code": 6684,
+    "label": "JGD2011 / Japan Plane Rectangular CS XVI",
+    "group": "Japan",
+    "definition": "+proj=tmerc +lat_0=26 +lon_0=124 +k=0.9999 +x_0=0 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      122.83,
+      23.98,
+      125.51,
+      24.94
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_6685",
+    "code": 6685,
+    "label": "JGD2011 / Japan Plane Rectangular CS XVII",
+    "group": "Japan",
+    "definition": "+proj=tmerc +lat_0=26 +lon_0=131 +k=0.9999 +x_0=0 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      131.12,
+      24.4,
+      131.38,
+      26.01
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_6686",
+    "code": 6686,
+    "label": "JGD2011 / Japan Plane Rectangular CS XVIII",
+    "group": "Japan",
+    "definition": "+proj=tmerc +lat_0=20 +lon_0=136 +k=0.9999 +x_0=0 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      136.02,
+      20.37,
+      136.16,
+      20.48
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_6687",
+    "code": 6687,
+    "label": "JGD2011 / Japan Plane Rectangular CS XIX",
+    "group": "Japan",
+    "definition": "+proj=tmerc +lat_0=26 +lon_0=154 +k=0.9999 +x_0=0 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs",
+    "bbox": [
+      153.91,
+      24.22,
+      154.05,
+      24.35
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_7846",
+    "code": 7846,
+    "label": "GDA2020 / MGA zone 46",
+    "group": "Australia",
+    "definition": "+proj=utm +zone=46 +south +ellps=GRS80 +units=m +no_defs",
+    "bbox": [
+      93.41,
+      -15.46,
+      96.01,
+      -8.57
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_7847",
+    "code": 7847,
+    "label": "GDA2020 / MGA zone 47",
+    "group": "Australia",
+    "definition": "+proj=utm +zone=47 +south +ellps=GRS80 +units=m +no_defs",
+    "bbox": [
+      96,
+      -15.56,
+      100.34,
+      -8.47
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_7848",
+    "code": 7848,
+    "label": "GDA2020 / MGA zone 48",
+    "group": "Australia",
+    "definition": "+proj=utm +zone=48 +south +ellps=GRS80 +units=m +no_defs",
+    "bbox": [
+      102.14,
+      -34.68,
+      108.01,
+      -8.87
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_7849",
+    "code": 7849,
+    "label": "GDA2020 / MGA zone 49",
+    "group": "Australia",
+    "definition": "+proj=utm +zone=49 +south +ellps=GRS80 +units=m +no_defs",
+    "bbox": [
+      108,
+      -37.84,
+      114.01,
+      -10.72
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_7850",
+    "code": 7850,
+    "label": "GDA2020 / MGA zone 50",
+    "group": "Australia",
+    "definition": "+proj=utm +zone=50 +south +ellps=GRS80 +units=m +no_defs",
+    "bbox": [
+      114,
+      -38.53,
+      120.01,
+      -12.06
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_7851",
+    "code": 7851,
+    "label": "GDA2020 / MGA zone 51",
+    "group": "Australia",
+    "definition": "+proj=utm +zone=51 +south +ellps=GRS80 +units=m +no_defs",
+    "bbox": [
+      120,
+      -38.07,
+      126.01,
+      -10.46
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_7852",
+    "code": 7852,
+    "label": "GDA2020 / MGA zone 52",
+    "group": "Australia",
+    "definition": "+proj=utm +zone=52 +south +ellps=GRS80 +units=m +no_defs",
+    "bbox": [
+      125.99,
+      -37.38,
+      132,
+      -9.1
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_7853",
+    "code": 7853,
+    "label": "GDA2020 / MGA zone 53",
+    "group": "Australia",
+    "definition": "+proj=utm +zone=53 +south +ellps=GRS80 +units=m +no_defs",
+    "bbox": [
+      132,
+      -40.71,
+      138.01,
+      -8.88
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_7854",
+    "code": 7854,
+    "label": "GDA2020 / MGA zone 54",
+    "group": "Australia",
+    "definition": "+proj=utm +zone=54 +south +ellps=GRS80 +units=m +no_defs",
+    "bbox": [
+      138,
+      -48.19,
+      144.01,
+      -9.08
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_7855",
+    "code": 7855,
+    "label": "GDA2020 / MGA zone 55",
+    "group": "Australia",
+    "definition": "+proj=utm +zone=55 +south +ellps=GRS80 +units=m +no_defs",
+    "bbox": [
+      144,
+      -50.89,
+      150.01,
+      -9.23
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_7856",
+    "code": 7856,
+    "label": "GDA2020 / MGA zone 56",
+    "group": "Australia",
+    "definition": "+proj=utm +zone=56 +south +ellps=GRS80 +units=m +no_defs",
+    "bbox": [
+      150,
+      -58.96,
+      156,
+      -13.87
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_7857",
+    "code": 7857,
+    "label": "GDA2020 / MGA zone 57",
+    "group": "Australia",
+    "definition": "+proj=utm +zone=57 +south +ellps=GRS80 +units=m +no_defs",
+    "bbox": [
+      156,
+      -60.56,
+      162.01,
+      -14.08
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_7858",
+    "code": 7858,
+    "label": "GDA2020 / MGA zone 58",
+    "group": "Australia",
+    "definition": "+proj=utm +zone=58 +south +ellps=GRS80 +units=m +no_defs",
+    "bbox": [
+      162,
+      -59.39,
+      168,
+      -25.94
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_7859",
+    "code": 7859,
+    "label": "GDA2020 / MGA zone 59",
+    "group": "Australia",
+    "definition": "+proj=utm +zone=59 +south +ellps=GRS80 +units=m +no_defs",
+    "bbox": [
+      168,
+      -32.48,
+      173.35,
+      -25.61
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32601",
+    "code": 32601,
+    "label": "WGS 84 / UTM zone 1N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=1 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -180,
+      0,
+      -174,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32602",
+    "code": 32602,
+    "label": "WGS 84 / UTM zone 2N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=2 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -174,
+      0,
+      -168,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32603",
+    "code": 32603,
+    "label": "WGS 84 / UTM zone 3N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=3 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -168,
+      0,
+      -162,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32604",
+    "code": 32604,
+    "label": "WGS 84 / UTM zone 4N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=4 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -162,
+      0,
+      -156,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32605",
+    "code": 32605,
+    "label": "WGS 84 / UTM zone 5N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=5 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -156,
+      0,
+      -150,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32606",
+    "code": 32606,
+    "label": "WGS 84 / UTM zone 6N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=6 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -150,
+      0,
+      -144,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32607",
+    "code": 32607,
+    "label": "WGS 84 / UTM zone 7N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=7 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -144,
+      0,
+      -138,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32608",
+    "code": 32608,
+    "label": "WGS 84 / UTM zone 8N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=8 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -138,
+      0,
+      -132,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32609",
+    "code": 32609,
+    "label": "WGS 84 / UTM zone 9N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=9 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -132,
+      0,
+      -126,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32610",
+    "code": 32610,
+    "label": "WGS 84 / UTM zone 10N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=10 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -126,
+      0,
+      -120,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32611",
+    "code": 32611,
+    "label": "WGS 84 / UTM zone 11N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=11 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -120,
+      0,
+      -114,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32612",
+    "code": 32612,
+    "label": "WGS 84 / UTM zone 12N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=12 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -114,
+      0,
+      -108,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32613",
+    "code": 32613,
+    "label": "WGS 84 / UTM zone 13N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=13 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -108,
+      0,
+      -102,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32614",
+    "code": 32614,
+    "label": "WGS 84 / UTM zone 14N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=14 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -102,
+      0,
+      -96,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32615",
+    "code": 32615,
+    "label": "WGS 84 / UTM zone 15N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=15 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -96,
+      0,
+      -90,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32616",
+    "code": 32616,
+    "label": "WGS 84 / UTM zone 16N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=16 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -90,
+      0,
+      -84,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32617",
+    "code": 32617,
+    "label": "WGS 84 / UTM zone 17N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=17 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -84,
+      0,
+      -78,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32618",
+    "code": 32618,
+    "label": "WGS 84 / UTM zone 18N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=18 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -78,
+      0,
+      -72,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32619",
+    "code": 32619,
+    "label": "WGS 84 / UTM zone 19N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=19 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -72,
+      0,
+      -66,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32620",
+    "code": 32620,
+    "label": "WGS 84 / UTM zone 20N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=20 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -66,
+      0,
+      -60,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32621",
+    "code": 32621,
+    "label": "WGS 84 / UTM zone 21N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=21 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -60,
+      0,
+      -54,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32622",
+    "code": 32622,
+    "label": "WGS 84 / UTM zone 22N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=22 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -54,
+      0,
+      -48,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32623",
+    "code": 32623,
+    "label": "WGS 84 / UTM zone 23N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=23 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -48,
+      0,
+      -42,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32624",
+    "code": 32624,
+    "label": "WGS 84 / UTM zone 24N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=24 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -42,
+      0,
+      -36,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32625",
+    "code": 32625,
+    "label": "WGS 84 / UTM zone 25N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=25 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -36,
+      0,
+      -30,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32626",
+    "code": 32626,
+    "label": "WGS 84 / UTM zone 26N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=26 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -30,
+      0,
+      -24,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32627",
+    "code": 32627,
+    "label": "WGS 84 / UTM zone 27N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=27 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -24,
+      0,
+      -18,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32628",
+    "code": 32628,
+    "label": "WGS 84 / UTM zone 28N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=28 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -18,
+      0,
+      -12,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32629",
+    "code": 32629,
+    "label": "WGS 84 / UTM zone 29N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=29 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -12.01,
+      0,
+      -6,
+      84.01
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32630",
+    "code": 32630,
+    "label": "WGS 84 / UTM zone 30N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=30 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -6,
+      0,
+      0,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32631",
+    "code": 32631,
+    "label": "WGS 84 / UTM zone 31N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=31 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      0,
+      0,
+      6,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32632",
+    "code": 32632,
+    "label": "WGS 84 / UTM zone 32N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=32 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      6,
+      0,
+      12,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32633",
+    "code": 32633,
+    "label": "WGS 84 / UTM zone 33N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=33 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      12,
+      0,
+      18,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32634",
+    "code": 32634,
+    "label": "WGS 84 / UTM zone 34N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=34 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      18,
+      0,
+      24,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32635",
+    "code": 32635,
+    "label": "WGS 84 / UTM zone 35N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=35 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      24,
+      0,
+      30,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32636",
+    "code": 32636,
+    "label": "WGS 84 / UTM zone 36N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=36 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      30,
+      0,
+      36,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32637",
+    "code": 32637,
+    "label": "WGS 84 / UTM zone 37N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=37 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      36,
+      0,
+      42,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32638",
+    "code": 32638,
+    "label": "WGS 84 / UTM zone 38N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=38 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      42,
+      0,
+      48,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32639",
+    "code": 32639,
+    "label": "WGS 84 / UTM zone 39N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=39 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      48,
+      0,
+      54,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32640",
+    "code": 32640,
+    "label": "WGS 84 / UTM zone 40N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=40 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      54,
+      0,
+      60,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32641",
+    "code": 32641,
+    "label": "WGS 84 / UTM zone 41N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=41 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      60,
+      0,
+      66,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32642",
+    "code": 32642,
+    "label": "WGS 84 / UTM zone 42N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=42 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      66,
+      0,
+      72,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32643",
+    "code": 32643,
+    "label": "WGS 84 / UTM zone 43N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=43 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      72,
+      0,
+      78,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32644",
+    "code": 32644,
+    "label": "WGS 84 / UTM zone 44N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=44 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      78,
+      0,
+      84,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32645",
+    "code": 32645,
+    "label": "WGS 84 / UTM zone 45N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=45 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      84,
+      0,
+      90,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32646",
+    "code": 32646,
+    "label": "WGS 84 / UTM zone 46N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=46 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      90,
+      0,
+      96,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32647",
+    "code": 32647,
+    "label": "WGS 84 / UTM zone 47N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=47 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      96,
+      0,
+      102,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32648",
+    "code": 32648,
+    "label": "WGS 84 / UTM zone 48N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=48 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      102,
+      0,
+      108,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32649",
+    "code": 32649,
+    "label": "WGS 84 / UTM zone 49N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=49 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      108,
+      0,
+      114,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32650",
+    "code": 32650,
+    "label": "WGS 84 / UTM zone 50N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=50 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      114,
+      0,
+      120,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32651",
+    "code": 32651,
+    "label": "WGS 84 / UTM zone 51N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=51 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      120,
+      0,
+      126,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32652",
+    "code": 32652,
+    "label": "WGS 84 / UTM zone 52N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=52 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      126,
+      0,
+      132,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32653",
+    "code": 32653,
+    "label": "WGS 84 / UTM zone 53N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=53 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      132,
+      0,
+      138,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32654",
+    "code": 32654,
+    "label": "WGS 84 / UTM zone 54N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=54 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      138,
+      0,
+      144,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32655",
+    "code": 32655,
+    "label": "WGS 84 / UTM zone 55N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=55 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      144,
+      0,
+      150,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32656",
+    "code": 32656,
+    "label": "WGS 84 / UTM zone 56N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=56 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      150,
+      0,
+      156,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32657",
+    "code": 32657,
+    "label": "WGS 84 / UTM zone 57N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=57 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      156,
+      0,
+      162,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32658",
+    "code": 32658,
+    "label": "WGS 84 / UTM zone 58N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=58 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      162,
+      0,
+      168,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32659",
+    "code": 32659,
+    "label": "WGS 84 / UTM zone 59N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=59 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      168,
+      0,
+      174,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32660",
+    "code": 32660,
+    "label": "WGS 84 / UTM zone 60N",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=60 +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      174,
+      0,
+      180,
+      84
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32701",
+    "code": 32701,
+    "label": "WGS 84 / UTM zone 1S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=1 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -180,
+      -80,
+      -174,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32702",
+    "code": 32702,
+    "label": "WGS 84 / UTM zone 2S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=2 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -174,
+      -80,
+      -168,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32703",
+    "code": 32703,
+    "label": "WGS 84 / UTM zone 3S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=3 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -168,
+      -80,
+      -162,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32704",
+    "code": 32704,
+    "label": "WGS 84 / UTM zone 4S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=4 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -162,
+      -80,
+      -156,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32705",
+    "code": 32705,
+    "label": "WGS 84 / UTM zone 5S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=5 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -156,
+      -80,
+      -150,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32706",
+    "code": 32706,
+    "label": "WGS 84 / UTM zone 6S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=6 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -150,
+      -80,
+      -144,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32707",
+    "code": 32707,
+    "label": "WGS 84 / UTM zone 7S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=7 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -144,
+      -80,
+      -138,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32708",
+    "code": 32708,
+    "label": "WGS 84 / UTM zone 8S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=8 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -138,
+      -80,
+      -132,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32709",
+    "code": 32709,
+    "label": "WGS 84 / UTM zone 9S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=9 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -132,
+      -80,
+      -126,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32710",
+    "code": 32710,
+    "label": "WGS 84 / UTM zone 10S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=10 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -126,
+      -80,
+      -120,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32711",
+    "code": 32711,
+    "label": "WGS 84 / UTM zone 11S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=11 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -120,
+      -80,
+      -114,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32712",
+    "code": 32712,
+    "label": "WGS 84 / UTM zone 12S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=12 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -114,
+      -80,
+      -108,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32713",
+    "code": 32713,
+    "label": "WGS 84 / UTM zone 13S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=13 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -108,
+      -80,
+      -102,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32714",
+    "code": 32714,
+    "label": "WGS 84 / UTM zone 14S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=14 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -102,
+      -80,
+      -96,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32715",
+    "code": 32715,
+    "label": "WGS 84 / UTM zone 15S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=15 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -96,
+      -80,
+      -90,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32716",
+    "code": 32716,
+    "label": "WGS 84 / UTM zone 16S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=16 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -90,
+      -80,
+      -84,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32717",
+    "code": 32717,
+    "label": "WGS 84 / UTM zone 17S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=17 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -84,
+      -80,
+      -78,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32718",
+    "code": 32718,
+    "label": "WGS 84 / UTM zone 18S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=18 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -78,
+      -80,
+      -72,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32719",
+    "code": 32719,
+    "label": "WGS 84 / UTM zone 19S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=19 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -72,
+      -80,
+      -66,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32720",
+    "code": 32720,
+    "label": "WGS 84 / UTM zone 20S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=20 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -66,
+      -80,
+      -60,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32721",
+    "code": 32721,
+    "label": "WGS 84 / UTM zone 21S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=21 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -60,
+      -80,
+      -54,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32722",
+    "code": 32722,
+    "label": "WGS 84 / UTM zone 22S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=22 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -54,
+      -80,
+      -48,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32723",
+    "code": 32723,
+    "label": "WGS 84 / UTM zone 23S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=23 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -48,
+      -80,
+      -42,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32724",
+    "code": 32724,
+    "label": "WGS 84 / UTM zone 24S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=24 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -42,
+      -80,
+      -36,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32725",
+    "code": 32725,
+    "label": "WGS 84 / UTM zone 25S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=25 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -36,
+      -80,
+      -30,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32726",
+    "code": 32726,
+    "label": "WGS 84 / UTM zone 26S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=26 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -30,
+      -80,
+      -24,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32727",
+    "code": 32727,
+    "label": "WGS 84 / UTM zone 27S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=27 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -24,
+      -80,
+      -18,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32728",
+    "code": 32728,
+    "label": "WGS 84 / UTM zone 28S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=28 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -18,
+      -80,
+      -12,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32729",
+    "code": 32729,
+    "label": "WGS 84 / UTM zone 29S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=29 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -12,
+      -80,
+      -6,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32730",
+    "code": 32730,
+    "label": "WGS 84 / UTM zone 30S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=30 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      -6,
+      -80,
+      0,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32731",
+    "code": 32731,
+    "label": "WGS 84 / UTM zone 31S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=31 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      0,
+      -80,
+      6,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32732",
+    "code": 32732,
+    "label": "WGS 84 / UTM zone 32S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=32 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      6,
+      -80,
+      12,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32733",
+    "code": 32733,
+    "label": "WGS 84 / UTM zone 33S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=33 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      12,
+      -80,
+      18,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32734",
+    "code": 32734,
+    "label": "WGS 84 / UTM zone 34S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=34 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      18,
+      -80,
+      24,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32735",
+    "code": 32735,
+    "label": "WGS 84 / UTM zone 35S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=35 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      24,
+      -80,
+      30,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32736",
+    "code": 32736,
+    "label": "WGS 84 / UTM zone 36S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=36 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      30,
+      -80,
+      36,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32737",
+    "code": 32737,
+    "label": "WGS 84 / UTM zone 37S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=37 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      36,
+      -80,
+      42,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32738",
+    "code": 32738,
+    "label": "WGS 84 / UTM zone 38S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=38 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      42,
+      -80,
+      48,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32739",
+    "code": 32739,
+    "label": "WGS 84 / UTM zone 39S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=39 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      48,
+      -80,
+      54,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32740",
+    "code": 32740,
+    "label": "WGS 84 / UTM zone 40S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=40 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      54,
+      -80,
+      60,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32741",
+    "code": 32741,
+    "label": "WGS 84 / UTM zone 41S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=41 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      60,
+      -80,
+      66,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32742",
+    "code": 32742,
+    "label": "WGS 84 / UTM zone 42S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=42 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      66,
+      -80,
+      72,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32743",
+    "code": 32743,
+    "label": "WGS 84 / UTM zone 43S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=43 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      72,
+      -80,
+      78,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32744",
+    "code": 32744,
+    "label": "WGS 84 / UTM zone 44S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=44 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      78,
+      -80,
+      84,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32745",
+    "code": 32745,
+    "label": "WGS 84 / UTM zone 45S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=45 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      84,
+      -80,
+      90,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32746",
+    "code": 32746,
+    "label": "WGS 84 / UTM zone 46S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=46 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      90,
+      -80,
+      96,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32747",
+    "code": 32747,
+    "label": "WGS 84 / UTM zone 47S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=47 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      96,
+      -80,
+      102,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32748",
+    "code": 32748,
+    "label": "WGS 84 / UTM zone 48S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=48 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      102,
+      -80,
+      108,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32749",
+    "code": 32749,
+    "label": "WGS 84 / UTM zone 49S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=49 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      108,
+      -80,
+      114,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32750",
+    "code": 32750,
+    "label": "WGS 84 / UTM zone 50S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=50 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      114,
+      -80,
+      120,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32751",
+    "code": 32751,
+    "label": "WGS 84 / UTM zone 51S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=51 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      120,
+      -80,
+      126,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32752",
+    "code": 32752,
+    "label": "WGS 84 / UTM zone 52S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=52 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      126,
+      -80,
+      132,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32753",
+    "code": 32753,
+    "label": "WGS 84 / UTM zone 53S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=53 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      132,
+      -80,
+      138,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32754",
+    "code": 32754,
+    "label": "WGS 84 / UTM zone 54S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=54 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      138,
+      -80,
+      144,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32755",
+    "code": 32755,
+    "label": "WGS 84 / UTM zone 55S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=55 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      144,
+      -80,
+      150,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32756",
+    "code": 32756,
+    "label": "WGS 84 / UTM zone 56S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=56 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      150,
+      -80,
+      156,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32757",
+    "code": 32757,
+    "label": "WGS 84 / UTM zone 57S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=57 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      156,
+      -80,
+      162,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32758",
+    "code": 32758,
+    "label": "WGS 84 / UTM zone 58S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=58 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      162,
+      -80,
+      168,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32759",
+    "code": 32759,
+    "label": "WGS 84 / UTM zone 59S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=59 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      168,
+      -80,
+      174,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "epsg_32760",
+    "code": 32760,
+    "label": "WGS 84 / UTM zone 60S",
+    "group": "UTM",
+    "definition": "+proj=utm +zone=60 +south +datum=WGS84 +units=m +no_defs",
+    "bbox": [
+      174,
+      -80,
+      180,
+      0
+    ],
+    "keywords": ""
+  },
+  {
+    "id": "hawaii_harn_utm4",
+    "label": "Hawaii statewide \u2014 NAD83(HARN) / UTM 4N",
+    "group": "Alaska and Hawaii",
+    "definition": "+proj=utm +zone=4 +ellps=GRS80 +units=m +no_defs",
+    "bbox": [
+      -160.3,
+      18.8,
+      -154.7,
+      22.3
+    ]
+  },
+  {
+    "id": "hawaii_albers",
+    "label": "Hawaii Albers (USGS Landsat)",
+    "group": "Alaska and Hawaii",
+    "definition": "+proj=aea +lat_0=3 +lon_0=-157 +lat_1=8 +lat_2=18 +x_0=0 +y_0=0 +ellps=GRS80 +units=m +no_defs",
+    "bbox": [
+      -160.3,
+      18.8,
+      -154.7,
+      22.3
+    ]
+  }
+]

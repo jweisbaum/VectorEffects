@@ -68,6 +68,7 @@ impl BrushDirectionMode {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export, export_to = "StampSpace.ts")]
+#[repr(u8)]
 pub enum StampSpace {
     /// A shape on the ground: a disc of `size_km` at any latitude, which the
     /// map draws as an ellipse widening away from the equator.
@@ -81,17 +82,36 @@ pub enum StampSpace {
     Mercator,
     /// A circle in the Miller projection used when it was drawn.
     Miller,
+    /// A pixel footprint frozen in the lambert projection.
+    Lambert,
+    /// A pixel footprint frozen in the behrmann projection.
+    Behrmann,
+    /// A pixel footprint frozen in the gall peters projection.
+    GallPeters,
+    /// A pixel footprint frozen in the hobo dyer projection.
+    HoboDyer,
+    /// A pixel footprint frozen in the gall stereographic projection.
+    GallStereographic,
+    /// A pixel footprint frozen in the braun projection.
+    Braun,
+    /// A pixel footprint frozen in the central cylindrical projection.
+    CentralCylindrical,
+    /// A pixel footprint frozen in the patterson projection.
+    Patterson,
+    /// A pixel footprint frozen in the compact miller projection.
+    CompactMiller,
+    /// A pixel footprint frozen in the equidistant 30 projection.
+    #[serde(rename = "equidistant_30")]
+    Equidistant30,
+    /// A pixel footprint frozen in the equidistant 45 projection.
+    #[serde(rename = "equidistant_45")]
+    Equidistant45,
 }
 
 impl StampSpace {
     /// Index into [`ve_core::schema::STAMP_SPACES`].
     pub(crate) fn variant(self) -> u8 {
-        match self {
-            Self::Geodesic => 0,
-            Self::Projected => 1,
-            Self::Mercator => 2,
-            Self::Miller => 3,
-        }
+        self as u8
     }
 }
 
@@ -280,6 +300,12 @@ mod tests {
     /// reordered.
     #[test]
     fn the_wire_enums_index_the_schema_variants() {
+        for (index, name) in ve_core::schema::STAMP_SPACES.iter().enumerate() {
+            let wire: StampSpace = serde_json::from_value(serde_json::json!(name)).unwrap();
+            assert_eq!(wire.variant(), index as u8, "{name}");
+            assert_eq!(ve_render::aeqd::Space::ALL[index].choice(), wire.variant());
+            assert_eq!(serde_json::to_value(wire).unwrap(), serde_json::json!(name));
+        }
         assert_eq!(
             BRUSH_SHAPES[BrushShape::Circle.variant() as usize],
             "circle"

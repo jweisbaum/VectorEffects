@@ -27,12 +27,15 @@ const held = vi.hoisted(() => {
     clears: 0,
     /** When set, the clear fails with this message instead of succeeding. */
     refuseWith: null as string | null,
+    zarrPath: null as string | null,
+    openZarr: vi.fn(),
   };
 });
 
 vi.mock("../ipc", () => ({
   IpcError: class IpcError extends Error {},
   api: {
+    newProjectFromZarr: held.openZarr,
     recentProjects: () => Promise.resolve(held.recent),
     autosaves: () => Promise.resolve([]),
     clearRecentProjects: () => {
@@ -49,6 +52,7 @@ vi.mock("../ipc", () => ({
 vi.mock("./dialogs", () => ({
   pickProjectToOpen: () => Promise.resolve(null),
   pickGribToImport: () => Promise.resolve(null),
+  pickZarrToImport: () => Promise.resolve(held.zarrPath),
 }));
 
 const StartScreen = (await import("./StartScreen")).default;
@@ -89,6 +93,8 @@ beforeEach(async () => {
   ];
   held.clears = 0;
   held.refuseWith = null;
+  held.zarrPath = null;
+  held.openZarr.mockReset();
   container = document.createElement("div");
   document.body.appendChild(container);
   await act(async () => {
@@ -165,4 +171,15 @@ describe("clearing the recent projects list", () => {
     expect(container.textContent).toContain("cyclone");
     expect(container.textContent).toContain("read-only file system");
   });
+});
+
+it("opens a chosen Zarr directory and leaves the start screen alone on cancellation", async () => {
+  await render();
+  await click(button("Open from Zarr…"));
+  expect(held.openZarr).not.toHaveBeenCalled();
+  held.zarrPath = "/data/routing_test";
+  held.openZarr.mockRejectedValue(new Error("Cannot read routing_test"));
+  await click(button("Open from Zarr…"));
+  expect(held.openZarr).toHaveBeenCalledWith("/data/routing_test");
+  expect(container.textContent).toContain("Cannot read routing_test");
 });

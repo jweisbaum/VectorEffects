@@ -41,7 +41,7 @@ function LayerFacts({ layer }: { layer: LayerNode | null }) {
       ? "Painted"
       : layer.source === "image"
         ? "Image"
-        : layer.source === "zarr"
+        : layer.grib?.history
           ? "History"
           : "Imported field";
   rows.push(["Layer", layer.name]);
@@ -60,7 +60,7 @@ function LayerFacts({ layer }: { layer: LayerNode | null }) {
           `${formatUtcHour(grib.history.end_unix_s).replace("T", " ")} UTC`,
       ]);
     }
-    rows.push(["File", grib.path]);
+    rows.push([layer.source === "zarr" && !grib.history ? "Directory" : "File", grib.path]);
     rows.push([
       "Frames",
       grib.loaded

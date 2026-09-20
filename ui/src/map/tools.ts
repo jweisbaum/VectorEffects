@@ -19,8 +19,9 @@ import type { ToolOption } from "../generated/ToolOption";
 import type { ToolOptionSpec } from "../generated/ToolOptionSpec";
 import type { ToolSchema } from "../generated/ToolSchema";
 import type { StampSpace } from "../generated/StampSpace";
+import { STAMP_SPACES } from "./projection";
 import { displayDirection } from "../project/format";
-import { type Camera, type Viewport, normalizeLon, project, projectionFor } from "./camera";
+import { type Camera, type Viewport, normalizeLon, project, projectionFor, cameraWithAnchor } from "./camera";
 import { OP_POINTS, type OperatorPreview } from "./renderer";
 import {
   cosLat,
@@ -245,9 +246,9 @@ export function sampled(
  * for every tool that has a size.
  */
 export function spaceFor(unit: SizeUnit, camera?: Camera): StampSpace {
-  if (unit !== "px") return "geodesic";
+  if (unit !== "px" || (camera && projectionFor(camera).general)) return "geodesic";
   const projection = camera ? projectionFor(camera).id : "equirectangular";
-  return projection === "equirectangular" ? "projected" : projection;
+  return projection === "equirectangular" ? "projected" : projection as StampSpace;
 }
 
 /**
@@ -268,10 +269,11 @@ export function eraserStamp(
   brush: { size: number; unit: SizeUnit },
   camera: Camera,
   lat: number,
+  lon = camera.centerLon,
 ): { radiusKm: number; space: StampSpace } {
   const space = spaceFor(brush.unit, camera);
   const diameterKm =
-    brush.unit === "px" ? kmFromPixels(camera, lat, brush.size, space) : brush.size;
+    brush.unit === "px" ? kmFromPixels(camera, lat, brush.size, space, lon) : brush.size;
   return { radiusKm: diameterKm / 2, space };
 }
 
@@ -287,10 +289,11 @@ export function sizeKm(
   property: string,
   camera: Camera,
   lat: number,
+  lon = camera.centerLon,
 ): number {
   const amount = numberOf(state.values, property);
   if (state.unit === "km") return amount;
-  return kmFromPixels(camera, lat, amount, spaceFor(state.unit, camera));
+  return kmFromPixels(camera, lat, amount, spaceFor(state.unit, camera), lon);
 }
 
 /**
@@ -361,6 +364,7 @@ export function frozenOptions(
   schema: ToolSchema,
   camera: Camera,
   lat: number,
+  lon = camera.centerLon,
 ): ToolOption[] {
   const options: ToolOption[] = [];
   for (const spec of schema.options) {
@@ -369,7 +373,7 @@ export function frozenOptions(
         property: spec.property,
         value: {
           kind: "number",
-          value: Math.max(0.001, sizeKm(state, spec.property, camera, lat)),
+          value: Math.max(0.001, sizeKm(state, spec.property, camera, lat, lon)),
         },
       });
       continue;
@@ -389,7 +393,7 @@ export function frozenOptions(
     const space = spaceFor(state.unit, camera);
     options.push({
       property: "StampSpace",
-      value: { kind: "choice", index: ["geodesic", "projected", "mercator", "miller"].indexOf(space) },
+      value: { kind: "choice", index: STAMP_SPACES.indexOf(space) },
     });
   }
   return options;
@@ -408,7 +412,7 @@ export function newObject(
   return {
     tool,
     gesture,
-    options: frozenOptions(state, schema, camera, lat),
+    options: frozenOptions(state, schema, camera, lat, gestureAnchor(gesture)?.[0]),
     ...(layer !== null ? { layer } : {}),
   };
 }
@@ -432,7 +436,7 @@ export function footprintOf(
   camera: Camera,
 ): Footprint | null {
   const space = spaceFor(state.unit, camera);
-  const size = (property: string, lat: number) => sizeKm(state, property, camera, lat);
+  const size = (property: string, lat: number) => sizeKm(state, property, camera, lat, gestureAnchor(gesture)?.[0]);
 
   switch (gesture.kind) {
     case "stroke": {
@@ -868,13 +872,8 @@ export function cloneSourceCamera(
   const from = choiceOf(state.values, "OffsetMode") === 1 ? pointer : anchor;
   const [sourceLon, sourceLat] = positionOf(state.values, "SourcePoint");
 
-  const projection = projectionFor(camera);
-  const shiftY = projection.yOf(from[1]) - projection.yOf(sourceLat);
-  return {
-    ...camera,
-    centerLon: camera.centerLon - normalizeLon(from[0] - sourceLon),
-    centerLat: projection.latOf(projection.yOf(camera.centerLat) - shiftY),
-  };
+  return shiftedCamera(camera,[sourceLon,sourceLat],from);
+
 }
 
 /** What a gesture does to the field it covers, for the map to draw live (M32). */
@@ -911,6 +910,11 @@ function shiftedCamera(
   at: readonly [number, number],
 ): Camera {
   const projection = projectionFor(camera);
+  if (projection.general) {
+    const view={width:0,height:0}, anchor=project(camera,view,{lon:at[0],lat:at[1]});
+    const initial=projection.general.movable?{...camera,centerLon:camera.centerLon+normalizeLon(source[0]-at[0]),centerLat:Math.max(-90,Math.min(90,camera.centerLat+source[1]-at[1]))}:camera;
+    return cameraWithAnchor(initial,view,{lon:source[0],lat:source[1]},anchor);
+  }
   const shiftY = projection.yOf(at[1]) - projection.yOf(source[1]);
   return {
     ...camera,
@@ -997,5 +1001,14 @@ export function operatorOf(
     }
     default:
       return null;
+  }
+}
+
+function gestureAnchor(gesture: Gesture): readonly [number,number] | undefined {
+  switch(gesture.kind) {
+    case "point": return gesture.at;
+    case "extent": return gesture.centre;
+    case "stroke": case "ring": return gesture.points[0];
+    case "path": return gesture.nodes[0]?.at;
   }
 }

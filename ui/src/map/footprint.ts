@@ -9,12 +9,12 @@
 import type { BrushShape } from "../generated/BrushShape";
 import type { StampSpace } from "../generated/StampSpace";
 import { type Camera, type Viewport, normalizeLon, project, projectionFor } from "./camera";
-import { EARTH_RADIUS_M } from "./geo";
-import { projectionOf } from "./projection";
+import { destination, EARTH_RADIUS_M } from "./geo";
+import { projectionOf, type ProjectionId } from "./projection";
 
 /** The projection frozen into a pixel footprint; ground previews use latitude. */
 export function stampProjection(space: StampSpace) {
-  return projectionOf(space === "mercator" || space === "miller" ? space : "equirectangular");
+  return projectionOf(space === "geodesic" || space === "projected" ? "equirectangular" : space as ProjectionId);
 }
 
 /**
@@ -83,10 +83,21 @@ export function footprintRadii(
   lat: number,
   radiusKm: number,
   space: StampSpace = "geodesic",
+  lon = camera.centerLon,
 ): { rx: number; ry: number } {
+  if (projectionFor(camera).general) {
+    const view = {width: 0, height: 0}, centre = {lon, lat};
+    const origin = project(camera, view, centre);
+    const east = project(camera, view, destination(centre, 90, radiusKm * 1000));
+    const north = project(camera, view, destination(centre, 0, radiusKm * 1000));
+    return {rx: Math.hypot(east.x-origin.x,east.y-origin.y), ry: Math.hypot(north.x-origin.x,north.y-origin.y)};
+  }
   const halfDeg = radiusKm / KM_PER_DEGREE;
-  const sourceScale = space === "mercator" || space === "miller" ? projectionOf(space).scaleAt(lat) : 1;
-  const ry = halfDeg * projectionFor(camera).scaleAt(lat) / sourceScale * camera.pxPerDeg;
+  const source = stampProjection(space);
+  const viewProjection = projectionFor(camera);
+  const ratio = space !== "geodesic" && source.id === viewProjection.id ? 1
+    : viewProjection.scaleAt(lat) / Math.max(1e-8, space === "geodesic" ? 1 : source.scaleAt(lat));
+  const ry = halfDeg * ratio * camera.pxPerDeg;
   // A circle on the ground spans more longitude the further from the equator,
   // so it draws as an ellipse. A projected stamp is defined on the map instead
   // and spans the same degrees both ways — which is what a size in pixels is
@@ -121,7 +132,9 @@ export function kmFromPixels(
   lat: number,
   pixels: number,
   space: StampSpace = "geodesic",
+  lon = camera.centerLon,
 ): number {
+  if (projectionFor(camera).general) return pixels / Math.max(1e-8, footprintRadii(camera,lat,1,"geodesic",lon).rx);
   const scale = space !== "geodesic" ? 1 : cosLat(lat);
   return (pixels / camera.pxPerDeg) * KM_PER_DEGREE * scale;
 }
@@ -132,7 +145,9 @@ export function pixelsFromKm(
   lat: number,
   km: number,
   space: StampSpace = "geodesic",
+  lon = camera.centerLon,
 ): number {
+  if (projectionFor(camera).general) return km * footprintRadii(camera,lat,1,"geodesic",lon).rx;
   const scale = space !== "geodesic" ? 1 : cosLat(lat);
   return (km / (KM_PER_DEGREE * scale)) * camera.pxPerDeg;
 }
@@ -157,6 +172,10 @@ export function addFootprint(
   space: StampSpace = "geodesic",
   insetPx = 0,
 ): void {
+  if (projectionFor(camera).general) {
+    projectedStamp(sink,camera,view,lon,lat,radiusKm,radiusKm,shape,space,insetPx);
+    return;
+  }
   const { x, y, rx, ry } = stampBox(camera, view, lon, lat, radiusKm, space, insetPx);
   if (shape === "square") {
     sink.rect(x - rx, y - ry, rx * 2, ry * 2);
@@ -348,7 +367,7 @@ export function extendStrokePath(
   // A square stamp is joined to the one before it rather than relying on the
   // two overlapping (M58); a round one needs no join, its scallop being what
   // the spacing already bounds.
-  const joins = shape === "square";
+  const joins = shape === "square" && !projectionFor(camera).general;
   const stamp = (lon: number, lat: number, previous?: readonly [number, number]) => {
     if (progress.drawn >= MAX_FOOTPRINTS) return;
     if (joins && previous !== undefined) {
@@ -390,7 +409,9 @@ export function extendStrokePath(
     // far the interpolated polyline departs from the projected curve, which
     // both stamps care about.
     const { ry } = footprintRadii(camera, from[1], radiusKm);
-    const spanPx = Math.hypot(dLon * camera.pxPerDeg, dLat * camera.pxPerDeg);
+    const a = project(camera, view, {lon:from[0],lat:from[1]}), b = project(camera,view,{lon:to[0],lat:to[1]});
+    const spanPx = projectionFor(camera).general && Number.isFinite(a.x) && Number.isFinite(b.x)
+      ? Math.hypot(a.x-b.x,a.y-b.y) : Math.hypot(dLon * camera.pxPerDeg, dLat * camera.pxPerDeg);
     const stride = Math.max(1, 2 * Math.sqrt(Math.max(2 * ry * SCALLOP_PX - SCALLOP_PX ** 2, 0)));
     const steps = Math.max(1, Math.ceil(spanPx / stride));
 
@@ -575,6 +596,10 @@ export function buildFootprintPath(
 
     case "rect": {
       const [lon, lat] = footprint.centre;
+      if (projectionFor(camera).general) {
+        projectedStamp(sink,camera,view,lon,lat,footprint.halfWidthKm,footprint.halfHeightKm,"square",footprint.space,insetPx);
+        return;
+      }
       const point = project(camera, view, { lon, lat });
       const { rx } = footprintRadii(camera, lat, footprint.halfWidthKm, footprint.space);
       const { ry } = footprintRadii(camera, lat, footprint.halfHeightKm, footprint.space);
@@ -583,6 +608,7 @@ export function buildFootprintPath(
     }
 
     case "polygon": {
+      if (projectionFor(camera).general) { projectedRing(sink,camera,view,footprint.points); return; }
       const [first, ...rest] = footprint.points;
       if (first === undefined) return;
       const start = project(camera, view, { lon: first[0], lat: first[1] });
@@ -632,4 +658,41 @@ export function footprintHead(footprint: Footprint): readonly [number, number] |
       return [normalizeLon(footprint.points[0]![0] + lon), lat];
     }
   }
+}
+
+/** Project an outline as short curved segments, breaking at horizons and seams. */
+export function projectedRing(sink: PathSink, camera: Camera, view: Viewport, points: ReadonlyArray<readonly [number,number]>): void {
+  let drawing = false, complete = true;
+  let previous: {x:number;y:number} | null = null;
+  for (let i=0;i<points.length;i++) {
+    const a=points[i]!,b=points[(i+1)%points.length]!;
+    const dx=normalizeLon(b[0]-a[0]),dy=b[1]-a[1];
+    const steps=Math.min(512,Math.max(1,Math.ceil(Math.hypot(dx,dy)*camera.pxPerDeg/8)));
+    for(let j=0;j<steps;j++) {
+      const point=project(camera,view,{lon:a[0]+dx*j/steps,lat:a[1]+dy*j/steps});
+      if(!Number.isFinite(point.x)||!Number.isFinite(point.y)) {drawing=false;complete=false;previous=null;continue;}
+      if(previous && Math.hypot(point.x-previous.x,point.y-previous.y)>Math.hypot(view.width,view.height)/2) {drawing=false;complete=false;}
+      if(drawing)sink.lineTo(point.x,point.y);else sink.moveTo(point.x,point.y);
+      drawing=true;previous=point;
+    }
+  }
+  if(complete && drawing)sink.closePath();
+}
+
+/** Stored footprint frames stay fixed when the viewing projection changes. */
+function projectedStamp(sink: PathSink,camera: Camera,view: Viewport,lon:number,lat:number,rx:number,ry:number,shape:BrushShape,space:StampSpace,inset:number):void {
+  const scale=footprintRadii(camera,lat,1,"geodesic",lon),shrink=inset/Math.max(1e-8,Math.min(scale.rx,scale.ry));
+  rx=Math.max(0,rx-shrink);ry=Math.max(0,ry-shrink);
+  const source=stampProjection(space),points:Array<[number,number]>=[];
+  const count=96;
+  for(let i=0;i<count;i++) {
+    const angle=i/count*2*Math.PI;
+    let x=Math.sin(angle),y=Math.cos(angle);
+    if(shape==='square'){const divisor=Math.max(Math.abs(x),Math.abs(y));x/=divisor;y/=divisor;}
+    x*=rx;y*=ry;
+    if(space==='geodesic'){
+      const p=destination({lon,lat},Math.atan2(x,y)*180/Math.PI,Math.hypot(x,y)*1000);points.push([p.lon,p.lat]);
+    }else points.push([lon+x/KM_PER_DEGREE,source.latOf(source.yOf(lat)+y/KM_PER_DEGREE)]);
+  }
+  projectedRing(sink,camera,view,points);
 }

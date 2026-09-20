@@ -213,13 +213,64 @@ fn initial_bearing(a: vec2<f32>, b: vec2<f32>) -> f32 {
 // The object's local frame: geometry only, never a direction (see aeqd.rs for
 // why). Mirrors `Frame::to_local`; the two are the same construction twice, and
 // the fidelity suite is what keeps them the same.
+
+fn equalAreaK(mode: u32) -> f32 {
+  if (mode == 3u) { return 1.00000000000000000; }
+  if (mode == 4u) { return 0.75000000000000011; }
+  if (mode == 5u) { return 0.50000000000000011; }
+  if (mode == 6u) { return 0.62940952255126037; }
+  return 1.0;
+}
+fn cylindricalPolynomial(mode: u32, phi: f32) -> vec2<f32> {
+  var q = phi * phi;
+  if (mode == 10u) { return vec2<f32>(
+    phi * (1.0148 + q * q * (0.23185 + q * (-0.14499 + 0.02406 * q))),
+    1.0148 + q * q * (1.15925 + q * (-1.01493 + 0.21654 * q))); }
+  return vec2<f32>(phi * (0.9902 + q * (0.1604 - 0.03054 * q)),
+    0.9902 + q * (0.4812 - 0.1527 * q));
+}
+fn cylindricalY(mode: u32, lat: f32) -> f32 {
+  var phi = clamp(lat, -90.0, 90.0) * DEG;
+  if (mode >= 3u && mode <= 6u) { return sin(phi) / (DEG * equalAreaK(mode)); }
+  if (mode == 7u) { return 2.414213562373095 * tan(phi * 0.5) / DEG; }
+  if (mode == 8u) { return 2.0 * tan(phi * 0.5) / DEG; }
+  if (mode == 9u) { return tan(clamp(lat, -89.999, 89.999) * DEG) / DEG; }
+  if (mode == 10u || mode == 11u) { return cylindricalPolynomial(mode, phi).x / DEG; }
+  if (mode == 12u) { return clamp(lat, -90.0, 90.0) / 0.8660254037844386; }
+  if (mode == 13u) { return clamp(lat, -90.0, 90.0) / 0.7071067811865476; }
+  return lat;
+}
+fn cylindricalLat(mode: u32, degreesY: f32) -> f32 {
+  var y = degreesY * DEG;
+  if (mode >= 3u && mode <= 6u) { return asin(clamp(y * equalAreaK(mode), -1.0, 1.0)) / DEG; }
+  if (mode == 7u) { return clamp(2.0 * atan(y / 2.414213562373095) / DEG, -90.0, 90.0); }
+  if (mode == 8u) { return clamp(2.0 * atan(y / 2.0) / DEG, -90.0, 90.0); }
+  if (mode == 9u) { return atan(y) / DEG; }
+  if (mode == 10u || mode == 11u) {
+    var limit = 1.5707963267948966;
+    var maxY = cylindricalPolynomial(mode, limit).x;
+    let target_y = clamp(y, -maxY, maxY);
+    var phi = clamp(target_y, -limit, limit);
+    for (var i = 0; i < 12; i++) {
+      let value = cylindricalPolynomial(mode, phi);
+      phi = clamp(phi - (value.x - target_y) / value.y, -limit, limit);
+    }
+    return phi / DEG;
+  }
+  if (mode == 12u) { return clamp(degreesY * 0.8660254037844386, -90.0, 90.0); }
+  if (mode == 13u) { return clamp(degreesY * 0.7071067811865476, -90.0, 90.0); }
+  return degreesY;
+}
+
 fn projected_y(space: u32, lat: f32) -> f32 {
+    if (space >= 4u) { return cylindricalY(space - 1u, lat); }
     if (space == 2u) { return log(tan(PI / 4.0 + clamp(lat, -89.999, 89.999) * DEG / 2.0)) / DEG; }
     if (space == 3u) { return log(tan(PI / 4.0 + clamp(lat, -90.0, 90.0) * DEG * 0.4)) / (DEG * 0.8); }
     return lat;
 }
 
 fn projected_lat(space: u32, y: f32) -> f32 {
+    if (space >= 4u) { return cylindricalLat(space - 1u, y); }
     if (space == 2u) { return (2.0 * atan(exp(y * DEG)) - PI / 2.0) / DEG; }
     if (space == 3u) { return clamp((2.5 * atan(exp(y * DEG * 0.8)) - PI * 0.625) / DEG, -90.0, 90.0); }
     return clamp(y, -90.0, 90.0);

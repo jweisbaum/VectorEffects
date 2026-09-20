@@ -537,9 +537,61 @@ pub struct AppSettings {
 ///
 /// Named here because the setting is validated against them, and a hand-edited
 /// settings file naming something else must cost the preference and not the
-/// launch. The formulas live in `ui/src/map/projection.ts`, which is the only
-/// place they are needed.
-pub const PROJECTIONS: [&str; 3] = ["equirectangular", "mercator", "miller"];
+/// launch. The view formulas live in `ui/src/map/projection.ts`; frozen pixel
+/// geometry uses the corresponding spaces in `ve_render::aeqd`.
+pub const PROJECTIONS: [&str; 24] = [
+    "equirectangular",
+    "mercator",
+    "miller",
+    "lambert",
+    "behrmann",
+    "gall_peters",
+    "hobo_dyer",
+    "gall_stereographic",
+    "braun",
+    "central_cylindrical",
+    "patterson",
+    "compact_miller",
+    "equidistant_30",
+    "equidistant_45",
+    "orthographic",
+    "robinson",
+    "mollweide",
+    "winkel_tripel",
+    "equal_earth",
+    "sinusoidal",
+    "azimuthal_equidistant",
+    "azimuthal_equal_area",
+    "stereographic",
+    "gnomonic",
+];
+
+/// The frontend and backend read the same offline national/polar CRS catalogue.
+fn supported_projection(id: &str) -> bool {
+    if PROJECTIONS.contains(&id) {
+        return true;
+    }
+    if let Some(definition) = id.strip_prefix("custom:") {
+        // The frontend validates PROJ/WKT. Persist bounded encoded definitions;
+        // they are data, never commands or resource URLs.
+        return !definition.is_empty()
+            && definition.len() <= 24576
+            && definition.is_ascii()
+            && !definition.chars().any(char::is_control);
+    }
+    static CATALOGUE: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+    CATALOGUE
+        .get_or_init(|| {
+            let rows: Vec<serde_json::Value> =
+                serde_json::from_str(include_str!("../../../ui/src/map/projections/crs.json"))
+                    .unwrap_or_default();
+            rows.iter()
+                .filter_map(|row| row["id"].as_str().map(str::to_owned))
+                .collect()
+        })
+        .iter()
+        .any(|known| known == id)
+}
 
 impl Default for AppSettings {
     fn default() -> Self {
@@ -640,7 +692,7 @@ impl AppSettings {
         }
         self.default_wind_scale_knots = self.default_wind_scale_knots.clamp(1.0, 400.0);
         self.default_current_scale_knots = self.default_current_scale_knots.clamp(1.0, 400.0);
-        if !PROJECTIONS.contains(&self.projection.as_str()) {
+        if !supported_projection(&self.projection) {
             self.projection = PROJECTIONS[0].to_owned();
         }
         self
@@ -933,7 +985,7 @@ pub fn set_projection(
 
 /// Implementation of [`set_projection`].
 pub fn projection_set(state: &AppState, projection: String) -> Result<AppSettings> {
-    if !PROJECTIONS.contains(&projection.as_str()) {
+    if !supported_projection(&projection) {
         return Err(AppError::BadOption {
             field: "projection",
             value: projection,
@@ -1006,6 +1058,30 @@ mod tests {
     use super::*;
 
     #[test]
+    fn regional_and_custom_projections_survive_settings_round_trips() {
+        let rows: Vec<serde_json::Value> =
+            serde_json::from_str(include_str!("../../../ui/src/map/projections/crs.json")).unwrap();
+        assert_eq!(rows.len(), 246);
+        for row in rows {
+            let projection = row["id"].as_str().unwrap().to_owned();
+            let settings = AppSettings {
+                projection: projection.clone(),
+                ..AppSettings::default()
+            };
+            let saved = serde_json::to_string(&settings).unwrap();
+            let restored: AppSettings = serde_json::from_str(&saved).unwrap();
+            assert_eq!(restored.normalised().projection, projection);
+        }
+        assert!(supported_projection("custom:%2Bproj%3Dlcc%20%2Blat_1%3D33"));
+        assert!(!supported_projection("epsg_999999"));
+        assert!(!supported_projection("custom:"));
+        assert!(!supported_projection(&format!(
+            "custom:{}",
+            "x".repeat(24577)
+        )));
+    }
+
+    #[test]
     fn the_defaults_bind_every_action_once() {
         let settings = AppSettings::default();
         let mut chords: Vec<String> = settings.shortcuts.iter().map(Shortcut::chord).collect();
@@ -1036,12 +1112,17 @@ mod tests {
         .normalised();
         assert_eq!(settings.projection, "equirectangular");
 
-        let kept = AppSettings {
-            projection: "mercator".to_owned(),
-            ..AppSettings::default()
+        for projection in PROJECTIONS {
+            let settings = AppSettings {
+                projection: projection.to_owned(),
+                ..AppSettings::default()
+            };
+            let json = serde_json::to_string(&settings).unwrap();
+            let kept = serde_json::from_str::<AppSettings>(&json)
+                .unwrap()
+                .normalised();
+            assert_eq!(kept.projection, projection);
         }
-        .normalised();
-        assert_eq!(kept.projection, "mercator");
     }
 
     #[test]

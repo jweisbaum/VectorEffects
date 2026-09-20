@@ -230,7 +230,7 @@ stamp is a shape in.
 | Unit | Stamp space | Footprint |
 |---|---|---|
 | km | `geodesic` | A shape on the **ground**: a disc of `size_km` at any latitude, drawn as an ellipse that widens with latitude. |
-| px | `projected`, `mercator`, or `miller` | A shape in the projection active when it is created: the requested pixels across and tall, independent of latitude. |
+| px | the active cylindrical projection | A shape in the projection active when it is created: the requested pixels across and tall, independent of latitude. |
 
 Pixel distances use `KM_PER_DEGREE / pxPerDeg` on both projected axes. The
 frozen space selects the corresponding northing function: latitude for
@@ -502,8 +502,8 @@ META-INF/version      schema_version, for fast pre-parse rejection
   backfills to.
 
 **Import** means opening a `.veproj` produced elsewhere — the same path as open,
-with migration. The one foreign format that can be imported is GRIB2, as a
-layer rather than as a project (§4.8).
+with migration. Foreign vector data can be imported from GRIB2 and routing
+Zarr v3 stores as layers, or used to initialise a new project (§4.8).
 
 **Autosave is a setting** (D70): *recovery*, the default, writes a recovery
 copy to the app data directory every 60 s and on every 50 history entries,
@@ -818,6 +818,26 @@ rather than at every frame.
 A message that cannot be read is skipped and logged rather than failing the
 file; a file with no usable `u`/`v` pair is refused with the reasons.
 
+**Local routing Zarr imports.** The layer panel offers **Import Zarr**, and
+the start screen offers **Open from Zarr**. Both choose a directory, with or
+without a `.zarr` suffix. The supported layout is the one in `routing_test`
+and §12.3: Zarr v3 `data(time, param, latitude, longitude)`, Float16 or
+Float32 components in m/s, `u10`/`v10` and/or `ucur`/`vcur` named by the
+parameter coordinate, a strictly increasing whole-hour UTC time axis, and a
+regular eastward, north-to-south grid. Rectilinear shards, Zstd, and CRC-32C
+indices are decoded by `zarrs`. Coordinate values determine the lattice and
+clock; absent chunks and NaNs remain uncovered, while zero remains calm.
+
+Each field becomes an ordinary raster layer: the same timeline, speed
+filter, frame overrides, eraser, modifiers, rendering, and export as a GRIB
+or history layer. One undo removes an import. Opening a new project derives
+its settings by the GRIB rules above, including the 240-step project limit.
+The persisted `zarr_file` source records the directory and field kind, and
+reopening reads that source again; it is distinct from the `zarr` provenance
+of downloaded history, whose backing file remains GRIB. A missing directory
+leaves the layers present but unloaded. Wind and current share one read on
+reopen, and identical frames share their decoded grid in memory.
+
 ### 4.9 Image layers
 
 A georeferenced picture laid **under** the field: a chart scan, a satellite
@@ -1040,24 +1060,23 @@ refresh. Everything it needs afterwards is on disk.
 
 ### 5.1 Projection
 
-**Equirectangular (Plate Carrée) by default**, with **Mercator** and **Miller**
-offered beside it (M11). Equirectangular is the default because the grid is
-global lat/lon: the map is 1:1 with the data grid, both poles are visible (a
-global grib has rows at ±90, and Mercator cannot show them), and there is no
-zoom-dependent distortion of the editing surface.
+**Equirectangular (Plate Carrée) by default**. The searchable main-view Projection
+picker offers 270 offline presets. The 14 cylindrical maps are:
 
-The alternatives are there because the work is not always global. Mercator is
-what a marine chart is, so a bearing drawn on it is the bearing sailed, and a
-wind field read at a passage is read on the chart the passage is planned on.
-Miller keeps the poles that Mercator loses while shedding most of
-equirectangular's polar stretch.
+- Mercator and Miller.
+- Lambert cylindrical equal-area, Behrmann (30°), Gall–Peters (45°), and
+  Hobo–Dyer (37.5°), with the standard parallels' aspect ratios preserved.
+- Gall stereographic, Braun stereographic, and Central cylindrical.
+- Patterson and Compact Miller compromise world maps.
+- Equidistant cylindrical with standard parallels at 30° or 45°.
 
-**All three are cylindrical, and that is the design.** Longitude maps linearly
-to `x`; latitude maps to `y` through a function of latitude alone. That one
-property keeps everything above the view unchanged: a lat/lon rectangle is
-still an axis-aligned screen rectangle, so a tile is still two triangles, the
-world still repeats horizontally at ±360°, and the inverse — what the pointer
-needs — is closed-form and exact.
+Equirectangular remains the default because the data grid is global lat/lon.
+The cylindrical options share a one-dimensional transform: longitude maps linearly to `x`, while latitude
+maps to `y` through a function of latitude alone. Each projection is uniformly
+rescaled to `x = longitude`, preserving its aspect ratio. Tiles remain
+axis-aligned rectangles and the world repeats horizontally. Pointer inverses
+are analytic except for the two polynomial maps, which use bounded Newton
+iteration. CPU, compute shader, and WebGL formulas agree.
 
 Distortion near the poles is inherent and visible in every one of them. Tools
 that care expose an explicit choice (§6.2, circle tool) between a shape that is
@@ -1070,29 +1089,55 @@ exported file (invariant 3). It lives in the *application's* settings, not the
 project's: it says how this person likes to look at a map, not what the map is.
 
 **Pixel tools capture the current projection at creation.** The original
-`Projected` value remains equirectangular for old documents. `Mercator` and
-`Miller` retain those projections explicitly, so a pixel brush is circular on
+`Projected` value remains equirectangular for old documents. Every other
+cylindrical projection has its own appended, stable space index, so a pixel brush is circular on
 the screen at every latitude when drawn. The stored geometry is geographic:
 subsequent zoom or projection changes display that same geometry and do not
 rewrite it or change an export. This replaces the earlier rule that always
 froze equirectangular geometry, which stretched pixel brushes in Mercator.
 
-**Not done, and why.** The pseudo-cylindrical projections (Mollweide, Robinson,
-Winkel Tripel) and the globe are *not* offered. They break all four cylindrical
-properties at once: a lat/lon quad is curved, so every tile needs subdivision;
-two of the three have no closed-form inverse, so the pointer needs iteration;
-the world no longer repeats as a horizontal translation; and a globe needs
-back-face culling, spherical tile selection, a rotation interaction and a glyph
-lattice that is not a lat/lon grid. Each is a real feature and none of them is
-this one.
+**Global, polar, azimuthal and regional views.** The catalogue also includes
+Robinson, Mollweide, Winkel Tripel, Equal Earth, Sinusoidal, an orthographic globe,
+and movable azimuthal equidistant, Lambert azimuthal equal-area, stereographic
+and gnomonic views. Dragging a movable view changes its geographic centre.
+The globe hides its back hemisphere. Gnomonic and stereographic are bounded
+at 80° and 150° from their centre to avoid singularities.
 
-- Pan: unbounded in longitude (wraps seamlessly), clamped in the projection's
+The 246 regional/polar presets cover Arctic and Antarctic stereographic,
+NSIDC sea-ice/EASE grids, UPS, Arctic regional LAEA, British National Grid,
+Lambert-93 and France's nine CC zones, Belgian Lambert 2008, Swiss LV95,
+Dutch RD, Krovak East/North, SWEREF 99 TM and local zones, NZTM/NZMG and local
+circuits, Japan's 19 plane zones, MGA2020, Canadian Lambert grids, Alaska
+Albers and State Plane, Hawaii State Plane/UTM/Albers, and all 120 WGS84 UTM
+zones. The catalogue includes ellipsoids, origins, scales/standard parallels,
+false origins and areas of use. Regional views initially fit their area of use.
+
+PROJ/WKT definitions and bundled EPSG codes can be entered in Custom projection.
+PROJ method reference coordinates verify all 244 EPSG definitions. Runtime
+transforms are offline; bundled Helmert datum parameters are used where available,
+without downloadable survey correction grids. This is a map display, not a
+survey-grade coordinate conversion/export facility.
+
+General projections use adaptive inverse screen-to-geographic meshes, clipped
+per source tile at world seams. Images, land, coastlines and vector rasters
+share that mesh. Glyphs use a screen lattice with geographic east/north
+Jacobians for grid convergence. Graticules are curved and horizon-clipped.
+Pointer inverses outside the map are invalid and cannot initiate edits.
+Ground tools retain their geodesic geometry; in these views px resolves to a
+local ground size at creation, stored in the existing geodesic frame. Stored
+cylindrical pixel objects retain their original frame when viewed here.
+Transform drags use projected geographic outlines; their optional raster ghost
+is available in cylindrical views.
+
+- Cylindrical pan: unbounded in longitude (wraps seamlessly), clamped in the projection's
   own vertical coordinate, so the map cannot scroll past its top or bottom edge.
 - Zoom: continuous, from whole-world to roughly 1 grid cell ≈ 8 px. `pxPerDeg`
-  means pixels per degree *at the equator* in every projection, so the zoom
-  limits, the tile ladder and the glyph spacing keep their meanings.
+  means pixels per longitudinal map degree for cylindrical maps, and per
+  spherical degree of projected metres for general maps. Vertical
+  scale depends on the projection and latitude.
 - Mercator stops at ±85.051129° (the Web Mercator limit, which makes the world
-  square). The grid's top and bottom rows sit off the map there.
+  square). Central cylindrical stops at ±80° to avoid its polar singularity.
+  Grid rows beyond those limits sit off the map.
 - The camera state lives in the frontend and is mirrored into `ViewState` on
   save.
 

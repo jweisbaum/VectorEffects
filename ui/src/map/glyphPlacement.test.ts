@@ -1,3 +1,4 @@
+import { PROJECTIONS } from "./projection";
 import { describe, expect, it } from "vitest";
 import { glyphLattice, projectionFor, tileBounds, type Camera, type GeoPoint } from "./camera";
 import { GLYPH_SUBDIVISIONS, glyphCoverage, glyphCovered, glyphTileIsFull, spacedGlyphs } from "./glyphPlacement";
@@ -67,16 +68,21 @@ describe("glyphs in sparse fields", () => {
   });
 
   it("spaces sites across the antimeridian and in polar projections", () => {
-    for (const projection of ["equirectangular", "mercator", "miller"] as const) {
+    for (const { id: projection } of PROJECTIONS) {
       const polar: Camera = { ...camera, centerLon: 180, centerLat: 78, projection };
       const candidates = lattice({ west: 176, east: 184, south: 75, north: 82 });
       const placed = spacedGlyphs(candidates, 1, polar);
       const map = projectionFor(polar);
       expect(placed.some(p => p.lon < 180)).toBe(true);
       expect(placed.some(p => p.lon > 180)).toBe(true);
-      for (const p of placed) for (const q of placed) if (p !== q) {
-        expect(Math.hypot(p.lon - q.lon, map.yOf(p.lat) - map.yOf(q.lat))).toBeGreaterThanOrEqual(0.8 - 1e-9);
+      // One assertion per projection avoids thousands of matcher allocations.
+      let minGap = Infinity;
+      const mapped = placed.map(p => ({ x: p.lon, y: map.yOf(p.lat) }));
+      for (let i = 0; i < mapped.length; i++) for (let j = i + 1; j < mapped.length; j++) {
+        const p = mapped[i]!, q = mapped[j]!;
+        minGap = Math.min(minGap, Math.hypot(p.x - q.x, p.y - q.y));
       }
+      expect(minGap, projection).toBeGreaterThanOrEqual(0.8 - 1e-9);
     }
   });
 });

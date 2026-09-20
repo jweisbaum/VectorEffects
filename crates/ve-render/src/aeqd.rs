@@ -57,6 +57,7 @@ pub const M_PER_DEGREE: f64 = EARTH_RADIUS_M * std::f64::consts::PI / 180.0;
 
 /// Which space an object's geometry is defined in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[repr(u8)]
 pub enum Space {
     /// Ground space: local metres are true metres, in an azimuthal-equidistant
     /// frame about the anchor. A circle here is a geodesic cap.
@@ -74,6 +75,28 @@ pub enum Space {
     Mercator,
     /// Miller map metres, frozen when a pixel tool creates the object.
     Miller,
+    /// Frozen lambert map metres.
+    Lambert,
+    /// Frozen behrmann map metres.
+    Behrmann,
+    /// Frozen gall peters map metres.
+    GallPeters,
+    /// Frozen hobo dyer map metres.
+    HoboDyer,
+    /// Frozen gall stereographic map metres.
+    GallStereographic,
+    /// Frozen braun map metres.
+    Braun,
+    /// Frozen central cylindrical map metres.
+    CentralCylindrical,
+    /// Frozen patterson map metres.
+    Patterson,
+    /// Frozen compact miller map metres.
+    CompactMiller,
+    /// Frozen equidistant 30 map metres.
+    Equidistant30,
+    /// Frozen equidistant 45 map metres.
+    Equidistant45,
 }
 
 impl Space {
@@ -83,34 +106,122 @@ impl Space {
             1 => Self::Projected,
             2 => Self::Mercator,
             3 => Self::Miller,
+            4 => Self::Lambert,
+            5 => Self::Behrmann,
+            6 => Self::GallPeters,
+            7 => Self::HoboDyer,
+            8 => Self::GallStereographic,
+            9 => Self::Braun,
+            10 => Self::CentralCylindrical,
+            11 => Self::Patterson,
+            12 => Self::CompactMiller,
+            13 => Self::Equidistant30,
+            14 => Self::Equidistant45,
             _ => Self::Geodesic,
         }
     }
 
-    /// Latitude in equatorial projected degrees.
-    pub fn y_of(self, lat: f64) -> f64 {
-        let (lat, factor) = match self {
-            Self::Mercator => (lat.clamp(-89.999, 89.999), 1.0),
-            Self::Miller => (lat.clamp(-90.0, 90.0), 0.8),
-            _ => return lat,
-        };
-        ((std::f64::consts::FRAC_PI_4 + factor * lat.to_radians() / 2.0)
-            .tan()
-            .ln()
-            / factor)
-            .to_degrees()
+    /// Every persisted space, in stable index order.
+    pub const ALL: [Self; 15] = [
+        Self::Geodesic,
+        Self::Projected,
+        Self::Mercator,
+        Self::Miller,
+        Self::Lambert,
+        Self::Behrmann,
+        Self::GallPeters,
+        Self::HoboDyer,
+        Self::GallStereographic,
+        Self::Braun,
+        Self::CentralCylindrical,
+        Self::Patterson,
+        Self::CompactMiller,
+        Self::Equidistant30,
+        Self::Equidistant45,
+    ];
+
+    /// Stable schema / GPU index.
+    pub fn choice(self) -> u8 {
+        self as u8
     }
 
-    /// Inverse of the frozen cylindrical projection.
-    pub fn lat_of(self, y: f64) -> f64 {
-        let factor = match self {
-            Self::Mercator => 1.0,
-            Self::Miller => 0.8,
-            _ => return y.clamp(-90.0, 90.0),
+    fn equal_area_k(self) -> Option<f64> {
+        let standard: f64 = match self {
+            Self::Lambert => 0.0,
+            Self::Behrmann => 30.0,
+            Self::GallPeters => 45.0,
+            Self::HoboDyer => 37.5,
+            _ => return None,
         };
-        ((2.0 * (factor * y.to_radians()).exp().atan() - std::f64::consts::FRAC_PI_2) / factor)
-            .to_degrees()
-            .clamp(-90.0, 90.0)
+        Some(standard.to_radians().cos().powi(2))
+    }
+
+    /// Latitude to frozen cylindrical map degrees, with x = longitude.
+    pub fn y_of(self, lat: f64) -> f64 {
+        let phi = lat.clamp(-90.0, 90.0).to_radians();
+        if let Some(k) = self.equal_area_k() {
+            return (phi.sin() / k).to_degrees();
+        }
+        let y = match self {
+            Self::Mercator => (std::f64::consts::FRAC_PI_4
+                + lat.clamp(-89.999, 89.999).to_radians() / 2.0)
+                .tan()
+                .ln(),
+            Self::Miller => (std::f64::consts::FRAC_PI_4 + 0.4 * phi).tan().ln() / 0.8,
+            Self::GallStereographic => (1.0 + std::f64::consts::SQRT_2) * (phi / 2.0).tan(),
+            Self::Braun => 2.0 * (phi / 2.0).tan(),
+            Self::CentralCylindrical => lat.clamp(-89.999, 89.999).to_radians().tan(),
+            Self::Patterson | Self::CompactMiller => self.polynomial(phi).0,
+            Self::Equidistant30 => phi / 30_f64.to_radians().cos(),
+            Self::Equidistant45 => phi / std::f64::consts::FRAC_1_SQRT_2,
+            _ => return lat,
+        };
+        y.to_degrees()
+    }
+
+    /// Published Patterson / Compact Miller polynomial and its derivative.
+    fn polynomial(self, phi: f64) -> (f64, f64) {
+        let p2 = phi * phi;
+        if self == Self::Patterson {
+            (
+                phi * (1.0148 + p2 * p2 * (0.23185 + p2 * (-0.14499 + 0.02406 * p2))),
+                1.0148 + p2 * p2 * (1.15925 + p2 * (-1.01493 + 0.21654 * p2)),
+            )
+        } else {
+            (
+                phi * (0.9902 + p2 * (0.1604 - 0.03054 * p2)),
+                0.9902 + p2 * (0.4812 - 0.1527 * p2),
+            )
+        }
+    }
+
+    /// Inverse of the frozen projection; coordinates beyond its poles clamp.
+    pub fn lat_of(self, y: f64) -> f64 {
+        let y = y.to_radians();
+        if let Some(k) = self.equal_area_k() {
+            return (y * k).clamp(-1.0, 1.0).asin().to_degrees();
+        }
+        let phi = match self {
+            Self::Mercator => 2.0 * y.exp().atan() - std::f64::consts::FRAC_PI_2,
+            Self::Miller => (2.0 * (0.8 * y).exp().atan() - std::f64::consts::FRAC_PI_2) / 0.8,
+            Self::GallStereographic => 2.0 * (y / (1.0 + std::f64::consts::SQRT_2)).atan(),
+            Self::Braun => 2.0 * (y / 2.0).atan(),
+            Self::CentralCylindrical => y.atan(),
+            Self::Patterson | Self::CompactMiller => {
+                let limit = std::f64::consts::FRAC_PI_2;
+                let target = y.clamp(-self.polynomial(limit).0, self.polynomial(limit).0);
+                let mut phi = target.clamp(-limit, limit);
+                for _ in 0..12 {
+                    let (value, slope) = self.polynomial(phi);
+                    phi = (phi - (value - target) / slope).clamp(-limit, limit);
+                }
+                phi
+            }
+            Self::Equidistant30 => y * 30_f64.to_radians().cos(),
+            Self::Equidistant45 => y * std::f64::consts::FRAC_1_SQRT_2,
+            _ => y,
+        };
+        phi.to_degrees().clamp(-90.0, 90.0)
     }
 }
 
@@ -234,12 +345,25 @@ impl Frame {
     ///
     /// Used to build the spherical cap the evaluator culls against.
     ///
-    /// The same bound serves both spaces. A projected metre is north-equivalent:
-    /// due north it is exactly a ground metre, and in every other direction it
-    /// is fewer, so `r * scale` over-estimates the reach and the cull stays
-    /// conservative — which is the only direction a cull may err in.
+    /// Geodesic and the original cylindrical spaces need only `r * scale`.
+    /// Cylinders that compress latitude need an inverse-projected bound too.
     pub fn reach_m(&self, local_radius: f64) -> f64 {
-        local_radius * self.scale
+        let radius = local_radius * self.scale;
+        if self.space.choice() <= 3 {
+            return radius;
+        }
+        // Equal-area and polynomial maps can compress latitude. Bound the
+        // entire projected disc by its geographic rectangle, then by a path
+        // along a meridian and a parallel. Using radius alone clips polar
+        // brush strokes before either evaluator gets to sample them.
+        let delta = radius / M_PER_DEGREE;
+        let centre = self.space.y_of(self.anchor.lat);
+        let north = self.space.lat_of(centre + delta);
+        let south = self.space.lat_of(centre - delta);
+        let latitude_reach = (north - self.anchor.lat)
+            .abs()
+            .max((south - self.anchor.lat).abs());
+        (radius + latitude_reach * M_PER_DEGREE).min(std::f64::consts::PI * EARTH_RADIUS_M)
     }
 }
 
@@ -543,9 +667,49 @@ mod tests {
 #[cfg(test)]
 mod cylindrical_tests {
     use super::*;
+
+    #[test]
+    fn projections_match_independent_proj_coordinates() {
+        // PROJ at lon=30°, lat=60°, R=180/pi, uniformly normalised by x/30.
+        for (space, y) in [
+            (Space::Lambert, 49.619600588),
+            (Space::Behrmann, 66.1594674506),
+            (Space::GallPeters, 99.2392011759),
+            (Space::HoboDyer, 78.8351602734),
+            (Space::GallStereographic, 79.8615417993),
+            (Space::CentralCylindrical, 99.2392011759),
+            (Space::Patterson, 68.2322688789),
+            (Space::CompactMiller, 67.7622868691),
+            (Space::Equidistant30, 69.2820323028),
+            (Space::Equidistant45, 84.8528137424),
+        ] {
+            assert!((space.y_of(60.0) - y).abs() < 1e-8, "{space:?}");
+            assert!((space.lat_of(y) - 60.0).abs() < 1e-8, "{space:?}");
+        }
+    }
+
+    #[test]
+    fn compressed_polar_geometry_is_inside_the_culling_cap() {
+        for space in Space::ALL.into_iter().skip(1) {
+            for lat in [-89.5, -75.0, 0.0, 75.0, 89.5] {
+                let frame = Frame::in_space(LonLat::new(179.0, lat).unwrap(), 37.0, 150.0, space);
+                let radius = 3.0 * M_PER_DEGREE;
+                let reach = frame.reach_m(radius);
+                for i in 0..64 {
+                    let theta = f64::from(i) * std::f64::consts::TAU / 64.0;
+                    let edge = frame.to_global([radius * theta.sin(), radius * theta.cos()]);
+                    assert!(
+                        frame.anchor.distance_m(edge) <= reach + 1.0,
+                        "{space:?} at {lat}"
+                    );
+                }
+            }
+        }
+    }
+
     #[test]
     fn pixel_perimeters_are_circular_at_every_latitude_in_their_projection() {
-        for space in [Space::Projected, Space::Mercator, Space::Miller] {
+        for space in Space::ALL.into_iter().skip(1) {
             for lat in [-75.0, 0.0, 60.0, 75.0] {
                 let frame = Frame::in_space(LonLat::new(179.0, lat).unwrap(), 0.0, 100.0, space);
                 for i in 0..64 {

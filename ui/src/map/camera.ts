@@ -20,6 +20,9 @@ import {
   worldHeightDeg,
 } from "./projection";
 
+import { defaultCentre, mapExtent, mapTransform } from "./projections/general";
+import { geographicMesh, type GeographicMesh } from "./projections/mesh";
+
 /** What a camera that names no projection is drawn in. */
 const PLATE_CARREE = projectionOf(DEFAULT_PROJECTION);
 
@@ -89,6 +92,10 @@ export function minPxPerDeg(
   view: Viewport,
   projection: Projection = PLATE_CARREE,
 ): number {
+  if (projection.general) {
+    const [west,south,east,north] = mapExtent(projection.general);
+    return Math.min(view.width / Math.max(1e-6,east-west), view.height / Math.max(1e-6,north-south)) * 0.96;
+  }
   // Mercator's world is 360 degrees tall on this scale rather than 180, so
   // "fit the world" is a different number in it.
   return Math.min(view.width / 360, view.height / worldHeightDeg(projection));
@@ -107,6 +114,15 @@ export function clampCamera(camera: Camera, view: Viewport): Camera {
     Math.max(camera.pxPerDeg, minPxPerDeg(view, projection)),
     MAX_PX_PER_DEG,
   );
+  if (projection.general) {
+    const lat = Math.max(-90, Math.min(90, camera.centerLat));
+    const next = { ...camera, centerLon: normalizeLon(camera.centerLon), centerLat: lat, pxPerDeg };
+    if (!projection.general.movable && !mapTransform(projection.general, defaultCentre(projection.general)).forward({lon: next.centerLon, lat})) {
+      const centre = defaultCentre(projection.general);
+      next.centerLon = centre.lon; next.centerLat = centre.lat;
+    }
+    return next;
+  }
   const halfHeightDeg = view.height / 2 / pxPerDeg;
   // The clamp is in the projection's own vertical coordinate, not in degrees
   // of latitude: what must not scroll off is the *map*, and where a latitude
@@ -133,6 +149,13 @@ export function clampCamera(camera: Camera, view: Viewport): Camera {
  */
 export function project(camera: Camera, view: Viewport, point: GeoPoint): ScreenPoint {
   const projection = projectionFor(camera);
+  if (projection.general) {
+    const transform = mapTransform(projection.general, {lon: camera.centerLon, lat: camera.centerLat});
+    const centre = projection.general.movable ? {x:0,y:0} : transform.forward({lon:camera.centerLon,lat:camera.centerLat});
+    const xy = transform.forward(point);
+    if (!xy || !centre) return {x:NaN,y:NaN};
+    return {x:view.width/2+(xy.x-centre.x)*camera.pxPerDeg, y:view.height/2-(xy.y-centre.y)*camera.pxPerDeg};
+  }
   const dLon = normalizeLon(point.lon - camera.centerLon);
   return {
     x: view.width / 2 + dLon * camera.pxPerDeg,
@@ -145,6 +168,13 @@ export function project(camera: Camera, view: Viewport, point: GeoPoint): Screen
 /** Converts a screen position back to a geographic one. */
 export function unproject(camera: Camera, view: Viewport, point: ScreenPoint): GeoPoint {
   const projection = projectionFor(camera);
+  if (projection.general) {
+    const transform = mapTransform(projection.general, {lon:camera.centerLon,lat:camera.centerLat});
+    const centre = projection.general.movable ? {x:0,y:0} : transform.forward({lon:camera.centerLon,lat:camera.centerLat});
+    if (!centre) return {lon:NaN,lat:NaN};
+    return transform.inverse({x:centre.x+(point.x-view.width/2)/camera.pxPerDeg,
+      y:centre.y-(point.y-view.height/2)/camera.pxPerDeg}) ?? {lon:NaN,lat:NaN};
+  }
   const lon = camera.centerLon + (point.x - view.width / 2) / camera.pxPerDeg;
   const y =
     projection.yOf(camera.centerLat) - (point.y - view.height / 2) / camera.pxPerDeg;
@@ -166,6 +196,10 @@ export function unproject(camera: Camera, view: Viewport, point: ScreenPoint): G
  */
 export function panBy(camera: Camera, view: Viewport, dxPx: number, dyPx: number): Camera {
   const projection = projectionFor(camera);
+  if (projection.general) {
+    const centre = unproject(camera, view, {x:view.width/2+dxPx,y:view.height/2+dyPx});
+    return validGeo(centre) ? clampCamera({...camera,centerLon:centre.lon,centerLat:centre.lat},view) : camera;
+  }
   const y = projection.yOf(camera.centerLat) - dyPx / camera.pxPerDeg;
   return clampCamera(
     {
@@ -192,6 +226,11 @@ export function zoomAbout(
   const projection = projectionFor(camera);
   const before = unproject(camera, view, anchor);
   const zoomed = clampCamera({ ...camera, pxPerDeg: camera.pxPerDeg * factor }, view);
+  if (projection.general) {
+    if (!validGeo(before)) return zoomed;
+    return cameraWithAnchor(zoomed,view,before,anchor);
+  }
+
   const after = unproject(zoomed, view, anchor);
   // The correction is applied in the projection's own vertical coordinate:
   // a difference in latitude is not a difference in pixels once the two are
@@ -218,9 +257,24 @@ export interface ViewBounds {
   south: number;
 }
 
-/** The geographic extent currently on screen. */
-export function visibleBounds(camera: Camera, view: Viewport): ViewBounds {
+/** The geographic extent currently on screen. Rendering includes repeated worlds;
+ * data queries need at most one full world. */
+export function visibleBounds(camera: Camera, view: Viewport, repeatWorlds = false): ViewBounds {
   const projection = projectionFor(camera);
+  if (projection.general) {
+    const points:GeoPoint[]=[];
+    for(let j=0;j<=16;j++)for(let i=0;i<=16;i++){
+      const p=unproject(camera,view,{x:i*view.width/16,y:j*view.height/16});if(validGeo(p))points.push(p);
+    }
+    if(!points.length)return {west:-180,east:180,north:90,south:-90};
+    const lons=points.map(p=>camera.centerLon+normalizeLon(p.lon-camera.centerLon));
+    let north=Math.max(...points.map(p=>p.lat)),south=Math.min(...points.map(p=>p.lat));
+    for(const lat of [-90,90]){
+      const p=project(camera,view,{lon:camera.centerLon,lat});
+      if(p.x>=0&&p.x<=view.width&&p.y>=0&&p.y<=view.height){if(lat>0)north=90;else south=-90;}
+    }
+    return {west:north===90||south===-90?-180:Math.min(...lons),east:north===90||south===-90?180:Math.max(...lons),north,south};
+  }
   const halfLon = view.width / 2 / camera.pxPerDeg;
   // Half the viewport in the projection's own vertical coordinate, then back
   // to latitudes. Under Mercator the same pixel height is a much narrower band
@@ -229,7 +283,7 @@ export function visibleBounds(camera: Camera, view: Viewport): ViewBounds {
   const halfY = view.height / 2 / camera.pxPerDeg;
   const centreY = projection.yOf(camera.centerLat);
   // More than a full world across: there is no meaningful sub-range to cull to.
-  const spanLon = Math.min(halfLon * 2, 360);
+  const spanLon = repeatWorlds ? halfLon * 2 : Math.min(halfLon * 2, 360);
   return {
     west: camera.centerLon - spanLon / 2,
     east: camera.centerLon + spanLon / 2,
@@ -284,7 +338,8 @@ export function visibleTiles(
   view: Viewport,
   budget = 192,
 ): VisibleTile[] {
-  const bounds = visibleBounds(camera, view);
+  if (projectionFor(camera).general) return projectedMesh(camera,view,budget).tiles;
+  const bounds = visibleBounds(camera, view, true);
   const ideal = tileLevelFor(camera.pxPerDeg);
 
   // Step back a level rather than truncate.
@@ -411,4 +466,60 @@ export function glyphLattice(
     cols: Math.max(0, lastCol - firstCol + 1),
     rows: Math.max(0, lastRow - firstRow + 1),
   };
+}
+
+/** Non-geographic pixels (outside a globe or map outline) cannot begin edits. */
+export function validGeo(point: GeoPoint): boolean {
+  return Number.isFinite(point.lon) && Number.isFinite(point.lat) && Math.abs(point.lat)<=90;
+}
+const projectedMeshes = new Map<string,GeographicMesh>();
+export function projectedMesh(camera:Camera,view:Viewport,budget=192):GeographicMesh {
+  const key=JSON.stringify([camera,view,budget]);
+  const cached=projectedMeshes.get(key);if(cached)return cached;
+  const general=projectionFor(camera).general;
+  if(!general)throw new Error("Only general projections need a geographic mesh");
+  const transform=mapTransform(general,{lon:camera.centerLon,lat:camera.centerLat});
+  const centre=(general.movable?null:transform.forward({lon:camera.centerLon,lat:camera.centerLat}))??{x:0,y:0};
+  const mesh=geographicMesh(view.width,view.height,camera.pxPerDeg,
+    p=>transform.inverse({x:centre.x+(p.x-view.width/2)/camera.pxPerDeg,y:centre.y-(p.y-view.height/2)/camera.pxPerDeg}),
+    p=>{const xy=transform.forward(p);return xy?{x:view.width/2+(xy.x-centre.x)*camera.pxPerDeg,y:view.height/2-(xy.y-centre.y)*camera.pxPerDeg}:null;},budget);
+  projectedMeshes.set(key,mesh);
+  if(projectedMeshes.size>4)projectedMeshes.delete(projectedMeshes.keys().next().value!);
+  return mesh;
+}
+/** Fit a newly chosen CRS to its region; a globe opens with the current focus. */
+export function cameraForProjection(camera:Camera,view:Viewport,id:ProjectionId):Camera {
+  const projection=projectionOf(id);
+  if(!projection.general)return clampCamera({...camera,projection:id},view);
+  const centre=projection.general.movable?{lon:camera.centerLon,lat:camera.centerLat}:defaultCentre(projection.general);
+  return clampCamera({projection:id,centerLon:centre.lon,centerLat:centre.lat,pxPerDeg:minPxPerDeg(view,projection)},view);
+}
+
+/** Solve a geographic anchor's screen position for zooming and clone previews. */
+export function cameraWithAnchor(camera:Camera,view:Viewport,before:GeoPoint,anchor:ScreenPoint):Camera {
+  const projection=projectionFor(camera);
+  if(!projection.general || !validGeo(before) || !Number.isFinite(anchor.x))return camera;
+    if (!projection.general.movable) {
+      const transform=mapTransform(projection.general,{lon:0,lat:0});
+      const fixed=transform.forward(before);
+      if (!fixed) return camera;
+      const centre=transform.inverse({x:fixed.x-(anchor.x-view.width/2)/camera.pxPerDeg,
+        y:fixed.y+(anchor.y-view.height/2)/camera.pxPerDeg});
+      return centre ? clampCamera({...camera,centerLon:centre.lon,centerLat:centre.lat},view) : camera;
+    }
+    // Two angular camera coordinates, solved against the same forward map as
+    // the pointer. This keeps wheel zoom anchored while turning a globe.
+    let next=camera;
+    for(let i=0;i<10;i++){
+      const p=project(next,view,before),h=1e-4;
+      if(!Number.isFinite(p.x))break;
+      const dx=p.x-anchor.x,dy=p.y-anchor.y;if(Math.hypot(dx,dy)<0.001)break;
+      const a=project({...next,centerLon:next.centerLon+h},view,before);
+      const b=project({...next,centerLat:next.centerLat+h},view,before);
+      const ax=(a.x-p.x)/h,ay=(a.y-p.y)/h,bx=(b.x-p.x)/h,by=(b.y-p.y)/h,det=ax*by-ay*bx;
+      if(!Number.isFinite(det)||Math.abs(det)<1e-8)break;
+      next=clampCamera({...next,centerLon:next.centerLon-Math.max(-20,Math.min(20,(dx*by-dy*bx)/det)),
+        centerLat:next.centerLat-Math.max(-20,Math.min(20,(dy*ax-dx*ay)/det))},view);
+    }
+    return next;
 }

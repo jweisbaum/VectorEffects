@@ -147,6 +147,21 @@ impl<R: tauri::Runtime> VectorEffects<R> {
         .map(Json)
     }
 
+    #[tool(
+        description = "Imports a local routing Zarr v3 directory as wind and current layers, with the same timeline and editing behavior as GRIB. Accepts routing_test and VectorEffects Zarr exports. The path is a directory, with or without a .zarr suffix."
+    )]
+    async fn import_zarr(
+        &self,
+        Parameters(p): Parameters<PathParams>,
+    ) -> std::result::Result<Json<ProjectSummary>, ToolError> {
+        let path = absolute(&p.path)?;
+        self.write("import_zarr", false, move |app| {
+            crate::zarr::import_zarr(app.state(), path)
+        })
+        .await
+        .map(Json)
+    }
+
     #[tool(description = "Adds an image layer (PNG, JPEG, GeoTIFF). Display only; never exported.")]
     async fn import_image(
         &self,

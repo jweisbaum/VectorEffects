@@ -33,6 +33,7 @@ pub mod session;
 pub mod settings;
 pub mod shape_animation;
 pub mod transform;
+pub mod zarr;
 
 use commands::AppState;
 use paths::AppPaths;
@@ -166,6 +167,8 @@ pub fn run() -> anyhow::Result<()> {
                 export::cancel_export,
                 import::import_grib,
                 import::new_project_from_grib,
+                zarr::import_zarr,
+                zarr::new_project_from_zarr,
                 history::import_history,
                 document::document_tree,
                 document::object_properties,

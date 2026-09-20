@@ -10,9 +10,15 @@ import LayerPanel from "./LayerPanel";
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const backend = vi.hoisted(() => ({
   documentTree: vi.fn(), moveLayer: vi.fn(), moveObject: vi.fn(), setLayerVisible: vi.fn(),
+  importZarr: vi.fn(), pickZarr: vi.fn(),
 }));
 vi.mock("../ipc", () => ({ api: backend }));
 vi.mock("../hint", () => ({ reportError: vi.fn() }));
+vi.mock("../project/dialogs", () => ({
+  pickZarrToImport: backend.pickZarr,
+  pickGribToImport: vi.fn(),
+  pickImageToImport: vi.fn(),
+}));
 
 let container: HTMLDivElement;
 let root: Root;
@@ -40,6 +46,8 @@ function pointer(target: EventTarget, type: string, y: number, pointerId = 1) {
 
 beforeEach(async () => {
   vi.clearAllMocks();
+  backend.pickZarr.mockResolvedValue(null);
+  backend.importZarr.mockResolvedValue({ ...project, revision: 2 });
   tree = { layers: ["painted", "raster", "zarr", "image"].map((source, i) => ({
     id: i + 1, name: `Layer ${i + 1}`, source, visible: true, locked: false,
     objects: [], grib: null, image: null, parameter: "wind",
@@ -72,6 +80,15 @@ afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
   vi.restoreAllMocks();
+});
+
+it("imports a selected Zarr directory through the layer controls", async () => {
+  const button = [...container.querySelectorAll("button")].find(b => b.textContent === "Import Zarr")!;
+  await act(async () => button.click());
+  expect(backend.importZarr).not.toHaveBeenCalled();
+  backend.pickZarr.mockResolvedValue("/data/routing_test");
+  await act(async () => button.click());
+  expect(backend.importZarr).toHaveBeenCalledWith("/data/routing_test");
 });
 
 it.each([

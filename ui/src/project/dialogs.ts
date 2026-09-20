@@ -32,6 +32,14 @@ export async function pickGribToImport(): Promise<string | null> {
   return typeof chosen === "string" ? chosen : null;
 }
 
+/** A local Zarr store is a directory, even when its name has no extension. */
+export async function pickZarrToImport(): Promise<string | null> {
+  const chosen = await whileChoosing("Choosing a Zarr directory", () =>
+    open({ multiple: false, directory: true, title: "Open Zarr directory" }),
+  );
+  return typeof chosen === "string" ? chosen : null;
+}
+
 /**
  * Picks an image to lay under the field (spec.md 4.9, M18).
  *

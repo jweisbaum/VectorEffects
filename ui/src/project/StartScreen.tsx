@@ -7,7 +7,7 @@ import type { Autosave } from "../generated/Autosave";
 import type { RecentProject } from "../generated/RecentProject";
 import NewProjectForm from "./NewProjectForm";
 import ConfirmDialog from "./ConfirmDialog";
-import { pickGribToImport, pickProjectToOpen } from "./dialogs";
+import { pickGribToImport, pickProjectToOpen, pickZarrToImport } from "./dialogs";
 
 /**
  * Shown when no project is open.
@@ -59,6 +59,11 @@ export default function StartScreen({
   const openFromGrib = async () => {
     const path = await pickGribToImport();
     if (path !== null) await run(() => api.newProjectFromGrib(path));
+  };
+
+  const openFromZarr = async () => {
+    const path = await pickZarrToImport();
+    if (path !== null) await run(() => api.newProjectFromZarr(path));
   };
 
   /**
@@ -135,6 +140,9 @@ export default function StartScreen({
           </button>
           <button onClick={() => void openFromGrib()} disabled={busy} title="Create a project from a GRIB2 file: the field kind, grid, time step and span come from the file">
             Open from GRIB…
+          </button>
+          <button onClick={() => void openFromZarr()} disabled={busy} title="Create a project from a routing Zarr directory: wind, currents, grid and times come from the store">
+            Open from Zarr…
           </button>
 
           {recent.length > 0 && (

@@ -391,7 +391,8 @@ fn tree_of(project: &Project, step: u32) -> DocumentTree {
                     // A history layer says what it is (M38): it reads a GRIB
                     // file and behaves as a raster layer in every way, and
                     // the panel names the archive rather than the file.
-                    ve_core::document::LayerSource::Zarr { .. } => "zarr",
+                    ve_core::document::LayerSource::Zarr { .. }
+                    | ve_core::document::LayerSource::ZarrFile { .. } => "zarr",
                 }
                 .to_owned(),
                 parameter: crate::projects::kind_name(layer.parameter()).to_owned(),

@@ -1,8 +1,36 @@
 import { describe, expect, it } from "vitest";
 
-import { PROJECTIONS, projectionOf, worldHeightDeg } from "./projection";
+import { PROJECTIONS, STAMP_SPACES, projectionOf, worldHeightDeg, type CylindricalProjectionId } from "./projection";
 
 describe("every projection", () => {
+  it("matches independent PROJ coordinates, preserving each standard parallel's aspect ratio", () => {
+    // PROJ at lon=30°, lat=60°, R=180/pi; divide both coordinates by x/30.
+    const references: Partial<Record<CylindricalProjectionId, number>> = {
+      lambert: 49.619600588, behrmann: 66.1594674506, gall_peters: 99.2392011759,
+      hobo_dyer: 78.8351602734, gall_stereographic: 79.8615417993,
+      central_cylindrical: 99.2392011759, patterson: 68.2322688789,
+      compact_miller: 67.7622868691, equidistant_30: 69.2820323028,
+      equidistant_45: 84.8528137424,
+    };
+    for (const [id, y] of Object.entries(references)) {
+      const projection = projectionOf(id as CylindricalProjectionId);
+      expect(projection.yOf(60), id).toBeCloseTo(y, 8);
+      expect(projection.latOf(y), id).toBeCloseTo(60, 8);
+    }
+    expect(projectionOf("braun").yOf(60)).toBeCloseTo(2 / Math.sqrt(3) * 180 / Math.PI, 8);
+  });
+
+  it("keeps the persisted pixel-tool space indices stable", () => {
+    expect(STAMP_SPACES).toEqual([
+      "geodesic", "projected", "mercator", "miller", "lambert", "behrmann",
+      "gall_peters", "hobo_dyer", "gall_stereographic", "braun", "central_cylindrical",
+      "patterson", "compact_miller", "equidistant_30", "equidistant_45",
+    ]);
+    for (const projection of PROJECTIONS) {
+      expect(STAMP_SPACES[projection.mode + 1]).toBe(projection.mode === 0 ? "projected" : projection.id);
+    }
+  });
+
   it("round-trips a latitude back to itself", () => {
     // `unproject` is on the *painting* path, not just the readout: a stroke
     // drawn at 60°N has to land at 60°N (M11's acceptance).
@@ -117,9 +145,10 @@ describe("scaleAt", () => {
     }
   });
 
-  it("is 1 at the equator, where every projection agrees", () => {
+  it("has a finite positive equatorial scale", () => {
     for (const projection of PROJECTIONS) {
-      expect(projection.scaleAt(0), projection.id).toBeCloseTo(1, 12);
+      expect(projection.scaleAt(0), projection.id).toBeGreaterThan(0);
+      expect(Number.isFinite(projection.scaleAt(0)), projection.id).toBe(true);
     }
   });
 });

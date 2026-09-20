@@ -129,12 +129,12 @@ describe("the panel with no object selected", () => {
   });
 
   /** An imported forecast has no archive, and must not claim one. */
-  it("says nothing about an archive for an imported forecast", async () => {
+  it.each(["raster", "zarr"])("says nothing about an archive for an imported %s field", async (source) => {
     await show(
       layer({
-        source: "raster",
+        source,
         grib: {
-          path: "/tmp/gfs.grib2",
+          path: source === "zarr" ? "/tmp/routing_test" : "/tmp/gfs.grib2",
           history: null,
           field_kind: "wind",
           loaded: true,
@@ -149,7 +149,9 @@ describe("the panel with no object selected", () => {
       }),
     );
     expect(text()).toContain("Imported field");
-    expect(text()).toContain("gfs.grib2");
+    expect(text()).toContain(source === "zarr" ? "routing_test" : "gfs.grib2");
+    expect(text()).toContain(source === "zarr" ? "Directory" : "File");
+    expect(text()).not.toContain("History");
     expect(text()).not.toContain("Archive");
   });
 
