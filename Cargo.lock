@@ -250,7 +250,7 @@ checksum = "ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5"
 
 [[package]]
 name = "basemap-builder"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "earcutr",
  "serde_json",
@@ -1884,7 +1884,7 @@ dependencies = [
 
 [[package]]
 name = "icon-grid-builder"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "flate2",
  "ve-grib",
@@ -5529,7 +5529,7 @@ checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
 
 [[package]]
 name = "ve-app"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -5576,7 +5576,7 @@ dependencies = [
 
 [[package]]
 name = "ve-chart"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "quick-xml",
  "serde_json",
@@ -5588,7 +5588,7 @@ dependencies = [
 
 [[package]]
 name = "ve-core"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "blake3",
  "bytemuck",
@@ -5603,7 +5603,7 @@ dependencies = [
 
 [[package]]
 name = "ve-grib"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "flate2",
  "hayro-jpeg2000",
@@ -5616,7 +5616,7 @@ dependencies = [
 
 [[package]]
 name = "ve-osm"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "png 0.18.1",
  "reqwest",
@@ -5627,7 +5627,7 @@ dependencies = [
 
 [[package]]
 name = "ve-render"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "blake3",
  "pollster",
@@ -5640,7 +5640,7 @@ dependencies = [
 
 [[package]]
 name = "ve-zarr"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "crc32c",
  "half",
