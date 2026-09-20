@@ -495,21 +495,21 @@ export default function LayerPanel({
           title="Import a GRIB2 file as a layer"
           onClick={() => void importGrib()}
         >
-          Import GRIB
+          + GRIB
         </button>
         <button
           className="import-grib"
           title="Import wind and currents from a routing Zarr directory as layers"
           onClick={() => void importZarr()}
         >
-          Import Zarr
+          + Zarr
         </button>
         <button
           className="import-grib"
           title="Lay a georeferenced image under the field. A GeoTIFF or an image with a world file lands where it says; anything else lands on the view, to be placed by its corners."
           onClick={() => void importImage()}
         >
-          Import image
+          + image
         </button>
         <button
           className="import-grib icon-button"

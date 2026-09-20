@@ -83,7 +83,7 @@ afterEach(async () => {
 });
 
 it("imports a selected Zarr directory through the layer controls", async () => {
-  const button = [...container.querySelectorAll("button")].find(b => b.textContent === "Import Zarr")!;
+  const button = container.querySelector<HTMLButtonElement>('button[title^="Import wind and currents"]')!;
   await act(async () => button.click());
   expect(backend.importZarr).not.toHaveBeenCalled();
   backend.pickZarr.mockResolvedValue("/data/routing_test");
