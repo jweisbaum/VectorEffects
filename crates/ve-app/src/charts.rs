@@ -285,14 +285,29 @@ fn draw_vectors(features: &[Feature], frame: TileFrame, style: Style) -> Option<
         if !bounds.overlaps(&frame.bounds) {
             continue;
         }
-        // A point feature has no line to stroke, so its mark carries the
-        // colour; an area with no fill asked for is drawn as its outline.
+        // **Only an area is filled.** The layer's fill opacity is the one
+        // control here that means a thing about areas alone, and handing it
+        // to the other two geometries drew neither what it is:
+        //
+        // - A LineString, a route or a track is a path. Filled, a GPX track
+        //   came back as a translucent slab between its first and last point.
+        //   The painter fills an open path on purpose, because an S-57 area
+        //   arrives as its edges (`Style::close`), so the fill is dropped
+        //   here — where the geometry is known — and not there.
+        // - A point's mark takes the fill when it has one and the line
+        //   colour otherwise, so a GPX waypoint under the default fill was a
+        //   faint ring rather than the dot a mark is.
         let style = match feature.geometry {
             Geometry::Points(_) => Style {
                 point_radius: style.width.max(1.0) * 1.8,
+                fill: None,
                 ..style
             },
-            _ => style,
+            Geometry::Lines(_) => Style {
+                fill: None,
+                ..style
+            },
+            Geometry::Areas(_) => style,
         };
         painter.draw(Painted { feature, style });
         drawn = true;
@@ -320,6 +335,103 @@ pub fn rgba_of(colour: &str, alpha: f64) -> [u8; 4] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A square, as a ring of points, in whichever geometry.
+    fn square(as_area: bool) -> Feature {
+        let ring = vec![
+            [-4.0, -4.0],
+            [4.0, -4.0],
+            [4.0, 4.0],
+            [-4.0, 4.0],
+            [-4.0, -4.0],
+        ];
+        Feature {
+            class: String::new(),
+            attributes: Vec::new(),
+            geometry: if as_area {
+                Geometry::Areas(vec![vec![ring]])
+            } else {
+                Geometry::Lines(vec![ring])
+            },
+        }
+    }
+
+    /// The alpha at the middle of a tile spanning ±10°, which is well inside
+    /// the square and far from its stroke.
+    fn centre_alpha(feature: Feature, fill: Option<[u8; 4]>) -> u8 {
+        let frame = ve_chart::paint::TileFrame {
+            bounds: ve_chart::geometry::Bounds {
+                west: -10.0,
+                south: -10.0,
+                east: 10.0,
+                north: 10.0,
+            },
+            size: 64,
+        };
+        let style = Style {
+            stroke: Some([255, 255, 255, 255]),
+            fill,
+            width: 1.0,
+            point_radius: 0.0,
+            close: false,
+        };
+        let rgba = draw_vectors(&[feature], frame, style).expect("something was drawn");
+        let middle = (32 * 64 + 32) * 4;
+        rgba[middle + 3]
+    }
+
+    /// A LineString, a route or a track is a path and not an area, so a
+    /// layer's fill does not apply to it. The same ring proves it both ways:
+    /// as an area it is filled, as a line it is hollow.
+    #[test]
+    fn a_line_is_never_filled_and_the_same_ring_as_an_area_is() {
+        let fill = Some([200, 100, 50, 255]);
+        assert_eq!(
+            centre_alpha(square(false), fill),
+            0,
+            "a line was filled; a GPX track would paint a slab"
+        );
+        assert!(
+            centre_alpha(square(true), fill) > 0,
+            "an area with a fill asked for must still be filled"
+        );
+    }
+
+    /// A mark is a dot in the line colour, not a ring of the area fill: a
+    /// waypoint at the default fill opacity would otherwise barely show.
+    #[test]
+    fn a_point_takes_the_line_colour_whatever_the_fill_is() {
+        let frame = ve_chart::paint::TileFrame {
+            bounds: ve_chart::geometry::Bounds {
+                west: -10.0,
+                south: -10.0,
+                east: 10.0,
+                north: 10.0,
+            },
+            size: 64,
+        };
+        let mark = Feature {
+            class: String::new(),
+            attributes: Vec::new(),
+            geometry: Geometry::Points(vec![[0.0, 0.0, f64::NAN]]),
+        };
+        let style = Style {
+            stroke: Some([255, 255, 255, 255]),
+            // A fill as faint as the panel's default, which the mark must
+            // not take for its own colour.
+            fill: Some([200, 100, 50, 46]),
+            width: 3.0,
+            point_radius: 0.0,
+            close: false,
+        };
+        let rgba = draw_vectors(&[mark], frame, style).expect("the mark is drawn");
+        let middle = (32 * 64 + 32) * 4;
+        assert_eq!(
+            &rgba[middle..middle + 4],
+            &[255, 255, 255, 255],
+            "the mark took the fill instead of the line colour"
+        );
+    }
 
     #[test]
     fn a_colour_reads_as_its_bytes_and_a_bad_one_as_the_default() {

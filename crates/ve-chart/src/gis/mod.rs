@@ -1,6 +1,6 @@
 //! GIS vector files as a display-only layer (spec.md 4.11).
 //!
-//! Four formats, one shape: everything is read into [`Feature`]s in
+//! Five formats, one shape: everything is read into [`Feature`]s in
 //! longitude and latitude, and drawn by the same painter a chart is. None of
 //! it reaches a scene, a render-cache key or an exported file — a survey
 //! traced onto the map is something to paint *against*, not a field.
@@ -9,6 +9,7 @@
 //! application already places one as an image layer (spec.md 4.9).
 
 pub mod geojson;
+pub mod gpx;
 pub mod kml;
 pub mod shapefile;
 
@@ -24,6 +25,12 @@ pub struct Vectors {
     pub features: Vec<Feature>,
     /// The box around all of it.
     pub bounds: Bounds,
+    /// How many of the features are areas.
+    ///
+    /// Counted here, with the bounds, rather than by whoever asks: the panel
+    /// asks on every refresh to decide whether to offer a fill at all, and a
+    /// survey of a hundred thousand features should not be walked for it.
+    pub areas: u32,
 }
 
 /// The formats read here.
@@ -37,6 +44,8 @@ pub enum Format {
     Kml,
     /// KML, zipped.
     Kmz,
+    /// GPX: waypoints, routes and tracks.
+    Gpx,
 }
 
 impl Format {
@@ -50,13 +59,15 @@ impl Format {
             "shp" | "dbf" | "shx" | "prj" => Self::Shapefile,
             "kml" => Self::Kml,
             "kmz" => Self::Kmz,
+            "gpx" => Self::Gpx,
             _ => return None,
         })
     }
 
     /// What the open dialog offers, and what the error says when a file is
     /// none of them.
-    pub const EXTENSIONS: &'static [&'static str] = &["geojson", "json", "shp", "kml", "kmz"];
+    pub const EXTENSIONS: &'static [&'static str] =
+        &["geojson", "json", "shp", "kml", "kmz", "gpx"];
 }
 
 /// Reads any of the supported files.
@@ -73,11 +84,16 @@ pub fn read(path: &Path) -> Result<Vectors> {
         Format::Shapefile => shapefile::read(path)?,
         Format::Kml => kml::read(&std::fs::read_to_string(path)?)?,
         Format::Kmz => kml::read_zipped(&std::fs::read(path)?)?,
+        Format::Gpx => gpx::read(&std::fs::read_to_string(path)?)?,
     };
     let mut bounds = Bounds::EMPTY;
+    let mut areas = 0u32;
     for feature in &features {
         if let Some(own) = feature.bounds() {
             bounds.merge(own);
+        }
+        if matches!(feature.geometry, crate::geometry::Geometry::Areas(_)) {
+            areas += 1;
         }
     }
     if bounds.west > bounds.east {
@@ -97,7 +113,11 @@ pub fn read(path: &Path) -> Result<Vectors> {
             bounds.east, bounds.north
         )));
     }
-    Ok(Vectors { features, bounds })
+    Ok(Vectors {
+        features,
+        bounds,
+        areas,
+    })
 }
 
 #[cfg(test)]
@@ -109,11 +129,19 @@ mod tests {
         assert_eq!(Format::of(Path::new("a.geojson")), Some(Format::GeoJson));
         assert_eq!(Format::of(Path::new("a.KML")), Some(Format::Kml));
         assert_eq!(Format::of(Path::new("a.kmz")), Some(Format::Kmz));
+        assert_eq!(Format::of(Path::new("a.gpx")), Some(Format::Gpx));
+        assert_eq!(Format::of(Path::new("a.GPX")), Some(Format::Gpx));
         for part in ["a.shp", "a.dbf", "a.shx", "a.prj"] {
             assert_eq!(
                 Format::of(Path::new(part)),
                 Some(Format::Shapefile),
                 "{part}"
+            );
+        }
+        for offered in Format::EXTENSIONS {
+            assert!(
+                Format::of(Path::new(&format!("a.{offered}"))).is_some(),
+                "the dialog offers .{offered} and `read` cannot dispatch it"
             );
         }
         assert_eq!(Format::of(Path::new("a.grib2")), None);

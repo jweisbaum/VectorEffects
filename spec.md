@@ -676,9 +676,14 @@ speed thresholds, displayed in the preferred speed unit and stored in m/s.
 For vector layers the band applies to the layer's final contribution, after
 its raster, creations and modifiers, before compositing with other layers.
 Outside the band the contribution is undefined and layers beneath show through.
-Both CPU and GPU apply the same rule. Image layers have no intrinsic velocity;
-their displayed pixels are filtered using the displayed vector field at each
-location. Image thresholds do not change exported vector data.
+Both CPU and GPU apply the same rule.
+
+**A display-only layer has no speed filter.** An image (§4.9) and a GIS layer
+(§4.11) are drawn under the field and make none, so there is nothing to
+threshold and the panel does not offer the control. An image layer's pixels
+were once filtered by the *displayed* field at each location; that is
+withdrawn, because it thresholded a picture against numbers belonging to
+another layer, which is not a property of the picture.
 
 Thresholds are saved with the layer and support undo. Raster slider ceilings
 start at the source maximum; other layers have a useful default. Typed values
@@ -1148,11 +1153,34 @@ the wrong thing in the right place, which is the worst failure a chart can
 have. An unlisted class keeps its number (`OBJL_137`) and is not drawn.
 
 **GIS layers.** *Import GIS* in the layer panel reads a shapefile (`.shp`
-with its `.dbf` and `.prj`), GeoJSON, KML or KMZ, and adds a display-only
-layer — a real layer, with an eye, a name and a place in the stack, but no
-field, no speed filter and no step bar. A georeferenced raster chosen in the
-same dialog is routed to the image import instead (§4.9): a GeoTIFF is a
-picture, and the application already places one. The project stores the
+with its `.dbf` and `.prj`), GeoJSON, KML, KMZ or GPX, and adds a
+display-only layer — a real layer, with an eye, a name and a place in the
+stack, but no field, no speed filter and no step bar.
+
+**GPX is read as the three things it holds.** A `<wpt>` is a mark and becomes
+its own point feature, because a waypoint's name is the point of it. A
+`<rte>` is the legs someone intends to sail and becomes one line. A `<trk>`
+is where someone actually went and becomes one feature holding a line per
+`<trkseg>`: a track that lost its fix has a gap, and joining across it would
+draw a leg that was never sailed. An `<ele>` is kept as an attribute and
+never as a point's third number, which is a *sounding* — a depth, measured
+downwards — and would read as its own negation. A fix that states no
+position, or one outside the schema's range, is skipped rather than failing
+the file.
+
+**Only an area is filled.** The fill opacity says a thing about areas alone.
+A LineString, a route or a track is a path, so it is stroked and never
+filled, however the fill is set — the painter does fill an open path, because
+an S-57 area arrives as its edges, so the fill is dropped where the geometry
+is known. A point's mark is a dot in the line colour for the same reason: a
+waypoint is a mark, not a ring of the area fill. **And the panel offers the
+fill only when the file holds an area to fill**, so a route or a track shows
+a colour and a width and nothing else: a slider that changes no pixel is a
+control that lies about what it does.
+
+A georeferenced raster chosen in the same dialog is routed to the image
+import instead (§4.9): a GeoTIFF is a picture, and the application already
+places one. The project stores the
 file's path and how the user asked for it to be drawn — colour, line width,
 fill opacity — and never its geometry, which is read again on open.
 
@@ -1166,6 +1194,18 @@ the earth.
 ---
 
 ## 5. Map view
+
+**Zoom runs from the projection's whole world in the window to one tile pixel
+per screen pixel.** The close end is the tile pyramid's own and is derived from
+it rather than chosen: level 12 lays 2^13 tiles of 256 px across 360 degrees,
+which is 5,825 px per degree, about 19 m a pixel. Past that a tile is coarser
+than the screen and the map only goes softer, so that is where zooming stops.
+It is close enough for an S-57 berthing cell (§4.11) and an OpenStreetMap
+street (§5.4) to be read at the scale each was drawn for, which a shallower
+limit is not. Nothing about the field constrains either end: the preview
+evaluates the objects analytically at screen resolution and the project's grid
+governs the export alone (§4.2), so a painted field is exactly as sharp at 19 m
+a pixel as at 200 km.
 
 ### 5.1 Projection
 

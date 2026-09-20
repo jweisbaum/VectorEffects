@@ -63,7 +63,7 @@ export async function pickGisToImport(): Promise<string | null> {
       filters: [
         {
           name: "GIS data",
-          extensions: ["geojson", "json", "shp", "kml", "kmz", "tif", "tiff"],
+          extensions: ["geojson", "json", "shp", "kml", "kmz", "gpx", "tif", "tiff"],
         },
       ],
     }),

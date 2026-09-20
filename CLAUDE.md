@@ -97,8 +97,8 @@ crates/
   ve-chart/    Display-only map data (spec 4.11): the S-57 reader
                (`s57`: the ISO 8211 container, the feature records, the
                object catalogue), the GIS readers (`gis`: shapefile,
-               GeoJSON, KML/KMZ) and the `paint` that draws either into a
-               tile. Reaches no network and links no C library
+               GeoJSON, KML/KMZ, GPX) and the `paint` that draws either into
+               a tile. Reaches no network and links no C library
   ve-osm/      OpenStreetMap raster tiles (spec 5.4). **Fetches**, and is
                one of the two crates allowed to — see invariant 5
   ve-app/      Tauri app: IPC commands, app state, background workers,
@@ -1070,7 +1070,8 @@ Raise these rather than picking a default:
 
 Pixel stamps freeze the active cylindrical projection, including Mercator and
 Miller. Legacy Projected remains equirectangular. Layer thresholds apply to final
-layer vectors; image thresholds use the displayed vector field. Export coverage
+layer vectors; a display-only layer -- an image or a GIS file -- has no speed
+filter at all, since it makes no field to threshold. Export coverage
 as GRIB missing-value bitmaps and retain genuinely calm zeros. The system-local
 January 1, 2027 expiry gate must remain enforced in both the UI and native IPC.
 Help images are bundled assets: the illustrated reference includes the user's

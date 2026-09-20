@@ -21,6 +21,19 @@ import { dropSide, layerDropIndex, objectDropIndex } from "./reorder";
 import { KIND_LABELS, KINDS, type FieldKindName, kindOf } from "../kind";
 import SpeedFilter from "./SpeedFilter";
 
+/**
+ * Whether a layer source carries a field of its own.
+ *
+ * An image and a GIS layer are display only (spec.md 4.9, 4.11): they are
+ * drawn under the field, make none, and reach no export — so there is no
+ * speed to threshold and the speed filter is not offered for them.
+ *
+ * Written as the sources that *do* carry a field rather than the two that do
+ * not, so a new display-only source is not handed a control it cannot honour.
+ */
+const hasField = (source: string) =>
+  source === "painted" || source === "raster" || source === "zarr";
+
 /** A drop lands above or below a row, or into a layer. */
 type DropWhere = "above" | "below" | "into";
 
@@ -534,7 +547,7 @@ export default function LayerPanel({
         </button>
         <button
           className="import-grib"
-          title="Lay GIS data under the field: a shapefile, GeoJSON or KML, or a georeferenced raster. Display only — it makes no wind and reaches no export."
+          title="Lay GIS data under the field: a shapefile, GeoJSON, KML/KMZ, a GPX route or track, or a georeferenced raster. Display only — it makes no wind and reaches no export."
           onClick={() => void importGis()}
         >
           + GIS
@@ -630,7 +643,7 @@ export default function LayerPanel({
                       setRenaming(layer.id);
                       setDraft(layer.name);
                     }}
-                    title="Drag to reorder · double-click to rename"
+                    title={`${layer.name}\nDrag to reorder · double-click to rename`}
                   >
                     {layer.name}
                   </span>
@@ -696,7 +709,7 @@ export default function LayerPanel({
                   {layer.grib?.history ? "from the archive" : "from the file"}
                 </div>
               )}
-              {(
+              {hasField(layer.source) && (
                 <SpeedFilter
                   grib={layer.speed_filter ?? layer.grib ?? { speed_min_mps: null, speed_max_mps: null, speed_ceiling_mps: 60 }}
                   treeRevision={treeRevision}
@@ -707,7 +720,6 @@ export default function LayerPanel({
                   }
                 />
               )}
-              {layer.source === "image" && <p className="muted layer-filter-note">Image thresholds use the displayed vector speed at each image position.</p>}
 
               {layer.gis && (
                 <GisControls
@@ -801,9 +813,11 @@ export default function LayerPanel({
                     </li>
                   );
                 })}
-                {/* A GRIB layer's field is its content; only a painted layer
-                    with nothing on it is empty. */}
-                {layer.objects.length === 0 && !layer.grib && (
+                {/* An imported layer's file is its content — a GRIB's field,
+                    a picture, 1,368 GIS features — so only a painted layer
+                    with nothing on it is empty. The condition used to name
+                    the GRIB alone and called a loaded chart empty. */}
+                {layer.objects.length === 0 && layer.source === "painted" && (
                   <li className="object empty muted">empty</li>
                 )}
               </ul>
@@ -853,7 +867,7 @@ function GisControls({
   return (
     <div className="grib-info">
       <label className="layer-filter-row" title="Line and point colour.">
-        Colour
+        <span className="layer-filter-label">Colour</span>
         <input
           type="color"
           value={gis.colour}
@@ -861,7 +875,7 @@ function GisControls({
         />
       </label>
       <label className="layer-filter-row" title="Line width, in screen pixels.">
-        Width
+        <span className="layer-filter-label">Width</span>
         <input
           type="range"
           min={2}
@@ -870,20 +884,27 @@ function GisControls({
           onChange={(event) => onStyle({ widthPx: Number(event.target.value) / 10 })}
         />
       </label>
-      <label
-        className="layer-filter-row"
-        title="How strongly areas are filled. At nothing, only their outlines are drawn — which is what a boundary over a field usually wants."
-      >
-        Fill
-        <input
-          type="range"
-          min={0}
-          max={100}
-          value={Math.round(gis.fill_opacity * 100)}
-          onChange={(event) => onStyle({ fillOpacity: Number(event.target.value) / 100 })}
-        />
-      </label>
-      <span className="muted" title={gis.path}>
+      {/*
+        The fill is offered only when the file holds an area to fill. A route,
+        a track or a coastline is all lines, and a slider that changes nothing
+        on the map is a control that lies about what it does.
+      */}
+      {gis.areas > 0 && (
+        <label
+          className="layer-filter-row"
+          title="How strongly areas are filled. At nothing, only their outlines are drawn — which is what a boundary over a field usually wants. Lines and marks are never filled."
+        >
+          <span className="layer-filter-label">Fill</span>
+          <input
+            type="range"
+            min={0}
+            max={100}
+            value={Math.round(gis.fill_opacity * 100)}
+            onChange={(event) => onStyle({ fillOpacity: Number(event.target.value) / 100 })}
+          />
+        </label>
+      )}
+      <span className="layer-filter-summary muted" title={gis.path}>
         {gis.features.toLocaleString()} features · display only
       </span>
     </div>

@@ -1093,7 +1093,25 @@ body {
   font-size: 12px;
   cursor: grab;
 }
-.layer-header .name { font-weight: 600; cursor: grab; }
+/* An imported layer is named after its file, and a routing export's file name
+   is long enough to push the move and delete buttons out of the panel. The
+   name is the only part of the row that may shrink, so it is the part that
+   ellipsises; the whole name stays in the row's tooltip. `flex: 0 1 auto`
+   rather than `1`, because the `.spacer` after it is what holds the buttons
+   right. */
+.layer-header .name {
+  font-weight: 600;
+  cursor: grab;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Nothing in the row may push it wider than the panel. */
+.layer-header { overflow: hidden; }
+.layer-header > button,
+.layer-header > .grip { flex: none; }
 /* The grip: a place that is plainly for picking the row up. */
 .layer-header .grip,
 .object .grip { color: var(--muted); opacity: 0.55; cursor: grab; letter-spacing: -2px; font-size: 11px; }
@@ -1469,6 +1487,36 @@ body {
 .layer-parameter { padding: 2px 8px 4px 26px; font-size: 11px; color: var(--muted); }
 .layer-parameter label { display: flex; align-items: center; gap: 6px; }
 .layer-parameter select { font: inherit; background: #0f1a2c; color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 1px 4px; }
+/* A GIS layer's controls (spec.md 4.11). These carried no rules at all, so
+   the labels were inline text and the Fill slider wrapped onto the next line.
+   The metrics are the speed filter's, so an imported layer's controls sit in
+   the same column whichever kind of file it came from. */
+.grib-info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 3px 8px 5px 26px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.layer-filter-row { display: flex; align-items: center; gap: 6px; }
+/* A fixed column, so the three controls line up under each other rather than
+   each starting after the width of its own word. */
+.layer-filter-label { flex: none; width: 2.9rem; }
+.layer-filter-row input[type="range"] { flex: 1; min-width: 60px; }
+.layer-filter-row input[type="color"] {
+  flex: none;
+  width: 34px;
+  height: 16px;
+  padding: 0;
+  background: #0f1a2c;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+/* What the file turned out to hold. Its own line, and truncated rather than
+   widening the panel for a long path. */
+.layer-filter-summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 .grib-filter-band { display: flex; flex-direction: column; gap: 2px; }
 .grib-filter-row { display: flex; align-items: center; gap: 6px; }
 .grib-filter-row input[type="range"] { flex: 1; min-width: 60px; }

@@ -191,6 +191,56 @@ fn a_gis_layers_style_is_the_style_it_is_drawn_in() {
     assert_eq!(gis.colour, "#ff0000");
     assert_eq!(gis.width_px, 3.0);
     assert_eq!(gis.fill_opacity, 1.0);
+    // The survey is a polygon, a line and two marks in one MultiPoint: three
+    // features, one of them an area. The count is what the panel offers the
+    // fill on, so it has to mean areas and not features.
+    assert_eq!(gis.features, 3);
+    assert_eq!(gis.areas, 1);
+}
+
+/// A GPX passage is all lines and marks, so the panel has no fill to offer:
+/// `areas` is what it asks, and a route file must answer zero while still
+/// holding features.
+#[test]
+fn a_track_and_route_file_reports_no_areas_to_fill() {
+    let root = TempRoot::new("gpx");
+    let state = app(&root);
+    let path = root.path("passage.gpx");
+    std::fs::write(
+        &path,
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="test">
+  <wpt lat="41.5150" lon="-70.6700"><name>Woods Hole</name></wpt>
+  <rte><name>To Nantucket</name>
+    <rtept lat="41.5150" lon="-70.6700"/>
+    <rtept lat="41.3900" lon="-70.3400"/>
+    <rtept lat="41.2850" lon="-70.0970"/>
+  </rte>
+  <trk><name>Sailed</name><trkseg>
+    <trkpt lat="41.5150" lon="-70.6700"/>
+    <trkpt lat="41.4400" lon="-70.4900"/>
+  </trkseg></trk>
+</gpx>"#,
+    )
+    .expect("write passage");
+    charts::gis_imported(&state, path.to_string_lossy().into_owned()).expect("import");
+
+    let view = ve_app::document::tree(&state, 0).expect("tree");
+    let gis = view
+        .layers
+        .last()
+        .expect("layer")
+        .gis
+        .as_ref()
+        .expect("view");
+    assert!(gis.loaded, "{:?}", gis.error);
+    assert_eq!(gis.features, 3, "a mark, a route and a track");
+    assert_eq!(gis.areas, 0, "a passage has nothing to fill");
+    // And it is drawn where the passage is, off Woods Hole.
+    assert!(
+        charts::tile(&state, Backdrop::Gis(gis.layer), tile_at(7, -70.4, 41.4)).is_some(),
+        "the passage should be drawn where it is"
+    );
 }
 
 #[test]

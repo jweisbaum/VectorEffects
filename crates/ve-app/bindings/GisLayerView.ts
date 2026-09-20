@@ -34,6 +34,14 @@ loaded: boolean,
  */
 features: number, 
 /**
+ * How many of those are areas.
+ *
+ * The panel offers the fill only when there is something to fill: a
+ * route, a track or a coastline holds no area, and a slider that
+ * changes nothing is a control that lies about what it does.
+ */
+areas: number, 
+/**
  * What it covers: west, south, east, north. Absent when unread.
  */
 bounds: Array<number> | null, 

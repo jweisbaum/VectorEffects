@@ -141,6 +141,7 @@ fn gis_view(
         fill_opacity: *fill_opacity,
         loaded: read.is_ok(),
         features: read.as_ref().map_or(0, |v| v.features.len() as u32),
+        areas: read.as_ref().map_or(0, |v| v.areas),
         bounds: read
             .as_ref()
             .ok()
@@ -168,6 +169,12 @@ pub struct GisLayerView {
     pub loaded: bool,
     /// How many features it holds.
     pub features: u32,
+    /// How many of those are areas.
+    ///
+    /// The panel offers the fill only when there is something to fill: a
+    /// route, a track or a coastline holds no area, and a slider that
+    /// changes nothing is a control that lies about what it does.
+    pub areas: u32,
     /// What it covers: west, south, east, north. Absent when unread.
     pub bounds: Option<Vec<f64>>,
     /// Why it could not be read, where it could not.
