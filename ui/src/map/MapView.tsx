@@ -5092,6 +5092,29 @@ export default function MapView({
   };
 
   /**
+   * The readout follows the timeline, not only the pointer.
+   *
+   * During playback the pointer stands still while the field moves under it,
+   * so a readout sampled only on pointer reports keeps showing the step it
+   * was last sampled at and disagrees with the map it sits on. Re-sampling on
+   * every step change costs one field sample per frame, through the same
+   * one-in-flight, latest-wins stream `sampleAt` already uses -- a timeline
+   * faster than the backend answers drops samples rather than queueing them.
+   *
+   * `showReadout` and `eyedropper` are watched for the same reason: switching
+   * either on with the pointer parked would otherwise show the sample from
+   * whenever it was last on, until the pointer moved.
+   */
+  useEffect(() => {
+    const point = cursorRef.current;
+    if (!point) return;
+    sampleAt(unproject(cameraRef.current, viewRef.current, point));
+    // `sampleAt` is rebuilt every render and reads the rest from refs; the
+    // step, and whether anyone is reading the number, are what this watches.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, showReadout, eyedropper]);
+
+  /**
    * Commits a finished gesture.
    *
    * One path for every tool: the preview it holds, the layer it joins, the
