@@ -1,0 +1,24 @@
+[package]
+name = "ve-osm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "OpenStreetMap raster tiles as a map background (spec.md 5.4). The one place in VectorEffects that fetches tiles."
+
+[dependencies]
+thiserror = { workspace = true }
+tracing = { workspace = true }
+# The same client, with the same features and for the same reasons, as
+# ve-zarr's: rustls links no system library, where native-tls needs
+# openssl-sys on Linux and the three-platform build forbids a C library.
+reqwest = { version = "0.13.2", default-features = false, features = ["blocking", "rustls", "http2"] }
+# Tiles arrive as PNG. The same decoder ve-app uses for image layers.
+png = "0.18.1"
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

@@ -1,0 +1,27 @@
+[package]
+name = "ve-chart"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Display-only map data for VectorEffects: S-57 charts, GIS vector files, and the painter that draws them into tiles."
+
+[dependencies]
+thiserror = { workspace = true }
+serde_json = { workspace = true }
+# The rasteriser. Pure Rust, no C library behind it (invariant 5 and the
+# three-platform build): `png-format` is left off, since it is the one
+# default feature that pulls a second copy of `png` in, and the application
+# encodes what it serves itself.
+tiny-skia = { version = "0.12.0", default-features = false, features = ["std", "simd"] }
+# KML is XML. Already in the tree behind the Tauri bundler's dependencies.
+quick-xml = "0.41.0"
+# KMZ is a zipped KML. The same `zip`, with the same features, as ve-core.
+zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true
