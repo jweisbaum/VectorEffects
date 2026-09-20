@@ -310,12 +310,23 @@ pub fn open_project(
 /// Implementation of [`open_project`], callable without a Tauri handle.
 pub fn open(state: &AppState, path: String, discard_unsaved: bool) -> Result<ProjectSummary> {
     let path = PathBuf::from(path);
+    // Asked before the reading as well as after it: the files a project's
+    // layers name can be a minute of work, and a refusal that was always
+    // coming should not cost that first. Nothing is replaced until the second
+    // asking, under the same lock as the replacing.
+    with_session(state, |session| refuse_to_discard(session, discard_unsaved))?;
+    let mut opening = state.opening.begin();
+    opening.document(&path.file_name().map_or_else(
+        || path.display().to_string(),
+        |name| name.to_string_lossy().into_owned(),
+    ));
     let mut project = io::load(&path).doing("open the project at", path.display())?;
     tracing::info!(path = %path.display(), objects = project.object_count(), "opened project");
     // Imported fields are read back from their files, never from the project
     // (invariant 2). A file that has gone leaves its layer empty rather than
     // refusing the project; the layer panel says so.
-    crate::import::attach_rasters(&mut project);
+    crate::import::attach_rasters(&mut project, &mut opening);
+    opening.finished();
 
     let settings_file = state.paths.settings_file();
     with_session(state, |session| {

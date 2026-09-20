@@ -1,5 +1,55 @@
 # VectorEffects — Implementation Plan
 
+**2026-09-20: A loading page, and opening made ten to thirty times faster.**
+Asked for: a loading page with a progress bar when a project opens, and
+whatever could be done for the speed of opening projects and Zarr stores.
+Measured first (`tests/open_cost.rs`, release, 16 cores, the user's own
+files): a project from `era5-wind-globcurrent.grib2` (164 MB, wind and
+currents) took 4.2 s to make and **9.3 s to reopen**; `routing_test` (744
+hourly steps at 0.25°, 1.6 GB) took **124 s to make and 111 s to reopen**.
+After: 0.35 s and 0.32 s; 10.8 s and 11.7 s (11 to 18 s across runs — the
+machine was not idle). What was wrong, in order of what it cost:
+(1) **the store was read in 128 MiB slabs of eight steps, and its inner
+chunks are seventy-two steps long**, so every chunk was decompressed nine
+times over; `RoutingStore::blocks` now cuts at the store's own chunk
+boundaries, with bands under the same memory bound. (2) `RasterGrid::new`
+fed BLAKE3 four bytes at a time — two million calls a frame — and
+`RasterSequence::new` then walked every sample of every frame again for the
+fastest speed; the samples now go in as one slice, across the pool for a large
+grid, *for the same digest* (a test writes it out the long way, since the
+render cache keys on it), and the fastest speed is found in the same visit.
+(3) **a GRIB with two kinds was decoded once per layer on every open**; a
+file is now read once however many layers name it, and different files side
+by side. (4) GRIB messages were unpacked one after another, and frames built
+one after another; both go across the pool, in file order still. (5) The
+Zarr read ran **inside the session lock**, so tiles and edits stood behind
+it; it is outside now, and an import checks the project is still the one it
+was asked for. Checked against references that are not ours: the decoder's
+200 ecCodes values (`reference_set`), and on the real store the
+block-assembled frames against the same times read whole, node for node.
+**Seen in the application**, through the driver, opening the saved
+`routing_test` project under `tauri dev`: the page names the file, counts
+"routing_test · 144 of 1,488" upward with the bar from 5 to 95, turns to
+"Drawing the map", and leaves when the map has drawn. That run also found the
+pairing loop in the wrong crate — `ve-app` is built unoptimised in
+development, and the open took 67 s there; moved into `ve-zarr`
+(`Slab::append_pairs`) it takes 13 s.
+The page: `open://progress` from a sink on `AppState` (headless callers
+install nothing), begun at the ipc chokepoint (`OPENING`), a real fraction in
+frames, held until the map *shows* the project and not merely until the
+command answers, arriving after a delay so a quick open never flashes it;
+layers whose files are gone are now named in the status bar. Spec §4.7, §4.8.
+**Not done, and why:** (a) an hourly month opened as a project can show 240
+of its 744 frames — `step_hours` is immutable and `step_count` stops at 240
+(§4.1) — and the other 504 are still decoded and held, about 4 GB and two
+thirds of the remaining eleven seconds. Skipping them changes what the layer
+panel reports a file as holding and what a later import sees, so it is a
+decision to bring back rather than take. (b) Peak memory while a time chunk
+is assembled is its finished frames (1.2 GB for `routing_test`) plus one
+block; the §13 RSS budget was already far exceeded by any imported month and
+still is. (c) `import_grib` still reads under the lock, because a resample
+needs the project's neighbour sets.
+
 **2026-09-18 (evening): The service's text, as a client actually keeps it.**
 Reported from use: with the service connected, Claude "defaults to not using
 VectorEffects even when asked to by name". Found, from a Claude Code

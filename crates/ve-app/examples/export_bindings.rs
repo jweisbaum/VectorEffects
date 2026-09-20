@@ -27,6 +27,7 @@ use ve_app::export::{
 use ve_app::history::HistoryProgress;
 use ve_app::mcp::capture::CaptureRequest;
 use ve_app::mcp::events::{DocumentChanged, McpActivity, ViewFocus};
+use ve_app::opening::OpenProgress;
 use ve_app::palette::{
     GestureSelector, OptionDependency, PreviewKind, Sizing, ToolOptionSpec, ToolSchema,
 };
@@ -129,6 +130,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ExportResult::export_all(&cfg)?;
     ExportProgress::export_all(&cfg)?;
     HistoryProgress::export_all(&cfg)?;
+    OpenProgress::export_all(&cfg)?;
     ExportEstimate::export_all(&cfg)?;
     ExportZarrRequest::export_all(&cfg)?;
     ExportZarrResult::export_all(&cfg)?;

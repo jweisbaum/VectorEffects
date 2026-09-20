@@ -242,11 +242,14 @@ pub fn recover(state: &AppState, id: u64, discard_unsaved: bool) -> Result<Proje
             field: "autosave",
             value: "no such snapshot".to_owned(),
         })?;
+    let mut opening = state.opening.begin();
+    opening.document("the recovery snapshot");
     let mut project = io::load(&snapshot_path(dir, id)).doing(
         "reopen the recovery snapshot at",
         snapshot_path(dir, id).display(),
     )?;
-    crate::import::attach_rasters(&mut project);
+    crate::import::attach_rasters(&mut project, &mut opening);
+    opening.finished();
 
     with_session(state, |session| {
         refuse_to_discard(session, discard_unsaved)?;

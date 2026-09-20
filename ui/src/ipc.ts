@@ -9,6 +9,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { SelectionPreviewRequest } from "./generated/SelectionPreviewRequest";
 
 import { beginBusy } from "./busy";
+import { beginOpening } from "./project/opening";
 
 // Monotonic across this frontend session; the time seed also survives a reload.
 let renderRequestId = Date.now() * 1000;
@@ -123,12 +124,38 @@ const LONG_RUNNING: Readonly<Record<string, string>> = {
   mcp_register_client: "Adding the MCP service",
 };
 
+/** The last component of a path, whichever way its separators lean. */
+function fileName(path: unknown): string {
+  const text = typeof path === "string" ? path : "";
+  return text.split(/[\\/]/).filter((part) => part !== "").pop() ?? text;
+}
+
+/**
+ * The commands that put a project on screen from files, and what the loading
+ * page calls what each is opening (spec.md 4.7). Marked here for the reason
+ * `LONG_RUNNING` is: every caller of one of these comes through `call`, so
+ * the page cannot be forgotten by one of them or shown twice by two.
+ *
+ * An import *into* an open project is not here. The project is already on
+ * screen and stays usable; that wait belongs to the status bar.
+ */
+const OPENING: Readonly<Record<string, (args: Record<string, unknown>) => string>> = {
+  open_project: (args) => fileName(args.path),
+  new_project_from_grib: (args) => fileName(args.path),
+  new_project_from_zarr: (args) => fileName(args.path),
+  recover_autosave: () => "recovered work",
+};
+
 async function call<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   const label = LONG_RUNNING[command];
   const done = label === undefined ? null : beginBusy(label);
+  const opened = OPENING[command] === undefined ? null : beginOpening(OPENING[command](args ?? {}));
   try {
-    return await invoke<T>(command, args);
+    const result = await invoke<T>(command, args);
+    opened?.(true);
+    return result;
   } catch (raw) {
+    opened?.(false);
     if (isErrorPayload(raw)) throw new IpcError(raw);
     // A command that panicked, or a Tauri-level failure, arrives as a bare string.
     throw new IpcError({ kind: "unknown", message: String(raw) });

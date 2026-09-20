@@ -11,6 +11,8 @@ import MapView, { type MapHandle } from "./map/MapView";
 import Timeline from "./timeline/Timeline";
 import NewProjectDialog from "./project/NewProjectDialog";
 import StartScreen from "./project/StartScreen";
+import LoadingScreen from "./project/LoadingScreen";
+import { finishOpening, unreadLayers, useOpening } from "./project/opening";
 import BetaGate from "./project/BetaGate";
 import Help from "./help/Help";
 import UnsavedChangesDialog from "./project/UnsavedChangesDialog";
@@ -189,6 +191,32 @@ function EditorApp() {
   }), []);
   /** Where the map is looking, for an image that has to be placed by hand. */
   const viewBounds = useCallback(() => mapRef.current?.bounds() ?? null, []);
+
+  // The loading page stays until the map is *showing* the project (spec.md
+  // 4.7). The command answering means the files are read, not that a tile is
+  // on screen — rendered is not shown — and a page that left then gave way to
+  // a blank map. `present` is what playback trusts for the same question. The
+  // wait is bounded: a map that cannot draw must not hold the page forever.
+  const openingStage = useOpening().stage;
+  const openingTitle = useOpening().title;
+  useEffect(() => {
+    if (openingTitle === null || openingStage !== "drawing") return;
+    if (project !== null) {
+      void api
+        .documentTree(0)
+        .then((tree) => {
+          const unread = unreadLayers(tree);
+          if (unread !== null) reportError(unread);
+        })
+        .catch(() => undefined);
+    }
+    const started = performance.now();
+    const timer = window.setInterval(() => {
+      const shown = mapRef.current?.present(0) ?? false;
+      if (shown || performance.now() - started > FIRST_FRAME_LIMIT_MS) finishOpening();
+    }, 60);
+    return () => window.clearInterval(timer);
+  }, [openingStage, openingTitle, project]);
 
   // A shorter timeline cannot leave the playhead past its end.
   useEffect(() => {
@@ -523,7 +551,12 @@ function EditorApp() {
   }, [activeLayer, modal, openProject, save, saveAs, selection, startNewProject, step]);
 
   if (!project) {
-    return <StartScreen onOpened={setProject} />;
+    return (
+      <>
+        <StartScreen onOpened={setProject} />
+        <LoadingScreen />
+      </>
+    );
   }
 
   return (
@@ -821,11 +854,19 @@ function EditorApp() {
         </button>
       </div>
     </div>
+    <LoadingScreen />
     </UnitsProvider>
   );
 }
 
 /** The glyph a dock tab shows: pointing into the panel to open it, out to close it. */
+/**
+ * The longest the loading page waits for the map's first frame. A viewport of
+ * imported-field tiles is a second or two; past this something is wrong with
+ * the map, and the page is not where that should be found out.
+ */
+const FIRST_FRAME_LIMIT_MS = 6000;
+
 const DOCK_GLYPH = {
   left: { open: "◀", closed: "▶" },
   right: { open: "▶", closed: "◀" },

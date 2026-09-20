@@ -9,6 +9,9 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+use rayon::prelude::*;
 
 use ve_core::project::FieldKind;
 use ve_core::raster::{MISSING, RasterFrame, RasterGrid, RasterSequence};
@@ -205,7 +208,17 @@ struct Candidate {
 /// is not a field.
 pub fn sequences(
     messages: Vec<Message>,
+    resampling: Option<&mut Resampling<'_>>,
+) -> Result<Vec<RasterSequence>> {
+    sequences_reporting(messages, resampling, &|_, _| {})
+}
+
+/// [`sequences`], saying how far along it is: `progress(done, total)` in
+/// frames, from whichever thread built one.
+pub fn sequences_reporting(
+    messages: Vec<Message>,
     mut resampling: Option<&mut Resampling<'_>>,
+    progress: &(dyn Fn(usize, usize) + Sync),
 ) -> Result<Vec<RasterSequence>> {
     // Keyed by kind, then valid time, then component: a `BTreeMap` so the
     // frames come out in time order without a second sort, and so nothing
@@ -229,6 +242,11 @@ pub fn sequences(
         }
     }
 
+    let total = slots.values().map(BTreeMap::len).sum();
+    let done = AtomicUsize::new(0);
+    let tick = || progress(done.fetch_add(1, Ordering::Relaxed) + 1, total);
+    progress(0, total);
+
     let mut out = Vec::new();
     let mut dropped = Vec::new();
     for (kind_key, times) in slots {
@@ -237,14 +255,52 @@ pub fn sequences(
         } else {
             FieldKind::Current
         };
+        let mut pairs = Vec::with_capacity(times.len());
+        for (time, [u, v]) in times {
+            match (u, v) {
+                (Some(u), Some(v)) => pairs.push((time, u.message, v.message)),
+                _ => {
+                    dropped.push(format!("{kind:?} at {time}: only one component"));
+                    tick();
+                }
+            }
+        }
+        // A lat/lon frame is a reorder, a pairing and a hash of its own
+        // samples and nothing else's, so a file of them is built across the
+        // pool. A resampled one shares the neighbour sets being gathered, and
+        // its own work is already spread across the pool from the inside.
+        let lat_lon = pairs.iter().all(|(_, u, v)| {
+            matches!(
+                (&u.header.grid, &v.header.grid),
+                (Grid::LatLon(_), Grid::LatLon(_))
+            )
+        });
+        // Each pair is taken by value, so its two messages are let go of as
+        // its frame is finished: what is held falls as the frames grow, and a
+        // large file never has all of both in memory.
+        let grids: Vec<_> = if lat_lon {
+            pairs
+                .into_par_iter()
+                .map(|(time, u, v)| {
+                    let grid = raster_of(&u, &v, None);
+                    tick();
+                    (time, grid)
+                })
+                .collect()
+        } else {
+            pairs
+                .into_iter()
+                .map(|(time, u, v)| {
+                    let grid = raster_of(&u, &v, resampling.as_deref_mut());
+                    tick();
+                    (time, grid)
+                })
+                .collect()
+        };
         let mut frames = Vec::new();
         let mut first_time = None;
-        for (time, [u, v]) in times {
-            let (Some(u), Some(v)) = (u, v) else {
-                dropped.push(format!("{kind:?} at {time}: only one component"));
-                continue;
-            };
-            let grid = match raster_of(&u.message, &v.message, resampling.as_deref_mut()) {
+        for (time, grid) in grids {
+            let grid = match grid {
                 Ok(grid) => grid,
                 Err(why) => {
                     dropped.push(format!("{kind:?} at {time}: {why}"));
@@ -396,11 +452,28 @@ pub struct Imported {
 /// Only the vector components are unpacked; other parameters in the file
 /// cost a header parse each and nothing more.
 pub fn read_file(path: &Path, resampling: Option<&mut Resampling<'_>>) -> Result<Imported> {
-    let (messages, skipped) = read_messages(path)?;
-    Ok(Imported {
-        sequences: sequences(messages, resampling)?,
-        skipped,
-    })
+    read_file_reporting(path, resampling, &|_, _| {})
+}
+
+/// [`read_file`], saying how far along it is.
+///
+/// One scale for the two halves of the work: a message unpacked is one unit,
+/// and a frame built is two, since it uses up a `u` and a `v`. A file with
+/// messages that pair with nothing finishes short of its total, so the last
+/// report is made here rather than left to the count.
+pub fn read_file_reporting(
+    path: &Path,
+    resampling: Option<&mut Resampling<'_>>,
+    progress: &(dyn Fn(usize, usize) + Sync),
+) -> Result<Imported> {
+    let (messages, skipped) =
+        read_messages_reporting(path, &|done, total| progress(done, total * 2))?;
+    let unpacked = messages.len();
+    let sequences = sequences_reporting(messages, resampling, &|frames, _| {
+        progress((unpacked + frames * 2).min(unpacked * 2), unpacked * 2);
+    })?;
+    progress(unpacked * 2, unpacked * 2);
+    Ok(Imported { sequences, skipped })
 }
 
 /// Decodes a file's vector messages without assembling them.
@@ -410,8 +483,16 @@ pub fn read_file(path: &Path, resampling: Option<&mut Resampling<'_>>) -> Result
 /// new project gets is derived from the mesh (see [`nominal_spacing`]) and
 /// only then can the file be turned into rasters.
 pub fn read_messages(path: &Path) -> Result<(Vec<Message>, Vec<decode::Skipped>)> {
+    read_messages_reporting(path, &|_, _| {})
+}
+
+/// [`read_messages`], with `progress(done, total)` in messages unpacked.
+pub fn read_messages_reporting(
+    path: &Path,
+    progress: &(dyn Fn(usize, usize) + Sync),
+) -> Result<(Vec<Message>, Vec<decode::Skipped>)> {
     let bytes = std::fs::read(path)?;
-    let decoded = decode::read(&bytes, is_vector_component)?;
+    let decoded = decode::read_reporting(&bytes, is_vector_component, progress)?;
     if decoded.messages.is_empty() {
         let reasons: Vec<String> = decoded
             .skipped

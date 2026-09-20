@@ -552,6 +552,39 @@ discard, so no caller can drop a user's work by forgetting to ask.
 `close_project` is the one command whose purpose is to discard, and it does so
 without complaint.
 
+**The loading page.** Anything that puts a project on screen from files —
+Open, a recent project, *Open from GRIB*, *Open from Zarr*, recovered work —
+shows a page over the whole window while it does: the name of what is being
+opened, a bar, and under it what is being read and how much of it
+("routing_test · 312 of 1,488"). A project holds the paths of its imported
+layers and never their samples (invariants 1 and 2), so opening one is reading
+every such file again, and a month of hourly wind is most of a minute; a
+spinner cannot tell that from a stall. The bar is a real fraction. The
+document is its first twentieth; the rest is shared equally among the distinct
+files the layers name, each counted in its own units once it has been opened
+far enough to know them — frames for a store, and for a GRIB one unit per
+message unpacked and two per frame built. The fraction never decreases,
+whatever order the decoding threads report in. It travels as the
+`open://progress` event (`label`, `done`, `total`, `fraction`) from a sink on
+the application's state, so a headless caller — a test, the MCP service —
+installs nothing and pays nothing.
+
+The page is begun where the command is called (`OPENING` in `ui/src/ipc.ts`,
+beside `LONG_RUNNING` and for the same reason), not by whichever screen asked.
+It **stays until the map is showing the project**, not until the command
+answers: rendered is not shown (§9.4), and a page that left when the files
+were read gave way to a blank map. That last wait is bounded at six seconds.
+It arrives after a short delay, so a project that opens in a frame or two
+never flashes a page, and it goes at once when an opening is refused. An
+import *into* an open project shows no page: the project is on screen and
+usable, and that wait is the status bar's. A layer whose file could not be
+read still opens empty (§4.8) and is now also named in the status bar, since
+the layer panel that marks it may be closed.
+
+**A file is read once however many layers name it**, and different files are
+read side by side. A GRIB holding wind and currents is two layers and was two
+decodes on every open.
+
 ### 4.8 Imported GRIB layers
 
 A GRIB2 file can be imported as a layer, from the **Import GRIB** button
@@ -837,6 +870,20 @@ reopening reads that source again; it is distinct from the `zarr` provenance
 of downloaded history, whose backing file remains GRIB. A missing directory
 leaves the layers present but unloaded. Wind and current share one read on
 reopen, and identical frames share their decoded grid in memory.
+
+**A store is read along its own chunk boundaries.** A routing store's inner
+chunks run the whole length of a time chunk — three days of hourly steps in
+one compressed piece (§12.3) — so a read of a few steps decompresses all
+seventy-two and keeps a tenth, and a reader that cuts its slabs anywhere else
+pays that at every cut. `RoutingStore::blocks` cuts at the chunk boundaries in
+time and latitude, and a latitude chunk too tall for the 128 MiB bound on what
+is held while reading is cut into bands, which costs a second decode only of
+the inner chunks a cut crosses. Samples are widened from half precision as `u`
+is paired with `v`, in one pass across the pool, and a time chunk's frames are
+hashed together. The read happens **outside the session lock**, as a GRIB
+project's does: tile requests and edits do not stand behind it. An import into
+an open project therefore checks, on taking the lock back, that the project is
+still the one that was asked.
 
 ### 4.9 Image layers
 

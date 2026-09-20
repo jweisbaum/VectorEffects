@@ -21,6 +21,8 @@
 //! indexes from 0 within each section, so octet `n` is `section[n - 1]`.
 //! Signed fields are sign-magnitude, not two's complement (see writer.rs).
 
+use rayon::prelude::*;
+
 use crate::error::{GribError, Result};
 use crate::projection::{Earth, Projection, RotatedPole};
 use crate::writer::{ReferenceTime, from_i16_sm, from_i32_sm};
@@ -1507,7 +1509,25 @@ fn values_of(header: &Header, s: &Sections<'_>) -> Result<Vec<f32>> {
 /// rather than failing the file — one unsupported field must not stop the
 /// others from importing. A file that is not GRIB2 at all is an error.
 pub fn read(bytes: &[u8], wanted: impl Fn(&Header) -> bool) -> Result<Decoded> {
+    read_reporting(bytes, wanted, &|_, _| {})
+}
+
+/// [`read`], saying how far along it is: `progress(done, total)` as each
+/// wanted message is unpacked, from whichever thread unpacked it.
+///
+/// The headers are read first and in order, which is what makes `total` known
+/// before the first value is unpacked. The unpacking is then spread across
+/// the pool: a message depends on no other — the one packing that would, a
+/// bitmap carried over from the message before (indicator 254), is refused —
+/// and a month of hourly wind is fifteen hundred of them. The messages and
+/// the skips still come back in file order, whichever finished first.
+pub fn read_reporting(
+    bytes: &[u8],
+    wanted: impl Fn(&Header) -> bool,
+    progress: &(dyn Fn(usize, usize) + Sync),
+) -> Result<Decoded> {
     let mut decoded = Decoded::default();
+    let mut selected = Vec::new();
     for (index, message) in split_messages(bytes)?.into_iter().enumerate() {
         let skip = |reason: GribError| Skipped {
             index,
@@ -1527,14 +1547,34 @@ pub fn read(bytes: &[u8], wanted: impl Fn(&Header) -> bool) -> Result<Decoded> {
                 continue;
             }
         };
-        if !wanted(&header) {
-            continue;
-        }
-        match values_of(&header, &sections) {
-            Ok(values) => decoded.messages.push(Message { header, values }),
-            Err(err) => decoded.skipped.push(skip(err)),
+        if wanted(&header) {
+            selected.push((index, header, sections));
         }
     }
+
+    let total = selected.len();
+    let done = std::sync::atomic::AtomicUsize::new(0);
+    progress(0, total);
+    let unpacked: Vec<_> = selected
+        .into_par_iter()
+        .map(|(index, header, sections)| {
+            let values = values_of(&header, &sections);
+            let done = done.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+            progress(done, total);
+            (index, header, values)
+        })
+        .collect();
+    for (index, header, values) in unpacked {
+        match values {
+            Ok(values) => decoded.messages.push(Message { header, values }),
+            Err(err) => decoded.skipped.push(Skipped {
+                index,
+                reason: err.to_string(),
+            }),
+        }
+    }
+    // Header failures were gathered before the value failures were known.
+    decoded.skipped.sort_by_key(|skipped| skipped.index);
     Ok(decoded)
 }
 

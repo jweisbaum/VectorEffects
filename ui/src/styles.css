@@ -452,6 +452,41 @@ body {
 .start-panel h3 { font-size: 0.8rem; margin: 1rem 0 0.4rem; font-weight: 500; }
 .start-panel p { margin: 0; }
 
+/* The loading page (spec.md 4.7): over everything, since what is under it is
+   about to be replaced or is not drawn yet. It arrives after a delay, so a
+   project that opens in a frame or two never flashes a page; the delay is
+   in the animation, not in a timer, because webview timers are throttled. */
+.loading {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  display: grid;
+  place-items: center;
+  padding: 2rem;
+  background:
+    radial-gradient(1200px 600px at 50% -10%, #16273f 0%, var(--bg) 60%);
+  animation: loading-arrives 160ms ease-out 140ms both;
+}
+@keyframes loading-arrives {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.loading-panel { width: min(520px, 100%); }
+.loading-panel p { margin: 0; }
+.loading-verb { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.08em; }
+.loading-title {
+  margin: 0.2rem 0 1.4rem;
+  font-size: 1.4rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.loading-bar { height: 8px; border-radius: 4px; margin-bottom: 0.7rem; }
+.loading-label { font-variant-numeric: tabular-nums; min-height: 1.3em; }
+@media (prefers-reduced-motion: reduce) {
+  .loading { animation-duration: 1ms; }
+}
+
 .start-new,
 .start-open {
   border-top: 1px solid var(--border);

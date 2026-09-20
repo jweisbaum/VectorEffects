@@ -235,14 +235,26 @@ pub fn grib_project(
     // The grid comes first: an unstructured file states no spacing, so the
     // resolution is derived from its mesh and the file is then resampled onto
     // it. A lat/lon file reaches the same answer from its own increments.
+    with_session(state, |session| {
+        crate::projects::refuse_to_discard(session, discard_unsaved)
+    })?;
+    // The loading page's bar, on the scale `read_file_reporting` uses: a
+    // message unpacked is one unit and a frame built is two.
+    let mut opening = state.opening.begin();
+    opening.sources([layer_name_suffix(&path)]);
     let (messages, skipped) =
-        import::read_messages(&path).doing("read the GRIB file at", path.display())?;
+        import::read_messages_reporting(&path, &|done, total| opening.source(0, done, total * 2))
+            .doing("read the GRIB file at", path.display())?;
     let resolution = nearest_resolution(import::nominal_spacing(&messages).unwrap_or(1.0));
     let mut cache = std::collections::BTreeMap::new();
     let sequences = {
+        let unpacked = messages.len();
         let mut resampling = import::Resampling::new(resolution.target_grid(), &mut cache);
-        import::sequences(messages, Some(&mut resampling))?
+        import::sequences_reporting(messages, Some(&mut resampling), &|frames, _| {
+            opening.source(0, (unpacked + frames * 2).min(unpacked * 2), unpacked * 2);
+        })?
     };
+    opening.finished();
     let imported = import::Imported { sequences, skipped };
     let settings = settings_for(&imported.sequences).ok_or_else(|| {
         AppError::Grib(ve_grib::GribError::NoVectorField(
@@ -276,93 +288,111 @@ pub fn grib_project(
     })
 }
 
-/// Reads every GRIB layer's file back into memory after a project opens.
+/// Reads every imported layer's file back into memory after a project opens.
 ///
 /// A file that cannot be read leaves its layer without a field — it still
 /// opens, still lists, and contributes nothing — and the reason is logged
 /// and returned so the caller can show it. The project itself is never
 /// refused over a missing import: the user's own work is in the objects,
 /// and those are intact.
-pub fn attach_rasters(project: &mut Project) -> Vec<(String, AppError)> {
-    let mut failures = Vec::new();
-    // The neighbour sets travel with the project, so a reopened ICON layer
-    // costs a decode and an interpolation rather than the search as well.
-    // Taken out for the loop's sake and put back after, sets and all.
-    let resolution = project.settings.resolution;
-    let mut cache = std::mem::take(&mut project.regrid);
-    // Wind and current from one local store share a decode on reopen.
-    let mut zarrs = std::collections::BTreeMap::<PathBuf, Vec<Arc<RasterSequence>>>::new();
-    for layer in &mut project.layers {
+///
+/// **A file is read once however many layers name it.** A GRIB holding wind
+/// and currents is two layers and one decode, as a routing store always was;
+/// the layers share the sequences. Different files are read side by side:
+/// each is its own work, and a project built from a forecast and a history
+/// import waits for the slower of the two rather than for both.
+pub fn attach_rasters(
+    project: &mut Project,
+    opening: &mut crate::opening::Opening,
+) -> Vec<(String, AppError)> {
+    use rayon::prelude::*;
+    use ve_core::document::LayerSource;
+
+    // The distinct files, in the order the layers first name them, and which
+    // of them each layer reads.
+    let mut sources: Vec<(PathBuf, bool)> = Vec::new();
+    let mut wanted: Vec<(usize, usize, FieldKind)> = Vec::new();
+    for (index, layer) in project.layers.iter().enumerate() {
         // A history layer reads a GRIB file of its own (M38), so it comes
         // back the same way a forecast does.
         let Some((path, field)) = layer.source.raster_file() else {
             continue;
         };
-        let (path, field) = (path.to_path_buf(), field);
-        if matches!(
-            layer.source,
-            ve_core::document::LayerSource::ZarrFile { .. }
-        ) {
-            let result = if let Some(sequences) = zarrs.get(&path) {
-                Ok(sequences.clone())
+        let source = (
+            path.to_path_buf(),
+            matches!(layer.source, LayerSource::ZarrFile { .. }),
+        );
+        let at = sources
+            .iter()
+            .position(|known| *known == source)
+            .unwrap_or_else(|| {
+                sources.push(source);
+                sources.len() - 1
+            });
+        wanted.push((index, at, field));
+    }
+    opening.sources(sources.iter().map(|(path, _)| layer_name_suffix(path)));
+
+    // The neighbour sets travel with the project, so a reopened ICON layer
+    // costs a decode and an interpolation rather than the search as well.
+    // Every file starts from the project's sets — they are shared, so the
+    // copy is a map of pointers — and what each had to build goes back after.
+    let target = project.settings.resolution.target_grid();
+    let regrid = std::mem::take(&mut project.regrid);
+    let opening = &*opening;
+    let read: Vec<_> = sources
+        .par_iter()
+        .enumerate()
+        .map(|(at, (path, zarr))| {
+            let progress = |done: usize, total: usize| opening.source(at, done, total);
+            let mut cache = regrid.clone();
+            let sequences = if *zarr {
+                crate::zarr::read_reporting(path, &progress)
             } else {
-                crate::zarr::read(&path).map(|sequences| {
-                    let sequences: Vec<_> = sequences.into_iter().map(Arc::new).collect();
-                    zarrs.insert(path.clone(), sequences.clone());
-                    sequences
-                })
+                let mut resampling = import::Resampling::new(target, &mut cache);
+                import::read_file_reporting(path, Some(&mut resampling), &progress)
+                    .map(|imported| imported.sequences)
+                    .map_err(AppError::from)
             };
-            match result {
-                Ok(sequences) => {
-                    layer.raster = sequences.into_iter().find(|s| s.kind == field);
-                    if layer.raster.is_none() {
-                        failures.push((
-                            layer.name.clone(),
-                            AppError::Internal(format!(
-                                "{} no longer holds a {field:?} field",
-                                path.display()
-                            )),
-                        ));
-                    }
-                }
-                Err(err) => {
-                    layer.raster = None;
-                    tracing::warn!(layer = %layer.name, %err, "Zarr layer could not be read");
-                    failures.push((layer.name.clone(), err));
-                }
-            }
-            continue;
+            let sequences = sequences.map(|s| s.into_iter().map(Arc::new).collect::<Vec<_>>());
+            (sequences, cache)
+        })
+        .collect();
+
+    project.regrid = regrid;
+    let mut results = Vec::with_capacity(read.len());
+    for (sequences, cache) in read {
+        for (key, set) in cache {
+            project.regrid.entry(key).or_insert(set);
         }
-        let target = resolution.target_grid();
-        let result = {
-            let mut resampling = import::Resampling::new(target, &mut cache);
-            import::read_file(&path, Some(&mut resampling))
-        };
-        match result {
-            Ok(imported) => {
-                layer.raster = imported
-                    .sequences
-                    .into_iter()
-                    .find(|s| s.kind == field)
-                    .map(Arc::new);
+        results.push(sequences);
+    }
+
+    let mut failures = Vec::new();
+    for (index, at, field) in wanted {
+        let layer = &mut project.layers[index];
+        let path = &sources[at].0;
+        match &results[at] {
+            Ok(sequences) => {
+                layer.raster = sequences.iter().find(|s| s.kind == field).cloned();
                 if layer.raster.is_none() {
                     let err = AppError::Grib(ve_grib::GribError::NoVectorField(format!(
                         "{} no longer holds a {field:?} field",
                         path.display()
                     )));
-                    tracing::warn!(layer = %layer.name, %err, "grib layer has no field");
+                    tracing::warn!(layer = %layer.name, %err, "imported layer has no field");
                     failures.push((layer.name.clone(), err));
                 }
             }
             Err(err) => {
                 layer.raster = None;
-                let err = AppError::from(err);
-                tracing::warn!(layer = %layer.name, path = %path.display(), %err, "grib layer could not be read");
-                failures.push((layer.name.clone(), err));
+                tracing::warn!(layer = %layer.name, path = %path.display(), %err, "imported layer could not be read");
+                // One file's error is every layer's that names it, and an
+                // error is not something to copy: the message is.
+                failures.push((layer.name.clone(), AppError::Internal(err.to_string())));
             }
         }
     }
-    project.regrid = cache;
     failures
 }
 

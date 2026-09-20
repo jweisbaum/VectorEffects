@@ -24,6 +24,8 @@ zarrs = { version = "0.23", default-features = false, features = ["filesystem", 
 zarrs_storage = "0.4"
 lz4_flex = { version = "0.14", default-features = false, features = ["std", "frame"] }
 half = "2.7"
+# A block's samples are paired into vectors across the pool (`routing.rs`).
+rayon = { workspace = true }
 # The export writes its shards itself (`export.rs`): the inner chunks' codec,
 # and the checksum the shard index ends with. `zstd` is the crate `zarrs`
 # already builds; `crc32c` is pure Rust.

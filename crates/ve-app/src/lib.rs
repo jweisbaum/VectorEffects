@@ -22,6 +22,7 @@ pub mod macros;
 pub mod mcp;
 pub mod measure;
 pub mod merge;
+pub mod opening;
 pub mod palette;
 pub mod paths;
 pub mod projects;
@@ -101,6 +102,14 @@ pub fn run() -> anyhow::Result<()> {
                 let _ = handle.emit("render://progress", progress);
             });
             pool.start(app.handle().clone());
+            // The loading page's bar (spec.md 4.7): an opening says how far
+            // along it is, and here is the only place that is listened to.
+            let handle = app.handle().clone();
+            app.state::<AppState>()
+                .opening
+                .on_progress(move |progress| {
+                    let _ = handle.emit("open://progress", progress);
+                });
             // Crash recovery: a snapshot of unsaved work every minute or fifty
             // edits, offered back on the start screen (spec.md 4.2, M10).
             autosave::start(app.handle().clone());

@@ -306,6 +306,7 @@ dependencies = [
  "cfg-if",
  "constant_time_eq",
  "cpufeatures 0.3.1",
+ "rayon-core",
 ]
 
 [[package]]
@@ -5505,6 +5506,7 @@ dependencies = [
  "hyper-util",
  "jpeg-decoder",
  "png 0.18.1",
+ "rayon",
  "reqwest",
  "rmcp",
  "schemars 1.2.2",
@@ -5537,6 +5539,7 @@ name = "ve-core"
 version = "0.1.8"
 dependencies = [
  "blake3",
+ "bytemuck",
  "lz4_flex",
  "proptest",
  "rayon",
@@ -5579,6 +5582,7 @@ dependencies = [
  "crc32c",
  "half",
  "lz4_flex",
+ "rayon",
  "reqwest",
  "serde",
  "serde_json",

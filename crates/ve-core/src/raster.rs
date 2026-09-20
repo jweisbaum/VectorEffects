@@ -14,6 +14,8 @@
 use std::fmt;
 use std::sync::Arc;
 
+use rayon::prelude::*;
+
 use crate::project::FieldKind;
 use crate::vector::Uv;
 
@@ -79,6 +81,12 @@ pub struct RasterGrid {
     pub uv: Vec<[f32; 2]>,
     /// BLAKE3 of everything above: the render cache key for this slice.
     pub hash: [u8; 32],
+    /// The fastest speed at any node that has one, in m/s.
+    ///
+    /// Found while the samples are already in hand, so a sequence's own
+    /// figure is a fold over its frames rather than a second pass over every
+    /// sample of a month of them.
+    pub fastest_mps: f32,
 }
 
 impl fmt::Debug for RasterGrid {
@@ -99,6 +107,57 @@ impl fmt::Debug for RasterGrid {
 impl PartialEq for RasterGrid {
     fn eq(&self, other: &Self) -> bool {
         self.hash == other.hash
+    }
+}
+
+/// Samples below this many are hashed and scanned on the calling thread:
+/// a small grid costs less than handing it to the pool does.
+const PARALLEL_SAMPLES: usize = 1 << 16;
+
+/// Feeds the samples to the hasher as the little-endian bytes of each `u`
+/// then `v`, in order.
+///
+/// That byte string is what the hash has always been over, and it has to
+/// stay so: the render cache keys on it, and a changed key is every imported
+/// tile rendered again. On a little-endian machine — all three we ship for —
+/// it is the slice's own memory, so it goes in as one piece rather than four
+/// bytes at a time (two million calls for one 0.25° frame), and BLAKE3's
+/// tree lets a large one be hashed across the pool for the same digest.
+fn hash_samples(hasher: &mut blake3::Hasher, uv: &[[f32; 2]]) {
+    #[cfg(target_endian = "little")]
+    {
+        let bytes: &[u8] = bytemuck::cast_slice(uv);
+        if uv.len() >= PARALLEL_SAMPLES {
+            hasher.update_rayon(bytes);
+        } else {
+            hasher.update(bytes);
+        }
+    }
+    #[cfg(not(target_endian = "little"))]
+    for sample in uv {
+        hasher.update(&sample[0].to_le_bytes());
+        hasher.update(&sample[1].to_le_bytes());
+    }
+}
+
+/// The fastest speed among the samples that are not missing.
+///
+/// `f32::max` is associative and commutative over what `hypot` returns here,
+/// so the answer does not depend on how the pool splits the work.
+fn fastest_of(uv: &[[f32; 2]]) -> f32 {
+    let fastest = |samples: &[[f32; 2]]| {
+        samples
+            .iter()
+            .filter(|uv| !is_missing(uv[0]) && !is_missing(uv[1]))
+            .map(|uv| uv[0].hypot(uv[1]))
+            .fold(0.0, f32::max)
+    };
+    if uv.len() >= PARALLEL_SAMPLES {
+        uv.par_chunks(PARALLEL_SAMPLES)
+            .map(fastest)
+            .reduce(|| 0.0, f32::max)
+    } else {
+        fastest(uv)
     }
 }
 
@@ -153,11 +212,9 @@ impl RasterGrid {
         hasher.update(&lat0.to_le_bytes());
         hasher.update(&dlon.to_le_bytes());
         hasher.update(&dlat.to_le_bytes());
-        for sample in &uv {
-            hasher.update(&sample[0].to_le_bytes());
-            hasher.update(&sample[1].to_le_bytes());
-        }
+        hash_samples(&mut hasher, &uv);
         let hash = *hasher.finalize().as_bytes();
+        let fastest_mps = fastest_of(&uv);
 
         Ok(Self {
             ni,
@@ -169,6 +226,7 @@ impl RasterGrid {
             wraps,
             uv,
             hash,
+            fastest_mps,
         })
     }
 
@@ -423,9 +481,7 @@ impl RasterSequence {
         }
         let fastest_mps = frames
             .iter()
-            .flat_map(|frame| frame.grid.uv.iter())
-            .filter(|uv| !is_missing(uv[0]) && !is_missing(uv[1]))
-            .map(|uv| uv[0].hypot(uv[1]))
+            .map(|frame| frame.grid.fastest_mps)
             .fold(0.0, f32::max);
         Ok(Self {
             kind,
@@ -494,6 +550,60 @@ mod tests {
             }
         }
         RasterGrid::new(ni, nj, lon0, lat0, d, d, uv).expect("valid grid")
+    }
+
+    /// The key the render cache holds tiles under is BLAKE3 over the header
+    /// and then each sample's `u` and `v` as little-endian bytes. Written out
+    /// here the long way, on a grid large enough to be hashed across the
+    /// pool and on one that is not: whatever route the bytes take in, a
+    /// project's imported tiles must still be found where they were left.
+    #[test]
+    fn the_hash_is_over_each_sample_in_little_endian_order() {
+        for (ni, nj) in [(9_u32, 7_u32), (720, 361)] {
+            let g = grid(ni, nj, -20.0, 80.0, 0.25, |i, j| {
+                if (i + j) % 11 == 0 {
+                    [MISSING; 2]
+                } else {
+                    [i as f32 * 0.37 - 40.0, j as f32 * -0.19 + 3.0]
+                }
+            });
+            let mut hasher = blake3::Hasher::new();
+            hasher.update(&ni.to_le_bytes());
+            hasher.update(&nj.to_le_bytes());
+            hasher.update(&(-20.0_f64).to_le_bytes());
+            hasher.update(&80.0_f64.to_le_bytes());
+            hasher.update(&0.25_f64.to_le_bytes());
+            hasher.update(&0.25_f64.to_le_bytes());
+            for sample in &g.uv {
+                hasher.update(&sample[0].to_le_bytes());
+                hasher.update(&sample[1].to_le_bytes());
+            }
+            assert_eq!(g.hash, *hasher.finalize().as_bytes(), "{ni} x {nj}");
+        }
+    }
+
+    /// A 3-4-5 triangle among slower nodes, and a missing node whose stored
+    /// sentinel would otherwise be the fastest thing on the grid by far.
+    #[test]
+    fn the_fastest_speed_leaves_missing_nodes_out() {
+        for (ni, nj) in [(4_u32, 3_u32), (720, 361)] {
+            let g = grid(ni, nj, 0.0, 45.0, 0.25, |i, j| match (i, j) {
+                (1, 1) => [MISSING; 2],
+                (2, 2) => [-3.0, 4.0],
+                _ => [1.0, 0.0],
+            });
+            assert_eq!(g.fastest_mps, 5.0, "{ni} x {nj}");
+            let sequence = RasterSequence::new(
+                FieldKind::Wind,
+                vec![RasterFrame {
+                    offset_hours: 0.0,
+                    valid_unix_s: 0,
+                    grid: Arc::new(g),
+                }],
+            )
+            .expect("sequence");
+            assert_eq!(sequence.fastest_mps(), 5.0);
+        }
     }
 
     #[test]

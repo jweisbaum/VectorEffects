@@ -477,6 +477,80 @@ fn the_field_is_read_from_the_file_again_when_the_project_reopens() {
     assert_eq!(u_at(&app, 1), 0.0, "a missing file contributes nothing");
 }
 
+/// Everything an opening reported, in the order it was reported.
+fn reports(app: &AppState) -> std::sync::Arc<std::sync::Mutex<Vec<ve_app::opening::OpenProgress>>> {
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let into = seen.clone();
+    app.opening
+        .on_progress(move |progress| into.lock().expect("lock").push(progress));
+    seen
+}
+
+/// A file with both kinds is two layers, and reopening decoded it once per
+/// layer. The bar is what shows that it no longer does: three hours of two
+/// kinds is twelve messages, each one unit unpacked, and six frames, each two
+/// units built — twenty-four, counted up once. Read twice, the count for the
+/// file would reach its end and start again.
+#[test]
+fn a_file_two_layers_name_is_read_once_and_the_bar_says_how_far() {
+    let root = TempRoot::new("progress");
+    let app = state(&root, 3, 4);
+    let grib = write_file(
+        &root,
+        "both.grib2",
+        &[FieldKind::Wind, FieldKind::Current],
+        &[0, 3, 6],
+    );
+    import::grib_import(&app, grib).expect("import");
+    let project_path = root.0.join("both.veproj");
+    projects::save_as(&app, project_path.to_string_lossy().into_owned()).expect("save");
+    projects::close_open(&app, true).expect("close");
+
+    let seen = reports(&app);
+    projects::open(&app, project_path.to_string_lossy().into_owned(), false).expect("open");
+    let seen = seen.lock().expect("lock");
+
+    assert_eq!(seen.first().map(|p| p.fraction), Some(0.0));
+    assert_eq!(seen.first().map(|p| p.label.as_str()), Some("both.veproj"));
+    assert_eq!(seen.last().map(|p| p.fraction), Some(1.0));
+    assert!(
+        seen.windows(2).all(|w| w[0].fraction <= w[1].fraction),
+        "the bar never runs backwards"
+    );
+    let file: Vec<_> = seen.iter().filter(|p| p.label == "both.grib2").collect();
+    assert!(file.iter().all(|p| p.total == 24), "one scale for the file");
+    assert!(
+        file.windows(2).all(|w| w[0].done <= w[1].done),
+        "counted up once: the file was read once"
+    );
+    assert_eq!(file.last().map(|p| p.done), Some(24));
+
+    let tree = document::tree(&app, 0).expect("tree");
+    for layer in &tree.layers[1..] {
+        let info = layer.grib.as_ref().expect("grib");
+        assert!(info.loaded, "{}", layer.name);
+        assert_eq!(info.frame_count, 3, "{}", layer.name);
+    }
+    assert_eq!(u_at(&app, 1), 3.0, "and the field is the file's");
+}
+
+#[test]
+fn a_project_from_a_grib_reports_its_reading_to_the_end() {
+    let root = TempRoot::new("grib-project-progress");
+    let app = fresh(&root);
+    let grib = write_file(&root, "wind.grib2", &[FieldKind::Wind], &[0, 6, 12]);
+    let seen = reports(&app);
+    import::grib_project(&app, grib, false).expect("project");
+    let seen = seen.lock().expect("lock");
+    assert!(seen.windows(2).all(|w| w[0].fraction <= w[1].fraction));
+    assert_eq!(seen.last().map(|p| p.fraction), Some(1.0));
+    // Six messages and three frames of two: twelve units, all of them done.
+    assert!(
+        seen.iter()
+            .any(|p| p.label == "wind.grib2" && p.done == 12 && p.total == 12)
+    );
+}
+
 #[test]
 fn a_file_without_vector_fields_is_refused_by_name() {
     let root = TempRoot::new("refused");

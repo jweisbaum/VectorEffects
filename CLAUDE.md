@@ -157,6 +157,11 @@ cargo run -p ve-app --example make_samples -- assets/samples
 cargo test -p ve-grib --release --test resample_cost -- --nocapture
                                  # cost of putting a projected grid on the
                                  # project's lattice
+VE_TEST_OPEN_GRIB=~/Documents/era5-wind-globcurrent.grib2 \
+VE_TEST_OPEN_ZARR=~/SampleRoutingData/routing_test \
+    cargo test -p ve-app --release --test open_cost -- --ignored --nocapture
+                                 # what opening costs: a project from a file,
+                                 # and the saved project read back
 
 # Regenerate TS bindings after changing any IPC-facing Rust type
 npm run bindings            # cargo run -p ve-app --example export_bindings
@@ -689,6 +694,26 @@ to the hash input is a correctness bug that shows up as stale frames.
   the same function, or playback would wait on the wrong scene's tiles.
   Nothing in the preview path may write the document: the history lock is
   what makes the capture's frames trustworthy.
+- **A command that puts a project on screen from files goes in `OPENING` in
+  `ui/src/ipc.ts`**, beside `LONG_RUNNING` and for the same reason: the
+  loading page (spec §4.7) is begun at the chokepoint, never by the screen
+  that asked. Its bar is fed by `open://progress` from `AppState::opening`
+  (`ve_app::opening`), a sink that is empty in every headless caller — so a
+  new opening path reports by calling `state.opening.begin()`, not by taking
+  a callback in its signature. The page leaves when the *map* shows the
+  project (`present`), not when the command answers; `finishOpening` is
+  called from `App` and nowhere else.
+- **A routing store is read through `RoutingStore::blocks`, never in slabs of
+  your own choosing.** Its inner chunks span a whole time chunk (72 hourly
+  steps), so a read of eight steps decompresses all seventy-two. Reading in
+  128 MiB slabs cut anywhere was nine decodes of every chunk and two minutes
+  to open a month; cut at the chunk boundaries it is one.
+- **A raster's hash is over its samples' little-endian bytes, fed in one
+  piece** (`hash_samples` in `raster.rs`). The per-sample loop it replaced
+  was two million hasher calls per 0.25° frame. The digest must not change —
+  the render cache keys on it — and
+  `the_hash_is_over_each_sample_in_little_endian_order` holds it to the long
+  way round.
 - **A long-running command gets a label in `LONG_RUNNING` in `ui/src/ipc.ts`**
   and nothing else: the status bar's spinner counts those by name through
   `ui/src/busy.ts`. Never start the spinner from a *feature* — two callers of

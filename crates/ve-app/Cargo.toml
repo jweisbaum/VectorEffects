@@ -23,6 +23,8 @@ ve-render = { workspace = true }
 ve-zarr = { workspace = true }
 
 anyhow = { workspace = true }
+# A store's frames are paired and hashed across the pool as it opens.
+rayon = { workspace = true }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 serde = { workspace = true }
 serde_json = { workspace = true }

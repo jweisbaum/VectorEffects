@@ -287,6 +287,8 @@ pub struct AppState {
     pub tiles: ve_render::cache::RenderCache,
     /// Prepared frames shared by background rendering and tile requests.
     pub scenes: crate::protocol::SceneCache,
+    /// Where an opening's progress goes: the loading page, or nowhere.
+    pub opening: crate::opening::Sink,
 }
 
 impl AppState {
@@ -314,6 +316,7 @@ impl AppState {
             session: std::sync::Mutex::new(session),
             tiles,
             scenes: crate::protocol::SceneCache::default(),
+            opening: crate::opening::Sink::default(),
             paths,
         }
     }

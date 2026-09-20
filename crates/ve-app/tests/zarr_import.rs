@@ -122,6 +122,43 @@ fn opens_as_wind_and_current_layers_with_the_native_grid_and_clock() {
     assert_eq!((uv.u, uv.v), (9.0, 2.0), "imported vectors reach export");
 }
 
+/// Two times of two fields is four frames, and the bar counts them: when
+/// the project is made from the store, and again when it is reopened, where
+/// the two layers share the one read.
+#[test]
+fn the_reading_is_reported_in_frames_to_the_end() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("routing_test");
+    write_store(&path);
+    let app = app(root.path());
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let into = seen.clone();
+    app.opening
+        .on_progress(move |progress| into.lock().unwrap().push(progress));
+
+    zarr::zarr_project(&app, path.to_string_lossy().into_owned(), false).unwrap();
+    let saved = root.path().join("routing.veproj");
+    projects::save_as(&app, saved.to_string_lossy().into_owned()).unwrap();
+    projects::close_open(&app, true).unwrap();
+    let made = std::mem::take(&mut *seen.lock().unwrap());
+    projects::open(&app, saved.to_string_lossy().into_owned(), false).unwrap();
+    let reopened = std::mem::take(&mut *seen.lock().unwrap());
+
+    for reports in [made, reopened] {
+        assert!(reports.windows(2).all(|w| w[0].fraction <= w[1].fraction));
+        assert_eq!(reports.last().map(|p| p.fraction), Some(1.0));
+        let store: Vec<_> = reports
+            .iter()
+            .filter(|p| p.label == "routing_test")
+            .collect();
+        assert!(store.iter().all(|p| p.total == 4));
+        assert!(store.windows(2).all(|w| w[0].done <= w[1].done));
+        assert_eq!(store.last().map(|p| p.done), Some(4));
+    }
+    assert_eq!(sample(&app, 1, FieldKind::Wind), (9.0, 2.0));
+    assert_eq!(sample(&app, 1, FieldKind::Current), (1.0, 2.0));
+}
+
 #[test]
 fn component_names_determine_the_vector_order() {
     let root = tempfile::tempdir().unwrap();
@@ -216,4 +253,55 @@ fn invalid_imports_and_unsaved_replacement_leave_the_project_intact() {
     assert!(error.to_string().contains(&bad));
     assert_eq!(projects::current(&app).unwrap().unwrap().layer_count, 3);
     zarr::zarr_project(&app, path.display().to_string(), true).unwrap();
+}
+
+/// The frames a real store opens as, against the same times read whole and
+/// paired the long way. The store is read in blocks cut at its chunk
+/// boundaries and assembled band by band; this reads four times in one piece
+/// each — the first, both sides of a time-chunk boundary, and the last — and
+/// expects the same samples in the same places.
+#[test]
+#[ignore = "reads the external store named by VE_TEST_OPEN_ZARR"]
+fn a_real_store_assembled_from_blocks_matches_its_times_read_whole() {
+    let Some(path) = std::env::var_os("VE_TEST_OPEN_ZARR") else {
+        return;
+    };
+    let path = Path::new(&path);
+    let store = ve_zarr::routing::RoutingStore::open(path).unwrap();
+    let sequences = zarr::read(path).unwrap();
+    let points = store.longitude.len() * store.latitude.len();
+    let last = store.times.len() - 1;
+    for t in [0, 71.min(last), 72.min(last), last] {
+        let whole = store.read(t..t + 1).unwrap();
+        for sequence in &sequences {
+            let (u, v) = match sequence.kind {
+                FieldKind::Wind => ("u10", "v10"),
+                FieldKind::Current => ("ucur", "vcur"),
+            };
+            let of = |name: &str| {
+                let p = store.parameters.iter().position(|p| p == name).unwrap();
+                &whole[p * points..(p + 1) * points]
+            };
+            let frame = &sequence.frames[t];
+            assert_eq!(frame.valid_unix_s, store.times[t]);
+            let mut covered = 0;
+            for (k, (&u, &v)) in of(u).iter().zip(of(v)).enumerate() {
+                let expected = if u.is_finite() && v.is_finite() {
+                    covered += 1;
+                    [u, v]
+                } else {
+                    [ve_core::raster::MISSING; 2]
+                };
+                assert_eq!(
+                    frame.grid.uv[k], expected,
+                    "{:?} t={t} node {k}",
+                    sequence.kind
+                );
+            }
+            println!(
+                "{:?} t={t}: {covered} of {points} nodes covered, all equal",
+                sequence.kind
+            );
+        }
+    }
 }

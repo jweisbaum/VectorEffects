@@ -12,7 +12,11 @@ serde_json.workspace = true
 thiserror = { workspace = true }
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 # Content hashes for imported rasters: the render cache keys off them.
-blake3 = { version = "1.8.7", default-features = false, features = ["std"] }
+# `rayon`: a large frame is hashed across the pool, for the same digest.
+blake3 = { version = "1.8.7", default-features = false, features = ["std", "rayon"] }
+# The samples as the bytes they already are, for the hasher. Already in the
+# tree behind `wgpu`; `unsafe` is forbidden here, and this is the safe cast.
+bytemuck = "1"
 # Resampling an unstructured grid is a few million independent searches.
 rayon = { workspace = true }
 # Captured fields inside a project archive (spec.md 8.5). Pure Rust, no C
