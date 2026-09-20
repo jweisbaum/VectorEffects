@@ -5533,6 +5533,7 @@ version = "0.1.9"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
+ "blake3",
  "bytes",
  "chrono",
  "directories",
@@ -5563,8 +5564,10 @@ dependencies = [
  "tracing-appender",
  "tracing-subscriber",
  "ts-rs",
+ "ve-chart",
  "ve-core",
  "ve-grib",
+ "ve-osm",
  "ve-render",
  "ve-zarr",
  "zarrs",

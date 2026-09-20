@@ -17,6 +17,8 @@ import { useEffect, useState } from "react";
 import type { AppSettings } from "../generated/AppSettings";
 import type { AutosaveMode } from "../generated/AutosaveMode";
 import type { MacroLibrary } from "../generated/MacroLibrary";
+import type { ChartStatus } from "../generated/ChartStatus";
+import { pickChartDirectory } from "../project/dialogs";
 import type { ProjectSummary } from "../generated/ProjectSummary";
 import type { Shortcut } from "../generated/Shortcut";
 import NumberField from "../NumberField";
@@ -88,6 +90,16 @@ export default function SettingsDialog({
   /** The row waiting for a key press, if any. */
   const [capturing, setCapturing] = useState<string | null>(null);
   const [library, setLibrary] = useState<MacroLibrary | null>(null);
+  const [chartStatus, setChartStatus] = useState<ChartStatus | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    void api
+      .chartStatus()
+      .then((status) => { if (live) setChartStatus(status); })
+      .catch(() => { if (live) setChartStatus(null); });
+    return () => { live = false; };
+  }, []);
   /** The gradients on offer (M42), from the backend's own table. */
   const [gradients, setGradients] = useState<readonly GradientView[]>(knownGradients);
   useEffect(() => {
@@ -343,6 +355,61 @@ export default function SettingsDialog({
               }}
             />
           </label>
+        </section>
+
+        <section>
+          <h3>Charts</h3>
+          <p className="muted">
+            Electronic navigational charts (S-57). Choose the directory an
+            exchange set was unpacked into — the one holding the cell folders,
+            usually beside a <code>CATALOG.031</code>. Turn them on with
+            <strong> Charts</strong> in the view controls. Charts are drawn
+            under the field and are never part of a project.
+          </p>
+          <div className="settings-field">
+            <span>
+              {chartStatus === null
+                ? "…"
+                : chartStatus.error
+                  ? chartStatus.error
+                  : chartStatus.directory
+                    ? `${chartStatus.cells.toLocaleString()} cells in ${chartStatus.directory}`
+                    : "No chart directory chosen."}
+            </span>
+            <span className="settings-actions">
+              <button
+                onClick={() => {
+                  void (async () => {
+                    const directory = await pickChartDirectory();
+                    if (directory === null) return;
+                    await api
+                      .setChartDirectory(directory)
+                      .then((status) => {
+                        setChartStatus(status);
+                        void api.appSettings().then(onSettings);
+                      })
+                      .catch(report);
+                  })();
+                }}
+              >
+                Choose…
+              </button>
+              <button
+                disabled={!chartStatus?.directory}
+                onClick={() => {
+                  void api
+                    .setChartDirectory("")
+                    .then((status) => {
+                      setChartStatus(status);
+                      void api.appSettings().then(onSettings);
+                    })
+                    .catch(report);
+                }}
+              >
+                Clear
+              </button>
+            </span>
+          </div>
         </section>
 
         <section>

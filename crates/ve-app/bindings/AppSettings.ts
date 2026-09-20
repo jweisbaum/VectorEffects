@@ -67,4 +67,12 @@ auto_scale: boolean,
 /**
  * The MCP service (spec.md 8.8). Absent from older files: off.
  */
-mcp: McpSettings, };
+mcp: McpSettings, 
+/**
+ * Where the S-57 electronic charts live (spec.md 4.11). Empty means
+ * none is chosen, and *Display charts* has nothing to show.
+ *
+ * A view preference like the projection: it says what this person has
+ * on their disk to look at, and changes no project and no export.
+ */
+chart_directory: string, };

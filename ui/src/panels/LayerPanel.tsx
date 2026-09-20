@@ -5,7 +5,14 @@ import { api } from "../ipc";
 import type { DocumentTree } from "../generated/DocumentTree";
 import type { ProjectSummary } from "../generated/ProjectSummary";
 import type { ImageLayerView } from "../generated/ImageLayerView";
-import { pickGribToImport, pickImageToImport, pickZarrToImport } from "../project/dialogs";
+import type { GisLayerView } from "../generated/GisLayerView";
+import {
+  isGeoRaster,
+  pickGisToImport,
+  pickGribToImport,
+  pickImageToImport,
+  pickZarrToImport,
+} from "../project/dialogs";
 import { layerForSelection, layerToActivate } from "./activeLayer";
 import { CalendarIcon } from "./CalendarIcon";
 import { EyeIcon } from "./EyeIcon";
@@ -273,6 +280,20 @@ export default function LayerPanel({
     run(api.importImage(path, viewBounds?.() ?? null));
   };
 
+  /**
+   * Picks a GIS file and lays it under the field (spec.md 4.11).
+   *
+   * A georeferenced raster goes to the image import instead: a GeoTIFF is a
+   * picture, and the application already places one. The user chooses a
+   * file, not a kind — which of the two it is, is the file's own business.
+   */
+  const importGis = async () => {
+    setError(null);
+    const path = await pickGisToImport();
+    if (path === null) return;
+    run(isGeoRaster(path) ? api.importImage(path, viewBounds?.() ?? null) : api.importGis(path));
+  };
+
   const commitRename = (id: number, isLayer: boolean) => {
     const name = draft.trim();
     setRenaming(null);
@@ -512,6 +533,13 @@ export default function LayerPanel({
           + image
         </button>
         <button
+          className="import-grib"
+          title="Lay GIS data under the field: a shapefile, GeoJSON or KML, or a georeferenced raster. Display only — it makes no wind and reaches no export."
+          onClick={() => void importGis()}
+        >
+          + GIS
+        </button>
+        <button
           className="import-grib icon-button"
           title="Import past hours from the ERA5 and GlobCurrent archives as layers. This is the only action that reaches the network."
           aria-label="Import history"
@@ -681,6 +709,13 @@ export default function LayerPanel({
               )}
               {layer.source === "image" && <p className="muted layer-filter-note">Image thresholds use the displayed vector speed at each image position.</p>}
 
+              {layer.gis && (
+                <GisControls
+                  gis={layer.gis}
+                  onStyle={(style) => run(api.setGisStyle(layer.id, style))}
+                />
+              )}
+
               {layer.image && (
                 <ImageControls
                   image={layer.image}
@@ -790,6 +825,71 @@ export default function LayerPanel({
  * file's own georeference — offered only when the file has one, since a
  * hand-placed image has nothing to go back to.
  */
+/**
+ * What a GIS layer offers (spec.md 4.11): its colour, its line width and how
+ * strongly its areas are filled.
+ *
+ * Display only, so there is no speed filter and no step bar — it makes no
+ * field. What it says instead is what the file turned out to hold, which is
+ * the question a survey laid under the map actually raises: did it read, and
+ * how much is in it.
+ */
+function GisControls({
+  gis,
+  onStyle,
+}: {
+  gis: GisLayerView;
+  onStyle: (style: { colour?: string; widthPx?: number; fillOpacity?: number }) => void;
+}) {
+  if (!gis.loaded) {
+    return (
+      <div className="grib-info">
+        <span className="grib-missing" title={`${gis.path}\n${gis.error ?? ""}`}>
+          {gis.error ?? "The file could not be read."}
+        </span>
+      </div>
+    );
+  }
+  return (
+    <div className="grib-info">
+      <label className="layer-filter-row" title="Line and point colour.">
+        Colour
+        <input
+          type="color"
+          value={gis.colour}
+          onChange={(event) => onStyle({ colour: event.target.value })}
+        />
+      </label>
+      <label className="layer-filter-row" title="Line width, in screen pixels.">
+        Width
+        <input
+          type="range"
+          min={2}
+          max={60}
+          value={Math.round(gis.width_px * 10)}
+          onChange={(event) => onStyle({ widthPx: Number(event.target.value) / 10 })}
+        />
+      </label>
+      <label
+        className="layer-filter-row"
+        title="How strongly areas are filled. At nothing, only their outlines are drawn — which is what a boundary over a field usually wants."
+      >
+        Fill
+        <input
+          type="range"
+          min={0}
+          max={100}
+          value={Math.round(gis.fill_opacity * 100)}
+          onChange={(event) => onStyle({ fillOpacity: Number(event.target.value) / 100 })}
+        />
+      </label>
+      <span className="muted" title={gis.path}>
+        {gis.features.toLocaleString()} features · display only
+      </span>
+    </div>
+  );
+}
+
 function ImageControls({
   image,
   onOpacity,

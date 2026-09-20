@@ -639,6 +639,39 @@ void main() {
 `;
 
 /**
+ * A backdrop tile: a chart, a map tile, or a GIS layer (spec.md 4.11).
+ *
+ * The field's own vertex shader, because a backdrop is on exactly the same
+ * tile grid as the field and has to follow the projection the same way; only
+ * what is done with the texel differs. The texture is straight RGBA, drawn
+ * under everything, and nothing about it reaches an evaluation or an export.
+ */
+export const BACKDROP_FRAG = `#version 300 es
+precision highp float;
+in vec2 vUV;
+in float vHorizon;
+${PROJECTION}
+${EXACT_TILE}
+uniform vec4 uTileGeo;
+uniform sampler2D uTile;
+uniform float uOpacity;
+out vec4 fragColor;
+void main() {
+  // The far side of a globe (mode 15 up); always positive on a flat map.
+  if (vHorizon < 0.0) discard;
+  vec2 uv = vUV;
+  if (uExact == 1) {
+    vec2 exact = exactTileUV(uTileGeo);
+    if (exact.y > 10.0) discard;
+    uv = exact;
+  }
+  vec4 texel = texture(uTile, uv);
+  if (texel.a <= 0.0) discard;
+  fragColor = vec4(texel.rgb, texel.a * uOpacity);
+}
+`;
+
+/**
  * Direction glyphs, instanced.
  *
  * One draw call per visible tile. Stations use a globe-anchored lattice, with

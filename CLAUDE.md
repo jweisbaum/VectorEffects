@@ -46,11 +46,15 @@ stop and raise it rather than working around it.
    `'self'`-only. `npm run check:offline` enforces this statically in CI
    (source URLs, remote references in the built bundle, and CSP strength). A
    socket-level test over the packaged app arrives with M10.
-   **One exception, added on the user's instruction (M38):** the history
+   **Two exceptions, both added on the user's instruction.** The history
    import of spec §4.10 reads the ERA5 and GlobCurrent archives over HTTPS
-   when the user asks it to. It lives in `ve-zarr` and nothing else may reach
-   the network — the offline check allows those URLs in that crate alone. A
-   new fetch anywhere else is still the violation it always was.
+   when the user asks it to (M38); it lives in `ve-zarr`. The OpenStreetMap
+   background of spec §5.4 fetches raster tiles while, and only while, the
+   user has that box ticked; it lives in `ve-osm`. The offline check names
+   those two crates and those hosts and allows them nowhere else, so a new
+   fetch anywhere else is still the violation it always was. **The fetching
+   is done in Rust**: the webview's CSP stays `'self'`-only, which is why
+   the OSM tiles are resampled here rather than fetched by the page.
    **The invariant runs both ways** (M69): an *inbound* socket that drives the
    application is the same promise broken from the other side. `ve-app`'s
    optional `webdriver` feature compiles in a WebDriver endpoint on loopback
@@ -90,6 +94,13 @@ crates/
                pure-Rust codec crates, bitmaps. `icon` holds the bundled
                unstructured-grid definitions. `reader` is the writer's
                test-only verifier.
+  ve-chart/    Display-only map data (spec 4.11): the S-57 reader
+               (`s57`: the ISO 8211 container, the feature records, the
+               object catalogue), the GIS readers (`gis`: shapefile,
+               GeoJSON, KML/KMZ) and the `paint` that draws either into a
+               tile. Reaches no network and links no C library
+  ve-osm/      OpenStreetMap raster tiles (spec 5.4). **Fetches**, and is
+               one of the two crates allowed to — see invariant 5
   ve-app/      Tauri app: IPC commands, app state, background workers,
                custom URI scheme, autosave (`autosave`: a snapshot of unsaved
                work every 60 s or 50 edits, offered back on the start screen). `image` decodes and georeferences
@@ -154,6 +165,14 @@ cargo test -p ve-app --release --test stress -- --nocapture
                                  # open budget from spec.md 13
 cargo run -p ve-app --example make_samples -- assets/samples
                                  # regenerate the sample projects
+VE_TEST_ENC=~/Downloads/ENC_ROOT cargo test -p ve-chart --release \
+    --test enc -- --ignored --nocapture
+                                 # the S-57 reader against a real chart set
+VE_TEST_OSM=1 cargo test -p ve-osm --test live -- --ignored --nocapture
+                                 # the one test that fetches on purpose
+cargo run -p ve-chart --release --example enc_report -- ~/Downloads/ENC_ROOT
+                                 # what a chart set holds, by class: the
+                                 # tool the object catalogue was built with
 cargo test -p ve-grib --release --test resample_cost -- --nocapture
                                  # cost of putting a projected grid on the
                                  # project's lattice
@@ -535,6 +554,37 @@ components. The neighbour search is kept in the project because it costs half
 a second at 0.1° and depends only on the mesh and the grid — it is derived
 state, and `io::read_regrid` drops a set that no longer matches rather than
 trusting it.
+
+### Adding a backdrop, or touching the ones there are
+
+A backdrop (spec §4.11) is what the map draws *under* everything: the chart
+directory, the OpenStreetMap tiles, a GIS layer. All three are RGBA tiles of
+the application's *own* pyramid, painted in Rust and served by
+`protocol::serve_backdrop` under `backdrop/<kind>/<token>/…`, so the map
+draws them as plain textures through the geometry the field already uses
+(`bindTileGeometry`) and follows every projection for free.
+
+- **Nothing a backdrop reads is document data.** It reaches no scene, no
+  `FlatScene` hash, no render-cache key and no export. A backdrop that
+  needed a revision to be correct would be field data wearing a disguise.
+- **The token in the address is what makes it immutable.** It is derived
+  from the source — the chart directory's path, the document revision for a
+  GIS layer — because the tile is served `immutable` for a year. A backdrop
+  whose content can change under a fixed token is a stale-tile bug.
+- **Only OpenStreetMap replaces the basemap** (`replacesBase`). A chart
+  covers the coast it was published for; hiding the world's land for one
+  leaves black around it. That is also why chart land is the basemap's own
+  land colour, to the byte — `chart_land_is_the_basemaps_own_land` holds it
+  there, and without it every cell's rectangle shows across the continent.
+- **A tile with nothing on it answers 204, not 404.** Most of a viewport is
+  outside a chart directory; a refusal per tile is a console full of errors
+  for a map that is working.
+- **The S-57 object catalogue was read off real cells and not remembered.**
+  `cargo run -p ve-chart --release --example enc_report -- <dir>` is what
+  reads it off: it prints each class with its geometry and attributes, so a
+  wrong code shows up as an area class full of depths called something that
+  is not DEPARE. A class that cannot be identified that way stays out —
+  guessing draws the wrong thing in the right place.
 
 ### Adding an image layer format
 
@@ -921,6 +971,17 @@ to the hash input is a correctness bug that shows up as stale frames.
 - `visibleTiles` drops a zoom level rather than truncating its list when the
   ideal level exceeds the budget: a retina viewport at mid zoom wants ~286
   tiles, and an unpainted corner is a far worse artefact than soft pixels.
+- **The driver runs on its own dev port.** `VE_DEV_PORT=5199 node
+  tools/webdriver/...` moves Vite *and* the Tauri config's `devUrl`
+  together, so a driver run starts beside a `tauri dev` somebody else is
+  already using rather than failing on the port or killing what holds it.
+  Check `lsof -nP -iTCP:5173 -sTCP:LISTEN` before assuming a stuck port is
+  yours: the person whose machine this is very likely has their own running.
+- **A command invoked through the driver moves the backend and not the
+  interface.** `import_gis` through a raw `invoke` adds the layer and leaves
+  the map never asking for its tiles — it looks exactly like a rendering
+  bug. Emit `document://changed` after it, which is the path an MCP write
+  already takes, or drive the application's own action.
 - `VE_CAPTURE=1 npm run dev` runs the development capture suite: it renders a
   few deliberate scenarios, writes each to the log directory, and logs the field
   values sampled at the same points. That makes "do the glyphs point the right

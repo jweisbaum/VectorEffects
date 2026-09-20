@@ -29,7 +29,11 @@ CONF=crates/ve-app/tauri.conf.json
 # nothing at all.
 # `.invalid` is reserved by RFC 2606 and never resolves, which is what makes it
 # the right host for a test that must not reach anything.
-ALLOW='schema\.tauri\.app|//localhost:|\.localhost|//127\.0\.0\.1|www\.w3\.org/2000/svg|\.invalid'
+# `opengis.net` is an XML namespace, exactly as `w3.org/2000/svg` is: a KML
+# document declares it, the parser compares it as a string, and nothing ever
+# fetches it. The KML reader would not recognise a namespaced element without
+# it.
+ALLOW='schema\.tauri\.app|//localhost:|\.localhost|//127\.0\.0\.1|www\.w3\.org/2000/svg|www\.opengis\.net/kml|\.invalid'
 # Pure comment lines. A URL in a comment fetches nothing, and the generated
 # ts-rs bindings carry a provenance URL in their header.
 COMMENT=':[0-9]+:[[:space:]]*(//|\*|/\*)'
@@ -46,19 +50,30 @@ hits=$(grep -rnE 'https?://' ui/src ui/index.html 2>/dev/null \
   | grep -vE "$COMMENT" | grep -vE "$ALLOW" || true)
 [ -n "$hits" ] && report "absolute URL in frontend source" "$hits"
 
-# `ve-zarr` is the one crate allowed to name a remote host: the history import
-# of spec 4.10 reads the ERA5 and GlobCurrent archives, and only when the user
-# asks it to (invariant 5). Everywhere else a URL in Rust is still a finding,
-# so a fetch that creeps into another crate is caught.
-hits=$(find crates -name '*.rs' -not -path 'crates/ve-zarr/*' -exec grep -nHE 'https?://' {} + 2>/dev/null \
+# Two crates are allowed to name a remote host, and only two. `ve-zarr` reads
+# the ERA5 and GlobCurrent archives for the history import of spec 4.10;
+# `ve-osm` fetches OpenStreetMap raster tiles for the map background of spec
+# 5.4. Both only when the user asks: a history import is an action, and the
+# tiles are fetched only while the view checkbox is on. Everywhere else a URL
+# in Rust is still a finding, so a fetch that creeps into another crate is
+# caught — which is the whole point of naming the exceptions here.
+hits=$(find crates -name '*.rs' -not -path 'crates/ve-zarr/*' -not -path 'crates/ve-osm/*' \
+  -exec grep -nHE 'https?://' {} + 2>/dev/null \
   | grep -vE "$COMMENT" | grep -vE "$ALLOW" || true)
 [ -n "$hits" ] && report "absolute URL in rust source" "$hits"
 
-# And in that crate, only the two archives it exists to read.
+# And in those crates, only the hosts they exist to read.
 ARCHIVES='storage\.googleapis\.com/gcp-public-data-arco-era5|s3\.waw3-1\.cloudferro\.com/mdl-arco-time'
 hits=$(find crates/ve-zarr -name '*.rs' -exec grep -nHE 'https?://' {} + 2>/dev/null \
   | grep -vE "$COMMENT" | grep -vE "$ALLOW" | grep -vE "$ARCHIVES" || true)
 [ -n "$hits" ] && report "unexpected remote host in ve-zarr" "$hits"
+
+# `github.com` appears in the User-Agent the tile policy requires, which is
+# sent to the tile server and fetched from nowhere.
+TILES='tile\.openstreetmap\.org|github\.com/jweisbaum/VectorEffects'
+hits=$(find crates/ve-osm -name '*.rs' -exec grep -nHE 'https?://' {} + 2>/dev/null \
+  | grep -vE "$COMMENT" | grep -vE "$ALLOW" | grep -vE "$TILES" || true)
+[ -n "$hits" ] && report "unexpected remote host in ve-osm" "$hits"
 
 hits=$(grep -nE 'https?://' "$CONF" 2>/dev/null | grep -vE "$ALLOW" || true)
 [ -n "$hits" ] && report "absolute URL in tauri.conf.json" "$hits"

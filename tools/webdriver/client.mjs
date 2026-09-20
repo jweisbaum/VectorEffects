@@ -104,12 +104,28 @@ export async function launch({
   // dev:webdriver` is a wrapper around the Tauri CLI, which starts Vite as
   // its `beforeDevCommand` and then cargo: signalling only the wrapper leaves
   // Vite holding port 5173 and the next run cannot start.
-  const child = spawn("npm", ["run", "dev:webdriver"], {
-    cwd,
-    stdio: ["ignore", "pipe", "pipe"],
-    detached: true,
-    env: { ...process.env, FORCE_COLOR: "0", ...env },
-  });
+  // A dev server may already be running — the person whose machine this is
+  // very likely has one — so the driver's own runs on a port of its own,
+  // named to Vite and to the Tauri config together. Nothing is killed to
+  // make room, which is the rule that matters here (see the port note in
+  // CLAUDE.md).
+  const devPort = process.env.VE_DEV_PORT ?? "5173";
+  const child = spawn(
+    "npm",
+    [
+      "run",
+      "dev:webdriver",
+      "--",
+      "--config",
+      JSON.stringify({ build: { devUrl: `http://localhost:${devPort}` } }),
+    ],
+    {
+      cwd,
+      stdio: ["ignore", "pipe", "pipe"],
+      detached: true,
+      env: { ...process.env, FORCE_COLOR: "0", VE_DEV_PORT: devPort, ...env },
+    },
+  );
 
   let port = null;
   const waiters = [];

@@ -62,6 +62,7 @@ import type { Autosave } from "./generated/Autosave";
 import type { MeasurementKind } from "./generated/MeasurementKind";
 import type { MeasurementView } from "./generated/MeasurementView";
 import type { NewMeasurement } from "./generated/NewMeasurement";
+import type { ChartStatus } from "./generated/ChartStatus";
 import type { ProjectSummary } from "./generated/ProjectSummary";
 import type { RecentProject } from "./generated/RecentProject";
 import type { SelectionTransform } from "./generated/SelectionTransform";
@@ -108,6 +109,8 @@ const LONG_RUNNING: Readonly<Record<string, string>> = {
   new_project_from_grib: "Opening GRIB",
   new_project_from_zarr: "Opening Zarr",
   import_image: "Importing image",
+  import_gis: "Importing GIS data",
+  set_chart_directory: "Reading charts",
   open_project: "Opening project",
   recover_autosave: "Recovering project",
   save_project: "Saving",
@@ -466,6 +469,24 @@ export const api = {
   addLayer: (name: string) => call<ProjectSummary>("add_layer", { name }),
   /** Imports a GRIB2 file as one layer per field kind it holds (spec 4.8). */
   importGrib: (path: string) => call<ProjectSummary>("import_grib", { path }),
+  /** What the S-57 chart directory holds (spec.md 4.11). */
+  chartStatus: () => call<ChartStatus>("chart_status"),
+  /** Chooses the S-57 chart directory, and says what was found in it. */
+  setChartDirectory: (directory: string) => call<ChartStatus>("set_chart_directory", { directory }),
+  /** Imports a GIS vector file as a display-only layer (spec.md 4.11). */
+  importGis: (path: string) => call<ProjectSummary>("import_gis", { path }),
+  /** Changes how a GIS layer is drawn. */
+  setGisStyle: (
+    layer: number,
+    style: { colour?: string; widthPx?: number; fillOpacity?: number },
+  ) =>
+    call<ProjectSummary>("set_gis_style", {
+      layer,
+      colour: style.colour ?? null,
+      widthPx: style.widthPx ?? null,
+      fillOpacity: style.fillOpacity ?? null,
+    }),
+
   /** Imports a local routing Zarr directory as wind and current layers. */
   importZarr: (path: string) => call<ProjectSummary>("import_zarr", { path }),
   /**

@@ -633,6 +633,26 @@ pub enum LayerSource {
         #[serde(with = "crate::canonical::ratio_field")]
         opacity: f64,
     },
+    /// Vector GIS data, drawn under the field (spec.md 4.11).
+    ///
+    /// **Display only**, exactly as [`Self::Image`] is: a shapefile, a
+    /// GeoJSON, a KML. It makes no field, is never evaluated and never
+    /// exported — it is a survey, a boundary or a set of marks put under the
+    /// map to paint against. The project keeps the file's path and how the
+    /// user asked for it to be drawn, never its geometry (invariant 2).
+    Gis {
+        /// The file, as the user chose it. Not copied into the project.
+        path: PathBuf,
+        /// Line and point colour, as sRGB `#rrggbb`.
+        colour: String,
+        /// Line width in screen pixels.
+        #[serde(with = "crate::canonical::ratio_field")]
+        width_px: f64,
+        /// How strongly areas are filled, `0.0` to `1.0`. Zero draws the
+        /// outline alone, which is what a boundary usually wants.
+        #[serde(with = "crate::canonical::ratio_field")]
+        fill_opacity: f64,
+    },
     /// A field imported from a history archive (spec.md 4.10, M38).
     ///
     /// **A GRIB layer that remembers where it came from.** The hours the user
@@ -668,6 +688,7 @@ impl LayerSource {
             Self::Painted => None,
             Self::Grib { path, .. }
             | Self::Image { path, .. }
+            | Self::Gis { path, .. }
             | Self::Zarr { path, .. }
             | Self::ZarrFile { path, .. } => Some(path),
         }
@@ -683,8 +704,18 @@ impl LayerSource {
             Self::Grib { path, field }
             | Self::Zarr { path, field, .. }
             | Self::ZarrFile { path, field } => Some((path, *field)),
-            Self::Painted | Self::Image { .. } => None,
+            Self::Painted | Self::Image { .. } | Self::Gis { .. } => None,
         }
+    }
+
+    /// Whether this layer is drawn rather than evaluated (spec.md 4.9, 4.11).
+    ///
+    /// A picture and a GIS file are backdrops: they reach no scene, no tile
+    /// of field, no render-cache key and no export. Everything that asks
+    /// "does this layer contribute a vector" asks this rather than matching
+    /// on the variant and forgetting one of them.
+    pub fn is_display_only(&self) -> bool {
+        matches!(self, Self::Image { .. } | Self::Gis { .. })
     }
 }
 

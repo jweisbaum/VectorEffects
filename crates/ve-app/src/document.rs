@@ -98,6 +98,8 @@ pub struct LayerNode {
     pub grib: Option<GribLayerInfo>,
     /// The picture beneath everything, for an image layer (spec.md 4.9, M18).
     pub image: Option<crate::image::ImageLayerView>,
+    /// The vector file beneath everything, for a GIS layer (spec.md 4.11).
+    pub gis: Option<GisLayerView>,
     /// What the layer is (M29): `"painted"`, `"raster"` for an imported GRIB,
     /// `"image"` for a picture, `"zarr"` for hours fetched from a history
     /// archive (spec.md 4.10, M38). Says which controls the panel offers.
@@ -109,6 +111,67 @@ pub struct LayerNode {
     /// Which field the layer is part of — `"wind"` or `"current"`: its
     /// file's for a raster layer, none that matters for an image (M29).
     pub parameter: String,
+}
+
+/// Everything the frontend needs to draw one GIS layer.
+///
+/// The file is read here, which is what makes the panel able to say "1,284
+/// features" or say why it cannot. It is held in the backdrop cache, so the
+/// panel refreshing does not re-read a shapefile each time.
+fn gis_view(
+    layer: ve_core::Id,
+    source: &ve_core::document::LayerSource,
+    backdrops: &crate::charts::Backdrops,
+) -> Option<GisLayerView> {
+    let ve_core::document::LayerSource::Gis {
+        path,
+        colour,
+        width_px,
+        fill_opacity,
+    } = source
+    else {
+        return None;
+    };
+    let read = backdrops.vectors(path);
+    Some(GisLayerView {
+        layer: layer.raw(),
+        path: path.to_string_lossy().into_owned(),
+        colour: colour.clone(),
+        width_px: *width_px,
+        fill_opacity: *fill_opacity,
+        loaded: read.is_ok(),
+        features: read.as_ref().map_or(0, |v| v.features.len() as u32),
+        bounds: read
+            .as_ref()
+            .ok()
+            .map(|v| vec![v.bounds.west, v.bounds.south, v.bounds.east, v.bounds.north]),
+        error: read.as_ref().err().map(ToString::to_string),
+    })
+}
+
+/// What the panel and the map need to know about a GIS layer (spec.md 4.11).
+#[derive(Debug, Clone, Serialize, JsonSchema, TS)]
+#[ts(export, export_to = "GisLayerView.ts")]
+pub struct GisLayerView {
+    /// The layer this belongs to.
+    pub layer: u64,
+    /// The file, as the user chose it.
+    pub path: String,
+    /// Line and point colour, `#rrggbb`.
+    pub colour: String,
+    /// Line width in screen pixels.
+    pub width_px: f64,
+    /// How strongly areas are filled, `0.0` to `1.0`.
+    pub fill_opacity: f64,
+    /// Whether the file could be read. False leaves the layer present and
+    /// empty, exactly as a missing GRIB does.
+    pub loaded: bool,
+    /// How many features it holds.
+    pub features: u32,
+    /// What it covers: west, south, east, north. Absent when unread.
+    pub bounds: Option<Vec<f64>>,
+    /// Why it could not be read, where it could not.
+    pub error: Option<String>,
 }
 
 /// A layer's speed threshold controls, in metres per second.
@@ -365,7 +428,7 @@ pub(crate) fn unit_name(unit: ve_core::schema::Unit) -> &'static str {
     }
 }
 
-fn tree_of(project: &Project, step: u32) -> DocumentTree {
+fn tree_of(project: &Project, step: u32, backdrops: &crate::charts::Backdrops) -> DocumentTree {
     DocumentTree {
         layers: project
             .layers
@@ -393,10 +456,12 @@ fn tree_of(project: &Project, step: u32) -> DocumentTree {
                     // the panel names the archive rather than the file.
                     ve_core::document::LayerSource::Zarr { .. }
                     | ve_core::document::LayerSource::ZarrFile { .. } => "zarr",
+                    ve_core::document::LayerSource::Gis { .. } => "gis",
                 }
                 .to_owned(),
                 parameter: crate::projects::kind_name(layer.parameter()).to_owned(),
                 image: crate::image::view(layer.id, &layer.source),
+                gis: gis_view(layer.id, &layer.source, backdrops),
                 // Every layer that reads a raster file gets this view — an
                 // imported forecast and a fetched history alike, which is
                 // what makes the panel offer a history layer the speed
@@ -474,7 +539,11 @@ pub fn document_tree(state: tauri::State<'_, AppState>, step: u32) -> Result<Doc
 /// Implementation of [`document_tree`], callable without a Tauri handle.
 pub fn tree(state: &AppState, step: u32) -> Result<DocumentTree> {
     with_session(state, |session| {
-        Ok(tree_of(&session.require_open()?.project, step))
+        Ok(tree_of(
+            &session.require_open()?.project,
+            step,
+            &state.backdrops,
+        ))
     })
 }
 

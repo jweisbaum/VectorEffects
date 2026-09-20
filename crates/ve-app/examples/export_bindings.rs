@@ -12,8 +12,10 @@ use ve_app::animation::{
     InterpolationView, KeyframeView, ObjectTracks, ShrinkImpact, TrackSamples, TrackSeries,
     TrackView,
 };
+use ve_app::charts::ChartStatus;
 use ve_app::commands::{AppInfo, EvaluatorSelection, FieldSample};
 use ve_app::create::{Gesture, NewObject, PathPoint, Tool, ToolOption};
+use ve_app::document::GisLayerView;
 use ve_app::document::{
     ClipboardState, DocumentTree, GribLayerInfo, HistoryEntry, HistoryView, LayerNode, ObjectNode,
     PropertyValue, PropertyView,
@@ -131,6 +133,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ExportProgress::export_all(&cfg)?;
     HistoryProgress::export_all(&cfg)?;
     OpenProgress::export_all(&cfg)?;
+    ChartStatus::export_all(&cfg)?;
+    GisLayerView::export_all(&cfg)?;
     ExportEstimate::export_all(&cfg)?;
     ExportZarrRequest::export_all(&cfg)?;
     ExportZarrResult::export_all(&cfg)?;

@@ -31,6 +31,15 @@ pub struct AppPaths {
 }
 
 impl AppPaths {
+    /// Where OpenStreetMap tiles are kept (spec.md 5.4).
+    ///
+    /// Under the render cache, because that is what it is: evictable, never
+    /// project data, and safe to delete when the application is closed —
+    /// deleting it costs the fetching again and nothing else.
+    pub fn osm_cache_dir(&self) -> PathBuf {
+        self.cache_dir.join("osm")
+    }
+
     /// Resolves the platform-appropriate directories, creating them if needed.
     pub fn resolve() -> Result<Self> {
         // Automated app runs must never modify the user's settings or recovery files.

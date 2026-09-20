@@ -266,6 +266,14 @@ enum Served {
         layer: u64,
         max_edge: u32,
     },
+    /// A backdrop tile: a chart, the map tiles, or a GIS layer (spec.md
+    /// 4.11). The token changes when the source does, which is what keeps
+    /// an immutable address honest.
+    Backdrop {
+        backdrop: crate::charts::Backdrop,
+        token: u64,
+        id: tile::TileId,
+    },
 }
 
 /// Extracts `<revision>/<step>/<z>/<x>/<y>`, or an image address, from a
@@ -282,6 +290,30 @@ fn parse(path: &str) -> Option<Served> {
     if first == "without" || first == "only" {
         scope = TileScope::named(first, parts.next()?.parse().ok()?)?;
         first = parts.next()?;
+    }
+    // A backdrop: the chart directory, the map tiles, or one GIS layer
+    // (spec.md 4.11). Addressed by a token that changes when the source
+    // does, so the answer can be served `immutable` like every other tile.
+    if first == "backdrop" {
+        let kind = parts.next()?;
+        let token: u64 = parts.next()?.parse().ok()?;
+        let backdrop = match kind {
+            "chart" => crate::charts::Backdrop::Chart,
+            "osm" => crate::charts::Backdrop::Osm,
+            "gis" => crate::charts::Backdrop::Gis(parts.next()?.parse().ok()?),
+            _ => return None,
+        };
+        let z: u32 = parts.next()?.parse().ok()?;
+        let x: u32 = parts.next()?.parse().ok()?;
+        let y: u32 = parts.next()?.split('.').next()?.parse().ok()?;
+        if parts.next().is_some() {
+            return None;
+        }
+        return Some(Served::Backdrop {
+            backdrop,
+            token,
+            id: tile::TileId::new(z, x, y).ok()?,
+        });
     }
     if first == "image" {
         let token: u64 = parts.next()?.parse().ok()?;
@@ -343,6 +375,7 @@ pub fn handle(app: &tauri::AppHandle, request: &Request<Vec<u8>>) -> Response<Ve
             layer,
             max_edge,
         } => return serve_image(app, token, layer, max_edge),
+        Served::Backdrop { backdrop, id, .. } => return serve_backdrop(app, backdrop, id),
         Served::Tile {
             revision,
             step,
@@ -391,6 +424,30 @@ struct TileRequest {
     step: u32,
     scope: TileScope,
     id: tile::TileId,
+}
+
+/// Serves one backdrop tile, painted here and encoded as a PNG.
+///
+/// A transparent answer rather than a 404 where there is nothing to draw:
+/// the map asks for every tile of the viewport, most of which a chart
+/// directory does not cover, and a refusal per tile is a console full of
+/// errors for a map that is working correctly.
+fn serve_backdrop(
+    app: &tauri::AppHandle,
+    backdrop: crate::charts::Backdrop,
+    id: tile::TileId,
+) -> Response<Vec<u8>> {
+    let state = app.state::<AppState>();
+    let Some(rgba) = crate::charts::tile(&state, backdrop, id) else {
+        return typed(204, "image/png", Vec::new());
+    };
+    match crate::image::encode_png(&rgba, tile::TILE_SIZE, tile::TILE_SIZE) {
+        Ok(bytes) => typed(200, "image/png", bytes),
+        Err(err) => {
+            tracing::warn!(%err, "could not encode a backdrop tile");
+            respond(500, Vec::new())
+        }
+    }
 }
 
 /// Serves an image layer's picture, decoded and downsampled here.

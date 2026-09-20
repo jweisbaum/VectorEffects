@@ -77,6 +77,8 @@ const held = vi.hoisted(() => {
     project,
     chosen: [] as Array<[string, string]>,
     units: [] as Array<[string, string]>,
+    charts: { directory: "", cells: 0, bounds: null, error: null, token: 1 },
+    chartDirectories: [] as string[],
   };
 });
 
@@ -94,6 +96,14 @@ vi.mock("../ipc", () => ({
       held.units.push([distance, speed]);
       return Promise.resolve({ ...settings, distance_unit: distance, speed_unit: speed });
     },
+    // The dialog asks what the chart directory holds on mount (spec 4.11).
+    chartStatus: () => Promise.resolve(held.charts),
+    setChartDirectory: (directory: string) => {
+      held.chartDirectories.push(directory);
+      held.charts = { ...held.charts, directory, cells: directory ? 144 : 0 };
+      return Promise.resolve(held.charts);
+    },
+    appSettings: () => Promise.resolve(settings),
     macroLibrary: () => Promise.resolve(held.library),
     deleteMacros: (id: string | null) => {
       held.deleted.push(id);
@@ -118,6 +128,7 @@ const settings: AppSettings = {
   default_wind_scale_knots: 60,
   default_current_scale_knots: 6,
   macro_directory: "/macros",
+  chart_directory: "",
   projection: "equirectangular",
   auto_scale: false,
   mcp: { enabled: false, port: 47391, token: "" },

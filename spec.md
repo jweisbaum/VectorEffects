@@ -1097,9 +1097,71 @@ application (§3.6). The dialog says so on both labels: the control has no
 timezone of its own, and reading it as local time would shift every fetched
 hour silently.
 
-**This is the one path that reaches the network** (invariant 5). It runs when
-the button is pressed and at no other moment: no timer, no startup check, no
-refresh. Everything it needs afterwards is on disk.
+**This is the one path that reaches the network for *data*** (invariant 5).
+It runs when the button is pressed and at no other moment: no timer, no
+startup check, no refresh. Everything it needs afterwards is on disk. The
+only other thing that ever fetches is the OpenStreetMap background of §5.4,
+which is a picture and not data, and is fetched only while it is switched on.
+
+### 4.11 Backdrops: charts and GIS data
+
+What the map draws *under* everything. Three sources, one mechanism: an S-57
+chart directory, OpenStreetMap tiles (§5.4) and a GIS layer's vector file are
+all painted in Rust onto the application's own tile grid and drawn by the map
+as plain textures beneath the field. The map therefore follows every
+projection it already has — flat, globe, or a fixed one's plane mesh —
+without knowing what S-57 or Web Mercator are.
+
+**None of it is field data.** A backdrop reaches no scene, no `FlatScene`
+hash, no render-cache key and no exported file. Deleting every one of these
+files changes nothing about what a project *is* (invariants 1 and 2), exactly
+as for an image layer (§4.9).
+
+**Electronic charts (S-57).** The chart directory is chosen in Settings and
+turned on with **Charts** in the view controls. It is *not* a layer: nothing
+appears in the layer panel, because a chart is how the map is being looked at
+and not part of the document — the same standing as the graticule. The
+directory is indexed from its `CATALOG.031`, which names every cell and gives
+its box; a directory without one is scanned for `.000` files and each is
+opened once for its box. A cell's name states its usage band, 1 (overview) to
+6 (berthing), and a tile draws the bands that suit its zoom, coarse first, so
+a harbour plan paints over the coastal chart it sits inside. **A set with no
+band that coarse still draws**: a harbour pack begins at band 4, and zoomed
+out it shows its harbour charts rather than an empty sea.
+
+What is read is the base edition, the `.000` file. **Update files (`.001` and
+up) are not applied**, so a cell is exactly as its publisher first issued it;
+the Settings panel says so. What is drawn is a simplified chart, not S-52:
+depth areas shaded at 5 m and 20 m, depth contours, the coastline, land,
+shoreline construction, and a mark for every sounding, aid to navigation,
+wreck, rock and obstruction, with restricted and caution areas outlined. A
+feature is dropped past the scale its own `SCAMIN` gives it. Chart land is
+drawn in the **basemap's own land colour**, to the byte: a chart covers the
+stretch of coast it was published for, and a land fill of its own drew every
+cell's rectangle across the continent behind it.
+
+The object catalogue in `ve-chart` holds only the classes that real cells
+identify beyond doubt — `DEPARE` is the area class carrying a depth range,
+`SOUNDG` the only one whose geometry is three-dimensional. **A class that
+could not be identified that way is left out**, because a guessed code draws
+the wrong thing in the right place, which is the worst failure a chart can
+have. An unlisted class keeps its number (`OBJL_137`) and is not drawn.
+
+**GIS layers.** *Import GIS* in the layer panel reads a shapefile (`.shp`
+with its `.dbf` and `.prj`), GeoJSON, KML or KMZ, and adds a display-only
+layer — a real layer, with an eye, a name and a place in the stack, but no
+field, no speed filter and no step bar. A georeferenced raster chosen in the
+same dialog is routed to the image import instead (§4.9): a GeoTIFF is a
+picture, and the application already places one. The project stores the
+file's path and how the user asked for it to be drawn — colour, line width,
+fill opacity — and never its geometry, which is read again on open.
+
+**A projected coordinate system is refused by name**, the rule §4.9 already
+follows for images: metres read as degrees put a coastline somewhere
+plausible and entirely wrong. A shapefile's `.prj` is read for it; a GeoJSON
+carrying the withdrawn `crs` member is checked against it; and a file with
+nothing to declare is caught by its own extent, since metres do not fit on
+the earth.
 
 ---
 
@@ -1388,7 +1450,38 @@ kind. The readout reports the composite: the kind that wins the cell, or
 *active layer's* kind, since that is what a stroke in it will paint, and a
 gesture's preview draws that kind's glyph.
 
-### 5.4 Stale-tile behaviour
+### 5.4 OpenStreetMap background
+
+**OpenStreetMap** in the view controls replaces the built-in basemap with
+OpenStreetMap's own raster tiles. Like the charts it is not a layer: nothing
+appears in the layer panel. Unlike the charts it stands *in place of* the
+basemap rather than over it — it is a map of the whole world, and drawing the
+application's own land over it would be two coastlines.
+
+**This is the second and last exception to invariant 5**, added on the user's
+instruction, and it is narrower than the history import's: tiles are fetched
+only while the box is on, by one crate (`ve-osm`), from OpenStreetMap's tile
+servers and nowhere else. `tools/check-offline.sh` names that crate and those
+hosts and refuses a URL anywhere else, so a fetch that creeps into another
+crate is still the finding it always was. **The webview's CSP stays
+`'self'`-only**: the fetching is done in Rust, not in the page.
+
+The tile usage policy is what shapes the rest. A real User-Agent naming the
+application and where to find it; tiles kept on disk for a week under the
+render cache, so a pan does not ask twice and deleting the cache costs only
+the fetching again; and no bulk download — the map asks for the tiles it is
+showing and nothing beyond them. A tile the server will not give is
+remembered as absent rather than asked for again at every frame.
+
+Tiles are Web Mercator and the application's are a lat/lon lattice, so they
+are resampled in Rust onto the application's own grid, at the source zoom
+whose tiles are about as fine as the tile being drawn. The map then draws
+them as ordinary textures — which is what lets OpenStreetMap appear on the
+globe and under every other projection, rather than on the flat map alone.
+**Attribution is required while they are drawn**: *© OpenStreetMap
+contributors*.
+
+### 5.5 Stale-tile behaviour
 
 While a frame is re-rendering, previously-rendered tiles remain on screen,
 dimmed slightly, so pan and zoom never blank out. A small activity indicator
@@ -1397,7 +1490,7 @@ of the status bar's hint line (M27; it sat in the title bar among the view
 controls before, where a count that comes and goes on every edit pulled the
 eye).
 
-### 5.5 Map chrome
+### 5.6 Map chrome
 
 Everything drawn over the map — the active tool's options, the colour legend,
 the cursor readout, selection handles, gesture previews — obeys three rules.
@@ -1426,7 +1519,7 @@ the timeline's to say. The controls are rendered by the map through a portal,
 so the tool, the glyphs, the graticule and the two boxes stay the map's state.
 
 Everything drawn over the map can be put away, for the same reason the panels
-can (§5.5): what is over the map is how one person is looking at it, not a
+can (§5.6): what is over the map is how one person is looking at it, not a
 fact about the document, so none of it is in the project or the settings file.
 **Hiding the readout stops it sampling**, rather than only hiding the answer —
 it costs a field evaluation at every pointer report. The eyedropper's
@@ -1714,11 +1807,11 @@ built differently. A new tool gets them all, and the checklist below is what
 
 | Inherited | Rule | Where |
 |---|---|---|
-| Option bar | Spans the map view and wraps within it. A tool's options grow with the tool, and a bar that sizes to its contents puts the last ones off screen where they cannot be reached. Nothing else may occupy the map's top edge. | §5.5 |
+| Option bar | Spans the map view and wraps within it. A tool's options grow with the tool, and a bar that sizes to its contents puts the last ones off screen where they cannot be reached. Nothing else may occupy the map's top edge. | §5.6 |
 | Sizes in px | A size given in px freezes the active projection in `stamp_space` and one in km selects `geodesic`, for **every** tool with a size. px means a shape on the map, at any latitude and zoom; km means one on the ground. One vocabulary, one property — and one control: the unit, never the space beside it. | §3.5 |
 | Gesture preview | Every gesture previews the field it will paint — speed colour and direction glyphs, not an outline — and the preview is held after release until the new revision's tiles are drawn. A tool that *operates* on the field rather than adding one is previewed by applying the operation to the map, live, and that too is held until the commit lands. | §6.1 |
 | Hover indicator | Where a tool has one, it is the exact footprint a click would produce, in the same colour and with the same glyph as the gesture preview. | §6.1 |
-| Chrome | Handles, markers and previews are drawn in the same frame as the map, and never overlap each other. | §5.5 |
+| Chrome | Handles, markers and previews are drawn in the same frame as the map, and never overlap each other. | §5.6 |
 | Position options | Every `LonLat` option is placeable by pointing: on the tool while setting it up, and on an existing object through the inspector. Typing coordinates is the alternative, never the only way. | §6.1 |
 | Eyedropper | A tool that paints a *single* vector can take that vector from the map: arm it, click, and the speed and direction come from the field at that point. Offered exactly where the two properties it writes are both live — never in a gradient mode, which has two of each, and never where a bearing is an offset rather than a direction. | §6.1 |
 | Direction modes | `Constant`, `TowardPoint` and `AwayFromPoint` mean the same thing for every tool that has a `target`, and are the same property with the same variant indices. | §6.2 |

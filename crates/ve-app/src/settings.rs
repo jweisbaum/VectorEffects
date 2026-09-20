@@ -531,6 +531,13 @@ pub struct AppSettings {
     /// The MCP service (spec.md 8.8). Absent from older files: off.
     #[serde(default)]
     pub mcp: McpSettings,
+    /// Where the S-57 electronic charts live (spec.md 4.11). Empty means
+    /// none is chosen, and *Display charts* has nothing to show.
+    ///
+    /// A view preference like the projection: it says what this person has
+    /// on their disk to look at, and changes no project and no export.
+    #[serde(default)]
+    pub chart_directory: String,
 }
 
 /// The map projections the view offers, in the order the menu lists them.
@@ -604,6 +611,7 @@ impl Default for AppSettings {
             default_wind_scale_knots: 60.0,
             default_current_scale_knots: 6.0,
             macro_directory: String::new(),
+            chart_directory: String::new(),
             projection: PROJECTIONS[0].to_owned(),
             auto_scale: false,
             mcp: McpSettings::default(),
@@ -1051,6 +1059,42 @@ pub fn macro_directory_set(state: &AppState, directory: String) -> Result<AppSet
         session.save_settings(&file)?;
         Ok(session.settings.clone())
     })
+}
+
+/// Sets where the S-57 charts live, and says what was found there.
+///
+/// The directory is indexed straight away rather than at the first tile, so
+/// the dialog can say "144 cells" or say what is wrong with the choice — a
+/// directory that holds no chart is the most likely mistake, and finding
+/// out at the first tile means finding out as an empty map.
+#[tauri::command(async)]
+pub fn set_chart_directory(
+    state: tauri::State<'_, AppState>,
+    directory: String,
+) -> Result<crate::charts::ChartStatus> {
+    chart_directory_set(&state, directory)
+}
+
+/// Implementation of [`set_chart_directory`].
+pub fn chart_directory_set(
+    state: &AppState,
+    directory: String,
+) -> Result<crate::charts::ChartStatus> {
+    let file = state.paths.settings_file();
+    let directory = directory.trim().to_owned();
+    with_session(state, |session| {
+        session.settings.chart_directory = directory.clone();
+        session.save_settings(&file)?;
+        Ok(())
+    })?;
+    Ok(state.backdrops.chart_status(&directory))
+}
+
+/// What the chart directory currently holds.
+#[tauri::command(async)]
+pub fn chart_status(state: tauri::State<'_, AppState>) -> Result<crate::charts::ChartStatus> {
+    let directory = state.chart_directory();
+    Ok(state.backdrops.chart_status(&directory))
 }
 
 #[cfg(test)]

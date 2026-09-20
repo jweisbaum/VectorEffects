@@ -1,5 +1,58 @@
 # VectorEffects — Implementation Plan
 
+**2026-09-20 (evening): Charts, OpenStreetMap and GIS data, all under the
+field.** Three features asked for together, and they turned out to be one
+mechanism: whatever is drawn *under* the map is painted in Rust onto the
+application's own tile grid and drawn as a plain texture, so it follows every
+projection — flat, globe, plane mesh — through the geometry the field tiles
+already use. Spec §4.11 and §5.4.
+
+**Charts.** S-57 is read by a new `ve-chart`: the ISO 8211 container, the
+vector and feature records, and the edge walk that turns an area's edges into
+rings. GDAL was not an option (a C library; invariant 5 and the
+three-platform build), so it is written here. **The object catalogue was read
+off the user's own 144-cell NOAA set rather than remembered** — my memory of
+the numbering was wrong in several places, and the way to find out was
+`examples/enc_report.rs`, which prints each class with its geometry and
+attributes: DEPARE is the area class carrying a depth range, SOUNDG the only
+one whose geometry is 3-D, SBDARE is 121 and SLCONS 122 and not the other way
+round. A class that could not be identified that way is **left out**: a
+guessed code draws the wrong thing in the right place. All 144 cells read,
+188,805 features, every one inside the box its catalogue gives it. What is
+drawn is a simplified chart and not S-52 — depths, contours, coast, aids,
+hazards, restricted areas — over the base editions only; updates are not
+applied, and the Settings panel says so.
+
+**OpenStreetMap.** `ve-osm`, the second and last exception to invariant 5,
+added on the user's instruction. The fetching is in Rust, not the page, so
+the CSP stays `'self'`-only and the tiles can be resampled from Web Mercator
+onto the application's lattice — which is what puts OpenStreetMap on the
+*globe* and not only on the flat map. The usage policy shaped the rest: a
+real User-Agent, a week of disk cache, and tiles only for the viewport.
+`check-offline.sh` now names two crates and their hosts and refuses a URL
+anywhere else.
+
+**GIS.** Shapefile, GeoJSON, KML and KMZ read into the same feature model and
+drawn by the same painter, as a real but display-only layer. A georeferenced
+raster chosen in the same dialog goes to the image import instead — a GeoTIFF
+is a picture, and §4.9 already places one. A projected reference system is
+refused by name, the rule images already follow.
+
+**Found by looking, not by testing.** Three things the suites could not have
+caught. Charts drew their own land colour and every cell's *rectangle* showed
+across the continent; chart land is now the basemap's own, to the byte, held
+there by a test. Turning charts on hid the basemap everywhere, leaving a black
+globe around the covered coast — only OpenStreetMap stands *in place of* the
+basemap now, the rest sit over it. And OSM tiles decoded as nothing, because
+the servers serve palette PNGs and the decoder refused them; the live test is
+what found it.
+
+**Not done:** S-52 symbols and chart text (a project of its own — the
+soundings are dots, not numbers); update files (`.001`+), which need the
+record-update logic; and the chart palette is not settable, deliberately — a
+backdrop with its own controls is a second map. The GIS inspector offers
+colour, width and fill and nothing else.
+
 **2026-09-20 (afternoon): Turning the globe, from 1.2 frames a second to
 sixty.** Reported: "the performance of rotating the globe projection is
 terrible". Measured before anything was changed. In the application, through

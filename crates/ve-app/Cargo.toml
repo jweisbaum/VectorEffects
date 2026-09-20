@@ -21,10 +21,14 @@ ve-core = { workspace = true }
 ve-grib = { workspace = true }
 ve-render = { workspace = true }
 ve-zarr = { workspace = true }
+ve-chart = { workspace = true }
+ve-osm = { workspace = true }
 
 anyhow = { workspace = true }
 # A store's frames are paired and hashed across the pool as it opens.
 rayon = { workspace = true }
+# Tokens for the backdrop tile addresses (`charts.rs`).
+blake3 = { version = "1.8.7", default-features = false, features = ["std"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 serde = { workspace = true }
 serde_json = { workspace = true }

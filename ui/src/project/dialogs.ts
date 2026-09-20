@@ -40,6 +40,42 @@ export async function pickZarrToImport(): Promise<string | null> {
   return typeof chosen === "string" ? chosen : null;
 }
 
+/** The S-57 chart directory: an exchange set's root (spec.md 4.11). */
+export async function pickChartDirectory(): Promise<string | null> {
+  const chosen = await whileChoosing("Choosing a chart directory", () =>
+    open({ multiple: false, directory: true, title: "Choose the ENC chart directory" }),
+  );
+  return typeof chosen === "string" ? chosen : null;
+}
+
+/**
+ * Picks a GIS file to lay under the field (spec.md 4.11).
+ *
+ * A georeferenced raster is offered here too, and routed to the image-layer
+ * import: a GeoTIFF is a picture, and the application already places one.
+ * Which of the two a file is, is a question its extension answers.
+ */
+export async function pickGisToImport(): Promise<string | null> {
+  const chosen = await whileChoosing("Choosing a GIS file", () =>
+    open({
+      multiple: false,
+      directory: false,
+      filters: [
+        {
+          name: "GIS data",
+          extensions: ["geojson", "json", "shp", "kml", "kmz", "tif", "tiff"],
+        },
+      ],
+    }),
+  );
+  return typeof chosen === "string" ? chosen : null;
+}
+
+/** Whether a GIS path is a raster, which imports as an image layer. */
+export function isGeoRaster(path: string): boolean {
+  return /\.(tif|tiff)$/i.test(path);
+}
+
 /**
  * Picks an image to lay under the field (spec.md 4.9, M18).
  *

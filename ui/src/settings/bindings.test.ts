@@ -20,6 +20,7 @@ const settings: AppSettings = {
   default_wind_scale_knots: 60,
   default_current_scale_knots: 6,
   macro_directory: "",
+  chart_directory: "",
   projection: "equirectangular",
   auto_scale: false,
   mcp: { enabled: false, port: 47391, token: "" },

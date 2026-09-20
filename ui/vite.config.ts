@@ -6,7 +6,11 @@ import react from "@vitejs/plugin-react";
 export default defineConfig({
   plugins: [react()],
   clearScreen: false,
-  server: { port: 5173, strictPort: true },
+  // The port is fixed so the Tauri config's devUrl can name it, and
+  // `VE_DEV_PORT` moves both together: a driver run can then start beside a
+  // dev server somebody else is already using, rather than failing on a
+  // port in use or killing what is holding it.
+  server: { port: Number(process.env.VE_DEV_PORT ?? 5173), strictPort: true },
   build: {
     outDir: "dist",
     target: "es2022",

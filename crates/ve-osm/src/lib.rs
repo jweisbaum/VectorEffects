@@ -29,6 +29,16 @@ pub const DEFAULT_TILE_URL: &str = "https://tile.openstreetmap.org/{z}/{x}/{y}.p
 /// What the map must show while OpenStreetMap tiles are drawn.
 pub const ATTRIBUTION: &str = "© OpenStreetMap contributors";
 
+/// How an application identifies itself to the tile servers.
+///
+/// The usage policy requires a real one, naming the application and a way to
+/// reach whoever runs it. It lives here rather than in the application
+/// because the host it names is part of this crate's one exception to
+/// invariant 5, and `tools/check-offline.sh` allows it here and nowhere else.
+pub fn user_agent(version: &str) -> String {
+    format!("VectorEffects/{version} (+https://github.com/jweisbaum/VectorEffects)")
+}
+
 /// What went wrong fetching or decoding a tile.
 #[derive(Debug, thiserror::Error)]
 pub enum OsmError {

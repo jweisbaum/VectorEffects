@@ -50,7 +50,7 @@ beforeEach(async () => {
   backend.importZarr.mockResolvedValue({ ...project, revision: 2 });
   tree = { layers: ["painted", "raster", "zarr", "image"].map((source, i) => ({
     id: i + 1, name: `Layer ${i + 1}`, source, visible: true, locked: false,
-    objects: [], grib: null, image: null, parameter: "wind",
+    objects: [], grib: null, image: null, gis: null, parameter: "wind",
   })) };
   backend.documentTree.mockImplementation(async () => structuredClone(tree));
   backend.moveLayer.mockImplementation(async (from: number, to: number) => {

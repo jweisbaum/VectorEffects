@@ -26,6 +26,7 @@ import {
 } from "./camera";
 import { destination } from "./geo";
 import { ProjectedSurface } from "./projections/surface";
+import type { BackdropDraw } from "./backdrops";
 import { projectedOnGpu, shaderMode } from "./projection";
 import type { Basemap } from "./format";
 import { KINDS, type FieldKindName } from "../kind";
@@ -35,6 +36,7 @@ import type { GlyphStyle } from "../generated/GlyphStyle";
 import { GLYPH_SUBDIVISIONS, PlacedGlyphs, glyphCovered, glyphTileIsFull, glyphTileIsEmpty, rankedSites, spacedGlyphs } from "./glyphPlacement";
 import { SPEED_MAX } from "./tileRange";
 import {
+  BACKDROP_FRAG,
   BASE_FRAG,
   BASE_VERT,
   GEO_FRAG,
@@ -269,6 +271,12 @@ export interface RenderState {
   /** Global per-style appearance preferences; omitted only by older fixtures. */
   glyphs?: GlyphSettings;
   showGraticule: boolean;
+  /**
+   * What the map draws *under* everything (spec.md 4.11): a chart, the map
+   * tiles, a GIS layer. Pictures, in the order given; none of it reaches an
+   * evaluation, a cache key or an export.
+   */
+  backdrops?: readonly BackdropDraw[];
   pixelRatio: number;
   /** A gesture that operates on the field, while one is being drawn. */
   operator?: OperatorPreview | null;
@@ -366,6 +374,8 @@ export class MapRenderer {
   private readonly globeGrid: { vao: WebGLVertexArrayObject; count: number };
   private readonly baseProgram: WebGLProgram;
   private readonly baseUniforms: Uniforms;
+  private readonly backdropProgram: WebGLProgram;
+  private readonly backdropUniforms: Uniforms;
   private readonly geoProgram: WebGLProgram;
   private readonly rasterProgram: WebGLProgram;
   private readonly glyphProgram: WebGLProgram;
@@ -415,6 +425,13 @@ export class MapRenderer {
 
     const shared = ["uCamera", "uViewport", "uLonOffset", "uProjection", "uOrigin", "uRim", "uExact", "uMesh"];
     this.baseUniforms = uniforms(gl, this.baseProgram, [...shared, "uTileGeo", "uTexture"]);
+    this.backdropProgram = link(gl, RASTER_VERT, BACKDROP_FRAG);
+    this.backdropUniforms = uniforms(gl, this.backdropProgram, [
+      ...shared,
+      "uTileGeo",
+      "uTile",
+      "uOpacity",
+    ]);
     this.geoUniforms = uniforms(gl, this.geoProgram, [...shared, "uColor"]);
     const mask = [
       "uMask", "uMaskSize", "uOpKind", "uOpAmount", "uOpCount", "uOpPoints", "uOpDeltas",
@@ -777,16 +794,77 @@ export class MapRenderer {
         b.west, b.north, b.east - b.west, b.north - b.south,
       );
       gl.bindTexture(gl.TEXTURE_2D, texture);
-      let count = 6;
-      if (exact) {
-        gl.bindVertexArray(this.quadVao);
-      } else if (onGpu) {
-        gl.bindVertexArray(this.globeGrid.vao);
-        count = this.globeGrid.count;
-      } else if (projectionFor(camera).general) {
-        count = this.projectedSurface.bindTile(camera, state.view, tile);
+      gl.drawArrays(gl.TRIANGLES, 0, this.bindTileGeometry(camera, state.view, tile, exact, onGpu));
+    }
+  }
+
+  /**
+   * Binds the geometry one tile is drawn through, and says how many
+   * vertices that is.
+   *
+   * The three projection families, in one place: a flat map draws a tile as
+   * two triangles, a globe through the static grid its vertex shader
+   * projects, and a fixed general projection through its plane mesh. Every
+   * pass over a tile — the field, a backdrop — goes through here, or one of
+   * them would draw the world in a projection the others are not in.
+   */
+  private bindTileGeometry(
+    camera: Camera,
+    view: Viewport,
+    tile: VisibleTile,
+    exact: boolean,
+    onGpu: boolean,
+  ): number {
+    const gl = this.gl;
+    if (exact) {
+      gl.bindVertexArray(this.quadVao);
+      return 6;
+    }
+    if (onGpu) {
+      gl.bindVertexArray(this.globeGrid.vao);
+      return this.globeGrid.count;
+    }
+    if (projectionFor(camera).general) {
+      return this.projectedSurface.bindTile(camera, view, tile);
+    }
+    gl.bindVertexArray(this.quadVao);
+    return 6;
+  }
+
+  /**
+   * Draws the backdrops, under everything (spec.md 4.11).
+   *
+   * Straight textures on the field's own tile grid, so they follow the
+   * projection without knowing what one is. Nothing here reads or writes
+   * the field: a backdrop is a picture under the map.
+   */
+  private drawBackdrops(state: RenderState, backdrops: readonly BackdropDraw[]): void {
+    if (backdrops.length === 0) return;
+    const gl = this.gl;
+    const camera = state.camera;
+    const onGpu = projectedOnGpu(projectionFor(camera));
+    gl.useProgram(this.backdropProgram);
+    gl.uniform1i(this.backdropUniforms.uTile ?? null, 0);
+    gl.activeTexture(gl.TEXTURE0);
+    for (const backdrop of backdrops) {
+      gl.uniform1f(this.backdropUniforms.uOpacity ?? null, backdrop.opacity);
+      for (const { tile, texture } of backdrop.textures) {
+        if (!texture) continue;
+        const b = tileBounds(tile.z, tile.x, tile.y);
+        this.setShared(this.backdropUniforms, camera, state.view, tile.lonOffset);
+        const exact = onGpu && this.drawnExactly(camera, tile);
+        gl.uniform1i(this.backdropUniforms.uExact ?? null, exact ? 1 : 0);
+        gl.uniform4f(
+          this.backdropUniforms.uTileGeo ?? null,
+          b.west, b.north, b.east - b.west, b.north - b.south,
+        );
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+        gl.drawArrays(
+          gl.TRIANGLES,
+          0,
+          this.bindTileGeometry(camera, state.view, tile, exact, onGpu),
+        );
       }
-      gl.drawArrays(gl.TRIANGLES, 0, count);
     }
   }
 
@@ -1377,15 +1455,24 @@ export class MapRenderer {
         gl.drawElements(kind === "land" ? gl.TRIANGLES : gl.LINES, geo.indexCount, gl.UNSIGNED_INT, 0);
       }
     };
+    // The map tiles stand in for the basemap, so they are drawn first and
+    // the basemap is not drawn at all. A chart and a GIS layer sit *over*
+    // it: they cover the stretch of coast they were published for, and
+    // hiding the world's land for one would leave black around it.
+    const backdrops = state.backdrops ?? [];
+    const replacing = backdrops.filter((backdrop) => backdrop.replacesBase);
+    const overlaying = backdrops.filter((backdrop) => !backdrop.replacesBase);
+    this.drawBackdrops(state, replacing);
     const onGpu = projectedOnGpu(projectionFor(state.camera));
-    if (onGpu) this.drawGlobeBase(state, tiles, "land", lod, drawGeographicTile);
-    else if (general) this.projectedSurface.drawBase(state.camera, state.view, tiles, "land", lod, drawGeographicTile);
+    const overBase = replacing.length > 0;
+    if (onGpu && !overBase) this.drawGlobeBase(state, tiles, "land", lod, drawGeographicTile);
+    else if (general && !overBase) this.projectedSurface.drawBase(state.camera, state.view, tiles, "land", lod, drawGeographicTile);
 
     // --- Land and coastlines ---
     gl.useProgram(this.geoProgram);
     const land = this.landByLod.get(lod);
     const coast = this.coastByLod.get(lod);
-    if (land && !general) {
+    if (land && !general && !overBase) {
       gl.bindVertexArray(land.vao);
       gl.uniform4f(this.geoUniforms.uColor ?? null, ...LAND);
       for (const offset of offsets) {
@@ -1474,14 +1561,17 @@ export class MapRenderer {
     // see: the field is nearly opaque, so leaving it underneath would make it
     // vanish. The coastlines and the glyphs still draw over it, as they draw
     // over everything.
+    // The chart and the GIS layers, over the land and under the field.
+    this.drawBackdrops(state, overlaying);
+
     this.drawImages(state, offsets, images.filter((image) => image.over));
 
     // --- Coastlines, above the raster ---
     // The field covers land as well as sea, so a coastline drawn underneath it
     // is almost invisible. Drawn here it stays legible at any wind speed.
-    if (onGpu) this.drawGlobeBase(state, tiles, "coast", lod, drawGeographicTile);
-    else if (general) this.projectedSurface.drawBase(state.camera, state.view, tiles, "coast", lod, drawGeographicTile);
-    if (coast && !general) {
+    if (onGpu && !overBase) this.drawGlobeBase(state, tiles, "coast", lod, drawGeographicTile);
+    else if (general && !overBase) this.projectedSurface.drawBase(state.camera, state.view, tiles, "coast", lod, drawGeographicTile);
+    if (coast && !general && !overBase) {
       gl.useProgram(this.geoProgram);
       gl.bindVertexArray(coast.vao);
       gl.uniform4f(this.geoUniforms.uColor ?? null, ...COAST);

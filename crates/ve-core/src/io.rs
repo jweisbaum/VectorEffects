@@ -1746,6 +1746,19 @@ mod tests {
                 step: None,
             });
 
+        // A GIS layer's line width and fill opacity reach the file
+        // (spec.md 4.11): two more f64s that need the same quantisation.
+        project.layers.push({
+            let mut layer = crate::document::Layer::new("Survey");
+            layer.source = crate::document::LayerSource::Gis {
+                path: std::path::PathBuf::from("/tmp/survey.geojson"),
+                colour: "#c8a050".to_owned(),
+                width_px: HOSTILE[2].abs() / 100.0,
+                fill_opacity: 0.250_000_000_000_000_04,
+            };
+            layer
+        });
+
         // One cycle canonicalises; every later cycle must be a fixed point.
         let first = to_canonical_json(&project).unwrap();
         let once = from_json(&first).unwrap();
@@ -1760,6 +1773,13 @@ mod tests {
         assert!(
             once.layers[0].erased[0].projected,
             "the erasure's space did not survive the file"
+        );
+        assert!(
+            matches!(
+                once.layers.last().map(|layer| &layer.source),
+                Some(crate::document::LayerSource::Gis { .. })
+            ),
+            "the GIS layer did not survive the file"
         );
     }
 

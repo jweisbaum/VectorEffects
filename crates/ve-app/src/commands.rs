@@ -289,9 +289,54 @@ pub struct AppState {
     pub scenes: crate::protocol::SceneCache,
     /// Where an opening's progress goes: the loading page, or nowhere.
     pub opening: crate::opening::Sink,
+    /// Charts, map tiles and GIS files: what the map draws under everything
+    /// (spec.md 4.11). Never project data.
+    pub backdrops: crate::charts::Backdrops,
 }
 
 impl AppState {
+    /// The chart directory the settings name, or empty for none.
+    pub fn chart_directory(&self) -> String {
+        self.session
+            .lock()
+            .map(|session| session.settings.chart_directory.clone())
+            .unwrap_or_default()
+    }
+
+    /// A GIS layer's file and the style it is drawn in, by layer id.
+    pub fn gis_layer(&self, layer: u64) -> Option<(std::path::PathBuf, ve_chart::paint::Style)> {
+        let session = self.session.lock().ok()?;
+        let open = session.open.as_ref()?;
+        let found = open
+            .project
+            .layers
+            .iter()
+            .find(|candidate| candidate.id.raw() == layer)?;
+        if !found.visible {
+            return None;
+        }
+        let ve_core::document::LayerSource::Gis {
+            path,
+            colour,
+            width_px,
+            fill_opacity,
+        } = &found.source
+        else {
+            return None;
+        };
+        let stroke = crate::charts::rgba_of(colour, 1.0);
+        Some((
+            path.clone(),
+            ve_chart::paint::Style {
+                stroke: Some(stroke),
+                fill: (*fill_opacity > 0.0).then(|| crate::charts::rgba_of(colour, *fill_opacity)),
+                width: *width_px as f32,
+                point_radius: 0.0,
+                close: false,
+            },
+        ))
+    }
+
     /// Builds the state from resolved paths, restoring the recent-files list.
     pub fn new(paths: AppPaths) -> Self {
         let session = crate::session::Session::load(&paths.settings_file());
@@ -317,6 +362,7 @@ impl AppState {
             tiles,
             scenes: crate::protocol::SceneCache::default(),
             opening: crate::opening::Sink::default(),
+            backdrops: crate::charts::Backdrops::default(),
             paths,
         }
     }

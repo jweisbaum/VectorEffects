@@ -7,6 +7,7 @@ pub mod animation;
 pub mod autosave;
 pub mod beta;
 pub mod capture;
+pub mod charts;
 pub mod commands;
 pub mod create;
 pub mod document;
@@ -177,6 +178,10 @@ pub fn run() -> anyhow::Result<()> {
                 import::import_grib,
                 import::new_project_from_grib,
                 zarr::import_zarr,
+                charts::import_gis,
+                charts::set_gis_style,
+                settings::set_chart_directory,
+                settings::chart_status,
                 zarr::new_project_from_zarr,
                 history::import_history,
                 document::document_tree,

@@ -83,7 +83,7 @@ it("prepares while paused, publishes only drawn steps, and maintains the selecte
 it("toggles shape editing per object and uses the shape track to add keys", async () => {
   const project = { revision: 8, step_count: 10, step_hours: 1, start_unix_s: null } as ProjectSummary;
   backend.tree.mockResolvedValue({ layers: [{ id: 1, name: "Layer", visible: true, locked: false,
-    source: "painted", parameter: "wind", grib: null, image: null,
+    source: "painted", parameter: "wind", grib: null, image: null, gis: null,
     objects: [{ id: 2, name: "Front", tool: "shape_fill", tool_label: "Shape", active_here: true, start_step: 0, end_step: 9 }],
   }] });
   backend.tracks.mockResolvedValue({ object: 2, name: "Front", start_step: 0, end_step: 9,
@@ -130,7 +130,7 @@ it("toggles shape editing per object and uses the shape track to add keys", asyn
 
 it("holds the latest released span through the write and delayed tree refresh", async () => {
   const project = { revision: 8, step_count: 10, step_hours: 1, start_unix_s: null } as ProjectSummary;
-  const layer = { id: 1, name: "Layer", visible: true, locked: false, source: "painted", parameter: "wind", grib: null, image: null,
+  const layer = { id: 1, name: "Layer", visible: true, locked: false, source: "painted", parameter: "wind", grib: null, image: null, gis: null,
     objects: [{ id: 2, name: "Front", tool: "shape_fill", tool_label: "Shape", active_here: true, start_step: 0, end_step: 9 }] };
   backend.tree.mockResolvedValue({ layers: [layer] });
   let written!: (project: ProjectSummary) => void;
@@ -187,7 +187,7 @@ it("scrubs the ruler without starting text selection and stops on cancel", async
 });
 
 it.each(["macro", "patch"])("does not offer shape animation for a %s", async (tool) => {
-  backend.tree.mockResolvedValue({ layers: [{id:1, name:"Layer", visible:true, locked:false, source:"painted", parameter:"wind", grib:null, image:null,
+  backend.tree.mockResolvedValue({ layers: [{id:1, name:"Layer", visible:true, locked:false, source:"painted", parameter:"wind", grib:null, image:null, gis:null,
     objects:[{id:2, name:"Capture", tool, tool_label:tool, active_here:true, start_step:0, end_step:9}]}]});
   const project = {revision: 20, step_count:10, step_hours:1, start_unix_s:null} as ProjectSummary;
   const container = document.createElement("div"); document.body.append(container); const root=createRoot(container);

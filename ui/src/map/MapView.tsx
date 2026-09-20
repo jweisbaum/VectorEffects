@@ -24,6 +24,8 @@ import type { ObjectOutline } from "../generated/ObjectOutline";
 import type { TileAddress } from "../generated/TileAddress";
 import type { Tool } from "../generated/Tool";
 import type { AppSettings } from "../generated/AppSettings";
+import type { ChartStatus } from "../generated/ChartStatus";
+import { BackdropCache } from "./backdrops";
 import type { BrushShape } from "../generated/BrushShape";
 import type { CaptureMode } from "../generated/CaptureMode";
 import type { CaptureRequest } from "../generated/CaptureRequest";
@@ -867,6 +869,42 @@ export default function MapView({
   const glyphStyle: "arrow" | "barb" = glyphStyleOf(activeKind);
   const [showGlyphs, setShowGlyphs] = useState(true);
   const [showGraticule, setShowGraticule] = useState(true);
+  // The backdrops (spec.md 4.11): what the map draws *under* everything.
+  // View state like the graticule, not layers — the layer panel shows
+  // nothing for them, because neither is part of the document.
+  const [showCharts, setShowCharts] = useState(false);
+  const [showOsm, setShowOsm] = useState(false);
+  const showChartsRef = useRef(false);
+  const showOsmRef = useRef(false);
+  const backdropsRef = useRef<BackdropCache | null>(null);
+  /** The chart directory's token, or 0 when none is chosen. */
+  const chartTokenRef = useRef(0);
+  /** The visible GIS layers, bottom of the stack first (spec.md 4.11). */
+  const gisLayersRef = useRef<{ layer: number; token: number }[]>([]);
+  /** What the chart directory holds, so the checkbox can say. */
+  const [chartStatus, setChartStatus] = useState<ChartStatus | null>(null);
+
+  // The directory is a setting, so the status is re-asked whenever the
+  // settings change — choosing a directory in the dialog turns the
+  // checkbox on the moment it finds cells.
+  useEffect(() => {
+    let live = true;
+    void api
+      .chartStatus()
+      .then((status) => { if (live) setChartStatus(status); })
+      .catch(() => { if (live) setChartStatus(null); });
+    return () => { live = false; };
+  }, [settings?.chart_directory]);
+
+  useEffect(() => {
+    chartTokenRef.current = chartStatus?.cells ? Number(chartStatus.token) : 0;
+    requestDrawRef.current();
+  }, [chartStatus]);
+
+  // A directory that goes away takes the charts off the map with it.
+  useEffect(() => {
+    if (showCharts && (!chartStatus?.directory || chartStatus.cells === 0)) setShowCharts(false);
+  }, [chartStatus, showCharts]);
   /**
    * The two boxes over the map: the colour legend and the cursor readout
    * (M77).
@@ -1508,6 +1546,9 @@ export default function MapView({
     const previous = shownFrameRef.current;
     const shown =
       previous !== null && isPreviewFrame(previous) === isPreviewFrame(frame) ? previous : null;
+    // The tiles this frame draws, which the backdrops are asked for too: a
+    // backdrop that fetched a different set would be a second viewport.
+    const viewTiles = visibleTiles(cameraRef.current, viewRef.current);
     const state: RenderState = {
       camera: cameraRef.current,
       view: viewRef.current,
@@ -1567,6 +1608,21 @@ export default function MapView({
       // revision is part of the texture's address, so an import or a reopen
       // makes the old one unreachable rather than stale.
       // A preview shows the macro on the basemap alone: no images either.
+      // The backdrops, under everything (spec.md 4.11). A macro preview
+      // shows the field on the basemap alone, so none of them are drawn
+      // there either.
+      backdrops: recordingRef.current?.preview_revision
+        ? []
+        : (backdropsRef.current?.draws(
+            {
+              charts: showChartsRef.current && chartTokenRef.current
+                ? { token: chartTokenRef.current }
+                : undefined,
+              osm: showOsmRef.current,
+              gis: gisLayersRef.current,
+            },
+            viewTiles,
+          ) ?? []),
       images:
         recordingRef.current?.preview_revision !== undefined &&
         recordingRef.current?.preview_revision !== null
@@ -1580,7 +1636,7 @@ export default function MapView({
 
     // Tell the timeline which tiles are on screen, once per change rather
     // than per frame: a pan delivers many frames and one viewport.
-    const unique = uniqueTiles(visibleTiles(state.camera, state.view));
+    const unique = uniqueTiles(viewTiles);
     const key = unique.map((t) => `${t.z}/${t.x}/${t.y}`).join(",");
     if (key !== reportedViewport.current) {
       reportedViewport.current = key;
@@ -1820,6 +1876,8 @@ export default function MapView({
           const layer = at.scope.kind === "whole" ? null : at.scope.layer;
           return api.tileKeys(at.revision, at.step, [...wanted], at.scope.kind, layer);
         };
+        backdropsRef.current = new BackdropCache(gl, baseUrl);
+        backdropsRef.current.onChange = () => requestDraw();
         pictures = new ImageCache(gl, baseUrl);
         pictures.onChange = () => requestDraw();
         pictures.onError = (message) => void api.frontendLog("error", message);
@@ -2114,6 +2172,12 @@ export default function MapView({
         // here rather than at the draw, so a hidden picture also offers no
         // control points and cannot be dragged: an eye that hides a layer
         // hides all of it.
+        // A GIS layer is drawn under the field like a picture, but as tiles
+        // on the map's own grid rather than as one placed image: a survey
+        // may span the world, and its tiles follow the projection.
+        gisLayersRef.current = tree.layers
+          .filter((layer) => layer.visible && layer.gis?.loaded)
+          .map((layer) => ({ layer: layer.id, token: projectRef.current.revision }));
         imageLayersRef.current = tree.layers
           .filter((layer) => layer.visible)
           .flatMap((layer) => (layer.image ? [{ ...layer.image,
@@ -2597,12 +2661,16 @@ export default function MapView({
 
   // Mirror display state into the refs `draw` reads, then redraw.
   useEffect(() => {
-    const changed = stepRef.current !== step || showGlyphsRef.current !== showGlyphs || showGraticuleRef.current !== showGraticule;
+    const changed = stepRef.current !== step || showGlyphsRef.current !== showGlyphs
+      || showGraticuleRef.current !== showGraticule || showChartsRef.current !== showCharts
+      || showOsmRef.current !== showOsm;
     showGlyphsRef.current = showGlyphs;
     showGraticuleRef.current = showGraticule;
+    showChartsRef.current = showCharts;
+    showOsmRef.current = showOsm;
     stepRef.current = step;
     if (changed) requestDraw();
-  }, [requestDraw, step, showGlyphs, showGraticule]);
+  }, [requestDraw, step, showGlyphs, showGraticule, showCharts, showOsm]);
 
   /**
    * Draws preview glyphs at a set of geographic positions.
@@ -6437,6 +6505,25 @@ export default function MapView({
             onChange={(e) => setShowLegend(e.target.checked)}
           />
           Legend
+        </label>
+        <label title={chartStatus?.directory
+          ? `Electronic charts from ${chartStatus.directory}${chartStatus.cells ? ` (${chartStatus.cells} cells)` : ""}. Drawn under everything; not a layer, and not part of the project.`
+          : "Electronic charts (S-57). Choose the chart directory in Settings first."}>
+          <input
+            type="checkbox"
+            checked={showCharts}
+            disabled={!chartStatus?.directory || chartStatus.cells === 0}
+            onChange={(e) => setShowCharts(e.target.checked)}
+          />
+          Charts
+        </label>
+        <label title="OpenStreetMap tiles in place of the built-in basemap. Tiles are fetched from openstreetmap.org while this is on, and kept on disk; everything else in the application stays offline.">
+          <input
+            type="checkbox"
+            checked={showOsm}
+            onChange={(e) => setShowOsm(e.target.checked)}
+          />
+          OpenStreetMap
         </label>
         <label title="The cursor readout over the map: the position under the pointer and the field there. A view setting: it changes nothing stored or exported.">
           <input
