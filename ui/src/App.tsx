@@ -642,8 +642,13 @@ function EditorApp() {
         className="stage"
         style={
           {
-            "--dock-left": panels.left ? "310px" : "0px",
-            "--dock-right": panels.right ? "250px" : "0px",
+            // The panels' own widths, not a copy of them: the stylesheet
+            // holds each once (`--sidebar-left`, `--sidebar-right`) and the
+            // map's chrome offsets itself by the same value. Written out
+            // here as a number, the two drifted the moment one panel was
+            // widened, and the collapse handle floated inside the map.
+            "--dock-left": panels.left ? "var(--sidebar-left)" : "0px",
+            "--dock-right": panels.right ? "var(--sidebar-right)" : "0px",
             "--dock-bottom": panels.bottom ? "220px" : "0px",
           } as CSSProperties
         }

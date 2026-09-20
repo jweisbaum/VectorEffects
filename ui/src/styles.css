@@ -6,6 +6,14 @@
   --text: #e8eef7;
   --muted: #8fa4c0;
   --accent: #6fd9ff;
+  /* The docked panels' widths, in one place.
+     The map's chrome keeps clear of a panel by offsetting itself by the
+     panel's width (`--dock-left`, set on the stage in App.tsx), so the two
+     numbers have to be the same number. They were written out twice, and
+     widening the layer panel left the collapse handle floating 54px inside
+     the map. One variable each, read by both. */
+  --sidebar-left: 364px;
+  --sidebar-right: 250px;
   color-scheme: dark;
 }
 
@@ -56,8 +64,8 @@ body {
 .stage > .timeline { position: relative; z-index: 2; }
 
 .sidebar {
-  width: 250px;
-  flex: 0 0 250px;
+  width: var(--sidebar-right);
+  flex: 0 0 var(--sidebar-right);
   min-height: 0;
   overflow-y: auto;
   background: #0d1526;
@@ -70,7 +78,11 @@ body {
    space, so the history calendar sat behind a horizontal scroll where nobody
    would find it. Widened for the row, with slack for the platforms whose
    fonts run wider than this one's. */
-.sidebar.left { flex-basis: 364px; width: 364px; border-right: 1px solid var(--border); }
+.sidebar.left {
+  flex-basis: var(--sidebar-left);
+  width: var(--sidebar-left);
+  border-right: 1px solid var(--border);
+}
 /* And if a font is wider still, the row wraps rather than hiding its end:
    a second line is a worse layout, a hidden button is a lost feature. */
 .layer-panel header { flex-wrap: wrap; row-gap: 6px; }

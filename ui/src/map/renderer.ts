@@ -1481,6 +1481,14 @@ export class MapRenderer {
       }
     }
 
+    // --- Charts and GIS data (spec.md 4.11) ---
+    // Over the basemap's land, which they are published to sit on, and under
+    // everything of the user's: the field, the images, the glyphs. A backdrop
+    // is something to paint *against*, so nothing the user made may end up
+    // behind one — a chart's deep water is opaque, and drawn later it hid the
+    // field entirely wherever a cell reached.
+    this.drawBackdrops(state, overlaying);
+
     // --- Image layers (spec.md 4.9, M18) ---
     // Above the land and below the field: an image is a reference to trace or
     // compare against, so the coastline under it stays visible and the field
@@ -1561,9 +1569,6 @@ export class MapRenderer {
     // see: the field is nearly opaque, so leaving it underneath would make it
     // vanish. The coastlines and the glyphs still draw over it, as they draw
     // over everything.
-    // The chart and the GIS layers, over the land and under the field.
-    this.drawBackdrops(state, overlaying);
-
     this.drawImages(state, offsets, images.filter((image) => image.over));
 
     // --- Coastlines, above the raster ---

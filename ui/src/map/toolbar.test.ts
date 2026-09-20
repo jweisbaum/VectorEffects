@@ -51,3 +51,30 @@ describe("the toolbar", () => {
     }
   });
 });
+
+/**
+ * The map's chrome keeps clear of a docked panel by offsetting itself by that
+ * panel's width, so the width and the offset have to be the same number.
+ * They were two literals in two files, and widening the layer panel left the
+ * collapse handle floating inside the map. Each is one variable now, and this
+ * is what says so.
+ */
+describe("the docked panels' widths", () => {
+  const app = readFileSync(fileURLToPath(new URL("../App.tsx", import.meta.url)), "utf8");
+
+  it("are stated once and read by both the panel and the map's chrome", () => {
+    for (const [side, variable] of [
+      ["left", "--sidebar-left"],
+      ["right", "--sidebar-right"],
+    ] as const) {
+      expect(css, `${variable} should be defined once, on :root`).toContain(`${variable}: `);
+      // The stage's inset refers to the variable rather than repeating it.
+      expect(app).toContain(`"--dock-${side}": panels.${side} ? "var(${variable})" : "0px"`);
+    }
+    expect(block(".sidebar.left")).toContain("width: var(--sidebar-left)");
+    // The bare `.sidebar` rule, not `.workspace > .sidebar` before it.
+    expect(block("\n.sidebar")).toContain("width: var(--sidebar-right)");
+    // And no bare pixel width is left behind to drift from them.
+    expect(app).not.toMatch(/"--dock-(left|right)":\s*panels\.\w+\s*\?\s*"\d+px"/);
+  });
+});
