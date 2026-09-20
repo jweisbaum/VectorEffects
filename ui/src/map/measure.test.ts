@@ -72,6 +72,15 @@ describe("projectPath", () => {
   it("has nothing to say about an empty path", () => {
     expect(projectPath({ centerLon: 0, centerLat: 0, pxPerDeg: 4 }, view, [])).toEqual([]);
   });
+
+  it("projects globe paths directly and breaks at the hidden hemisphere", () => {
+    const camera: Camera = { centerLon: 0, centerLat: 0, pxPerDeg: 4, projection: "orthographic" };
+    const path = projectPath(camera, view, [[0, 0], [30, 0], [180, 0], [150, 0]]);
+    expect(path[0]!.x).toBeCloseTo(project(camera, view, { lon: 0, lat: 0 }).x, 9);
+    expect(path[1]!.x).toBeCloseTo(project(camera, view, { lon: 30, lat: 0 }).x, 9);
+    expect(Number.isNaN(path[2]!.x)).toBe(true);
+    expect(Number.isNaN(path[3]!.x)).toBe(true);
+  });
 });
 
 /** A measurement with handles and nothing else, which is all the hit test reads. */

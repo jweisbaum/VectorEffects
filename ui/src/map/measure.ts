@@ -19,6 +19,7 @@ import {
   type Viewport,
   normalizeLon,
   project,
+  projectionFor,
 } from "./camera";
 
 /**
@@ -62,6 +63,12 @@ export function projectPath(
 ): ScreenPoint[] {
   const first = points[0];
   if (first === undefined) return [];
+  // Two-dimensional projections do not have a linear longitude axis. Project
+  // each vertex directly; NaN vertices mark the hidden hemisphere and are
+  // consumed by the drawing loop below as breaks in the visible path.
+  if (projectionFor(camera).general) {
+    return points.map(([lon, lat]) => project(camera, view, { lon, lat }));
+  }
   const origin = project(camera, view, { lon: first[0], lat: first[1] });
   const out: ScreenPoint[] = [origin];
 
@@ -138,7 +145,7 @@ export function drawMeasurements(
   overlay: MeasureOverlay,
 ): void {
   const worldPx = 360 * camera.pxPerDeg;
-  const copies = [-worldPx, 0, worldPx];
+  const copies = projectionFor(camera).general ? [0] : [-worldPx, 0, worldPx];
 
   context.save();
   context.lineJoin = "round";
@@ -153,11 +160,17 @@ export function drawMeasurements(
       // looking at two curves between the same two points can tell which is
       // the one they would steer (spec.md 10).
       const dashed = path.kind === "rhumb";
-      for (const offset of copies) {
+        for (const offset of copies) {
         context.beginPath();
-        for (const [i, point] of screen.entries()) {
-          if (i === 0) context.moveTo(point.x + offset, point.y);
-          else context.lineTo(point.x + offset, point.y);
+        let drawing = false;
+        for (const point of screen) {
+          if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) {
+            drawing = false;
+            continue;
+          }
+          if (drawing) context.lineTo(point.x + offset, point.y);
+          else context.moveTo(point.x + offset, point.y);
+          drawing = true;
         }
         context.strokeStyle = `rgba(${MEASURE_COLOUR}, ${dashed ? 0.75 : 0.95})`;
         context.lineWidth = Math.max(1, dpr) * (dashed ? 1.4 : 1.8);
@@ -170,7 +183,9 @@ export function drawMeasurements(
         lon: path.label_at[0]!,
         lat: path.label_at[1]!,
       });
-      writeLabel(context, dpr, path.label, label, copies);
+      if (Number.isFinite(label.x) && Number.isFinite(label.y)) {
+        writeLabel(context, dpr, path.label, label, copies);
+      }
     }
 
     if (measurement.total !== null && measurement.total_at !== null) {
@@ -178,12 +193,15 @@ export function drawMeasurements(
         lon: measurement.total_at[0]!,
         lat: measurement.total_at[1]!,
       });
-      writeLabel(context, dpr, measurement.total, { x: at.x, y: at.y + 16 * dpr }, copies, true);
+      if (Number.isFinite(at.x) && Number.isFinite(at.y)) {
+        writeLabel(context, dpr, measurement.total, { x: at.x, y: at.y + 16 * dpr }, copies, true);
+      }
     }
 
     const active = overlay.active === measurement.id;
     for (const handle of measurement.handles) {
       const at = project(camera, view, { lon: handle[0]!, lat: handle[1]! });
+      if (!Number.isFinite(at.x) || !Number.isFinite(at.y)) continue;
       for (const offset of copies) {
         context.beginPath();
         context.arc(at.x + offset, at.y, 4.5 * dpr, 0, Math.PI * 2);
@@ -203,6 +221,10 @@ export function drawMeasurements(
   const pending = overlay.pending;
   if (pending) {
     const at = project(camera, view, { lon: pending[0], lat: pending[1] });
+    if (!Number.isFinite(at.x) || !Number.isFinite(at.y)) {
+      context.restore();
+      return;
+    }
     context.setLineDash([4 * dpr, 4 * dpr]);
     if (overlay.cursor) {
       context.beginPath();

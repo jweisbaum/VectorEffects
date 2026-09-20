@@ -246,8 +246,9 @@ export function sampled(
  * for every tool that has a size.
  */
 export function spaceFor(unit: SizeUnit, camera?: Camera): StampSpace {
-  if (unit !== "px" || (camera && projectionFor(camera).general)) return "geodesic";
+  if (unit !== "px") return "geodesic";
   const projection = camera ? projectionFor(camera).id : "equirectangular";
+  if (camera && projectionFor(camera).general) return "projected";
   return projection === "equirectangular" ? "projected" : projection as StampSpace;
 }
 

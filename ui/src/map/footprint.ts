@@ -8,7 +8,7 @@
 
 import type { BrushShape } from "../generated/BrushShape";
 import type { StampSpace } from "../generated/StampSpace";
-import { type Camera, type Viewport, normalizeLon, project, projectionFor } from "./camera";
+import { type Camera, type Viewport, normalizeLon, project, projectionFor, unproject, validGeo } from "./camera";
 import { destination, EARTH_RADIUS_M } from "./geo";
 import { projectionOf, type ProjectionId } from "./projection";
 
@@ -86,6 +86,10 @@ export function footprintRadii(
   lon = camera.centerLon,
 ): { rx: number; ry: number } {
   if (projectionFor(camera).general) {
+    if (space !== "geodesic") {
+      const px = radiusKm / KM_PER_DEGREE * camera.pxPerDeg;
+      return { rx: px, ry: px };
+    }
     const view = {width: 0, height: 0}, centre = {lon, lat};
     const origin = project(camera, view, centre);
     const east = project(camera, view, destination(centre, 90, radiusKm * 1000));
@@ -134,7 +138,10 @@ export function kmFromPixels(
   space: StampSpace = "geodesic",
   lon = camera.centerLon,
 ): number {
-  if (projectionFor(camera).general) return pixels / Math.max(1e-8, footprintRadii(camera,lat,1,"geodesic",lon).rx);
+  if (projectionFor(camera).general) {
+    if (space !== "geodesic") return (pixels / camera.pxPerDeg) * KM_PER_DEGREE;
+    return pixels / Math.max(1e-8, footprintRadii(camera,lat,1,"geodesic",lon).rx);
+  }
   const scale = space !== "geodesic" ? 1 : cosLat(lat);
   return (pixels / camera.pxPerDeg) * KM_PER_DEGREE * scale;
 }
@@ -147,7 +154,10 @@ export function pixelsFromKm(
   space: StampSpace = "geodesic",
   lon = camera.centerLon,
 ): number {
-  if (projectionFor(camera).general) return km * footprintRadii(camera,lat,1,"geodesic",lon).rx;
+  if (projectionFor(camera).general) {
+    if (space !== "geodesic") return (km / KM_PER_DEGREE) * camera.pxPerDeg;
+    return km * footprintRadii(camera,lat,1,"geodesic",lon).rx;
+  }
   const scale = space !== "geodesic" ? 1 : cosLat(lat);
   return (km / (KM_PER_DEGREE * scale)) * camera.pxPerDeg;
 }
@@ -681,6 +691,22 @@ export function projectedRing(sink: PathSink, camera: Camera, view: Viewport, po
 
 /** Stored footprint frames stay fixed when the viewing projection changes. */
 function projectedStamp(sink: PathSink,camera: Camera,view: Viewport,lon:number,lat:number,rx:number,ry:number,shape:BrushShape,space:StampSpace,inset:number):void {
+  if (projectionFor(camera).general && space !== "geodesic") {
+    const centre = project(camera, view, {lon, lat});
+    if (!Number.isFinite(centre.x) || !Number.isFinite(centre.y)) return;
+    const pxRx = Math.max(0, rx / KM_PER_DEGREE * camera.pxPerDeg - inset);
+    const pxRy = Math.max(0, ry / KM_PER_DEGREE * camera.pxPerDeg - inset);
+    const points:Array<[number,number]> = [];
+    for (let i=0;i<96;i++) {
+      const angle=i/96*2*Math.PI;
+      let x=Math.sin(angle), y=Math.cos(angle);
+      if(shape==='square'){const divisor=Math.max(Math.abs(x),Math.abs(y));x/=divisor;y/=divisor;}
+      const geo=unproject(camera,view,{x:centre.x+x*pxRx,y:centre.y-y*pxRy});
+      if (validGeo(geo)) points.push([geo.lon,geo.lat]);
+    }
+    if (points.length > 1) projectedRing(sink,camera,view,points);
+    return;
+  }
   const scale=footprintRadii(camera,lat,1,"geodesic",lon),shrink=inset/Math.max(1e-8,Math.min(scale.rx,scale.ry));
   rx=Math.max(0,rx-shrink);ry=Math.max(0,ry-shrink);
   const source=stampProjection(space),points:Array<[number,number]>=[];

@@ -11,6 +11,7 @@ import {
   type PathSink,
   footprintOfOutline,
 } from "./footprint";
+import { cameraForProjection } from "./camera";
 import type { Camera, Viewport } from "./camera";
 
 const camera: Camera = { centerLon: 0, centerLat: 0, pxPerDeg: 4 };
@@ -222,6 +223,15 @@ describe("pixel sizes", () => {
       kmFromPixels(camera, 0, 100) / 2,
       4,
     );
+  });
+
+  it("keeps pixel brushes circular in globe views", () => {
+    const globe = cameraForProjection({ centerLon: 0, centerLat: 0, pxPerDeg: 4 }, view, "orthographic");
+    const km = kmFromPixels(globe, 45, 120, "projected", 0);
+    const radii = footprintRadii(globe, 45, km / 2, "projected", 0);
+    expect(radii.rx).toBeCloseTo(60, 6);
+    expect(radii.ry).toBeCloseTo(60, 6);
+    expect(pixelsFromKm(globe, 45, km, "projected", 0)).toBeCloseTo(120, 6);
   });
 
   /** Zooming in means fewer kilometres per pixel. */
