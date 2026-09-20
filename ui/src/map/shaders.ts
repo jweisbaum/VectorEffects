@@ -85,6 +85,15 @@ vec2 geoToScreen(vec2 lonLat) {
   );
 }
 
+// A general projection's mesh (mode 14) is made on a virtual canvas in the
+// projection's own plane, and this is where that canvas lies on the screen:
+// an offset and a scale, which is all a pan or a zoom changes. See
+// PlaneMesh in camera.ts.
+uniform vec3 uMesh;        // offset x, offset y, scale
+vec2 meshToScreen(vec2 virtual) {
+  return virtual * uMesh.z + uMesh.xy;
+}
+
 vec4 screenToClip(vec2 screen) {
   return vec4(
     screen.x / uViewport.x * 2.0 - 1.0,
@@ -118,7 +127,7 @@ layout(location=0) in vec2 aLonLat;
 ${PROJECTION}
 out float vHorizon;
 void main() {
-  gl_Position = screenToClip(uProjection == 14 ? aLonLat : geoToScreen(aLonLat));
+  gl_Position = screenToClip(uProjection == 14 ? meshToScreen(aLonLat) : geoToScreen(aLonLat));
   vHorizon = veHorizon;
 }
 `;
@@ -215,7 +224,7 @@ void main() {
   // fragment stage finds the image under each pixel: see IMAGE_FRAG.
   gl_Position = uProjection >= 15
     ? vec4(aCell * 2.0 - 1.0, 0.0, 1.0)
-    : screenToClip(uProjection == 14 ? aScreen : geoToScreen(lonLat));
+    : screenToClip(uProjection == 14 ? meshToScreen(aScreen) : geoToScreen(lonLat));
 }
 `;
 
@@ -457,7 +466,7 @@ void main() {
   );
   gl_Position = uExact == 1
     ? vec4(aCorner * 2.0 - 1.0, 0.0, 1.0)
-    : screenToClip(uProjection == 14 ? aScreen : geoToScreen(lonLat));
+    : screenToClip(uProjection == 14 ? meshToScreen(aScreen) : geoToScreen(lonLat));
   vHorizon = uExact == 1 ? 1.0 : veHorizon;
 }
 `;

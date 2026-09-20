@@ -247,7 +247,7 @@ describe("the renderer's uniform lookups", () => {
     // The renderer names them in one place; this is that list, restated so a
     // shader gaining a uniform has to be noticed here too.
     const known = new Set([
-      "uCamera", "uViewport", "uLonOffset", "uProjection", "uOrigin", "uRim", "uExact", "uTexture",
+      "uCamera", "uViewport", "uLonOffset", "uProjection", "uOrigin", "uRim", "uExact", "uMesh", "uTexture",
       "uSourceCoverage", "uUseSourceCoverage", "uMask", "uMaskSize", "uOpKind", "uOpAmount", "uOpCount", "uOpRadius", "uOpFeather",
       "uField",
       "uTileGeo", "uTile", "uSpeedScale", "uRampWind", "uRampCurrent", "uDim",

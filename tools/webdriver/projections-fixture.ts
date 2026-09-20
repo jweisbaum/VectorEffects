@@ -1,6 +1,6 @@
 /** Real WebGL compilation, coordinate readback, and world-map coverage. */
 import { PROJECTIONS, MAP_PROJECTIONS, worldHeightDeg } from "../../ui/src/map/projection";
-import { cameraForProjection } from "../../ui/src/map/camera";
+import { cameraForProjection, panBy } from "../../ui/src/map/camera";
 import { GEO_VERT } from "../../ui/src/map/shaders";
 import { MapRenderer, type RenderState } from "../../ui/src/map/renderer";
 import { parseBasemap } from "../../ui/src/map/format";
@@ -119,13 +119,16 @@ export async function projectionsFixture(basemapBase64: string) {
   canvas.width = 2880; canvas.height = 1590;
   const large = { width: canvas.width, height: canvas.height };
   const turning = [];
-  for (const projection of MAP_PROJECTIONS.filter(p => p.general?.movable)) {
+  const moved = MAP_PROJECTIONS.filter(p => p.general?.movable || ["robinson", "mollweide", "epsg_3413"].includes(p.id));
+  for (const projection of moved) {
     for (const showGlyphs of [false, true]) {
       const base = cameraForProjection({centerLon: 0, centerLat: 20, pxPerDeg: 2}, large, projection.id);
       const times: number[] = [];
       for (let frame = 0; frame < 16; frame++) {
         const state: RenderState = {
-          camera: {...base, centerLon: -40 + frame * 1.7, centerLat: 15 + frame * 0.6}, view: large,
+          // A globe is turned; a fixed map is dragged, a dozen pixels a frame.
+          camera: projection.general?.movable ? {...base, centerLon: -40 + frame * 1.7, centerLat: 15 + frame * 0.6}
+            : panBy(base, large, frame * 13, frame * 5), view: large,
           frame: "fixture/0", heldFrame: null,
           ramps: { wind: { min: 0, max: 20 }, current: { min: 0, max: 20 } },
           gradients: { wind: [[0, 0, 0], [1, 1, 1]], current: [[0.03, 0.12, 0.15], [0.1, 0.3, 0.5]] },

@@ -871,6 +871,22 @@ to the hash input is a correctness bug that shows up as stale frames.
   the antipode, through the viewport quad and the exact inverse (`uExact`).
   A helper that is called per *point* must not build a string to look itself
   up (`mapTransform` remembers its last answer for that reason).
+- **A fixed general projection's mesh is in the projection's plane, and its
+  vertices are not screen pixels.** `PlaneMesh` (camera.ts) is a virtual
+  canvas; `meshPlacement` puts it on the screen and `uMesh` applies that in
+  the vertex shader. Anything drawn through mode 14 — tiles, an image's cut,
+  the graticule — is in those virtual pixels and is made once a *mesh*. The
+  glyphs are the exception: their positions are true screen pixels and skip
+  `meshToScreen`. Keying anything on the camera again brings back the
+  400 ms frame.
+- **A plane mesh is never built on the main thread while the map can make do
+  with the one it has.** `projectedMesh` returns the held mesh when it is
+  within `PLANE_MESH_LAG` bands, even past its edge, and asks the worker;
+  `MapView` asks again 180 ms after the pointer rests, and redraws on
+  `onProjectedMeshReady`. One build in flight at a time — a pan wants a
+  different mesh every frame. `refreshProjectedMesh` clears the wanted flag
+  *before* it checks the camera, or a map switched to another projection
+  mid-wait redraws itself for ever.
 - **`gl_FragCoord` is fragment-only, and the projection prelude is included by
   both stages.** A helper that reads the pixel goes in `EXACT_TILE`, after the
   prelude, in fragment sources only, or every vertex shader fails to compile.

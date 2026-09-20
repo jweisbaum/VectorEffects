@@ -12,6 +12,7 @@ import {
   type Camera,
   type Viewport,
   glyphLattice,
+  meshPlacement,
   normalizeLon,
   projectionFor,
   project,
@@ -412,7 +413,7 @@ export class MapRenderer {
     this.smearProgram = link(gl, SMEAR_VERT, SMEAR_FRAG);
     this.baseProgram = link(gl, BASE_VERT, BASE_FRAG);
 
-    const shared = ["uCamera", "uViewport", "uLonOffset", "uProjection", "uOrigin", "uRim", "uExact"];
+    const shared = ["uCamera", "uViewport", "uLonOffset", "uProjection", "uOrigin", "uRim", "uExact", "uMesh"];
     this.baseUniforms = uniforms(gl, this.baseProgram, [...shared, "uTileGeo", "uTexture"]);
     this.geoUniforms = uniforms(gl, this.geoProgram, [...shared, "uColor"]);
     const mask = [
@@ -574,6 +575,12 @@ export class MapRenderer {
     const lat0 = (camera.centerLat * Math.PI) / 180;
     gl.uniform3f(u.uOrigin ?? null, camera.centerLat, Math.sin(lat0), Math.cos(lat0));
     gl.uniform1f(u.uRim ?? null, (rimDeg * Math.PI) / 180);
+    // Where a fixed general projection's plane mesh lies on the screen. The
+    // glyphs' positions are screen pixels already and are not run through it.
+    if (projection.general && !projection.general.movable) {
+      const place = meshPlacement(camera, view);
+      gl.uniform3f(u.uMesh ?? null, place.x, place.y, place.scale);
+    }
   }
 
   /**

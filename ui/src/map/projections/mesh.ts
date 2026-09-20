@@ -14,6 +14,12 @@ export interface GeographicMesh {
   triangles: MeshTriangle[];
 }
 const wrap = (lon:number) => ((lon+180)%360+360)%360-180;
+/** How many times a coarse cell may be halved. */
+const LATTICE_DEPTH = 12;
+/** Finest cells along a coarse cell's side, halved once more for midpoints. */
+const LATTICE = 2 << LATTICE_DEPTH;
+/** Room for any lattice count beside another in one key: 2^26 of them. */
+const KEY_STRIDE = 1 << 26;
 function blend(a:MeshVertex,b:MeshVertex,t:number):MeshVertex {
   return {x:a.x+(b.x-a.x)*t,y:a.y+(b.y-a.y)*t,lon:a.lon+(b.lon-a.lon)*t,lat:a.lat+(b.lat-a.lat)*t};
 }
@@ -31,13 +37,23 @@ export function clipPolygon(points:MeshVertex[],axis:"lon"|"lat",value:number,gr
 
 export function geographicMesh(
   width:number,height:number,pxPerDeg:number,
-  inverse:(point:XY)=>LL|null,forward:(point:LL)=>XY|null,budget=192,
+  inverse:(point:XY)=>LL|null,forward:(point:LL)=>XY|null,budget=192,spacing=48,
 ):GeographicMesh {
   const triangles:MeshTriangle[]=[];
-  const samples=new Map<string,MeshVertex|null>();
-  const at=(x:number,y:number):MeshVertex|null=>{
-    const key=`${x},${y}`;
-    if(samples.has(key))return samples.get(key)!;
+  // A sample is asked for by every cell that shares it, up to four at each
+  // depth, so each is taken once and remembered. Remembered by number: a
+  // position is a whole count of the finest cell there can be (a coarse cell
+  // halved LATTICE_DEPTH times, and once more for its midpoints), and two
+  // counts pack into one key. Keyed by a string built from the coordinates,
+  // this lookup was the largest single cost of the mesh.
+  const cols=Math.max(1,Math.ceil(width/spacing)),rows=Math.max(1,Math.ceil(height/spacing));
+  const unitX=width/cols/LATTICE,unitY=height/rows/LATTICE;
+  const samples=new Map<number,MeshVertex|null>();
+  const at=(i:number,j:number):MeshVertex|null=>{
+    const key=i*KEY_STRIDE+j;
+    const known=samples.get(key);
+    if(known!==undefined)return known;
+    const x=i*unitX,y=j*unitY;
     const ll=inverse({x,y});
     const point=ll&&Number.isFinite(ll.lon)&&Number.isFinite(ll.lat)?{...ll,x,y}:null;
     samples.set(key,point);return point;
@@ -52,14 +68,15 @@ export function geographicMesh(
     }
     triangles.push(verts);
   };
-  function cell(x0:number,y0:number,x1:number,y1:number,depth:number):void {
-    const xm=(x0+x1)/2,ym=(y0+y1)/2;
-    const a=at(x0,y0),b=at(x1,y0),c=at(x1,y1),d=at(x0,y1),m=at(xm,ym);
-    const top=at(xm,y0),right=at(x1,ym),bottom=at(xm,y1),left=at(x0,ym);
+  // A cell in lattice counts: its corner, and its side, which halves with depth.
+  function cell(i0:number,j0:number,size:number,depth:number):void {
+    const half=size/2,i1=i0+size,j1=j0+size,im=i0+half,jm=j0+half;
+    const a=at(i0,j0),b=at(i1,j0),c=at(i1,j1),d=at(i0,j1),m=at(im,jm);
+    const top=at(im,j0),right=at(i1,jm),bottom=at(im,j1),left=at(i0,jm);
     const points=[a,b,c,d,m,top,right,bottom,left];
     if(points.every(p=>p===null))return;
     const boundary=points.some(p=>p===null);
-    const small=Math.max(x1-x0,y1-y0)<=(boundary?1:0.25) || depth>=12;
+    const small=Math.max(size*unitX,size*unitY)<=(boundary?1:0.25) || depth>=LATTICE_DEPTH;
     let refine=boundary;
     if(!refine){
       // Test the diagonal and each edge: bilinear-only tests miss curvature
@@ -71,29 +88,35 @@ export function geographicMesh(
       }
     }
     if(refine&&!small){
-      cell(x0,y0,xm,ym,depth+1);cell(xm,y0,x1,ym,depth+1);
-      cell(x0,ym,xm,y1,depth+1);cell(xm,ym,x1,y1,depth+1);
+      cell(i0,j0,half,depth+1);cell(im,j0,half,depth+1);
+      cell(i0,jm,half,depth+1);cell(im,jm,half,depth+1);
     }else{
       if(a&&b&&c)emit(a,b,c);if(a&&c&&d)emit(a,c,d);
     }
   }
   // The modest initial spacing samples disconnected valid regions as well as
   // the main outline. Refinement follows the projection, not a fixed tile mesh.
-  const cols=Math.max(1,Math.ceil(width/48)),rows=Math.max(1,Math.ceil(height/48));
-  for(let j=0;j<rows;j++)for(let i=0;i<cols;i++)cell(i*width/cols,j*height/rows,(i+1)*width/cols,(j+1)*height/rows,0);
+  for(let j=0;j<rows;j++)for(let i=0;i<cols;i++)cell(i*LATTICE,j*LATTICE,LATTICE,0);
   let z=Math.min(12,Math.max(0,Math.ceil(Math.log2(360*pxPerDeg/256))-1));
   for(;;z--){
     const tileData=new Map<string,{z:number;x:number;y:number;lonOffset:number;data:number[]}>();
     const columns=2<<z,rows=1<<z,span=360/columns;
     for(const triangle of triangles){
-      const west=Math.min(...triangle.map(p=>p.lon)),east=Math.max(...triangle.map(p=>p.lon));
-      const south=Math.min(...triangle.map(p=>p.lat)),north=Math.max(...triangle.map(p=>p.lat));
+      const [p0,p1,p2]=triangle;
+      const west=Math.min(p0.lon,p1.lon,p2.lon),east=Math.max(p0.lon,p1.lon,p2.lon);
+      const south=Math.min(p0.lat,p1.lat,p2.lat),north=Math.max(p0.lat,p1.lat,p2.lat);
       const firstCol=Math.floor((west+180)/span),lastCol=Math.floor((east+180-1e-10)/span);
       const firstRow=Math.max(0,Math.floor((90-north)/span)),lastRow=Math.min(rows-1,Math.floor((90-south-1e-10)/span));
+      // Nearly every triangle is a few pixels across and lies in one tile,
+      // where there is nothing to clip it against.
+      const whole=firstCol===lastCol&&firstRow===lastRow;
       for(let row=firstRow;row<=lastRow;row++)for(let col=firstCol;col<=lastCol;col++){
         const w=-180+col*span,n=90-row*span;
-        let polygon=clipPolygon(triangle,'lon',w,true);polygon=clipPolygon(polygon,'lon',w+span,false);
-        polygon=clipPolygon(polygon,'lat',n-span,true);polygon=clipPolygon(polygon,'lat',n,false);
+        let polygon:MeshVertex[]=triangle;
+        if(!whole){
+          polygon=clipPolygon(polygon,'lon',w,true);polygon=clipPolygon(polygon,'lon',w+span,false);
+          polygon=clipPolygon(polygon,'lat',n-span,true);polygon=clipPolygon(polygon,'lat',n,false);
+        }
         if(polygon.length<3)continue;
         const x=((col%columns)+columns)%columns,lonOffset=(col-x)*span,key=`${x}/${row}/${lonOffset}`;
         let tile=tileData.get(key);

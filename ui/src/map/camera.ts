@@ -20,8 +20,12 @@ import {
   worldHeightDeg,
 } from "./projection";
 
-import { defaultCentre, mapExtent, mapTransform } from "./projections/general";
-import { geographicMesh, type GeographicMesh } from "./projections/mesh";
+import { defaultCentre, generalMap, mapExtent, mapTransform } from "./projections/general";
+import type { GeographicMesh, MeshTriangle } from "./projections/mesh";
+import {
+  buildPlaneMeshData, trianglesOf, virtualOf,
+  type PlaneBox, type PlaneMeshData, type PlaneMeshRequest,
+} from "./projections/planeMesh";
 
 /** What a camera that names no projection is drawn in. */
 const PLATE_CARREE = projectionOf(DEFAULT_PROJECTION);
@@ -340,7 +344,7 @@ export function visibleTiles(
 ): VisibleTile[] {
   const general = projectionFor(camera).general;
   if (general?.movable) return azimuthalTiles(camera, view, budget);
-  if (general) return projectedMesh(camera,view,budget).tiles;
+  if (general) return planeMeshTiles(camera, view, budget);
   const bounds = visibleBounds(camera, view, true);
   const ideal = tileLevelFor(camera.pxPerDeg);
 
@@ -553,21 +557,293 @@ export function azimuthalTiles(camera: Camera, view: Viewport, budget = 192): Vi
   return tiles;
 }
 
-const projectedMeshes = new Map<string,GeographicMesh>();
-export function projectedMesh(camera:Camera,view:Viewport,budget=192):GeographicMesh {
-  const key=JSON.stringify([camera,view,budget]);
-  const cached=projectedMeshes.get(key);if(cached)return cached;
-  const general=projectionFor(camera).general;
-  if(!general)throw new Error("Only general projections need a geographic mesh");
-  const transform=mapTransform(general,{lon:camera.centerLon,lat:camera.centerLat});
-  const centre=(general.movable?null:transform.forward({lon:camera.centerLon,lat:camera.centerLat}))??{x:0,y:0};
-  const mesh=geographicMesh(view.width,view.height,camera.pxPerDeg,
-    p=>transform.inverse({x:centre.x+(p.x-view.width/2)/camera.pxPerDeg,y:centre.y-(p.y-view.height/2)/camera.pxPerDeg}),
-    p=>{const xy=transform.forward(p);return xy?{x:view.width/2+(xy.x-centre.x)*camera.pxPerDeg,y:view.height/2-(xy.y-centre.y)*camera.pxPerDeg}:null;},budget);
-  projectedMeshes.set(key,mesh);
-  if(projectedMeshes.size>4)projectedMeshes.delete(projectedMeshes.keys().next().value!);
-  return mesh;
+/**
+ * A fixed general projection's mesh, built in the projection's own plane.
+ *
+ * Robinson does not change when the map is panned or zoomed; only where its
+ * plane sits on the screen does. A mesh made of *screen* positions was
+ * nonetheless a different mesh for every camera, and was rebuilt on every
+ * pointer move at 150 to 400 ms each. So it is made for a virtual canvas
+ * instead: a rectangle of the plane, at the finest scale of the zoom band the
+ * camera is in, and `meshPlacement` says where that canvas lies on the real
+ * screen — a scale and an offset, which the vertex shader applies. Panning
+ * and zooming inside the band rebuild nothing.
+ */
+export interface PlaneMesh extends GeographicMesh {
+  /** The projection it is a mesh of. */
+  projection: ProjectionId;
+  /** The tile level, which is what a zoom band is: one level's worth of scale. */
+  level: number;
+  /** Virtual pixels per plane degree: the top of the band. */
+  scale: number;
+  /** The plane rectangle covered, y up: west, south, east, north. */
+  region: PlaneBox;
+  /** Whether that is the whole map, so that no pan can leave it. */
+  whole: boolean;
+  /** Each tile's box in virtual pixels, beside `tiles`: left, top, right, bottom. */
+  boxes: ReadonlyArray<readonly [number, number, number, number]>;
+  /** The geographic box of everything in it, longitudes unwrapped. */
+  bounds: ViewBounds;
+  /** A place's position on the virtual canvas, or null where the map has none. */
+  toVirtual(point: GeoPoint): ScreenPoint | null;
 }
+
+/**
+ * The coarse cell a plane mesh starts from, in virtual pixels. Twice a screen
+ * mesh's: the canvas is up to four views at up to twice the scale, and what
+ * a cell samples is its corners, edges and middle, so ninety-six pixels of
+ * cell is still a sample every forty-eight. Refinement is by error either way.
+ */
+const PLANE_MESH_SPACING = 96;
+
+/**
+ * How many zoom bands behind a mesh may be and still be drawn through. Each
+ * band doubles its error — 0.3 px, then 0.6, 1.2, 2.4 — and halves the
+ * sharpness of the tiles it asks for, all of it put right a moment after the
+ * wheel stops. Past that it is remade at once: eight times too coarse is a
+ * picture that looks wrong, not soft.
+ */
+const PLANE_MESH_LAG = 3;
+
+/** The band a scale falls in: the tile level `geographicMesh` would choose. */
+function meshLevel(pxPerDeg: number): number {
+  return Math.min(MAX_TILE_LEVEL, Math.max(0, Math.ceil(Math.log2((360 * pxPerDeg) / TILE_SIZE)) - 1));
+}
+
+type General = NonNullable<Projection["general"]>;
+
+/** The view, as a rectangle of the projection's plane (y up). */
+function planeView(camera: Camera, view: Viewport): { centre: { x: number; y: number }; box: PlaneBox } | null {
+  const general = projectionFor(camera).general;
+  if (!general) return null;
+  const centre = mapTransform(general, { lon: 0, lat: 0 }).forward({ lon: camera.centerLon, lat: camera.centerLat });
+  if (!centre) return null;
+  const halfW = view.width / 2 / camera.pxPerDeg, halfH = view.height / 2 / camera.pxPerDeg;
+  return { centre, box: [centre.x - halfW, centre.y - halfH, centre.x + halfW, centre.y + halfH] };
+}
+
+function coversWorld(general: General): boolean {
+  const [west, south, east, north] = general.bbox;
+  return west <= -180 && east >= 180 && south <= -90 && north >= 90;
+}
+
+/**
+ * A plane rectangle, held to the map where the map has an end.
+ *
+ * Only a map of the whole world has one. A national grid's catalogued extent
+ * is its area of use, not where it stops being a projection: British National
+ * Grid draws Iceland perfectly well, and a view of it shows Iceland. Holding
+ * its mesh to the catalogue left the view with places no tile held.
+ */
+function withinMap(general: General, box: PlaneBox): PlaneBox {
+  if (!coversWorld(general)) return box;
+  const [west, south, east, north] = mapExtent(general);
+  const padX = (east - west) * 0.02, padY = (north - south) * 0.02;
+  const held: PlaneBox = [
+    Math.max(west - padX, box[0]), Math.max(south - padY, box[1]),
+    Math.min(east + padX, box[2]), Math.min(north + padY, box[3]),
+  ];
+  // A view off the map altogether still needs something to draw through.
+  return held[2] > held[0] && held[3] > held[1] ? held : box;
+}
+
+/** Whether a region is all of a world map, so that no pan can leave it. */
+function wholeMap(general: General, region: PlaneBox): boolean {
+  if (!coversWorld(general)) return false;
+  const [west, south, east, north] = mapExtent(general);
+  return region[0] <= west && region[1] <= south && region[2] >= east && region[3] >= north;
+}
+
+/** Whether a mesh's region holds the view and `slack` of it beyond, as far as the map extends. */
+function holdsView(mesh: PlaneMesh, general: General, box: PlaneBox, slack = 0): boolean {
+  if (mesh.whole) return true;
+  const sx = (box[2] - box[0]) * slack, sy = (box[3] - box[1]) * slack;
+  const wanted = withinMap(general, [box[0] - sx, box[1] - sy, box[2] + sx, box[3] + sy]);
+  return mesh.region[0] <= wanted[0] && mesh.region[1] <= wanted[1]
+    && mesh.region[2] >= wanted[2] && mesh.region[3] >= wanted[3];
+}
+
+/** What to build for a camera: the view with half of itself again on every
+ * side, so a pan has half a screen to go before it is left. */
+function requestFor(camera: Camera, view: Viewport, budget: number): PlaneMeshRequest & { level: number } {
+  const projection = projectionFor(camera);
+  const seen = planeView(camera, view);
+  if (!projection.general || !seen) throw new Error("Only general projections need a geographic mesh");
+  const level = meshLevel(camera.pxPerDeg);
+  const [vw, vs, ve, vn] = seen.box;
+  const growX = (ve - vw) / 2, growY = (vn - vs) / 2;
+  return {
+    projection: projection.id, level,
+    region: withinMap(projection.general, [vw - growX, vs - growY, ve + growX, vn + growY]),
+    scale: (TILE_SIZE * (2 << level)) / 360,
+    // The region can be four views' worth, so its tiles can be four budgets'
+    // worth; `visibleTiles` draws only the ones the view touches.
+    budget: budget * 4, spacing: PLANE_MESH_SPACING,
+  };
+}
+
+function meshFrom(request: PlaneMeshRequest & { level: number }, data: PlaneMeshData): PlaneMesh {
+  const general = generalMap(request.projection);
+  if (!general) throw new Error(`no such projection: ${request.projection}`);
+  const transform = mapTransform(general, { lon: 0, lat: 0 });
+  let triangles: MeshTriangle[] | null = null;
+  return {
+    tiles: data.tiles, boxes: data.boxes, bounds: data.bounds,
+    // Only an image layer reads these, and a hundred thousand of them are
+    // not worth unpacking for a map that has none.
+    get triangles() { return (triangles ??= trianglesOf(data.triangles)); },
+    projection: request.projection as ProjectionId, level: request.level, scale: request.scale,
+    region: request.region, whole: wholeMap(general, request.region),
+    toVirtual: (point) => { const xy = transform.forward(point); return xy ? virtualOf(request.region, request.scale, xy) : null; },
+  };
+}
+
+let planeMesh: PlaneMesh | null = null;
+let planeMeshWanted = false;
+let meshReady: (() => void) | null = null;
+/** The build in flight, if any, by what it is of. */
+let building: { id: number; key: string } | null = null;
+let builds = 0;
+let worker: Worker | null | undefined;
+
+/**
+ * The worker meshes are built in, or null where there is none to be had: a
+ * test, the driver's bundled fixture. A build there is on the calling thread,
+ * which is only slower, never different — both run `buildPlaneMeshData`.
+ */
+function meshWorker(): Worker | null {
+  if (worker !== undefined) return worker;
+  worker = null;
+  try {
+    if (typeof Worker !== "undefined") {
+      const made = new Worker(new URL("./projections/meshWorker.ts", import.meta.url), { type: "module" });
+      made.onmessage = (event: MessageEvent<{ id: number; data?: PlaneMeshData; error?: string }>) => {
+        const mine = building;
+        if (!mine || event.data.id !== mine.id) return;
+        building = null;
+        const request = JSON.parse(mine.key) as PlaneMeshRequest & { level: number };
+        if (event.data.data) planeMesh = meshFrom(request, event.data.data);
+        meshReady?.();
+      };
+      // A worker that will not run is no worker: fall back for good.
+      made.onerror = () => { worker = null; building = null; meshReady?.(); };
+      worker = made;
+    }
+  } catch {
+    worker = null;
+  }
+  return worker;
+}
+
+/** Called whenever a mesh built off the main thread has arrived: redraw. */
+export function onProjectedMeshReady(listener: (() => void) | null): void {
+  meshReady = listener;
+}
+
+/** Starts a build for this camera in the worker. False where there is none. */
+function buildElsewhere(camera: Camera, view: Viewport, budget: number): boolean {
+  const target = meshWorker();
+  if (!target) return false;
+  // One at a time. A pan asks for a different mesh every frame, and a queue of
+  // them, each a second's work, would still be arriving long after it ended.
+  // Whatever lands is drawn through, and the frame after decides again.
+  if (building) return true;
+  const request = requestFor(camera, view, budget);
+  const key = JSON.stringify(request);
+  building = { id: ++builds, key };
+  target.postMessage({ id: building.id, request });
+  return true;
+}
+
+/**
+ * The mesh to draw this camera through.
+ *
+ * Building one is up to a second or two where the map's outline or a pole is
+ * in it, so the map is never made to wait for one it can do without. The mesh
+ * in hand is drawn through while it is of this projection and no more than
+ * `PLANE_MESH_LAG` bands coarse — a plane mesh is right at any scale, only
+ * coarser than it would like — even when the view has run past its edge,
+ * which for a moment shows as an unpainted margin. What it would like
+ * instead is built in the worker: at once when the view has left it, and
+ * otherwise when the map says the pointer has come to rest
+ * (`projectedMeshWanted`, `refreshProjectedMesh`). Only with no mesh at all,
+ * or no worker, is one built here and now.
+ */
+export function projectedMesh(camera: Camera, view: Viewport, budget = 192): PlaneMesh {
+  const projection = projectionFor(camera);
+  const seen = planeView(camera, view);
+  if (!projection.general || projection.general.movable || !seen) {
+    throw new Error("Only fixed general projections need a geographic mesh");
+  }
+  const level = meshLevel(camera.pxPerDeg);
+  const held = planeMesh;
+  if (held && held.projection === projection.id && Math.abs(level - held.level) <= PLANE_MESH_LAG) {
+    const holds = holdsView(held, projection.general, seen.box);
+    if (holds && held.level <= level) {
+      // Due for a better one: bands behind, or the view nearing its edge.
+      planeMeshWanted = held.level !== level || !holdsView(held, projection.general, seen.box, 0.2);
+      return held;
+    }
+    // Left behind, or too fine for a view that has zoomed out: make do with
+    // it only if a better one can be on its way.
+    if (buildElsewhere(camera, view, budget)) {
+      planeMeshWanted = false;
+      return held;
+    }
+  }
+  planeMeshWanted = false;
+  const request = requestFor(camera, view, budget);
+  planeMesh = meshFrom(request, buildPlaneMeshData(request));
+  return planeMesh;
+}
+
+/** Whether the last `projectedMesh` made do with a mesh it would replace at rest. */
+export function projectedMeshWanted(): boolean {
+  return planeMeshWanted;
+}
+
+/** Builds the mesh this camera would like, for when the pointer has come to rest. */
+export function refreshProjectedMesh(camera: Camera, view: Viewport, budget = 192): void {
+  // Cleared first, whatever the camera now is: a map that kept asking for a
+  // mesh it no longer draws through would redraw itself for ever.
+  planeMeshWanted = false;
+  const projection = projectionFor(camera);
+  if (!projection.general || projection.general.movable) return;
+  if (buildElsewhere(camera, view, budget)) return;
+  const request = requestFor(camera, view, budget);
+  planeMesh = meshFrom(request, buildPlaneMeshData(request));
+}
+
+/**
+ * Where a plane mesh's virtual canvas lies on the screen: `screen = virtual *
+ * scale + offset`, which is the whole of what a pan or a zoom changes.
+ */
+export function meshPlacement(camera: Camera, view: Viewport): { scale: number; x: number; y: number } {
+  const mesh = projectedMesh(camera, view);
+  const seen = planeView(camera, view);
+  if (!seen) return { scale: 1, x: 0, y: 0 };
+  return {
+    scale: camera.pxPerDeg / mesh.scale,
+    x: view.width / 2 + (mesh.region[0] - seen.centre.x) * camera.pxPerDeg,
+    y: view.height / 2 - (mesh.region[3] - seen.centre.y) * camera.pxPerDeg,
+  };
+}
+
+/** The mesh's tiles that the view touches. */
+function planeMeshTiles(camera: Camera, view: Viewport, budget: number): VisibleTile[] {
+  const mesh = projectedMesh(camera, view, budget);
+  const place = meshPlacement(camera, view);
+  const tiles = mesh.tiles.filter((_, i) => {
+    const [left, top, right, bottom] = mesh.boxes[i]!;
+    return right * place.scale + place.x >= 0 && left * place.scale + place.x <= view.width
+      && bottom * place.scale + place.y >= 0 && top * place.scale + place.y <= view.height;
+  });
+  // A view zoomed out past its mesh touches four times the tiles a level
+  // too fine. Asking the backend for all of them, for the half second until
+  // the right mesh lands, is work thrown away: some are left unpainted.
+  return tiles.length > budget * 2 ? tiles.slice(0, budget * 2) : tiles;
+}
+
 /** Fit a newly chosen CRS to its region; a globe opens with the current focus. */
 export function cameraForProjection(camera:Camera,view:Viewport,id:ProjectionId):Camera {
   const projection=projectionOf(id);

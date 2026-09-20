@@ -1190,9 +1190,34 @@ turning is 4 ms on the main thread, 10 ms with glyphs, at 2880 × 1590. The
 shader and `azimuthal` in `general.ts` are the same formulas twice, held
 together by `azimuthalShader.test.ts`, which runs the shader's own text.
 
-Every other general projection uses adaptive inverse screen-to-geographic
-meshes, clipped per source tile at world seams. Images, land, coastlines and
-vector rasters share that mesh. Glyphs use a screen lattice with geographic east/north
+Every other general projection — Robinson, Mollweide, every EPSG code — uses
+an adaptive inverse mesh, clipped per source tile at world seams, and shared
+by images, land, coastlines and vector rasters. **The mesh is made in the
+projection's own plane, not on the screen.** Robinson does not change when
+the map is panned or zoomed; only where its plane lies on the screen does. A
+mesh of screen positions was nonetheless a different mesh for every camera
+and was rebuilt on every pointer move: 420 ms a frame for Robinson at a world
+zoom, a second for Mollweide. It is built instead for a virtual canvas — the
+view with half of itself again on every side, held to the map where the map
+has an end, at the finest scale of the camera's zoom band — and the vertex
+shader places that canvas with an offset and a scale (`uMesh`,
+`meshPlacement`), which is all a pan or a zoom changes. An image's cut of the
+mesh and the graticule are made once a mesh, not once a frame. Panning is
+1 to 3 ms a frame.
+
+A mesh is right at any scale, only coarser than it would like: each band
+behind doubles its 0.3 px error. So the one in hand is drawn through while it
+is within three bands, even when the view has run past its edge (an unpainted
+margin for a moment), and what it would like instead is built **in a worker**
+(`meshWorker.ts`): at once when the view has left it, otherwise 180 ms after
+the pointer rests. Building one with the map's outline or a pole in it is
+half a second to two and a half — a pole is singular in longitude and is
+refined at every zoom — and on the main thread that was a frozen window each
+time the wheel stopped. Only with no mesh at all, or no worker (a test, the
+driver's fixture), is one built where it is asked for; both paths run the
+same `buildPlaneMeshData`. **Only a map of the whole world is held to its
+extent**: a national grid's catalogued extent is its area of use, not where
+it stops projecting, and a view of British National Grid shows Iceland. Glyphs use a screen lattice with geographic east/north
 Jacobians for grid convergence. Graticules are curved and horizon-clipped.
 Pointer inverses outside the map are invalid and cannot initiate edits.
 Ground tools retain their geodesic geometry; in these views px resolves to a

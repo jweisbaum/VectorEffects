@@ -57,6 +57,9 @@ import {
   unproject,
   visibleTiles,
   zoomAbout,
+  onProjectedMeshReady,
+  projectedMeshWanted,
+  refreshProjectedMesh,
 } from "./camera";
 import {
   addFootprint,
@@ -639,6 +642,10 @@ export default function MapView({
    * first cancels the other.
    */
   const scheduled = useRef<{ raf: number; timer: number } | null>(null);
+  /** `requestDraw`, for `draw` itself, which is defined before it. */
+  const requestDrawRef = useRef<() => void>(() => undefined);
+  /** The wait for the pointer to rest before a plane mesh is rebuilt. */
+  const meshSettle = useRef<number | null>(null);
   const dragging = useRef<{ x: number; y: number } | null>(null);
   /** Where the pointer went down, to tell a click from a pan. */
   const pressOrigin = useRef<{ x: number; y: number } | null>(null);
@@ -1610,6 +1617,21 @@ export default function MapView({
 
     try {
       const ranges = renderer.render(state);
+      // A fixed general projection may have drawn through a mesh it would
+      // replace: one zoom band coarse, or with the view nearing its edge
+      // (`projectedMesh` in camera.ts). Building one is a fifth of a second,
+      // which mid-gesture is a dropped frame and at rest is nothing, so it
+      // waits for the pointer to stop. Every frame that still wants one
+      // pushes the wait back.
+      if (meshSettle.current !== null) window.clearTimeout(meshSettle.current);
+      meshSettle.current = null;
+      if (projectedMeshWanted()) {
+        meshSettle.current = window.setTimeout(() => {
+          meshSettle.current = null;
+          refreshProjectedMesh(cameraRef.current, viewRef.current);
+          requestDrawRef.current();
+        }, 180);
+      }
       // The auto scale follows what was drawn (spec.md 5.3, M27), per kind
       // (M31). Applied only when a range moved by more than the eye can see,
       // and through state, so the next frame paints with it and the legend
@@ -1727,6 +1749,14 @@ export default function MapView({
       timer: window.setTimeout(run, 200),
     };
   }, [draw]);
+  requestDrawRef.current = requestDraw;
+
+  // A plane mesh built off the main thread has arrived (camera.ts): draw
+  // through it. One listener, because there is one map.
+  useEffect(() => {
+    onProjectedMeshReady(() => requestDrawRef.current());
+    return () => onProjectedMeshReady(null);
+  }, []);
 
   /**
    * Redraws the overlay on the next frame.

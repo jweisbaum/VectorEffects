@@ -23,11 +23,30 @@ for the same glyphs. After: **4 ms, 10 ms with glyphs** in the fixture,
 **20 ms** in the application's development build. Against the old renderer's
 picture: every fixed projection byte-identical (which is what says the glyph
 change is an equivalent), the azimuthals differing only along hairlines —
-coast, graticule and limb antialiasing. **Not done yet:** the fixed general
-projections (Robinson, Mollweide, every EPSG code) still build that mesh per
-camera, 420 ms a frame for Robinson at a world zoom; their mesh does not
-depend on the camera if it is built in the projection's own plane, which is
-the next piece.
+coast, graticule and limb antialiasing. **Then the fixed projections**, which still built
+that mesh per camera: panning cost 423 ms a frame for Robinson, 993 for
+Mollweide, 236 for NSIDC polar stereographic. Their mapping does not depend
+on the camera, so the mesh is now made in the projection's own plane and
+placed by a uniform: **1 to 3 ms**. Three things found on the way, each by a
+test or a measurement rather than by eye. Holding the mesh to the
+projection's catalogued extent left a national grid's view with places no
+tile held, and — worse — made "is a better mesh wanted" unanswerable, which
+in the application would have been a rebuild every 180 ms: only a world map
+has an end. Letting the mesh lag one zoom band was not enough: twelve quick
+wheel steps cross two, and the rebuild mid-gesture was a 1,200 ms frame; it
+may lag three. And a rebuild at rest is 0.5 to 2.6 s where the outline or a
+pole is in it (a pole is refined at every zoom; that cost was always there,
+paid per frame), which on the main thread was a frozen window each time the
+wheel stopped — so it is built in a worker and the map draws through what it
+has until it lands. In the application: Robinson pans at 14 ms a frame, the
+worst frame of a fast zoom is 54 ms, and the map goes quiet afterwards. The
+builder itself is three times cheaper (integer sample keys for strings; no
+clipping for a triangle inside one tile). Every projection's picture was
+compared with the original renderer's: differences along hairlines only.
+**Not done:** swapping in a new mesh uploads two buffers a tile and is a
+~190 ms frame, once per rebuild — the base map's copy differs only in its
+texture coordinates and could be a uniform. Glyph placement under these
+projections is still done on the CPU each frame, 5 to 10 ms of it.
 
 **2026-09-20: A loading page, and opening made ten to thirty times faster.**
 Asked for: a loading page with a progress bar when a project opens, and
