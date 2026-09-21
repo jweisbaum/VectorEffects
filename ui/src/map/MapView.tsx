@@ -167,7 +167,7 @@ import {
 } from "./region";
 import { ImageCache } from "./images";
 import { imageUnder } from "./place";
-import { createAlignStore, imagePixelAt, pictureToMap, type AlignStore } from "./align";
+import { MAX_CONTROL_POINTS, createAlignStore, imagePixelAt, pictureToMap, type AlignStore } from "./align";
 import type { ImageLayerView } from "../generated/ImageLayerView";
 import { MapRenderer, type OperatorPreview, type RenderState } from "./renderer";
 import { uniqueTiles } from "../timeline/playback";
@@ -2266,22 +2266,25 @@ export default function MapView({
       if (alignStore.current!.get().layer !== null) {
         if (event.key === "Enter") {
           event.preventDefault();
-          const layer = alignStore.current!.get().layer!;
-          const pairs = alignStore.current!.pairs();
-          alignStore.current!.cancel();
-          setHint(null);
-          // Zero pairs placed is not "clear the warp" — a session opened and
-          // closed without a click would otherwise silently erase whatever
-          // control points the image already had (spec.md's full-replacement
-          // write, the same shape `set_image_control_points` takes for a
-          // measurement's `SetAnnotations`). Treated as Escape instead.
-          if (pairs.length > 0) {
-            void api
-              .setImageControlPoints(layer, pairs.map((p) => [p.u, p.v, p.lon, p.lat]))
-              .then(onProjectChanged)
-              .catch((err: unknown) => setError(String(err)));
-          }
-          requestOverlay();
+          // `commit` ends the session only once the write it is given
+          // succeeds (align.ts): zero pairs behaves as Escape, and a
+          // rejected write — any failure, not only the cap above, which
+          // should stop the reachable case before this is ever reached —
+          // leaves every pair exactly where it was, so Backspace can trim
+          // and Enter can be tried again instead of starting the whole
+          // chart over. An earlier version of this cleared the store
+          // *before* the write resolved and threw every pair away whether
+          // it succeeded or not — the bug this replaces.
+          void alignStore.current!
+            .commit((layer, pairs) =>
+              api.setImageControlPoints(layer, pairs.map((p) => [p.u, p.v, p.lon, p.lat])),
+            )
+            .then((summary) => {
+              setHint(null);
+              if (summary) onProjectChanged(summary);
+              requestOverlay();
+            })
+            .catch((err: unknown) => setError(String(err)));
           return;
         }
         if (event.key === "Escape") {
@@ -4365,8 +4368,17 @@ export default function MapView({
         const geo = unproject(cameraRef.current, viewRef.current, point);
         const pixel = view ? imagePixelAt(view, geo) : null;
         if (pixel) {
-          reportError(null);
-          alignStore.current!.pick("picture", { lon: pixel[0], lat: pixel[1] });
+          // `pick` itself refuses a fifty-first pair (align.ts,
+          // `MAX_CONTROL_POINTS`) — caught here, before it is ever stored,
+          // rather than at `Enter` where the backend's own cap would reject
+          // the whole set and cost every pair already placed.
+          if (alignStore.current!.pick("picture", { lon: pixel[0], lat: pixel[1] })) {
+            reportError(null);
+          } else {
+            reportError(
+              `At most ${MAX_CONTROL_POINTS} control points are allowed — drop one with Backspace to add another.`,
+            );
+          }
         } else {
           reportError("That point is outside the picture — click a place inside it.");
         }

@@ -943,7 +943,11 @@ click now. **Escape** cancels the session with nothing written; **Backspace**
 drops the last pair, or the picture click waiting for its map half if there
 is one. **Enter with no pairs placed behaves as Escape**: a session opened
 and closed without a click must not silently erase control points the image
-already had, since the write replaces the whole set.
+already had, since the write replaces the whole set. **A rejected write costs
+nothing**: the session ends only once the write succeeds, so every pair
+placed survives a failure exactly as it was, ready for `Backspace` to trim
+and `Enter` to try again — carefully placed pairs are slow, attentive work,
+and a refusal must not be the thing that erases it.
 
 **What is stored is the pairs, never the warp.** `LayerSource::Image` carries
 `control_points: Vec<ControlPoint>`, each a `{u, v, lon, lat}` — `u` and `v`
@@ -966,9 +970,10 @@ the rubber-sheet bend a creased or hand-drawn chart actually needs — and
 every pair still lands exactly, however many there are. **Fifty pairs is the
 cap**: the fit solves a dense system in the pair count and the mesh below is
 re-evaluated against every pair on each change, so both costs are bounded by
-holding the count down. More than fifty are refused, with a hint, rather than
-silently accepted — the click itself is not stopped, so the refusal is found
-at Enter, against the whole set placed since the session began.
+holding the count down. A fifty-first click is refused with a hint rather
+than silently dropped, before it is ever stored — the interaction's own cap,
+not just the write's: reaching it at `Enter` instead would mean rejecting the
+whole set, costing every pair placed to enforce a limit on one of them.
 
 Outside the pairs' own hull, an unconstrained spline can run away — its
 radial term grows like `r²·ln r` — so only that radial term is damped back

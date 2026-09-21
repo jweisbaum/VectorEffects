@@ -16,6 +16,17 @@
 
 import type { GeoPoint } from "./camera";
 
+/**
+ * The most pairs a session will add, mirroring `ve_core::warp::MAX_CONTROL_POINTS`
+ * (`crates/ve-core/src/warp.rs`). `ts-rs` exports types, not bare constants,
+ * so there is no generated binding to import here — this is a second copy of
+ * the number, and the two must be changed together. The backend's own cap in
+ * `control_points_set` stays the authority; this one exists so a click never
+ * reaches that refusal in the first place, losing nothing to a rejected
+ * write (spec.md 4.9).
+ */
+export const MAX_CONTROL_POINTS = 50;
+
 /** Which half of a pair the next click completes. */
 export type AlignKind = "picture" | "map";
 
@@ -81,17 +92,25 @@ export function createAlignStore() {
      * `expecting` says it is. A `kind` that does not match `expecting` is
      * ignored rather than reordering the pair — the caller alternates by
      * reading `expecting` itself, so this only guards a caller that does not.
+     *
+     * Returns `false` when a picture click would start a fifty-first pair —
+     * refused here, before it is stored, rather than waiting for `Enter` to
+     * find the same limit on the backend and reject the whole set. Every
+     * other call returns `true`, a no-op included, so the caller only has a
+     * hint to show on the one path that needed refusing.
      */
-    pick(kind: AlignKind, at: GeoPoint) {
-      if (snapshot.layer === null || kind !== snapshot.expecting) return;
+    pick(kind: AlignKind, at: GeoPoint): boolean {
+      if (snapshot.layer === null || kind !== snapshot.expecting) return true;
       if (kind === "picture") {
+        if (snapshot.pairs.length >= MAX_CONTROL_POINTS) return false;
         publish({ ...snapshot, expecting: "map", pending: { u: at.lon, v: at.lat } });
-        return;
+        return true;
       }
       const pending = snapshot.pending;
-      if (pending === null) return;
+      if (pending === null) return true;
       const pair: AlignPair = { u: pending.u, v: pending.v, lon: at.lon, lat: at.lat };
       publish({ ...snapshot, expecting: "picture", pairs: [...snapshot.pairs, pair], pending: null });
+      return true;
     },
     /**
      * Backspace: drops the picture click waiting for its map half, if there
@@ -109,6 +128,32 @@ export function createAlignStore() {
     /** Escape: leaves the mode with nothing written. */
     cancel() {
       publish(INITIAL);
+    },
+    /**
+     * Enter: writes every pair through `write` and ends the session only
+     * once that succeeds. Zero pairs behaves as `cancel` — there is nothing
+     * to write, and a session opened and closed without a click must not
+     * erase control points the image already had.
+     *
+     * **The session, and every pair, survive a rejected write.** Nothing is
+     * published until `write` resolves, so a caller whose promise rejects —
+     * the fifty-pair cap, or any other failure the backend reports — leaves
+     * the store exactly as it was: the pairs are still there for Backspace
+     * to trim and Enter to try again, rather than gone. Clearing the store
+     * *before* the write settles was the bug this replaces: a rejected
+     * write cost every pair placed, not only the ones over a limit. The
+     * caller is expected to report a rejection itself (through `hint.ts`);
+     * this only decides when the session ends, not how a failure is shown.
+     */
+    async commit<T>(write: (layer: number, pairs: readonly AlignPair[]) => Promise<T>): Promise<T | null> {
+      if (snapshot.layer === null) return null;
+      if (snapshot.pairs.length === 0) {
+        publish(INITIAL);
+        return null;
+      }
+      const result = await write(snapshot.layer, snapshot.pairs);
+      publish(INITIAL);
+      return result;
     },
     pairs: () => snapshot.pairs,
   };

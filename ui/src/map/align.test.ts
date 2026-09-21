@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { createAlignStore, imagePixelAt, pictureToMap, type AlignableView } from "./align";
+import { MAX_CONTROL_POINTS, createAlignStore, imagePixelAt, pictureToMap, type AlignableView } from "./align";
 
 /** Unwraps a resolved pixel, failing loudly if the click was refused. */
 function found(pixel: [number, number] | null): [number, number] {
@@ -94,6 +94,90 @@ describe("createAlignStore", () => {
     unsubscribe();
     store.undoLast();
     expect(calls).toBe(3);
+  });
+
+  /**
+   * The fifty-first pair is refused where it is placed, not left to the
+   * backend's own cap to discover at `Enter` — that would mean a rejected
+   * write, and (before `commit`) a rejected write used to cost every pair
+   * placed, the fifty already-good ones included. `pick` reports the
+   * refusal by returning `false`, rather than throwing or reaching into
+   * `hint.ts` itself, so the caller decides how to show it.
+   */
+  it("refuses a picture click that would start a fifty-first pair", () => {
+    const store = createAlignStore();
+    store.begin(7);
+    for (let i = 0; i < MAX_CONTROL_POINTS; i++) {
+      expect(store.pick("picture", { lon: i, lat: 0 })).toBe(true);
+      expect(store.pick("map", { lon: i, lat: 1 })).toBe(true);
+    }
+    expect(store.pairs()).toHaveLength(MAX_CONTROL_POINTS);
+    // The fifty-first picture click is refused outright...
+    expect(store.pick("picture", { lon: 999, lat: 0 })).toBe(false);
+    expect(store.pairs()).toHaveLength(MAX_CONTROL_POINTS);
+    expect(store.get().expecting).toBe("picture");
+    // ...and Backspace makes room for another, exactly as a refused click
+    // should: trim one, and the next picture click is accepted again.
+    store.undoLast();
+    expect(store.pairs()).toHaveLength(MAX_CONTROL_POINTS - 1);
+    expect(store.pick("picture", { lon: 999, lat: 0 })).toBe(true);
+  });
+
+  describe("commit", () => {
+    /** Enter with nothing placed behaves as `cancel`: no write is attempted. */
+    it("behaves as cancel with no pairs, and calls no write", async () => {
+      const store = createAlignStore();
+      store.begin(7);
+      const write = vi.fn();
+      const result = await store.commit(write);
+      expect(result).toBeNull();
+      expect(write).not.toHaveBeenCalled();
+      expect(store.get().layer).toBeNull();
+    });
+
+    /**
+     * The property this whole fix exists for: a rejected write must not
+     * cost the pairs placed before it. Before this, `Enter`'s handler
+     * cleared the store's pairs *before* the write resolved, so any
+     * failure — the fifty-pair cap included — threw away every pair the
+     * user had placed, not only the ones over a limit.
+     */
+    it("leaves every pair, and the session, exactly as they were when the write rejects", async () => {
+      const store = createAlignStore();
+      store.begin(7);
+      store.pick("picture", { lon: -70, lat: 41 });
+      store.pick("map", { lon: -69, lat: 42 });
+      store.pick("picture", { lon: -71, lat: 41 });
+      store.pick("map", { lon: -68, lat: 42 });
+      const before = store.pairs();
+
+      const write = vi.fn().mockRejectedValue(new Error("at most 50 control points are allowed"));
+      await expect(store.commit(write)).rejects.toThrow("at most 50");
+
+      expect(store.get().layer).toBe(7);
+      expect(store.pairs()).toEqual(before);
+      expect(store.get().expecting).toBe("picture");
+
+      // Trimming and retrying still works — the session was never damaged.
+      store.undoLast();
+      expect(store.pairs()).toHaveLength(1);
+    });
+
+    /** A successful write ends the session, and hands the write's own result back. */
+    it("ends the session and returns the write's result once it succeeds", async () => {
+      const store = createAlignStore();
+      store.begin(7);
+      store.pick("picture", { lon: -70, lat: 41 });
+      store.pick("map", { lon: -69, lat: 42 });
+
+      const write = vi.fn().mockResolvedValue("ok");
+      const result = await store.commit(write);
+
+      expect(result).toBe("ok");
+      expect(write).toHaveBeenCalledWith(7, [{ u: -70, v: 41, lon: -69, lat: 42 }]);
+      expect(store.get().layer).toBeNull();
+      expect(store.pairs()).toHaveLength(0);
+    });
   });
 });
 
