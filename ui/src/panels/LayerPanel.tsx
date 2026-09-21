@@ -974,7 +974,7 @@ export function ImageControls({
       >
         Align…
       </button>
-      {(image.georeferenced || image.warped) && (
+      {(image.georeferenced || image.warped || image.control_points.length > 0) && (
         <button
           onClick={onReset}
           title={

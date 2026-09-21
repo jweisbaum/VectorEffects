@@ -86,7 +86,7 @@ it("shows the reset button for a georeferenced image, as before", async () => {
   expect(resetButton()).not.toBeNull();
 });
 
-/** The regression this closes. */
+/** The regression this closes, for the case a 4+-pair fix originally covered. */
 it("shows the reset button for a hand-placed image once control points warp it", async () => {
   await render(view({ georeferenced: false, warped: true }));
   const button = resetButton();
@@ -94,6 +94,30 @@ it("shows the reset button for a hand-placed image once control points warp it",
   // The title has to tell the truth about which case this is: there is no
   // file to go back to, only the pairs to clear.
   expect(button!.title).not.toContain("its own file");
+});
+
+/**
+ * The band the first pass of this fix missed: `warped` is
+ * `!warp.is_identity_affine()`, and one, two or three pairs are all still
+ * `Kind::Affine` (a translation, a similarity, an affine) — so a hand-placed
+ * image nudged by a single control point is neither `georeferenced` nor
+ * `warped`, and the button stayed hidden for it even though there is exactly
+ * as much to clear as in the four-pair case. Design §3's promise is
+ * unconditional: one pair is still pairs.
+ */
+it("shows the reset button for a hand-placed image with one to three control points, unwarped", async () => {
+  for (const points of [1, 2, 3]) {
+    await render(
+      view({
+        georeferenced: false,
+        warped: false,
+        control_points: Array.from({ length: points }, (_, i) => [i, i, -70 + i, 42 - i]),
+      }),
+    );
+    const button = resetButton();
+    expect(button, `${points} point(s)`).not.toBeNull();
+    expect(button!.title, `${points} point(s)`).not.toContain("its own file");
+  }
 });
 
 it("still describes the georeferenced case as returning to the file", async () => {

@@ -264,7 +264,7 @@ impl Warp {
 /// vanishing line (`w == 0`) that dividing by it inflates whatever numerator
 /// remains into millions of degrees before `Warp::mesh` narrows the result to
 /// `f32` — no more usable than landing on the line outright, so it is
-/// rejected the same way. Four orders of magnitude looser than
+/// rejected the same way. Six orders of magnitude looser than
 /// `project_through`'s own `1e-12`, which exists only to protect that one
 /// division from a literal zero and says nothing about whether the *result*
 /// stays sane; a corner at `w = 1e-10` clears `1e-12` and still produces the
