@@ -15,6 +15,7 @@ import {
 } from "../project/dialogs";
 import { layerForSelection, layerToActivate } from "./activeLayer";
 import { CalendarIcon } from "./CalendarIcon";
+import { AlignIcon } from "./AlignIcon";
 import { EyeIcon } from "./EyeIcon";
 import HistoryImportDialog, { type HistoryChoice } from "./HistoryImportDialog";
 import { dropSide, layerDropIndex, objectDropIndex } from "./reorder";
@@ -919,15 +920,6 @@ function GisControls({
   );
 }
 
-/**
- * Above this, a corner's spline residual gets a line in the panel (spec.md
- * 4.9 §2, §5): "how much is the spline doing out here". Below it, the bend
- * at that corner is not worth a caution — a tenth of a degree is a few
- * hundred metres to a kilometre, depending on latitude, well past anything a
- * hand-placed pair would land by accident.
- */
-const CORNER_RESIDUAL_CAUTION_DEG = 0.1;
-
 /** Exported for direct testing (review finding 3(b): the reset button's visibility). */
 export function ImageControls({
   image,
@@ -950,7 +942,6 @@ export function ImageControls({
       </div>
     );
   }
-  const worstResidual = Math.max(0, ...image.corner_residual_deg);
   return (
     <div className="image-controls">
       <label>
@@ -966,13 +957,15 @@ export function ImageControls({
       </label>
       <span className="muted">
         {image.width}×{image.height}
-        {image.georeferenced ? " · georeferenced" : " · placed by hand"}
+        {image.georeferenced && " · georeferenced"}
       </span>
       <button
+        className="align"
         onClick={onAlign}
+        aria-label="Align by pointing"
         title="Align by pointing: click a place in the picture, then the same place on the map. Repeat as often as you like, then press Enter. Escape cancels; Backspace drops the last pair."
       >
-        Align…
+        <AlignIcon />
       </button>
       {(image.georeferenced || image.warped || image.control_points.length > 0) && (
         <button
@@ -985,14 +978,6 @@ export function ImageControls({
         >
           Reset place
         </button>
-      )}
-      {image.warped && worstResidual > CORNER_RESIDUAL_CAUTION_DEG && (
-        <span
-          className="muted"
-          title="Outside the pairs placed, the bend can run well past what a straight projection would give. Add a pair nearer that corner if it should follow the picture more closely there."
-        >
-          bends up to {worstResidual.toFixed(1)}° at a corner
-        </span>
       )}
     </div>
   );

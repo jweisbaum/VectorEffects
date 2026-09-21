@@ -1066,6 +1066,19 @@ body {
   font-size: 11px;
 }
 .image-controls label { display: flex; align-items: center; gap: 5px; }
+/* The align button is its icon and nothing else: square, so it reads as a
+   tool rather than a sentence, and `flex: none` so the row's gap cannot
+   squeeze it out of square. Its name lives in `aria-label` and `title`,
+   since there is no text to carry it. */
+.image-controls .align {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+}
 .image-controls input[type="range"] { width: 90px; }
 .image-controls .muted { white-space: nowrap; }
 .image-controls .grib-missing {

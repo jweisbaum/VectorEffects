@@ -377,9 +377,9 @@ function imagePixelFromMesh(
   // `imageUnder` hit-tests, so a click can pass that coarser test and still
   // land in the gap. There used to be a fallback here that took the nearest
   // cell's centroid and let Newton's method extrapolate past its own unit
-  // square — which answers confidently and, right where
-  // `corner_residual_deg` is already warning the spline is unreliable, is
-  // most likely to answer *wrongly*. Refusing is the honest answer; the
+  // square — which answers confidently and, right where the spline's own
+  // correction is least reliable, is most likely to answer *wrongly*.
+  // Refusing is the honest answer; the
   // caller turns `null` into a hint rather than a stored control point.
   return null;
 }
