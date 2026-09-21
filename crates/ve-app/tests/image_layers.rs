@@ -385,50 +385,75 @@ fn an_image_layer_keeps_the_path_and_never_the_pixels() {
     );
 }
 
-/// Three control points place an image exactly, and the drag is one undo.
+/// Control points reach the document through the command, come back in the
+/// view, and undo restores exactly what was there before.
 #[test]
-fn control_points_place_an_image_and_a_drag_is_one_undo() {
-    let root = TempRoot::new("corners");
+fn control_points_are_set_seen_and_undone() {
+    let root = TempRoot::new("control-points");
     let state = app(&root);
-    open(&state);
+    let layer = an_image_layer(&state, &root);
 
-    let path = root.0.join("hand.png");
-    write_png(&path, 100, 50);
-    image::image_imported(
+    let before = ve_app::document::tree(&state, 0).expect("tree");
+    let was = before
+        .layers
+        .last()
+        .expect("layer")
+        .image
+        .as_ref()
+        .expect("image");
+    assert!(was.control_points.is_empty());
+    assert!(!was.warped);
+
+    ve_app::image::control_points_set(
         &state,
-        path.to_string_lossy().into_owned(),
-        Some([-20.0, 40.0, 20.0, 0.0]),
+        layer,
+        vec![
+            [0.0, 0.0, -2.0, 1.0],
+            [800.0, 0.0, 2.0, 1.0],
+            [800.0, 600.0, 1.0, -1.0],
+            [0.0, 600.0, -1.0, -1.0],
+        ],
     )
-    .expect("import");
+    .expect("set");
 
-    let layer = image_layer(&state);
-    // A drag of the top-right corner, four reports of it.
-    for lon in [30.0, 31.0, 32.0, 33.0] {
-        image::corners_set(
-            &state,
-            layer,
-            [0.0, 10.0],
-            [lon, 10.0],
-            [0.0, 0.0],
-            Some("image:corner".to_owned()),
-        )
-        .expect("place");
-    }
-    let placed = corners_of(&state);
-    assert_eq!(placed[0], [0.0, 10.0], "top left");
-    assert_eq!(placed[1], [33.0, 10.0], "top right");
-    assert_eq!(placed[3], [0.0, 0.0], "bottom left");
-    // The fourth corner follows from the other three, which is what makes it
-    // an affine rather than four independent points.
-    assert_eq!(placed[2], [33.0, 0.0], "bottom right");
+    let after = ve_app::document::tree(&state, 0).expect("tree");
+    let now = after
+        .layers
+        .last()
+        .expect("layer")
+        .image
+        .as_ref()
+        .expect("image");
+    assert_eq!(now.control_points.len(), 4);
+    assert!(now.warped, "four pairs are a homography, which is a warp");
 
     ve_app::edit::undo_for_test(&state).expect("undo");
-    let back = corners_of(&state);
-    assert_ne!(back[1], [33.0, 10.0], "one undo returns the whole drag");
-    assert_ne!(back[1], [32.0, 10.0], "and not one report of it");
+    let back = ve_app::document::tree(&state, 0).expect("tree");
+    let again = back
+        .layers
+        .last()
+        .expect("layer")
+        .image
+        .as_ref()
+        .expect("image");
+    assert!(
+        again.control_points.is_empty(),
+        "undo did not restore the points"
+    );
+}
 
-    // Three points on a line have no area, and are refused rather than stored.
-    assert!(image::corners_set(&state, layer, [0.0, 0.0], [10.0, 0.0], [20.0, 0.0], None).is_err());
+/// Fifty is the cap, and a fifty-first is refused rather than silently
+/// dropped — the fit solves an n x n system and the mesh is re-evaluated
+/// against every pair.
+#[test]
+fn more_than_fifty_control_points_are_refused() {
+    let root = TempRoot::new("too-many");
+    let state = app(&root);
+    let layer = an_image_layer(&state, &root);
+    let too_many: Vec<[f64; 4]> = (0..51)
+        .map(|i| [i as f64, i as f64, i as f64 * 0.1, i as f64 * 0.1])
+        .collect();
+    assert!(ve_app::image::control_points_set(&state, layer, too_many).is_err());
 }
 
 /// A picture is addressed by the *opening*, not by the document's revision
@@ -454,15 +479,8 @@ fn an_edit_does_not_re_address_a_picture() {
     // Moving the picture is an edit like any other: the revision moves, the
     // address does not.
     let layer = image_layer(&state);
-    let moved = image::corners_set(
-        &state,
-        layer,
-        [1.0, 11.0],
-        [21.0, 11.0],
-        [1.0, 1.0],
-        Some("image:move".to_owned()),
-    )
-    .expect("move");
+    let moved =
+        image::control_points_set(&state, layer, vec![[0.0, 0.0, 1.0, 11.0]]).expect("move");
     assert_ne!(moved.revision, after_import.revision, "the document moved");
     assert_eq!(moved.image_token, token, "and the picture is where it was");
 
@@ -508,7 +526,7 @@ fn opacity_is_clamped_to_what_it_can_mean() {
     assert!((view_of(&state).opacity - 1.0).abs() < 1e-9);
 }
 
-/// A hand-placed image survives a save and a reopen, corners and all.
+/// A hand-placed image survives a save and a reopen, control points and all.
 #[test]
 fn a_hand_placed_image_survives_a_round_trip() {
     let root = TempRoot::new("roundtrip");
@@ -519,13 +537,14 @@ fn a_hand_placed_image_survives_a_round_trip() {
     write_png(&path, 80, 40);
     image::image_imported(&state, path.to_string_lossy().into_owned(), None).expect("import");
     let layer = image_layer(&state);
-    image::corners_set(
+    image::control_points_set(
         &state,
         layer,
-        [-33.5, 47.25],
-        [11.125, 44.5],
-        [-30.0, 20.75],
-        None,
+        vec![
+            [0.0, 0.0, -33.5, 47.25],
+            [80.0, 0.0, 11.125, 44.5],
+            [0.0, 40.0, -30.0, 20.75],
+        ],
     )
     .expect("place");
     image::opacity_set(&state, layer, 0.65).expect("opacity");
@@ -539,10 +558,14 @@ fn a_hand_placed_image_survives_a_round_trip() {
     let after = view_of(&state);
     assert_eq!(after.path, before.path);
     assert!((after.opacity - before.opacity).abs() < 1e-9);
-    for (a, b) in after.corners.iter().zip(&before.corners) {
+    assert_eq!(after.control_points.len(), before.control_points.len());
+    for (a, b) in after.control_points.iter().zip(&before.control_points) {
         // To the file's nine decimal places, as everywhere else.
         assert!(
-            (a[0] - b[0]).abs() < 1e-9 && (a[1] - b[1]).abs() < 1e-9,
+            (a[0] - b[0]).abs() < 1e-9
+                && (a[1] - b[1]).abs() < 1e-9
+                && (a[2] - b[2]).abs() < 1e-9
+                && (a[3] - b[3]).abs() < 1e-9,
             "{a:?} != {b:?}"
         );
     }
@@ -634,7 +657,12 @@ fn view_of(state: &AppState) -> ve_app::image::ImageLayerView {
         .expect("an image layer")
 }
 
-/// The one image layer's corners.
-fn corners_of(state: &AppState) -> Vec<[f64; 2]> {
-    view_of(state).corners
+/// Creates a project, imports a small PNG as its only layer, and returns the
+/// layer's id.
+fn an_image_layer(state: &AppState, root: &TempRoot) -> u64 {
+    open(state);
+    let path = root.0.join("layer.png");
+    write_png(&path, 80, 40);
+    image::image_imported(state, path.to_string_lossy().into_owned(), None).expect("import");
+    image_layer(state)
 }

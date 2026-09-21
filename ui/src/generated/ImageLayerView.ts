@@ -33,12 +33,28 @@ placement: [number, number, number, number, number, number],
  */
 opacity: number,
 /**
- * The four corners as `[lon, lat]`, top-left first, clockwise.
- *
- * Computed here rather than in the frontend so the placement has one
- * implementation: the map draws these and the control points drag them.
+ * The pairs that warp it: `[u, v, lon, lat]` each.
  */
-corners: Array<[number, number]>,
+control_points: Array<[number, number, number, number]>,
+/**
+ * Whether those pairs bend the picture, so the map must draw it
+ * through the mesh rather than the globe's per-pixel inverse
+ * (spec.md §4.9). False for an image with no pairs, or with pairs
+ * that happen to fit an affine.
+ */
+warped: boolean,
+/**
+ * The warp sampled on a `(warp_cells + 1)` by `(warp_cells + 1)` grid,
+ * lon/lat interleaved and flattened — `[lon0, lat0, lon1, lat1, ...]` —
+ * because it becomes a `Float32Array` in a vertex buffer. Empty when
+ * `warped` is false: an unwarped image needs no mesh.
+ */
+warp_mesh: Array<number>,
+/**
+ * The cell count `warp_mesh` was evaluated at. Zero when `warped` is
+ * false.
+ */
+warp_cells: number,
 /**
  * Whether the file carried its own georeference.
  *

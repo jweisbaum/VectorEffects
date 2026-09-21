@@ -799,42 +799,6 @@ impl Placement {
         )
     }
 
-    /// The placement that puts three pixel corners at three positions.
-    ///
-    /// The corners are the image's top-left, top-right and bottom-left, which
-    /// is what the map's three control points drag. Three points determine an
-    /// affine exactly, so this is a solve and not a fit.
-    ///
-    /// `None` when the three would be collinear — a degenerate image with no
-    /// area, which is what a control point dragged onto another one asks for.
-    pub fn from_corners(
-        width: u32,
-        height: u32,
-        top_left: (f64, f64),
-        top_right: (f64, f64),
-        bottom_left: (f64, f64),
-    ) -> Option<Self> {
-        let w = f64::from(width.max(1));
-        let h = f64::from(height.max(1));
-        let a = (top_right.0 - top_left.0) / w;
-        let d = (top_right.1 - top_left.1) / w;
-        let b = (bottom_left.0 - top_left.0) / h;
-        let e = (bottom_left.1 - top_left.1) / h;
-        // The determinant is the area of one pixel; zero means the three
-        // control points fell on a line.
-        if (a * e - b * d).abs() < 1e-12 {
-            return None;
-        }
-        Some(Self {
-            a,
-            b,
-            c: top_left.0,
-            d,
-            e,
-            f: top_left.1,
-        })
-    }
-
     /// The image's four corners, in the order top-left, top-right,
     /// bottom-right, bottom-left.
     pub fn corners(&self, width: u32, height: u32) -> [(f64, f64); 4] {

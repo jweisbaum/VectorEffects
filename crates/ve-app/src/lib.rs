@@ -234,7 +234,7 @@ pub fn run() -> anyhow::Result<()> {
                 autosave::recover_autosave,
                 autosave::discard_autosave,
                 image::import_image,
-                image::set_image_corners,
+                image::set_image_control_points,
                 image::set_image_opacity,
                 image::reset_image_placement,
                 measure::measurements,

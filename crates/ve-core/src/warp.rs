@@ -285,11 +285,10 @@ fn similarity_through(
 /// vectors: `M * e1 = f1`, `M * e2 = f2`, where `e1, e2` are the pixel
 /// offsets of the second and third pairs from the first, and `f1, f2` their
 /// target offsets. Two vector equations in a 2×2 unknown give
-/// `M = F * E⁻¹`, `E⁻¹` by the ordinary 2×2 cofactor formula — the same
-/// shape as `Placement::from_corners`, generalised from three specific
-/// corners to three arbitrary pairs. `E`'s determinant is the (signed) area
-/// of the pixel triangle the three pairs form; it is singular exactly when
-/// they are collinear, which is the degenerate input this function declines.
+/// `M = F * E⁻¹`, `E⁻¹` by the ordinary 2×2 cofactor formula. `E`'s
+/// determinant is the (signed) area of the pixel triangle the three pairs
+/// form; it is singular exactly when they are collinear, which is the
+/// degenerate input this function declines.
 fn best_affine_3(
     p0: ControlPoint,
     p1: ControlPoint,

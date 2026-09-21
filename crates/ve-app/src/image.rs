@@ -38,8 +38,9 @@ use std::path::{Path, PathBuf};
 use schemars::JsonSchema;
 use serde::Serialize;
 use ts_rs::TS;
-use ve_core::document::{LayerSource, Placement};
+use ve_core::document::{ControlPoint, LayerSource, Placement};
 use ve_core::id::Id;
+use ve_core::warp::Warp;
 
 use crate::commands::AppState;
 use crate::error::{AppError, Result};
@@ -52,6 +53,14 @@ use crate::projects::with_session;
 /// ceiling on what that may ask for, so a mistyped or hostile URL cannot ask
 /// the app to encode a gigapixel PNG.
 pub const MAX_SERVED_EDGE: u32 = 8192;
+
+/// The cell count `ImageLayerView::warp_mesh` is evaluated at.
+///
+/// Owned by the backend and reported back as `warp_cells`: the frontend
+/// indexes the flattened mesh by this number rather than keeping a constant
+/// of its own, since two sources of truth for the same count would mis-index
+/// the vertex buffer silently.
+const WARP_MESH_CELLS: u32 = 64;
 
 /// What the frontend gets when it asks about an image layer.
 #[derive(Debug, Clone, Serialize, JsonSchema, TS)]
@@ -71,11 +80,21 @@ pub struct ImageLayerView {
     pub placement: [f64; 6],
     /// How strongly it shows, 0 to 1.
     pub opacity: f64,
-    /// The four corners as `[lon, lat]`, top-left first, clockwise.
-    ///
-    /// Computed here rather than in the frontend so the placement has one
-    /// implementation: the map draws these and the control points drag them.
-    pub corners: Vec<[f64; 2]>,
+    /// The pairs that warp it: `[u, v, lon, lat]` each.
+    pub control_points: Vec<[f64; 4]>,
+    /// Whether those pairs bend the picture, so the map must draw it
+    /// through the mesh rather than the globe's per-pixel inverse
+    /// (spec.md §4.9). False for an image with no pairs, or with pairs
+    /// that happen to fit an affine.
+    pub warped: bool,
+    /// The warp sampled on a `(warp_cells + 1)` by `(warp_cells + 1)` grid,
+    /// lon/lat interleaved and flattened — `[lon0, lat0, lon1, lat1, ...]` —
+    /// because it becomes a `Float32Array` in a vertex buffer. Empty when
+    /// `warped` is false: an unwarped image needs no mesh.
+    pub warp_mesh: Vec<f32>,
+    /// The cell count `warp_mesh` was evaluated at. Zero when `warped` is
+    /// false.
+    pub warp_cells: u32,
     /// Whether the file carried its own georeference.
     ///
     /// A hand-placed image says so, because "the corners are where the file
@@ -184,7 +203,7 @@ pub fn view(layer: Id, source: &LayerSource) -> Option<ImageLayerView> {
         path,
         placement,
         opacity,
-        ..
+        control_points,
     } = source
     else {
         return None;
@@ -194,6 +213,21 @@ pub fn view(layer: Id, source: &LayerSource) -> Option<ImageLayerView> {
     // that the file could have changed underneath.
     let probed = probe(path).ok();
     let (width, height) = probed.as_ref().map_or((0, 0), |p| (p.width, p.height));
+    let warp = Warp::fit(control_points, width, height, *placement);
+    let warped = !warp.is_identity_affine();
+    // No mesh for an unwarped image: it needs none, and shipping tens of
+    // thousands of floats per tree fetch for nothing is waste.
+    let (warp_mesh, warp_cells) = if warped {
+        let mesh = warp.mesh(width, height, WARP_MESH_CELLS);
+        let mut flat = Vec::with_capacity(mesh.len() * 2);
+        for [lon, lat] in mesh {
+            flat.push(lon);
+            flat.push(lat);
+        }
+        (flat, WARP_MESH_CELLS)
+    } else {
+        (Vec::new(), 0)
+    };
     Some(ImageLayerView {
         layer: layer.raw(),
         path: path.to_string_lossy().into_owned(),
@@ -209,11 +243,13 @@ pub fn view(layer: Id, source: &LayerSource) -> Option<ImageLayerView> {
             placement.f,
         ],
         opacity: *opacity,
-        corners: placement
-            .corners(width, height)
+        control_points: control_points
             .iter()
-            .map(|(lon, lat)| [*lon, *lat])
+            .map(|p| [p.u, p.v, p.lon, p.lat])
             .collect(),
+        warped,
+        warp_mesh,
+        warp_cells,
         georeferenced: probed.as_ref().is_some_and(|p| p.placement.is_some()),
     })
 }
@@ -704,47 +740,54 @@ fn centred(width: u32, height: u32, view: Option<[f64; 4]>) -> Placement {
     )
 }
 
-/// Moves an image by its three control points.
+/// Sets the pairs that warp an image (spec.md §4.9).
 ///
-/// Top-left, top-right and bottom-left in the image's own pixels, each given a
-/// place on the map. Three points determine an affine exactly, which is why
-/// there are three (spec.md 4.9).
+/// Each is `[u, v, lon, lat]`: a point in the picture, in the image's own
+/// pixels, and where on the earth it belongs. The warp is computed from
+/// these and never stored.
 #[tauri::command]
-pub fn set_image_corners(
+pub fn set_image_control_points(
     state: tauri::State<'_, AppState>,
     layer: u64,
-    top_left: [f64; 2],
-    top_right: [f64; 2],
-    bottom_left: [f64; 2],
-    gesture: Option<String>,
+    points: Vec<[f64; 4]>,
 ) -> Result<crate::projects::ProjectSummary> {
-    corners_set(&state, layer, top_left, top_right, bottom_left, gesture)
+    control_points_set(&state, layer, points)
 }
 
-/// Implementation of [`set_image_corners`].
-pub fn corners_set(
+/// Implementation of [`set_image_control_points`].
+pub fn control_points_set(
     state: &AppState,
     layer: u64,
-    top_left: [f64; 2],
-    top_right: [f64; 2],
-    bottom_left: [f64; 2],
-    gesture: Option<String>,
+    points: Vec<[f64; 4]>,
 ) -> Result<crate::projects::ProjectSummary> {
-    write(state, layer, gesture, |source, probed| {
-        let LayerSource::Image { placement, .. } = source else {
+    if points.len() > ve_core::warp::MAX_CONTROL_POINTS {
+        return Err(AppError::BadOption {
+            field: "image",
+            value: format!(
+                "{} control points, but at most {} are allowed",
+                points.len(),
+                ve_core::warp::MAX_CONTROL_POINTS
+            ),
+        });
+    }
+    if points
+        .iter()
+        .any(|pair| pair.iter().any(|n| !n.is_finite()))
+    {
+        return Err(AppError::BadOption {
+            field: "image",
+            value: "a control point must be four finite numbers".to_owned(),
+        });
+    }
+    let points: Vec<ControlPoint> = points
+        .into_iter()
+        .map(|[u, v, lon, lat]| ControlPoint { u, v, lon, lat })
+        .collect();
+    write(state, layer, None, |source, _| {
+        let LayerSource::Image { control_points, .. } = source else {
             return Err(not_an_image());
         };
-        *placement = Placement::from_corners(
-            probed.width,
-            probed.height,
-            (top_left[0], top_left[1]),
-            (top_right[0], top_right[1]),
-            (bottom_left[0], bottom_left[1]),
-        )
-        .ok_or_else(|| AppError::BadOption {
-            field: "image",
-            value: "those three corners are on a line, which is an image with no area".to_owned(),
-        })?;
+        *control_points = points;
         Ok(())
     })
 }
