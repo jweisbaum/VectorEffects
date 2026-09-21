@@ -908,6 +908,26 @@ export default function MapView({
    * changes outside anything React would otherwise re-render for.
    */
   const alignStore = useRef<AlignStore | null>(null);
+  /**
+   * The whole picture being dragged by the hand (M36).
+   *
+   * `origin` is the placement's own top-left as it stood when the pointer
+   * went down — the drag's baseline. Every report sends `origin + (pointer
+   * now - pointer then)`, an absolute position rather than an accumulated
+   * delta, so the same pointer position twice is a no-op and a dropped
+   * report costs nothing. That is the rule `Session::transform`'s baseline
+   * exists to enforce for object drags.
+   */
+  const imageDrag = useRef<{
+    layer: number;
+    from: { lon: number; lat: number };
+    origin: [number, number];
+  } | null>(null);
+  /** One move in flight at a time, newest position waiting — as the readout does. */
+  const imageMove = useRef<{ inFlight: boolean; queued: [number, number] | null }>({
+    inFlight: false,
+    queued: null,
+  });
   alignStore.current ??= createAlignStore();
   /**
    * The field sample in flight for the readout, and the position waiting
@@ -4185,7 +4205,7 @@ export default function MapView({
    * `createReadoutStore` exists to prevent.
    */
   const applyCursor = useCallback(
-    (insideRegion: boolean, panning: boolean) => {
+    (insideRegion: boolean, panning: boolean, onImage = false) => {
       const canvas = canvasRef.current;
       if (!canvas) return;
       if (shapeModeRef.current !== null) {
@@ -4213,6 +4233,7 @@ export default function MapView({
         panning,
         recording: recording !== null,
         aligning: alignStore.current!.get().layer !== null,
+        onImage,
         // What the layer will not take, and what is not on the map at all
         // (M51, M68). Both are refusals the cursor can say on hover rather
         // than leaving the user to discover on release — which is the whole
@@ -4387,6 +4408,35 @@ export default function MapView({
         alignStore.current!.pick("map", geo);
       }
       return;
+    }
+
+    // Inside the picture, the hand moves the whole thing (M36) — the same
+    // tool that moves a selected object, and the same rule: what is selected
+    // is what a drag moves, and a drag anywhere else pans. The active image
+    // layer is the selection, which is why `imageUnder` looks at that layer
+    // and no other: a stack of charts would otherwise move whichever
+    // happened to be on top, with no way to say which was meant.
+    //
+    // Below the alignment branch on purpose. While the mode is armed every
+    // click is a control point's, so a hand over the picture must not steal
+    // one — `pointerPriority` has already decided that above.
+    if (tool === HAND) {
+      const image = imageUnder(
+        imageLayersRef.current,
+        activeLayer,
+        cameraRef.current,
+        viewRef.current,
+        point,
+      );
+      if (image !== null) {
+        imageDrag.current = {
+          layer: image.layer,
+          from: unproject(cameraRef.current, viewRef.current, point),
+          origin: [image.placement[2]!, image.placement[5]!],
+        };
+        applyCursor(false, false, true);
+        return;
+      }
     }
 
     // The insert tool puts a library macro down where it is clicked
@@ -4789,7 +4839,53 @@ export default function MapView({
           editsRegion(tool) &&
           regionContains(region, geo.lon, geo.lat),
         dragging.current !== null,
+        // The hand over the active picture moves it rather than panning
+        // (M36), so the cursor has to say so on hover rather than on the
+        // release. Only worth asking for the hand — no other tool changes
+        // what it does over a picture.
+        imageDrag.current !== null ||
+          (tool === HAND &&
+            imageUnder(
+              imageLayersRef.current,
+              activeLayer,
+              cameraRef.current,
+              viewRef.current,
+              point,
+            ) !== null),
       );
+    }
+
+    // The whole picture following the hand (M36). Absolute, against the
+    // baseline taken at the press, so a dropped report costs nothing and the
+    // same position twice writes nothing; one in flight at a time with the
+    // newest waiting, the pattern the readout and the drag preview use. The
+    // gesture key coalesces the whole drag into one undo entry.
+    const moving = imageDrag.current;
+    if (moving) {
+      const geo = unproject(cameraRef.current, viewRef.current, point);
+      const flight = imageMove.current;
+      flight.queued = [
+        moving.origin[0] + normalizeLon(geo.lon - moving.from.lon),
+        moving.origin[1] + (geo.lat - moving.from.lat),
+      ];
+      if (!flight.inFlight) {
+        const send = () => {
+          const wanted = flight.queued;
+          flight.queued = null;
+          if (wanted === null) {
+            flight.inFlight = false;
+            return;
+          }
+          flight.inFlight = true;
+          void api
+            .moveImage(moving.layer, wanted[0], wanted[1], `image:${moving.layer}:move`)
+            .then((summary) => onProjectChanged(summary))
+            .catch((error: unknown) => reportError(String(error)))
+            .finally(send);
+        };
+        send();
+      }
+      return;
     }
 
     // A region being drawn follows the pointer. The lasso keeps every
@@ -5356,6 +5452,19 @@ export default function MapView({
       return;
     }
     if (shapeEditing !== null) { dragging.current = null; pressOrigin.current = null; return; }
+
+    // The picture has arrived. `finishGesture` breaks the coalescing key, so
+    // the whole drag is one undo entry and the next drag starts another —
+    // and it clears the baseline, which a stale one would make the next drag
+    // compute from where this one started.
+    if (imageDrag.current) {
+      imageDrag.current = null;
+      dragging.current = null;
+      pressOrigin.current = null;
+      void api.endGesture().catch((error: unknown) => reportError(String(error)));
+      applyCursor(false, false, true);
+      return;
+    }
 
     // In a macro preview a press that barely moved is a click, which places a
     // copy; one that travelled was a pan and places nothing (M33).

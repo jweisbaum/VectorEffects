@@ -653,6 +653,15 @@ export const api = {
   importImage: (path: string, view: [number, number, number, number] | null) =>
     call<ProjectSummary>("import_image", { path, view }),
   /** Sets the pairs that warp an image: each `[u, v, lon, lat]` (spec.md 4.9). */
+  /**
+   * Moves an image bodily (M36): `lon`/`lat` are where its top-left pixel
+   * should now sit, absolute rather than a delta, so the same position twice
+   * is a no-op and a dropped pointer report costs nothing. The backend
+   * shifts every control point's target by the same amount, so the picture
+   * travels as one rigid thing.
+   */
+  moveImage: (layer: number, lon: number, lat: number, gesture: string | null) =>
+    call<ProjectSummary>("move_image", { layer, lon, lat, gesture }),
   setImageControlPoints: (layer: number, points: [number, number, number, number][]) =>
     call<ProjectSummary>("set_image_control_points", { layer, points }),
   /** Sets how strongly an image shows. */

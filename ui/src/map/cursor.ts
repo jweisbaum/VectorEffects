@@ -27,6 +27,15 @@ export interface CursorContext {
   /** A macro capture is running: the region is dragged with the selection cursor. */
   recording: boolean;
   /**
+   * The pointer is over the active image layer's picture, which the hand
+   * moves rather than pans (M36).
+   *
+   * Only the active layer's, for the reason `imageUnder` gives: a project
+   * with several charts stacked would otherwise move whichever happened to
+   * be on top, with no way to say which was meant.
+   */
+  onImage: boolean;
+  /**
    * The image alignment mode is armed (Task 7): every click is a control
    * point's picture or map half, never a tool's. Crosshair, like a pick —
    * both are a click aimed at an exact point rather than at an object or a
@@ -125,7 +134,11 @@ export function cursorFor(context: CursorContext): string {
   if (context.insideRegion) return BUCKET_CURSOR;
   switch (context.tool) {
     case HAND:
-      return context.panning ? "grabbing" : "grab";
+      if (context.panning) return "grabbing";
+      // Over the picture the hand moves it rather than the map (M36), and
+      // says so: a grab hand here would promise a pan that is not what a
+      // drag does.
+      return context.onImage ? "move" : "grab";
     case SELECT:
     case CAPTURE:
     case INSERT:

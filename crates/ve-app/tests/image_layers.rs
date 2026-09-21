@@ -625,6 +625,107 @@ fn more_than_fifty_control_points_are_refused() {
 /// exists to prevent. Covers a NaN, a positive infinity and a negative
 /// infinity, and both kinds of position: `u`/`v` (pixels) and `lon`/`lat`
 /// (degrees), which are read by different code paths.
+/// Dragging a picture moves it bodily: the placement travels, and so does
+/// every control point's target, so each pair still lands exactly where it
+/// was put (M36).
+///
+/// The pairs matter here rather than being incidental. `Warp::fit` takes the
+/// fit from the pairs alone once there are two of them, so a move that left
+/// them where they were would be a move that did nothing at all — the very
+/// bug this asserts against.
+#[test]
+fn moving_an_image_carries_its_control_points_with_it() {
+    let root = TempRoot::new("move");
+    let state = app(&root);
+    let layer = an_image_layer(&state, &root);
+
+    ve_app::image::control_points_set(
+        &state,
+        layer,
+        vec![
+            [0.0, 0.0, -2.0, 1.0],
+            [40.0, 0.0, 2.0, 1.0],
+            [0.0, 20.0, -2.0, -1.0],
+        ],
+    )
+    .expect("set");
+    // The baseline is taken *after* the pairs are placed: they change the
+    // quad's shape, and what is under test is what the move alone does to it.
+    let before = view_of(&state);
+    let [was_c, was_f] = [before.placement[2], before.placement[5]];
+
+    ve_app::image::image_moved(&state, layer, was_c + 3.0, was_f - 4.0, None).expect("move");
+
+    let after = view_of(&state);
+    assert!(
+        (after.placement[2] - (was_c + 3.0)).abs() < 1e-9,
+        "{:?}",
+        after.placement
+    );
+    assert!(
+        (after.placement[5] - (was_f - 4.0)).abs() < 1e-9,
+        "{:?}",
+        after.placement
+    );
+    // Each target shifted by the same delta, so the picture stayed rigid.
+    let wanted = [
+        [-2.0 + 3.0, 1.0 - 4.0],
+        [2.0 + 3.0, 1.0 - 4.0],
+        [-2.0 + 3.0, -1.0 - 4.0],
+    ];
+    for (point, [lon, lat]) in after.control_points.iter().zip(wanted) {
+        assert!((point[2] - lon).abs() < 1e-9, "{point:?} wanted lon {lon}");
+        assert!((point[3] - lat).abs() < 1e-9, "{point:?} wanted lat {lat}");
+    }
+    // The quad the map hit-tests moved by the same delta and no other, so
+    // the picture stayed the same shape while it travelled.
+    for (now, then) in after.corners.iter().zip(before.corners.iter()) {
+        assert!(
+            (now[0] - (then[0] + 3.0)).abs() < 1e-9,
+            "{now:?} from {then:?}"
+        );
+        assert!(
+            (now[1] - (then[1] - 4.0)).abs() < 1e-9,
+            "{now:?} from {then:?}"
+        );
+    }
+}
+
+/// The same position twice writes nothing, which is what lets a drag send
+/// where the picture should *be* on every pointer report without piling up
+/// undo entries or drifting on a dropped one.
+#[test]
+fn moving_an_image_where_it_already_is_changes_nothing() {
+    let root = TempRoot::new("move-noop");
+    let state = app(&root);
+    let layer = an_image_layer(&state, &root);
+    let before = view_of(&state);
+    ve_app::image::image_moved(
+        &state,
+        layer,
+        before.placement[2],
+        before.placement[5],
+        None,
+    )
+    .expect("move");
+    let after = view_of(&state);
+    assert_eq!(after.placement, before.placement);
+    assert_eq!(after.control_points, before.control_points);
+}
+
+/// A move to nowhere is refused rather than written as a NaN placement,
+/// which would propagate into the warp and out to a vertex buffer unseen.
+#[test]
+fn moving_an_image_to_a_non_finite_position_is_refused() {
+    let root = TempRoot::new("move-nan");
+    let state = app(&root);
+    let layer = an_image_layer(&state, &root);
+    let before = view_of(&state);
+    assert!(ve_app::image::image_moved(&state, layer, f64::NAN, 0.0, None).is_err());
+    assert!(ve_app::image::image_moved(&state, layer, 0.0, f64::INFINITY, None).is_err());
+    assert_eq!(view_of(&state).placement, before.placement);
+}
+
 #[test]
 fn non_finite_control_points_are_refused() {
     let root = TempRoot::new("non-finite");

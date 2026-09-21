@@ -814,6 +814,70 @@ pub fn control_points_set(
     })
 }
 
+/// Moves an image bodily across the map (M36).
+///
+/// `lon` and `lat` are where the image's top-left pixel should now sit. The
+/// difference from where it sits already is applied to the placement **and**
+/// to every control point's target, so the picture travels as one rigid
+/// thing and every pair still lands exactly where it was put — the target
+/// moved with the picture it was pinned to.
+///
+/// Shifting the pairs is not a convenience. `Warp::fit` determines the fit
+/// from the pairs alone once there are two of them, so a move that touched
+/// only the placement would be silently dead the moment anyone had aligned
+/// anything.
+///
+/// The position is absolute rather than a delta, and the delta is taken
+/// against the placement as it stands. A drag therefore sends where the
+/// picture should *be*, the same position twice is a no-op, and a dropped
+/// pointer report costs nothing — which is what `Session::transform`'s
+/// baseline rule asks of every drag.
+#[tauri::command]
+pub fn move_image(
+    state: tauri::State<'_, AppState>,
+    layer: u64,
+    lon: f64,
+    lat: f64,
+    gesture: Option<String>,
+) -> Result<crate::projects::ProjectSummary> {
+    image_moved(&state, layer, lon, lat, gesture)
+}
+
+/// Implementation of [`move_image`].
+pub fn image_moved(
+    state: &AppState,
+    layer: u64,
+    lon: f64,
+    lat: f64,
+    gesture: Option<String>,
+) -> Result<crate::projects::ProjectSummary> {
+    if !lon.is_finite() || !lat.is_finite() {
+        return Err(AppError::BadOption {
+            field: "image",
+            value: "an image can only be moved to a real position".to_owned(),
+        });
+    }
+    write(state, layer, gesture, |source, _| {
+        let LayerSource::Image {
+            placement,
+            control_points,
+            ..
+        } = source
+        else {
+            return Err(not_an_image());
+        };
+        let dlon = lon - placement.c;
+        let dlat = lat - placement.f;
+        placement.c = lon;
+        placement.f = lat;
+        for point in control_points.iter_mut() {
+            point.lon += dlon;
+            point.lat += dlat;
+        }
+        Ok(())
+    })
+}
+
 /// Sets how strongly an image shows.
 #[tauri::command]
 pub fn set_image_opacity(

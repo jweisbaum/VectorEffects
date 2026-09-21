@@ -3,13 +3,11 @@ import { describe, expect, it } from "vitest";
 import { BUCKET_CURSOR, FORBIDDEN_CURSOR, type CursorContext, cursorFor, pointerPriorityFor } from "./cursor";
 import { CAPTURE, ERASE, HAND, INSERT, MEASURE, SELECT } from "./tools";
 
-// `onImage` and `grip` are deleted from `CursorContext`, and with them the
-// "picture's grips (M50)" suite and the hand-over-image "move" cursor test
-// that used to live here. Both promised gestures — the corner/edge/rotation
-// drag and the M36 whole-picture drag — that the control-point model
-// replaces; there is no successor cursor cue to rewrite them against yet, so
-// they are deleted rather than adapted. Task 7's alignment interaction gets
-// its own cursor cues, if it needs any, with its own tests.
+// `grip` is deleted from `CursorContext`, and with it the "picture's grips
+// (M50)" suite: the corner, edge and rotation drags it cued are gone, and
+// the control-point model replaces them, so those tests are deleted rather
+// than adapted. `onImage` is back — the M36 whole-picture drag it cues was
+// restored, and "the hand over a picture" below is its successor suite.
 
 const base: CursorContext = {
   tool: HAND,
@@ -19,6 +17,7 @@ const base: CursorContext = {
   panning: false,
   recording: false,
   forbidden: false,
+  onImage: false,
   aligning: false,
 };
 
@@ -131,5 +130,46 @@ describe("a tool the layer will not take (M51)", () => {
   /** Nor an armed pick, which the user asked for by name. */
   it("does not outrank a pick", () => {
     expect(cursorFor({ ...base, forbidden: true, picking: true })).toBe("crosshair");
+  });
+});
+
+describe("the hand over a picture", () => {
+  /**
+   * M36: inside the active layer's picture the hand moves the picture, not
+   * the map, and the cursor has to say which — a grab hand here would
+   * promise a pan that is not what the drag does.
+   */
+  it("says move rather than grab", () => {
+    expect(cursorFor({ ...base, tool: HAND, onImage: true })).toBe("move");
+    expect(cursorFor({ ...base, tool: HAND, onImage: false })).toBe("grab");
+  });
+
+  /** Once the drag is under way the grabbing hand wins, as it does for a pan. */
+  it("shows the drag while it is happening", () => {
+    expect(cursorFor({ ...base, tool: HAND, onImage: true, panning: true })).toBe("grabbing");
+  });
+
+  /**
+   * The picture is the hand's business and nobody else's: no other tool
+   * changes what it does over an image, so none of them may change cursor
+   * for being over one.
+   */
+  it("does not change any other tool's cursor", () => {
+    for (const tool of [SELECT, MEASURE, CAPTURE, ERASE, INSERT] as const) {
+      expect(
+        cursorFor({ ...base, tool, onImage: true }),
+        `${tool} must not react to a picture`,
+      ).toBe(cursorFor({ ...base, tool, onImage: false }));
+    }
+  });
+
+  /**
+   * And it never outranks the modes above it: a capture recording, or the
+   * alignment mode armed, both take the click whatever is under the pointer
+   * (spec.md 8.7, Task 7).
+   */
+  it("does not outrank a capture or the alignment mode", () => {
+    expect(cursorFor({ ...base, tool: HAND, onImage: true, recording: true })).toBe("default");
+    expect(cursorFor({ ...base, tool: HAND, onImage: true, aligning: true })).toBe("crosshair");
   });
 });
