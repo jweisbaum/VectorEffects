@@ -1,14 +1,13 @@
 //! Fits an image warp from user-placed control points (spec.md §4.9).
 //!
 //! A control point pairs a pixel in a picture with where it belongs on the
-//! earth. Given zero, one, two, three, or four-or-more such pairs, this
-//! module picks the least-surprising *exact* fit: the stored placement, a
-//! translation, a similarity, a full affine, or, from four pairs on, a
-//! homography. A fifth pair and beyond bends the picture further with a
-//! thin-plate spline on top of the homography, which is a later change's
-//! `Kind::Spline`, added together with the code that constructs it — this
-//! module defines only the two fits it can itself produce, so that every
-//! variant declared here is reachable.
+//! earth. Given zero, one, two, three, or four such pairs, this module picks
+//! the least-surprising *exact* fit: the stored placement, a translation, a
+//! similarity, a full affine, or a homography. A fifth pair and beyond bends
+//! the picture further with a thin-plate spline laid on top of a
+//! least-squares homography — the residual a straight projective map cannot
+//! reach, damped back to that homography outside the pairs' hull so a far
+//! corner of the image does not run away.
 //!
 //! **The degenerate rule**, followed throughout: wherever a fit's own linear
 //! system turns out singular — control points on a line, or two pairs on the
@@ -75,6 +74,27 @@ enum Kind {
     /// A homography's nine matrix entries, row-major, with the ninth fixed
     /// at 1 (see [`Warp::place`]).
     Projective([f64; 9]),
+    /// A least-squares homography (`projective`) plus a thin-plate-spline
+    /// correction fit through five or more pairs.
+    ///
+    /// The spline is the standard decomposition into `n` radial weights and
+    /// a linear tail: `weights_lon[i]`/`weights_lat[i]` for `i < n` multiply
+    /// `phi(|scaled pixel - centers[i]|)`, and `weights_*[n..n+3]` are the
+    /// tail's `[a0, a1, a2]` evaluated at the same scaled pixel. `centers`
+    /// holds the `n` pairs' pixels already divided by `scale` (the image's
+    /// larger side) — see `Warp::fit`'s doc for why the division has to
+    /// happen before any distance is computed. `centroid` and `hull_radius`
+    /// are in raw, unscaled pixels: they exist only to measure how far a
+    /// query pixel is from the pairs, for [`Warp::place`]'s damping.
+    Spline {
+        projective: [f64; 9],
+        scale: f64,
+        centers: Vec<(f64, f64)>,
+        weights_lon: Vec<f64>,
+        weights_lat: Vec<f64>,
+        centroid: (f64, f64),
+        hull_radius: f64,
+    },
 }
 
 impl Warp {
@@ -97,9 +117,10 @@ impl Warp {
                     .unwrap_or_else(|| translation_through(points[0], base)),
             ),
             3 => Kind::Affine(best_affine(points, width, height, base)),
-            _ => homography_through(&points[0..4])
+            4 => homography_through(points)
                 .map(Kind::Projective)
-                .unwrap_or_else(|| Kind::Affine(best_affine(&points[0..4], width, height, base))),
+                .unwrap_or_else(|| Kind::Affine(best_affine(points, width, height, base))),
+            _ => spline_through(points, width, height, base),
         };
         Warp { kind, base }
     }
@@ -112,23 +133,47 @@ impl Warp {
     pub fn place(&self, u: f64, v: f64) -> (f64, f64) {
         match &self.kind {
             Kind::Affine(placement) => placement.place(u, v),
-            Kind::Projective(h) => {
-                let w = h[6] * u + h[7] * v + h[8];
-                // `w` is zero on the homography's vanishing line: real
-                // pixels a perspective transform sends to the horizon,
-                // mapped to infinity. A control-point fit that runs that
-                // line through the visible image is a pathological input,
-                // not one this module's tests exercise, but dividing by
-                // near-zero would still hand the caller an enormous or
-                // infinite lon/lat rather than failing loudly. `base` is a
-                // deterministic, finite answer that nothing else can be
-                // blamed for.
-                if w.abs() < 1e-12 {
-                    return self.base.place(u, v);
+            Kind::Projective(h) => project_through(h, self.base, u, v),
+            Kind::Spline {
+                projective,
+                scale,
+                centers,
+                weights_lon,
+                weights_lat,
+                centroid,
+                hull_radius,
+            } => {
+                let (plon, plat) = project_through(projective, self.base, u, v);
+                let scale = *scale;
+                let uc = u / scale;
+                let vc = v / scale;
+                let n = centers.len();
+                let (mut radial_lon, mut radial_lat) = (0.0, 0.0);
+                for (i, c) in centers.iter().enumerate() {
+                    let dx = uc - c.0;
+                    let dy = vc - c.1;
+                    let basis = phi((dx * dx + dy * dy).sqrt());
+                    radial_lon += weights_lon[i] * basis;
+                    radial_lat += weights_lat[i] * basis;
                 }
+                let affine_lon = weights_lon[n] + weights_lon[n + 1] * uc + weights_lon[n + 2] * vc;
+                let affine_lat = weights_lat[n] + weights_lat[n + 1] * uc + weights_lat[n + 2] * vc;
+                // Damping: undamped, `phi`'s r^2*ln(r) growth would send a
+                // pixel far outside the pairs' hull to an enormous or
+                // infinite correction (spec's mitigation for the spline's
+                // documented failure mode). `d <= hull_radius` covers every
+                // pair itself — `hull_radius` is defined as the greatest
+                // such `d` over the pairs — so this never softens the fit at
+                // the pairs the caller asked to land exactly.
+                let d = ((u - centroid.0).powi(2) + (v - centroid.1).powi(2)).sqrt();
+                let damping = if d <= *hull_radius {
+                    1.0
+                } else {
+                    (*hull_radius / d).powi(2)
+                };
                 (
-                    (h[0] * u + h[1] * v + h[2]) / w,
-                    (h[3] * u + h[4] * v + h[5]) / w,
+                    plon + affine_lon + damping * radial_lon,
+                    plat + affine_lat + damping * radial_lat,
                 )
             }
         }
@@ -146,7 +191,7 @@ impl Warp {
     pub fn as_placement(&self) -> Option<Placement> {
         match self.kind {
             Kind::Affine(placement) => Some(placement),
-            Kind::Projective(_) => None,
+            Kind::Projective(_) | Kind::Spline { .. } => None,
         }
     }
 }
@@ -310,6 +355,147 @@ fn homography_through(points: &[ControlPoint]) -> Option<[f64; 9]> {
     }
     solve(&mut a, &mut b, 8)?;
     Some([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7], 1.0])
+}
+
+/// Evaluates a homography's nine entries at pixel `(u, v)`, falling back to
+/// `base` on the vanishing line — see [`Warp::place`]'s `Projective` arm for
+/// why. Shared with [`spline_through`], which needs the same projection to
+/// compute the residual its spline has to make up at each pair.
+fn project_through(h: &[f64; 9], base: Placement, u: f64, v: f64) -> (f64, f64) {
+    let w = h[6] * u + h[7] * v + h[8];
+    if w.abs() < 1e-12 {
+        return base.place(u, v);
+    }
+    (
+        (h[0] * u + h[1] * v + h[2]) / w,
+        (h[3] * u + h[4] * v + h[5]) / w,
+    )
+}
+
+/// The homography through five or more pairs, fit by least squares.
+///
+/// With more than four pairs the eight unknowns are over-determined, so this
+/// minimises the sum of squared per-row residuals via the normal equations
+/// `AᵀA h = Aᵀb`, accumulated from the same per-pair rows
+/// [`homography_through`] solves exactly for four. `solve` reports `None`
+/// when `AᵀA` is singular — every pair collinear, most commonly — which the
+/// caller answers by falling back to an affine fit, the module's usual
+/// degenerate rule.
+fn homography_least_squares(points: &[ControlPoint]) -> Option<[f64; 9]> {
+    let mut ata = [0.0_f64; 64];
+    let mut atb = [0.0_f64; 8];
+    for p in points {
+        let rows = [
+            // lon*w = h0*u + h1*v + h2, the same row `homography_through`
+            // builds for one pair.
+            [p.u, p.v, 1.0, 0.0, 0.0, 0.0, -p.lon * p.u, -p.lon * p.v],
+            [0.0, 0.0, 0.0, p.u, p.v, 1.0, -p.lat * p.u, -p.lat * p.v],
+        ];
+        for (row, target) in rows.iter().zip([p.lon, p.lat]) {
+            for i in 0..8 {
+                atb[i] += row[i] * target;
+                for j in 0..8 {
+                    ata[i * 8 + j] += row[i] * row[j];
+                }
+            }
+        }
+    }
+    solve(&mut ata, &mut atb, 8)?;
+    Some([
+        atb[0], atb[1], atb[2], atb[3], atb[4], atb[5], atb[6], atb[7], 1.0,
+    ])
+}
+
+/// The thin-plate-spline radial basis function `r² ln r`, the kernel a
+/// rubber sheet bends by: it is the unique function (up to the fit's own
+/// affine tail) that minimises total bending energy for a surface pinned at
+/// scattered points in the plane, which is why the pairs "bend" rather than
+/// merely interpolate along one axis at a time.
+///
+/// Zero at `r = 0`: the literal formula is `0 * -inf` there, but the
+/// function's limit as `r -> 0` is `0`, so it is defined that way rather than
+/// evaluated as written.
+fn phi(r: f64) -> f64 {
+    if r <= 0.0 { 0.0 } else { r * r * r.ln() }
+}
+
+/// The thin-plate-spline fit through five or more pairs (module doc):
+/// [`homography_least_squares`] for the bulk of the map, plus a spline
+/// correction — [`Kind::Spline`] — for the residual a straight projective
+/// map cannot reach.
+///
+/// Degrades twice, both by the module's usual rule of falling back rather
+/// than returning a warp built on a `None`: to the affine tail when the
+/// homography's own normal equations are singular, and to the bare
+/// homography (no spline correction) when the spline's `(n+3)`-by-`(n+3)`
+/// system is — which happens when two pairs share a pixel, since then two
+/// of `K`'s rows are identical.
+fn spline_through(points: &[ControlPoint], width: u32, height: u32, base: Placement) -> Kind {
+    let Some(projective) = homography_least_squares(points) else {
+        return Kind::Affine(best_affine(points, width, height, base));
+    };
+    let n = points.len();
+
+    // Scaled into roughly 0..1 by the image's larger side: `phi`'s `r^2*ln
+    // r` on raw pixel distances of a few hundred to a few thousand makes the
+    // matrix below badly conditioned, and `solve` reports singular on a
+    // perfectly good set of points. Distances computed from these scaled
+    // coordinates are still all that `phi` sees, consistently, in both the
+    // fit here and `Warp::place`'s evaluation of it.
+    let scale = f64::from(width.max(height).max(1));
+    let centers: Vec<(f64, f64)> = points.iter().map(|p| (p.u / scale, p.v / scale)).collect();
+
+    // The residual the spline has to supply at each pair: how far the
+    // least-squares homography alone misses the target.
+    let mut b_lon = vec![0.0; n + 3];
+    let mut b_lat = vec![0.0; n + 3];
+    for (i, p) in points.iter().enumerate() {
+        let (plon, plat) = project_through(&projective, base, p.u, p.v);
+        b_lon[i] = p.lon - plon;
+        b_lat[i] = p.lat - plat;
+    }
+
+    // The [[K, P], [Pᵀ, 0]] system shared by both axes: K's radial entries,
+    // P's columns [1, u, v] beside them, and Pᵀ's rows below — the standard
+    // thin-plate-spline layout, whose bottom-right 3x3 block stays zero.
+    let dim = n + 3;
+    let mut k = vec![0.0; dim * dim];
+    for (i, ci) in centers.iter().enumerate() {
+        for (j, cj) in centers.iter().enumerate() {
+            let dx = ci.0 - cj.0;
+            let dy = ci.1 - cj.1;
+            k[i * dim + j] = phi((dx * dx + dy * dy).sqrt());
+        }
+        k[i * dim + n] = 1.0;
+        k[i * dim + n + 1] = ci.0;
+        k[i * dim + n + 2] = ci.1;
+        k[n * dim + i] = 1.0;
+        k[(n + 1) * dim + i] = ci.0;
+        k[(n + 2) * dim + i] = ci.1;
+    }
+    let mut k_lat = k.clone();
+    if solve(&mut k, &mut b_lon, dim).is_none() || solve(&mut k_lat, &mut b_lat, dim).is_none() {
+        return Kind::Projective(projective);
+    }
+
+    let (su, sv) = points
+        .iter()
+        .fold((0.0, 0.0), |(su, sv), p| (su + p.u, sv + p.v));
+    let centroid = (su / n as f64, sv / n as f64);
+    let hull_radius = points
+        .iter()
+        .map(|p| ((p.u - centroid.0).powi(2) + (p.v - centroid.1).powi(2)).sqrt())
+        .fold(0.0_f64, f64::max);
+
+    Kind::Spline {
+        projective,
+        scale,
+        centers,
+        weights_lon: b_lon,
+        weights_lat: b_lat,
+        centroid,
+        hull_radius,
+    }
 }
 
 /// Solves `a x = b` in place by Gaussian elimination with partial pivoting.
@@ -515,6 +701,109 @@ mod tests {
         let a = warp.place(0.0, 0.0);
         let b = warp.place(0.0, 600.0);
         assert!((a.1 - b.1).abs() > 1e-6, "the image collapsed to a line");
+    }
+
+    /// Five or more pairs bend, and every one of them still lands exactly.
+    /// This is what "perfectly warped" means and is the test that would
+    /// catch a wrong spline.
+    #[test]
+    fn every_pair_lands_exactly_however_many_there_are() {
+        let mut points = Vec::new();
+        for i in 0..7 {
+            for j in 0..7 {
+                let u = i as f64 * 100.0;
+                let v = j as f64 * 80.0;
+                // A target that no projective map could reach: a sine ripple
+                // across the sheet, which is exactly the paper distortion a
+                // rubber sheet exists to correct.
+                let lon = -71.0 + u / 800.0 + 0.02 * (v / 100.0).sin();
+                let lat = 42.0 - v / 600.0 + 0.02 * (u / 100.0).cos();
+                points.push(at(u, v, lon, lat));
+            }
+        }
+        assert!(points.len() <= MAX_CONTROL_POINTS);
+        let warp = Warp::fit(&points, 800, 600, base());
+        assert_exact(&points, &warp);
+        assert!(!warp.is_identity_affine());
+    }
+
+    /// Exactly four pairs must stay a pure homography: the spline's residual
+    /// is identically zero there, and a picture taken at an angle should not
+    /// acquire bending it did not ask for.
+    #[test]
+    fn four_pairs_bend_not_at_all() {
+        let points = [
+            at(0.0, 0.0, -2.0, 1.0),
+            at(800.0, 0.0, 2.0, 1.0),
+            at(800.0, 600.0, 1.0, -1.0),
+            at(0.0, 600.0, -1.0, -1.0),
+        ];
+        let warp = Warp::fit(&points, 800, 600, base());
+        // A projective map sends straight lines to straight lines. Three
+        // collinear pixels must stay collinear; a spline term would bow them.
+        let a = warp.place(0.0, 0.0);
+        let m = warp.place(400.0, 300.0);
+        let b = warp.place(800.0, 600.0);
+        let cross = (m.0 - a.0) * (b.1 - a.1) - (m.1 - a.1) * (b.0 - a.0);
+        assert!(cross.abs() < 1e-9, "the diagonal bowed by {cross}");
+    }
+
+    /// Outside the hull of the points the spline must not run away: the
+    /// radial term grows like r^2 log r, so a far corner has to fall back
+    /// towards the projective base rather than diverge.
+    #[test]
+    fn a_point_far_outside_the_hull_stays_near_the_projective_base() {
+        let points: Vec<_> = (0..6)
+            .map(|i| {
+                let u = 300.0 + (i % 3) as f64 * 100.0;
+                let v = 200.0 + (i / 3) as f64 * 100.0;
+                at(u, v, -70.5 + u / 4000.0, 41.5 - v / 4000.0)
+            })
+            .collect();
+        let warp = Warp::fit(&points, 800, 600, base());
+        assert_exact(&points, &warp);
+        // Ten image-widths away, far outside the hull.
+        let (lon, lat) = warp.place(8000.0, 6000.0);
+        assert!(lon.is_finite() && lat.is_finite(), "{lon}, {lat}");
+        assert!(
+            lon.abs() <= 360.0 && lat.abs() <= 180.0,
+            "ran away to {lon}, {lat}"
+        );
+    }
+
+    /// Pairs that straddle the antimeridian. Longitudes are not normalised
+    /// inside a warp — an image spanning the seam runs past 180 so its right
+    /// edge stays to the right of its left one, exactly as `Placement::place`
+    /// documents — so the fit must not fold it.
+    #[test]
+    fn pairs_across_the_antimeridian_are_not_folded() {
+        let points = [
+            at(0.0, 0.0, 178.0, 10.0),
+            at(800.0, 0.0, 182.0, 10.0),
+            at(0.0, 600.0, 178.0, 8.0),
+            at(800.0, 600.0, 182.0, 8.0),
+        ];
+        let warp = Warp::fit(&points, 800, 600, base());
+        assert_exact(&points, &warp);
+        let (lon, _) = warp.place(400.0, 300.0);
+        assert!(
+            (lon - 180.0).abs() < 1e-6,
+            "the seam folded the image: {lon}"
+        );
+    }
+
+    /// An image against the pole. The warp is in degree space, so a latitude
+    /// past 90 is a real answer for a pixel off the top of the sheet and must
+    /// not be clamped inside the fit — but a pair at the pole must still land.
+    #[test]
+    fn a_pair_at_the_pole_lands_on_the_pole() {
+        let points = [
+            at(400.0, 0.0, 0.0, 90.0),
+            at(0.0, 600.0, -20.0, 80.0),
+            at(800.0, 600.0, 20.0, 80.0),
+        ];
+        let warp = Warp::fit(&points, 800, 600, base());
+        assert_exact(&points, &warp);
     }
 
     /// The solver against a system whose answer is known by inspection,
