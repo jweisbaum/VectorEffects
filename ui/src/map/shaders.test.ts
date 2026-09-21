@@ -387,4 +387,22 @@ describe("a warped image (spec.md 4.9, control points)", () => {
       expect(source).toMatch(/uniform bool uWarped;/);
     }
   });
+
+  /**
+   * A warped image on the globe (mode 15 up) is drawn through `geoToScreen`
+   * vertex by vertex, exactly like `GEO_VERT`/`GEO_FRAG` and
+   * `BASE_VERT`/`BASE_FRAG` — and every one of those carries a `vHorizon`
+   * out/discard pair, because an azimuthal projects a vertex on the far side
+   * of the globe to a real point on screen, just past the rim, rather than
+   * refusing it. Without the same pair here, a warped chart on the far side
+   * of the globe draws as a smear across the limb instead of not drawing.
+   * Regression: `IMAGE_VERT` and `IMAGE_FRAG` did not carry it when the
+   * warp mesh path was first added.
+   */
+  it("discards the far side of the globe, like every other vertex-projected surface", () => {
+    expect(IMAGE_VERT).toMatch(/out float vHorizon;/);
+    expect(IMAGE_VERT).toMatch(/vHorizon\s*=/);
+    expect(IMAGE_FRAG).toMatch(/in float vHorizon;/);
+    expect(IMAGE_FRAG).toMatch(/if\s*\(\s*vHorizon\s*<\s*0\.0\s*\)\s*discard;/);
+  });
 });

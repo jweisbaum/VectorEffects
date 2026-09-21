@@ -211,6 +211,15 @@ void main() {
  * draws it through the path it already draws an unwarped image through. The
  * uniforms still carry the plain-placement affine, which the fragment stage
  * needs for the globe's per-pixel path on an *unwarped* image.
+ *
+ * On the globe and its azimuthal kin (mode 15 up), a warped image is drawn
+ * through `geoToScreen` vertex by vertex, exactly as `GEO_VERT` and
+ * `BASE_VERT` are — so it needs the same `vHorizon` they carry: every vertex
+ * is projected *somewhere*, near side or far, and only the horizon test
+ * tells them apart. Without it a chart on the far side of the globe drew as
+ * a smear across the limb instead of not drawing at all. An *unwarped*
+ * image on the globe takes the per-pixel path below instead and needs no
+ * horizon test of its own — `vHorizon` is pinned to 1.0 for it.
  */
 export const IMAGE_VERT = `#version 300 es
 precision highp float;
@@ -223,6 +232,7 @@ uniform vec3 uPlaceLat;     // and the same for the latitude
 uniform bool uWarped;
 out vec2 vUV;
 out vec2 vGeo;
+out float vHorizon;
 void main() {
   vUV = aCell;
   vec2 lonLat = uWarped
@@ -235,10 +245,15 @@ void main() {
   // On a globe (mode 15 up) the cells are the whole viewport and the
   // fragment stage finds the image under each pixel: see IMAGE_FRAG. A
   // warped image cannot take that path (no closed-form inverse of a spline),
-  // so it is projected vertex by vertex like every other projection instead.
+  // so it is projected vertex by vertex like every other projection instead
+  // — through geoToScreen, exactly as GEO_VERT and BASE_VERT are, and so it
+  // needs the same vHorizon this vertex sets and IMAGE_FRAG discards on: the
+  // azimuthals draw every vertex somewhere, on either side of the globe, and
+  // only the horizon test tells the far side from the near one.
   gl_Position = (uProjection >= 15 && !uWarped)
     ? vec4(aCell * 2.0 - 1.0, 0.0, 1.0)
     : screenToClip(uProjection == 14 ? meshToScreen(aScreen) : geoToScreen(lonLat));
+  vHorizon = (uProjection >= 15 && !uWarped) ? 1.0 : veHorizon;
 }
 `;
 
@@ -247,6 +262,7 @@ precision highp float;
 precision highp int;
 in vec2 vUV;
 in vec2 vGeo;
+in float vHorizon;
 ${PROJECTION}
 uniform vec3 uPlaceLon;
 uniform vec3 uPlaceLat;
@@ -260,6 +276,11 @@ uniform float uSpeedScale;
 uniform bool uWarped;
 out vec4 fragColor;
 void main() {
+  // The far side of a globe (mode 15 up); always positive on a flat map or
+  // through the globe's own per-pixel path (see IMAGE_VERT). Without this a
+  // warped image on the globe drew through every vertex it was given, near
+  // side and far side alike, which showed as a smear across the limb.
+  if (vHorizon < 0.0) discard;
   vec2 geo = vGeo;
   vec2 cell = vUV;
   if (uProjection >= 15 && !uWarped) {
