@@ -10,7 +10,8 @@
 import { describe, expect, it } from "vitest";
 
 import type { ImageLayerView } from "../generated/ImageLayerView";
-import { warpMeshFor, warpSpansTooMuch } from "./images";
+import { currentHint, reportError, setHint } from "../hint";
+import { WarpSpanWarnings, warpMeshFor, warpSpansTooMuch } from "./images";
 
 /** A minimal, fully-shaped view; each test overrides what it cares about. */
 function baseView(overrides: Partial<ImageLayerView>): ImageLayerView {
@@ -111,5 +112,78 @@ describe("the locality assumption behind the mesh/per-pixel split", () => {
   it("says nothing about too few points to have a footprint", () => {
     expect(warpSpansTooMuch([])).toBe(false);
     expect(warpSpansTooMuch([1, 2])).toBe(false);
+  });
+});
+
+describe("WarpSpanWarnings (spec.md 4.9, review finding 2)", () => {
+  const hugeMesh = [-90, 0, 90, 0, 90, -40, -90, -40];
+  const harbourMesh = [4.1, 52.01, 4.102, 52.01, 4.102, 52.008, 4.1, 52.008];
+
+  /**
+   * The regression this closes: `draws()` used to call `reportError` on
+   * every frame a too-large warp existed. `hint.ts`'s `publish` dedupes an
+   * unchanged snapshot, so calling `update` with the *same* mesh identity
+   * twice — standing in for two frames of a still scene — must leave the
+   * error exactly as it was, not merely equal in value: a hint set in
+   * between must survive, which it would not if `update` re-asserted the
+   * error unconditionally.
+   */
+  it("reports once and does not re-assert on an unchanged mesh", () => {
+    setHint(null);
+    reportError(null);
+    const warnings = new WarpSpanWarnings();
+    warnings.update(1, "/chart.png", hugeMesh);
+    expect(currentHint().error).toContain("quarter of the earth");
+
+    // A hint set after the warning must not be clobbered by a later frame
+    // whose mesh identity has not changed — the bug this closes would call
+    // reportError again here and stamp the error straight back over it.
+    setHint("Click the map to place it.");
+    warnings.update(1, "/chart.png", hugeMesh);
+    expect(currentHint().hint).toBe("Click the map to place it.");
+    expect(currentHint().error).toBeNull();
+    setHint(null);
+  });
+
+  it("clears the warning once the warp no longer spans too much", () => {
+    reportError(null);
+    const warnings = new WarpSpanWarnings();
+    warnings.update(1, "/chart.png", hugeMesh);
+    expect(currentHint().error).not.toBeNull();
+    warnings.update(1, "/chart.png", harbourMesh);
+    expect(currentHint().error).toBeNull();
+  });
+
+  it("clears the warning when the layer stops being warped or is removed", () => {
+    reportError(null);
+    const warnings = new WarpSpanWarnings();
+    warnings.update(1, "/chart.png", hugeMesh);
+    expect(currentHint().error).not.toBeNull();
+    warnings.forget(1);
+    expect(currentHint().error).toBeNull();
+  });
+
+  /** Never steps on an unrelated error that has since taken the line. */
+  it("never clears an error it did not itself set", () => {
+    reportError(null);
+    const warnings = new WarpSpanWarnings();
+    warnings.update(1, "/chart.png", hugeMesh);
+    reportError("the layer is locked", "bad-option");
+    warnings.forget(1);
+    expect(currentHint().error).toBe("the layer is locked");
+    reportError(null);
+  });
+
+  it("keeps two layers' warnings independent", () => {
+    reportError(null);
+    const warnings = new WarpSpanWarnings();
+    warnings.update(1, "/a.png", hugeMesh);
+    warnings.update(2, "/b.png", hugeMesh);
+    expect(currentHint().error).toContain("/b.png");
+    // Clearing the first must not disturb the second's still-active report.
+    warnings.forget(1);
+    expect(currentHint().error).toContain("/b.png");
+    warnings.forget(2);
+    expect(currentHint().error).toBeNull();
   });
 });

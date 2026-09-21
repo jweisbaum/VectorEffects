@@ -13,7 +13,7 @@
 
 import type { ImageLayerView } from "../generated/ImageLayerView";
 import { EARTH_RADIUS_M, distanceM } from "./geo";
-import { reportError } from "../hint";
+import { currentHint, reportError } from "../hint";
 import type { ImageDraw } from "./renderer";
 
 /** How a fetch is doing. */
@@ -59,6 +59,69 @@ export function warpSpansTooMuch(mesh: ArrayLike<number>): boolean {
   const eastWest = distanceM({ lon: minLon, lat: midLat }, { lon: maxLon, lat: midLat });
   const northSouth = distanceM({ lon: midLon, lat: minLat }, { lon: midLon, lat: maxLat });
   return Math.max(eastWest, northSouth) > QUARTER_EARTH_M;
+}
+
+/**
+ * Tracks, per image layer, whether its warp has been reported as spanning
+ * more than `warpSpansTooMuch` allows for — and clears the report exactly
+ * when that stops being true, rather than repeating it.
+ *
+ * `ImageCache.draws()` runs inside `draw()`, once a frame. Calling
+ * `reportError` from there on every frame a too-large warp exists would seem
+ * harmless — `hint.ts`'s `publish` dedupes identical snapshots, so there is
+ * no render storm — but `setHint` only clears the *error* when the hint
+ * *text* changes, and the very next frame would put this error straight
+ * back. So while such an image existed, every other hint and error in the
+ * application would be masked permanently, which is exactly what "no panel
+ * renders an error line of its own; `reportError` and `setHint` are the
+ * whole API" exists to prevent. `update` is therefore called only when a
+ * layer's mesh identity actually changes (a real re-fit), never per frame.
+ */
+export class WarpSpanWarnings {
+  private readonly active = new Map<number, string>();
+  /**
+   * The mesh identity `update` last saw per layer, by reference. This is
+   * what makes `update` idempotent on its own — safe to call redundantly —
+   * rather than depending entirely on a caller that only invokes it on a
+   * real re-fit: a still scene calling it every frame with the very same
+   * array must not re-assert an error a hint has since taken the place of.
+   */
+  private readonly lastMesh = new Map<number, ArrayLike<number>>();
+
+  /** Reports or clears a layer's warning, from its freshly rebuilt mesh. */
+  update(layer: number, path: string, mesh: ArrayLike<number>): void {
+    if (this.lastMesh.get(layer) === mesh) return;
+    this.lastMesh.set(layer, mesh);
+    if (!warpSpansTooMuch(mesh)) {
+      this.clear(layer);
+      return;
+    }
+    const message =
+      `“${path}”'s warp spans more than a quarter of the earth; the mesh path this draws it ` +
+      "through is built for a local chart and may look coarse that far out.";
+    this.active.set(layer, message);
+    reportError(message);
+  }
+
+  /** Called when a layer stops being warped, or disappears entirely. */
+  forget(layer: number): void {
+    this.lastMesh.delete(layer);
+    this.clear(layer);
+  }
+
+  /** Called when the whole cache is torn down — a project close or reopen. */
+  forgetAll(): void {
+    for (const layer of [...this.active.keys()]) this.forget(layer);
+  }
+
+  private clear(layer: number): void {
+    const message = this.active.get(layer);
+    if (message === undefined) return;
+    this.active.delete(layer);
+    // Only clear an error this instance itself set — a different error (or a
+    // hint) that has since taken the line's place must not be stepped on.
+    if (currentHint().error === message) reportError(null);
+  }
 }
 
 /**
@@ -112,6 +175,8 @@ export class ImageCache {
    * nothing new to the renderer, frame after frame (spec.md 4.9).
    */
   private readonly warpMeshes = new Map<number, { source: number[]; array: Float32Array }>();
+  /** Reports a layer's warp spanning too much once per re-fit, not per frame. */
+  private readonly warnings = new WarpSpanWarnings();
   /** Called when a fetch completes, so the caller can redraw. */
   onChange: (() => void) | null = null;
   /** Called when a fetch fails, so the failure reaches the application log. */
@@ -160,12 +225,6 @@ export class ImageCache {
       const key = `image/${token}/${view.layer}/${this.maxEdge}`;
       wanted.add(key);
       const warpMesh = this.cachedWarpMesh(view);
-      if (warpMesh && warpSpansTooMuch(warpMesh)) {
-        reportError(
-          `“${view.path}”'s warp spans more than a quarter of the earth; the mesh path this ` +
-            "draws it through is built for a local chart and may look coarse that far out.",
-        );
-      }
       out.push({
         layer: view.layer,
         texture: this.texture(key),
@@ -185,7 +244,10 @@ export class ImageCache {
     }
     const stillWarped = new Set(views.filter((v) => v.warped).map((v) => v.layer));
     for (const layer of [...this.warpMeshes.keys()]) {
-      if (!stillWarped.has(layer)) this.warpMeshes.delete(layer);
+      if (!stillWarped.has(layer)) {
+        this.warpMeshes.delete(layer);
+        this.warnings.forget(layer);
+      }
     }
     return out;
   }
@@ -203,12 +265,17 @@ export class ImageCache {
   private cachedWarpMesh(view: ImageLayerView): Float32Array | null {
     if (!view.warped || view.warp_mesh.length === 0) {
       this.warpMeshes.delete(view.layer);
+      this.warnings.forget(view.layer);
       return null;
     }
     const cached = this.warpMeshes.get(view.layer);
     if (cached && cached.source === view.warp_mesh) return cached.array;
     const array = warpMeshFor(view)!;
     this.warpMeshes.set(view.layer, { source: view.warp_mesh, array });
+    // The mesh identity just changed — a real re-fit, not a redraw — which is
+    // the one moment to report or clear the too-large warning (see
+    // `WarpSpanWarnings`).
+    this.warnings.update(view.layer, view.path, array);
     return array;
   }
 
@@ -271,5 +338,6 @@ export class ImageCache {
   dispose(): void {
     for (const key of [...this.entries.keys()]) this.release(key);
     this.warpMeshes.clear();
+    this.warnings.forgetAll();
   }
 }
