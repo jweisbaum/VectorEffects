@@ -60,12 +60,22 @@ function view(overrides: Partial<ImageLayerView>): ImageLayerView {
   };
 }
 
-async function render(image: ImageLayerView) {
+async function render(image: ImageLayerView, canAlign = true) {
   await act(async () =>
     root.render(
-      <ImageControls image={image} onOpacity={() => {}} onReset={() => {}} onAlign={() => {}} />,
+      <ImageControls
+        image={image}
+        onOpacity={() => {}}
+        onReset={() => {}}
+        onAlign={() => {}}
+        canAlign={canAlign}
+      />,
     ),
   );
+}
+
+function alignButton(): HTMLButtonElement | null {
+  return container.querySelector("button.align");
 }
 
 function resetButton(): HTMLButtonElement | null {
@@ -123,4 +133,26 @@ it("shows the reset button for a hand-placed image with one to three control poi
 it("still describes the georeferenced case as returning to the file", async () => {
   await render(view({ georeferenced: true, warped: false }));
   expect(resetButton()!.title).toContain("its own file");
+});
+
+/**
+ * Aligning by pointing is offered on the cylindrical maps and nowhere else.
+ * On the globe and the general presets the picture's own edge curves across
+ * the screen, and clicking a place in a picture whose true edge you cannot
+ * see is a georeference nobody can aim — so the button is not offered rather
+ * than offered and misleading.
+ */
+it("offers the align button only where the map can be aligned on", async () => {
+  await render(view({ georeferenced: true, warped: false }), true);
+  expect(alignButton()).not.toBeNull();
+
+  await render(view({ georeferenced: true, warped: false }), false);
+  expect(alignButton()).toBeNull();
+});
+
+/** Hiding it takes nothing else with it: opacity and reset stay put. */
+it("keeps the rest of the controls when the button is hidden", async () => {
+  await render(view({ georeferenced: true, warped: false }), false);
+  expect(container.querySelector('input[type="range"]')).not.toBeNull();
+  expect(resetButton()).not.toBeNull();
 });

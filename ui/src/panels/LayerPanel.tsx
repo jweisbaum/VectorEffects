@@ -114,6 +114,7 @@ export default function LayerPanel({
   onChanged,
   viewBounds,
   onAlign,
+  canAlign,
 }: {
   project: ProjectSummary;
   step: number;
@@ -136,6 +137,11 @@ export default function LayerPanel({
    * is where the control points are placed.
    */
   onAlign: (layer: number) => void;
+  /**
+   * Whether the projection on show can be aligned on (spec.md 4.9): the
+   * cylindrical maps only. `App` decides; the panel only carries it.
+   */
+  canAlign: boolean;
 }) {
   const [tree, setTree] = useState<DocumentTree | null>(null);
   /**
@@ -742,6 +748,7 @@ export default function LayerPanel({
                   onOpacity={(value) => run(api.setImageOpacity(layer.id, value))}
                   onReset={() => run(api.resetImagePlacement(layer.id))}
                   onAlign={() => onAlign(layer.id)}
+                  canAlign={canAlign}
                 />
               )}
 
@@ -926,12 +933,21 @@ export function ImageControls({
   onOpacity,
   onReset,
   onAlign,
+  canAlign,
 }: {
   image: ImageLayerView;
   onOpacity: (opacity: number) => void;
   onReset: () => void;
   /** Arms the map's alignment mode for this layer (Task 7). */
   onAlign: () => void;
+  /**
+   * Whether the projection on show can be aligned on: the cylindrical maps
+   * only. Off the button is not offered at all — the globe and the general
+   * presets curve the picture's own edge across the screen, and clicking a
+   * place in a picture whose true edge you cannot see is a georeference
+   * nobody can aim.
+   */
+  canAlign: boolean;
 }) {
   if (!image.loaded) {
     return (
@@ -959,14 +975,16 @@ export function ImageControls({
         {image.width}×{image.height}
         {image.georeferenced && " · georeferenced"}
       </span>
-      <button
-        className="align"
-        onClick={onAlign}
-        aria-label="Align by pointing"
-        title="Align by pointing: click a place in the picture, then the same place on the map. Repeat as often as you like, then press Enter. Escape cancels; Backspace drops the last pair."
-      >
-        <AlignIcon />
-      </button>
+      {canAlign && (
+        <button
+          className="align"
+          onClick={onAlign}
+          aria-label="Align by pointing"
+          title="Align by pointing: click a place in the picture, then the same place on the map. Repeat as often as you like, then press Enter. Escape cancels; Backspace drops the last pair."
+        >
+          <AlignIcon />
+        </button>
+      )}
       {(image.georeferenced || image.warped || image.control_points.length > 0) && (
         <button
           onClick={onReset}

@@ -225,6 +225,53 @@ function unwrapLon(lon: number, reference: number): number {
   return lon + Math.round((reference - lon) / 360) * 360;
 }
 
+/**
+ * The picture's own outline, as a closed run of lon/lat around its edge.
+ *
+ * Not the four corners. Two reasons, and either alone would be enough:
+ *
+ * - **A straight screen line between two projected corners is a chord, not a
+ *   path along the surface.** On the globe that cut visibly through the
+ *   planet instead of lying on it; on any of the other general projections it
+ *   would cut across the curve the same way. The tiles and the picture itself
+ *   are drawn through a subdivided mesh for exactly this reason — the outline
+ *   has to follow.
+ * - **A warped picture's edge bows.** Its true boundary is the mesh's own
+ *   piecewise edge, which a straight quad misses either side of.
+ *
+ * Walked in the image's own pixel space and mapped forward, so it follows
+ * whatever warp is in force. The caller hands the result to `projectPath`,
+ * which breaks the line where it passes behind the globe.
+ */
+export function outlinePath(view: AlignableView): [number, number][] {
+  // Fine enough to follow the sphere at any zoom the map allows, and to
+  // follow a bend between mesh samples; a closed loop of this many points is
+  // nothing to stroke once a frame.
+  const perEdge = Math.max(8, Math.min(64, view.warp_cells && view.warped ? view.warp_cells : 24));
+  const w = Math.max(1, view.width);
+  const h = Math.max(1, view.height);
+  const corners: [number, number][] = [
+    [0, 0],
+    [w, 0],
+    [w, h],
+    [0, h],
+  ];
+  const out: [number, number][] = [];
+  for (let edge = 0; edge < 4; edge += 1) {
+    const from = corners[edge]!;
+    const to = corners[(edge + 1) % 4]!;
+    // The far end is the next edge's near end, so it is left to that edge.
+    for (let step = 0; step < perEdge; step += 1) {
+      const t = step / perEdge;
+      const at = pictureToMap(view, from[0] + (to[0] - from[0]) * t, from[1] + (to[1] - from[1]) * t);
+      out.push([at.lon, at.lat]);
+    }
+  }
+  const start = out[0];
+  if (start) out.push(start);
+  return out;
+}
+
 /** The forward map: an image pixel to where it currently sits on the map. */
 export function pictureToMap(view: AlignableView, u: number, v: number): GeoPoint {
   const mesh = view.warped ? view.warp_mesh : undefined;

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { MAX_CONTROL_POINTS, createAlignStore, imagePixelAt, pictureToMap, type AlignableView } from "./align";
+import { MAX_CONTROL_POINTS, createAlignStore, imagePixelAt, outlinePath, pictureToMap, type AlignableView } from "./align";
 
 /** Unwraps a resolved pixel, failing loudly if the click was refused. */
 function found(pixel: [number, number] | null): [number, number] {
@@ -373,5 +373,71 @@ describe("imagePixelAt", () => {
   it("refuses a degenerate, zero-area affine rather than dividing by zero", () => {
     const view = { width: 100, height: 100, placement: [0, 0, -71, 0, 0, 42] };
     expect(imagePixelAt(view, { lon: -71, lat: 42 })).toBeNull();
+  });
+});
+
+describe("the picture's outline", () => {
+  const flat = { width: 800, height: 600, placement: [1 / 80, 0, -20, 0, -1 / 60, 10] };
+
+  /**
+   * The bug this exists for: the outline used to be four corners joined by
+   * straight screen lines, and a straight screen line between two projected
+   * points is a chord. On the globe it cut through the planet instead of
+   * lying on it. So the path has to carry points *between* the corners.
+   */
+  it("walks the edge rather than joining the corners", () => {
+    const path = outlinePath(flat);
+    expect(path.length).toBeGreaterThan(16);
+    // Closed: the last point returns to the first.
+    expect(path[path.length - 1]).toEqual(path[0]);
+  });
+
+  /**
+   * Every point is genuinely on the picture's edge, not merely near it. For a
+   * plain affine placement the edge is straight in lon/lat, so each sample
+   * must satisfy the placement's own forward map at a pixel with u or v
+   * pinned to an edge — checked by inverting back to a pixel and asserting it
+   * sits on the boundary.
+   */
+  it("puts every point on the picture's own edge", () => {
+    for (const at of outlinePath(flat)) {
+      const pixel = imagePixelAt(flat, { lon: at[0], lat: at[1] });
+      expect(pixel, `${at} did not invert`).not.toBeNull();
+      const [u, v] = pixel!;
+      const onEdge =
+        Math.abs(u) < 1e-6 ||
+        Math.abs(u - 800) < 1e-6 ||
+        Math.abs(v) < 1e-6 ||
+        Math.abs(v - 600) < 1e-6;
+      expect(onEdge, `pixel ${u},${v} is not on the boundary`).toBe(true);
+    }
+  });
+
+  /**
+   * A warped picture's edge bows, and the outline has to bow with it — a
+   * straight quad misses the true boundary either side. With a bending warp
+   * the sampled edge must not be collinear between its corners.
+   */
+  it("follows a bend rather than cutting across it", () => {
+    const cells = 4;
+    const mesh: number[] = [];
+    for (let row = 0; row <= cells; row += 1) {
+      for (let col = 0; col <= cells; col += 1) {
+        const u = col / cells;
+        const v = row / cells;
+        // A ripple along the top edge no straight line can follow.
+        mesh.push(-20 + u * 10, 10 - v * 10 + 0.8 * Math.sin(u * Math.PI));
+      }
+    }
+    const bent = { ...flat, warped: true, warp_mesh: mesh, warp_cells: cells };
+    const path = outlinePath(bent);
+    const top = path.slice(0, 12);
+    const first = top[0]!;
+    const last = top[top.length - 1]!;
+    const bowed = top.some(([lon, lat]) => {
+      const t = (lon - first[0]) / (last[0] - first[0] || 1);
+      return Math.abs(lat - (first[1] + (last[1] - first[1]) * t)) > 1e-3;
+    });
+    expect(bowed, "the top edge came back straight through a bend").toBe(true);
   });
 });

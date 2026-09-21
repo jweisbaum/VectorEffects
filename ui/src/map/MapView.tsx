@@ -97,6 +97,7 @@ import {
   handleUnder,
   MEASURE_LABELS,
   pointsNeeded,
+  projectPath,
 } from "./measure";
 import type { MeasurementView } from "../generated/MeasurementView";
 import type { MeasurementKind } from "../generated/MeasurementKind";
@@ -167,7 +168,7 @@ import {
 } from "./region";
 import { ImageCache } from "./images";
 import { imageUnder } from "./place";
-import { MAX_CONTROL_POINTS, createAlignStore, imagePixelAt, pictureToMap, type AlignStore } from "./align";
+import { MAX_CONTROL_POINTS, createAlignStore, imagePixelAt, outlinePath, pictureToMap, type AlignStore } from "./align";
 import type { ImageLayerView } from "../generated/ImageLayerView";
 import { MapRenderer, type OperatorPreview, type RenderState } from "./renderer";
 import { uniqueTiles } from "../timeline/playback";
@@ -2755,6 +2756,26 @@ export default function MapView({
     requestDraw();
   }, [requestDraw, settings?.projection]);
 
+  /**
+   * A projection that cannot be aligned on cancels an alignment under way.
+   *
+   * The panel offers the button on the cylindrical maps only (spec.md 4.9),
+   * so switching to the globe mid-session would otherwise leave the mode
+   * armed and swallowing every click with nothing on screen to say why, and
+   * no way to reach the button that would have turned it off. Cancelling
+   * discards the pairs rather than writing them — the session was never
+   * committed, and `Escape` does the same thing.
+   */
+  useEffect(() => {
+    const armed = alignStore.current?.get().layer ?? null;
+    if (armed === null) return;
+    if (!projectionOf((settings?.projection ?? DEFAULT_PROJECTION) as ProjectionId).general) return;
+    alignStore.current?.cancel();
+    setHint("");
+    reportError(null);
+    requestOverlay();
+  }, [requestOverlay, settings?.projection]);
+
   // Mirror display state into the refs `draw` reads, then redraw.
   useEffect(() => {
     glyphSettingsRef.current = settings?.glyphs ?? DEFAULT_GLYPHS;
@@ -3477,18 +3498,30 @@ export default function MapView({
     // this same outline.
     const placing = imageLayersRef.current.find((image) => image.layer === activeLayer);
     if (placing?.loaded) {
-      const outline = placing.corners.map((corner) =>
-        toScreen(camera, view, { lon: corner[0], lat: corner[1] }),
-      );
-      const first = outline[0];
-      if (first) {
+      // Walked around the picture's edge and projected point by point, never
+      // corner to corner: a straight screen line between two projected
+      // corners is a chord, which on the globe cut through the planet rather
+      // than lying on it. `projectPath` also unwraps longitude the short way
+      // and marks the hidden hemisphere with non-finite points, which the
+      // pen-up below turns into a break — the same shape `drawMeasurements`
+      // strokes its two passage paths with.
+      const screen = projectPath(camera, view, outlinePath(placing));
+      if (screen.length > 1) {
         context.save();
         context.beginPath();
-        context.moveTo(first.x, first.y);
-        for (const at of outline.slice(1)) context.lineTo(at.x, at.y);
-        context.closePath();
+        let drawing = false;
+        for (const at of screen) {
+          if (!Number.isFinite(at.x) || !Number.isFinite(at.y)) {
+            drawing = false;
+            continue;
+          }
+          if (drawing) context.lineTo(at.x, at.y);
+          else context.moveTo(at.x, at.y);
+          drawing = true;
+        }
         context.strokeStyle = "rgba(120, 200, 255, 0.85)";
         context.lineWidth = Math.max(1, dpr);
+        context.lineJoin = "round";
         context.setLineDash([5 * dpr, 4 * dpr]);
         context.stroke();
         context.setLineDash([]);

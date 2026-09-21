@@ -39,6 +39,7 @@ import type { CaptureMode } from "./generated/CaptureMode";
 import type { ProjectSummary } from "./generated/ProjectSummary";
 import type { TileAddress } from "./generated/TileAddress";
 import type { PositionPick } from "./picking";
+import { DEFAULT_PROJECTION, projectionOf, type ProjectionId } from "./map/projection";
 
 /**
  * Application shell.
@@ -106,6 +107,18 @@ function EditorApp() {
    * bindings from here, so a rebind changes the key everywhere (M15).
    */
   const [settings, setSettings] = useState<AppSettings | null>(null);
+  /**
+   * Whether a picture can be aligned by pointing in the projection on show.
+   *
+   * Only the cylindrical maps — the 14 whose `Projection` carries no
+   * `general` map. Everything else, the globe and the azimuthals and the
+   * general presets, curves the picture's own edge across the screen, and
+   * clicking a place in a picture you cannot see the true edge of is a
+   * georeference nobody can aim.
+   */
+  const alignable = !projectionOf(
+    (settings?.projection ?? DEFAULT_PROJECTION) as ProjectionId,
+  ).general;
   const [showSettings, setShowSettings] = useState(false);
   /**
    * The macro capture in progress, reported by the map (spec.md 8.7, M16).
@@ -679,6 +692,7 @@ function EditorApp() {
               onChanged={setProject}
               viewBounds={viewBounds}
               onAlign={(layer) => mapRef.current?.beginAlign(layer)}
+              canAlign={alignable}
             />
           </aside>
         ) : (
