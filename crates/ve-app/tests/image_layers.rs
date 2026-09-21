@@ -456,6 +456,40 @@ fn more_than_fifty_control_points_are_refused() {
     assert!(ve_app::image::control_points_set(&state, layer, too_many).is_err());
 }
 
+/// A non-finite number anywhere in a pair is refused, not clamped or passed
+/// through.
+///
+/// A NaN reaching `Warp::fit` would propagate silently through the solver
+/// into the mesh and out to a vertex buffer, rendering as nothing or as
+/// garbage with no error anywhere — which is exactly the failure the refusal
+/// exists to prevent. Covers a NaN, a positive infinity and a negative
+/// infinity, and both kinds of position: `u`/`v` (pixels) and `lon`/`lat`
+/// (degrees), which are read by different code paths.
+#[test]
+fn non_finite_control_points_are_refused() {
+    let root = TempRoot::new("non-finite");
+    let state = app(&root);
+    let layer = an_image_layer(&state, &root);
+    assert!(view_of(&state).control_points.is_empty());
+
+    let bad_pairs: [[f64; 4]; 4] = [
+        [f64::NAN, 0.0, 0.0, 0.0],          // u
+        [0.0, f64::INFINITY, 0.0, 0.0],     // v
+        [0.0, 0.0, f64::NEG_INFINITY, 0.0], // lon
+        [0.0, 0.0, 0.0, f64::NAN],          // lat
+    ];
+    for pair in bad_pairs {
+        assert!(
+            ve_app::image::control_points_set(&state, layer, vec![pair]).is_err(),
+            "{pair:?} should have been refused"
+        );
+        assert!(
+            view_of(&state).control_points.is_empty(),
+            "a refused pair must not reach the document ({pair:?})"
+        );
+    }
+}
+
 /// A picture is addressed by the *opening*, not by the document's revision
 /// (M37).
 ///
