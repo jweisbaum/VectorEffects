@@ -27,6 +27,14 @@ export interface CursorContext {
   /** A macro capture is running: the region is dragged with the selection cursor. */
   recording: boolean;
   /**
+   * The image alignment mode is armed (Task 7): every click is a control
+   * point's picture or map half, never a tool's. Crosshair, like a pick —
+   * both are a click aimed at an exact point rather than at an object or a
+   * stroke — but its own row, or a later change to the pick's cursor would
+   * silently change this one too for a reason that has nothing to do with it.
+   */
+  aligning: boolean;
+  /**
    * The tool in hand cannot work on the layer in hand (spec.md 6.1, M51).
    *
    * The backend has always refused these, but on release — after the stroke
@@ -78,6 +86,8 @@ export function cursorFor(context: CursorContext): string {
   // While a capture records, the region is dragged with the selection cursor
   // (spec.md 8.7): nothing else on the map does anything.
   if (context.recording) return "default";
+  // Alignment takes every click, whatever the tool in hand (Task 7).
+  if (context.aligning) return "crosshair";
   // The tool will not work on this layer (M51). Before the tools, which is
   // exactly where the refusal sits in the click.
   if (context.forbidden) return FORBIDDEN_CURSOR;

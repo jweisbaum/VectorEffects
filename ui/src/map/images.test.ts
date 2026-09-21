@@ -32,6 +32,7 @@ function baseView(overrides: Partial<ImageLayerView>): ImageLayerView {
       [-69, 41],
       [-70, 41],
     ],
+    corner_residual_deg: [0, 0, 0, 0],
     georeferenced: false,
     ...overrides,
   };

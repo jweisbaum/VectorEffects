@@ -30,7 +30,8 @@ const project = { revision: 1, step_count: 8, step_hours: 1 } as ProjectSummary;
 function Host() {
   const [summary, setSummary] = useState(project);
   return <LayerPanel project={summary} step={0} selection={[]} activeLayer={4}
-    onSelect={() => {}} onActivateLayer={activate} onActiveKind={() => {}} onChanged={setSummary} />;
+    onSelect={() => {}} onActivateLayer={activate} onActiveKind={() => {}} onChanged={setSummary}
+    onAlign={() => {}} />;
 }
 
 function row(id: number): HTMLElement {

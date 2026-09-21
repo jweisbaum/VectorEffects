@@ -101,6 +101,13 @@ pub struct ImageLayerView {
     /// is the *bent* quad for a warped image and the plain one otherwise. The
     /// map hit-tests against this; it is not what the picture is drawn from.
     pub corners: Vec<[f64; 2]>,
+    /// How far the spline moves each of the four corners above, in degrees,
+    /// from where the warp's own plain projective fit alone would put them
+    /// (spec.md §2, §5): "how much is the spline doing out here". Same
+    /// corner order as `corners`. Zero at every corner for a warp with four
+    /// or fewer pairs, since none of those has a spline term to differ from
+    /// itself by.
+    pub corner_residual_deg: Vec<f64>,
     /// Whether the file carried its own georeference.
     ///
     /// A hand-placed image says so, because "the corners are where the file
@@ -240,6 +247,7 @@ pub fn view(layer: Id, source: &LayerSource) -> Option<ImageLayerView> {
         .map(|(u, v)| warp.place(u, v))
         .map(|(lon, lat)| [lon, lat])
         .to_vec();
+    let corner_residual_deg = warp.corner_residual_deg(width, height).to_vec();
     Some(ImageLayerView {
         layer: layer.raw(),
         path: path.to_string_lossy().into_owned(),
@@ -263,6 +271,7 @@ pub fn view(layer: Id, source: &LayerSource) -> Option<ImageLayerView> {
         warp_mesh,
         warp_cells,
         corners,
+        corner_residual_deg,
         georeferenced: probed.as_ref().is_some_and(|p| p.placement.is_some()),
     })
 }

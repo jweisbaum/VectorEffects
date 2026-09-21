@@ -166,6 +166,8 @@ import {
   wholeMap,
 } from "./region";
 import { ImageCache } from "./images";
+import { imageUnder } from "./place";
+import { createAlignStore, imagePixelAt, pictureToMap, type AlignStore } from "./align";
 import type { ImageLayerView } from "../generated/ImageLayerView";
 import { MapRenderer, type OperatorPreview, type RenderState } from "./renderer";
 import { uniqueTiles } from "../timeline/playback";
@@ -492,6 +494,21 @@ export interface MapHandle extends PlaybackMap {
    * `view_focus` (spec 8.8). Clamped like every other camera move.
    */
   focus(lon: number, lat: number, pxPerDeg?: number): void;
+  /**
+   * Arms the image alignment mode for `layer` (Task 7, spec.md 4.9 §2, §5):
+   * the "Align…" button beside Opacity in `ImageControls`. Every click on
+   * the map from here is a control point's picture or map half, alternating,
+   * until `Enter` applies them, `Escape` cancels, or `Backspace` drops the
+   * last pair.
+   */
+  beginAlign(layer: number): void;
+  /**
+   * Whether the alignment mode is armed, for `App`'s own `Backspace` — which
+   * otherwise deletes the selection — to stand down while it is (spec.md
+   * 8.4): the same key means something else here, and both listen on
+   * `window`.
+   */
+  isAligning(): boolean;
 }
 
 export default function MapView({
@@ -885,6 +902,13 @@ export default function MapView({
   const [showReadout, setShowReadout] = useState(true);
   const readoutStore = useRef<ReadoutStore | null>(null);
   readoutStore.current ??= createReadoutStore();
+  /**
+   * The image alignment mode (Task 7), kept the same way as the readout:
+   * external, because a click is rarer than a pointer move but still
+   * changes outside anything React would otherwise re-render for.
+   */
+  const alignStore = useRef<AlignStore | null>(null);
+  alignStore.current ??= createAlignStore();
   /**
    * The field sample in flight for the readout, and the position waiting
    * behind it.
@@ -1799,6 +1823,11 @@ export default function MapView({
     });
   }, []);
 
+  // A change to the alignment mode — a pair placed, undone, or the mode
+  // itself starting or ending — redraws the overlay, which is where its
+  // numbered pairs are drawn. Subscribed once; `requestOverlay` is stable.
+  useEffect(() => alignStore.current!.subscribe(() => requestOverlay()), [requestOverlay]);
+
   // --- Set up GL once ---
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -2230,6 +2259,45 @@ export default function MapView({
       // Never steal a keystroke from a field the user is typing in.
       if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
 
+      // The image alignment mode (Task 7, spec.md 4.9 §2, §5) takes these
+      // three keys ahead of everything below, including the shape editor's
+      // and the timeline's own `Escape`/`Backspace`: while it is armed they
+      // mean the session, not a gesture or the selection.
+      if (alignStore.current!.get().layer !== null) {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          const layer = alignStore.current!.get().layer!;
+          const pairs = alignStore.current!.pairs();
+          alignStore.current!.cancel();
+          setHint(null);
+          // Zero pairs placed is not "clear the warp" — a session opened and
+          // closed without a click would otherwise silently erase whatever
+          // control points the image already had (spec.md's full-replacement
+          // write, the same shape `set_image_control_points` takes for a
+          // measurement's `SetAnnotations`). Treated as Escape instead.
+          if (pairs.length > 0) {
+            void api
+              .setImageControlPoints(layer, pairs.map((p) => [p.u, p.v, p.lon, p.lat]))
+              .then(onProjectChanged)
+              .catch((err: unknown) => setError(String(err)));
+          }
+          requestOverlay();
+          return;
+        }
+        if (event.key === "Escape") {
+          event.preventDefault();
+          alignStore.current!.cancel();
+          setHint(null);
+          requestOverlay();
+          return;
+        }
+        if (event.key === "Backspace" || event.key === "Delete") {
+          event.preventDefault();
+          alignStore.current!.undoLast();
+          return;
+        }
+      }
+
       // Region selection (spec.md 8.2, M14). `Cmd`-`A` enters the select tool
       // with the view selected and `Cmd`-`Shift`-`A` the whole map, so the
       // key that means "select everything" everywhere else means it here too;
@@ -2346,9 +2414,11 @@ export default function MapView({
     recording,
     nudgeCamera,
     nudgeSelection,
+    onProjectChanged,
     palette,
     requestOverlay,
     selectRegion,
+    setError,
     settings,
   ]);
 
@@ -2556,6 +2626,24 @@ export default function MapView({
     },
     [requestDraw],
   );
+  /**
+   * Arms the image alignment mode for `layer` (Task 7): the button beside
+   * Opacity in `ImageControls`. Every click on the map is a control point's
+   * picture or map half until `Enter`, `Escape` or `Backspace` ends it.
+   */
+  const beginAlign = useCallback(
+    (layer: number) => {
+      alignStore.current!.begin(layer);
+      setHint(
+        "Click a feature in the picture, then the same place on the map. Repeat as often as " +
+          "you like, then press Enter. Escape cancels; Backspace drops the last pair.",
+      );
+      requestOverlay();
+    },
+    [requestOverlay],
+  );
+  /** Whether the alignment mode is armed, for a key that must mean something else while it is. */
+  const isAligning = useCallback(() => alignStore.current!.get().layer !== null, []);
   const clearRegion = useCallback(() => {
     setRegion((current) => {
       if (current !== null) requestOverlay();
@@ -2594,8 +2682,32 @@ export default function MapView({
   );
   useImperativeHandle(
     ref,
-    () => ({ warm, prepare, present, bounds, clearRegion, copyRegion, pasteCapture, setCapture, focus }),
-    [bounds, clearRegion, copyRegion, focus, pasteCapture, setCapture, warm, prepare, present],
+    () => ({
+      warm,
+      prepare,
+      present,
+      bounds,
+      clearRegion,
+      copyRegion,
+      pasteCapture,
+      setCapture,
+      focus,
+      beginAlign,
+      isAligning,
+    }),
+    [
+      beginAlign,
+      bounds,
+      clearRegion,
+      copyRegion,
+      focus,
+      isAligning,
+      pasteCapture,
+      setCapture,
+      warm,
+      prepare,
+      present,
+    ],
   );
 
   // A project change can shorten the timeline.
@@ -3361,6 +3473,64 @@ export default function MapView({
       }
     }
 
+    // The image alignment mode (Task 7, spec.md 4.9 §2, §5): every pair
+    // placed this session, numbered, with a line from where it was clicked
+    // in the picture to where it was told to belong. The picture end is
+    // `pictureToMap`'s forward map of the pair's own pixel — the exact point
+    // that was clicked, recovered from the pixel `imagePixelAt` inverted it
+    // to, through the same (frozen, unwritten) warp — never the click's own
+    // screen position kept aside, so undo and redo of a pair need remember
+    // nothing but the pair. A picture click waiting on its map half draws the
+    // same line to the pointer instead, the position picker's own cue for
+    // "here to there".
+    const aligning = alignStore.current!.get();
+    if (aligning.layer !== null) {
+      const alignedView = imageLayersRef.current.find((v) => v.layer === aligning.layer);
+      if (alignedView) {
+        context.save();
+        context.font = `${11 * dpr}px system-ui, sans-serif`;
+        context.textAlign = "left";
+        context.textBaseline = "bottom";
+        const dot = (at: { x: number; y: number }) => {
+          context.beginPath();
+          context.arc(at.x, at.y, 4 * dpr, 0, Math.PI * 2);
+          context.fillStyle = "rgba(255, 214, 102, 0.95)";
+          context.fill();
+        };
+        aligning.pairs.forEach((pair, index) => {
+          const pictureGeo = pictureToMap(alignedView, pair.u, pair.v);
+          const from = toScreen(camera, view, pictureGeo);
+          const to = toScreen(camera, view, { lon: pair.lon, lat: pair.lat });
+          context.strokeStyle = "rgba(255, 214, 102, 0.9)";
+          context.lineWidth = Math.max(1, dpr);
+          context.beginPath();
+          context.moveTo(from.x, from.y);
+          context.lineTo(to.x, to.y);
+          context.stroke();
+          dot(from);
+          dot(to);
+          context.fillStyle = "rgba(255, 214, 102, 0.95)";
+          const label = String(index + 1);
+          context.fillText(label, from.x + 6 * dpr, from.y - 6 * dpr);
+          context.fillText(label, to.x + 6 * dpr, to.y - 6 * dpr);
+        });
+        if (aligning.pending && cursor) {
+          const pictureGeo = pictureToMap(alignedView, aligning.pending.u, aligning.pending.v);
+          const from = toScreen(camera, view, pictureGeo);
+          context.strokeStyle = "rgba(255, 214, 102, 0.6)";
+          context.lineWidth = Math.max(1, dpr);
+          context.setLineDash([4 * dpr, 4 * dpr]);
+          context.beginPath();
+          context.moveTo(from.x, from.y);
+          context.lineTo(cursor.x, cursor.y);
+          context.stroke();
+          context.setLineDash([]);
+          dot(from);
+        }
+        context.restore();
+      }
+    }
+
     // The measurements (spec.md 10, M8). Drawn whatever the tool is, because
     // they are annotations: a passage measured with the dividers is still on
     // the chart while the brush is in hand, which is the whole point of
@@ -4039,6 +4209,7 @@ export default function MapView({
         insideRegion,
         panning,
         recording: recording !== null,
+        aligning: alignStore.current!.get().layer !== null,
         // What the layer will not take, and what is not on the map at all
         // (M51, M68). Both are refusals the cursor can say on hover rather
         // than leaving the user to discover on release — which is the whole
@@ -4110,9 +4281,40 @@ export default function MapView({
 
     // An image layer's corner-drag handles and its M36 whole-picture drag
     // used to be picked up here (spec.md 4.9, M18). Both are gone with the
-    // corner-placement model; Task 7's alignment interaction is their
-    // replacement and picks up clicks on the active image's picture in its
-    // own way, on `imageUnder`.
+    // corner-placement model; this is their replacement, Task 7's
+    // alignment interaction. Every click here is a control point's picture
+    // or map half, alternating, never a tool's — ahead of the tools below,
+    // the same precedence a pick from the inspector takes above.
+    //
+    // `imagePixelAt` carries a picture click back to the image's own pixel
+    // space through whatever warp is in force when the session began: frozen
+    // for the whole session, since the document — and so the warp — is not
+    // written until `Enter` (the amendment to this task's brief: a spline has
+    // no closed-form inverse, so this searches the mesh already evaluated
+    // forward rather than re-deriving the fit in TypeScript).
+    if (alignStore.current!.get().layer !== null) {
+      if (alignStore.current!.get().expecting === "picture") {
+        // The same hit test the outline is drawn from (`insideImage`): a
+        // "picture" click that misses the quad is not a feature in the
+        // picture and is dropped rather than guessed at.
+        const view = imageUnder(
+          imageLayersRef.current,
+          alignStore.current!.get().layer,
+          cameraRef.current,
+          viewRef.current,
+          point,
+        );
+        if (view) {
+          const geo = unproject(cameraRef.current, viewRef.current, point);
+          const [u, v] = imagePixelAt(view, geo);
+          alignStore.current!.pick("picture", { lon: u, lat: v });
+        }
+      } else {
+        const geo = unproject(cameraRef.current, viewRef.current, point);
+        alignStore.current!.pick("map", geo);
+      }
+      return;
+    }
 
     // While a capture runs, the region can be *dragged* — and nothing else on
     // the map does anything (spec.md 8.7). By delta from where the pointer

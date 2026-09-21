@@ -19,6 +19,7 @@ const base: CursorContext = {
   panning: false,
   recording: false,
   forbidden: false,
+  aligning: false,
 };
 
 describe("cursorFor", () => {
@@ -63,6 +64,31 @@ describe("cursorFor", () => {
 
   it("uses the selection cursor while a capture records", () => {
     expect(cursorFor({ ...base, tool: "brush", recording: true })).toBe("default");
+  });
+});
+
+describe("the image alignment mode (Task 7)", () => {
+  it("takes the crosshair whatever tool is in hand", () => {
+    for (const tool of [HAND, SELECT, CAPTURE, INSERT, "brush", MEASURE] as const) {
+      expect(cursorFor({ ...base, tool, aligning: true })).toBe("crosshair");
+    }
+  });
+
+  /**
+   * A pick armed in the inspector still takes the click ahead of aligning —
+   * both give a crosshair, so this is checked through `recording`, which
+   * does not: aligning must lose to a running capture, which owns every
+   * click on the map before anything else does (spec.md 8.7).
+   */
+  it("does not outrank a running capture", () => {
+    expect(cursorFor({ ...base, aligning: true, recording: true })).toBe("default");
+  });
+
+  /** But it does outrank a refused tool (M51): the click means something else now. */
+  it("outranks a tool the layer would refuse", () => {
+    expect(cursorFor({ ...base, tool: "brush", aligning: true, forbidden: true })).toBe(
+      "crosshair",
+    );
   });
 });
 

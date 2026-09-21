@@ -112,6 +112,7 @@ export default function LayerPanel({
   onActiveKind,
   onChanged,
   viewBounds,
+  onAlign,
 }: {
   project: ProjectSummary;
   step: number;
@@ -128,6 +129,12 @@ export default function LayerPanel({
    * somewhere the user can reach them (spec.md 4.9, M18).
    */
   viewBounds?: () => [number, number, number, number] | null;
+  /**
+   * Arms the map's image alignment mode for a layer (Task 7): the "Align…"
+   * button in `ImageControls`. The map owns the interaction, since the map
+   * is where the control points are placed.
+   */
+  onAlign: (layer: number) => void;
 }) {
   const [tree, setTree] = useState<DocumentTree | null>(null);
   /**
@@ -733,6 +740,7 @@ export default function LayerPanel({
                   image={layer.image}
                   onOpacity={(value) => run(api.setImageOpacity(layer.id, value))}
                   onReset={() => run(api.resetImagePlacement(layer.id))}
+                  onAlign={() => onAlign(layer.id)}
                 />
               )}
 
@@ -911,14 +919,26 @@ function GisControls({
   );
 }
 
+/**
+ * Above this, a corner's spline residual gets a line in the panel (spec.md
+ * 4.9 §2, §5): "how much is the spline doing out here". Below it, the bend
+ * at that corner is not worth a caution — a tenth of a degree is a few
+ * hundred metres to a kilometre, depending on latitude, well past anything a
+ * hand-placed pair would land by accident.
+ */
+const CORNER_RESIDUAL_CAUTION_DEG = 0.1;
+
 function ImageControls({
   image,
   onOpacity,
   onReset,
+  onAlign,
 }: {
   image: ImageLayerView;
   onOpacity: (opacity: number) => void;
   onReset: () => void;
+  /** Arms the map's alignment mode for this layer (Task 7). */
+  onAlign: () => void;
 }) {
   if (!image.loaded) {
     return (
@@ -929,6 +949,7 @@ function ImageControls({
       </div>
     );
   }
+  const worstResidual = Math.max(0, ...image.corner_residual_deg);
   return (
     <div className="image-controls">
       <label>
@@ -946,10 +967,24 @@ function ImageControls({
         {image.width}×{image.height}
         {image.georeferenced ? " · georeferenced" : " · placed by hand"}
       </span>
+      <button
+        onClick={onAlign}
+        title="Align by pointing: click a place in the picture, then the same place on the map. Repeat as often as you like, then press Enter. Escape cancels; Backspace drops the last pair."
+      >
+        Align…
+      </button>
       {image.georeferenced && (
         <button onClick={onReset} title="Put the image back where its own file says it goes">
           Reset place
         </button>
+      )}
+      {image.warped && worstResidual > CORNER_RESIDUAL_CAUTION_DEG && (
+        <span
+          className="muted"
+          title="Outside the pairs placed, the bend can run well past what a straight projection would give. Add a pair nearer that corner if it should follow the picture more closely there."
+        >
+          bends up to {worstResidual.toFixed(1)}° at a corner
+        </span>
       )}
     </div>
   );

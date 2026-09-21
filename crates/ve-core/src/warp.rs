@@ -219,6 +219,30 @@ impl Warp {
         }
         out
     }
+
+    /// How far each of the image's four corners moves under the full warp
+    /// versus under its own plain projective fit, in degrees.
+    ///
+    /// Top-left, top-right, bottom-right, bottom-left — the same order
+    /// `view` builds `ImageLayerView::corners` in. Zero at every corner for
+    /// an `Affine` or a plain `Projective` warp: neither has a spline
+    /// correction to differ from itself by. Only `Kind::Spline` can move a
+    /// corner away from its own least-squares homography, and it typically
+    /// moves one most at a far corner outside the pairs' hull — which is
+    /// exactly what this reports (spec.md §2, §5): a caution that the spline
+    /// is reaching, not an error.
+    pub fn corner_residual_deg(&self, width: u32, height: u32) -> [f64; 4] {
+        let w = f64::from(width);
+        let h = f64::from(height);
+        [(0.0, 0.0), (w, 0.0), (w, h), (0.0, h)].map(|(u, v)| {
+            let (lon, lat) = self.place(u, v);
+            let (base_lon, base_lat) = match &self.kind {
+                Kind::Affine(_) | Kind::Projective(_) => (lon, lat),
+                Kind::Spline { projective, .. } => project_through(projective, self.base, u, v),
+            };
+            ((lon - base_lon).powi(2) + (lat - base_lat).powi(2)).sqrt()
+        })
+    }
 }
 
 /// A translation: `base` shifted so pixel `p.u, p.v` lands exactly on `p`'s
@@ -947,5 +971,70 @@ mod tests {
         // The first vertex is the image's top-left corner.
         let corner = warp.place(0.0, 0.0);
         assert!((f64::from(mesh[0][0]) - corner.0).abs() < 1e-4);
+    }
+
+    /// A pure affine or homography has no spline term to differ from itself
+    /// by, so every corner's residual is exactly zero however far the
+    /// pairs push the picture.
+    #[test]
+    fn an_affine_or_homography_has_zero_corner_residual() {
+        let points = [
+            at(0.0, 0.0, -2.0, 1.0),
+            at(800.0, 0.0, 2.0, 1.0),
+            at(800.0, 600.0, 1.0, -1.0),
+            at(0.0, 600.0, -1.0, -1.0),
+        ];
+        let warp = Warp::fit(&points, 800, 600, base());
+        for r in warp.corner_residual_deg(800, 600) {
+            assert!(r < 1e-9, "{r}");
+        }
+
+        let three = &points[..3];
+        let warp = Warp::fit(three, 800, 600, base());
+        for r in warp.corner_residual_deg(800, 600) {
+            assert!(r < 1e-9, "{r}");
+        }
+    }
+
+    /// A spline's residual at a corner outside the pairs' hull is the
+    /// straight-line distance between the full warp and the homography it
+    /// was laid on top of — checked independently by evaluating both
+    /// placements by hand rather than trusting the same subtraction twice.
+    #[test]
+    fn a_spline_corner_residual_is_the_distance_to_the_projective_base() {
+        let mut points = Vec::new();
+        for i in 0..7 {
+            for j in 0..7 {
+                let u = i as f64 * 100.0;
+                let v = j as f64 * 80.0;
+                let lon = -71.0 + u / 800.0 + 0.02 * (v / 100.0).sin();
+                let lat = 42.0 - v / 600.0 + 0.02 * (u / 100.0).cos();
+                points.push(at(u, v, lon, lat));
+            }
+        }
+        let warp = Warp::fit(&points, 800, 600, base());
+        assert!(!warp.is_identity_affine());
+
+        let residual = warp.corner_residual_deg(800, 600);
+        let Kind::Spline { projective, .. } = &warp.kind else {
+            panic!("nine pairs must fit a spline");
+        };
+        for (i, (u, v)) in [(0.0, 0.0), (800.0, 0.0), (800.0, 600.0), (0.0, 600.0)]
+            .into_iter()
+            .enumerate()
+        {
+            let (lon, lat) = warp.place(u, v);
+            let (base_lon, base_lat) = project_through(projective, warp.base, u, v);
+            let expected = ((lon - base_lon).powi(2) + (lat - base_lat).powi(2)).sqrt();
+            assert!(
+                (residual[i] - expected).abs() < 1e-12,
+                "corner {i}: {} vs {expected}",
+                residual[i]
+            );
+        }
+        // At least one corner actually differs: the spline is doing
+        // something, or this test would pass for a residual that is
+        // silently always zero.
+        assert!(residual.iter().any(|r| *r > 1e-6), "{residual:?}");
     }
 }

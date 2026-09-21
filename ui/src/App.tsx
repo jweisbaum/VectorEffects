@@ -467,6 +467,10 @@ function EditorApp() {
       // frames, whose own `Delete` comes first, or the key is going into a
       // text field.
       if ((key === "delete" || key === "backspace") && !typing && !event.metaKey && !event.ctrlKey) {
+        // The image alignment mode (Task 7) uses the same key for its own,
+        // unrelated undo — dropping the last control-point pair, not the
+        // selection — so it stands this down while it is armed.
+        if (mapRef.current?.isAligning()) return;
         if (selection.length === 0 || framesSelected.current || keysSelected.current) return;
         event.preventDefault();
         void api
@@ -674,6 +678,7 @@ function EditorApp() {
               onActiveKind={setActiveKind}
               onChanged={setProject}
               viewBounds={viewBounds}
+              onAlign={(layer) => mapRef.current?.beginAlign(layer)}
             />
           </aside>
         ) : (
