@@ -488,6 +488,77 @@ fn resetting_the_placement_clears_the_control_points() {
     assert!(!image.warped);
 }
 
+/// An unwarped image's `corners` is the plain quad its own placement puts it
+/// at — top-left first, clockwise — computed here by hand from the same six
+/// numbers the placement stores, not by calling `Placement::place` or
+/// `Placement::corners`, so this is an independent check of `image::view`'s
+/// arithmetic rather than a restatement of it.
+#[test]
+fn corners_are_the_placements_own_quad_when_unwarped() {
+    let root = TempRoot::new("corners-unwarped");
+    let state = app(&root);
+    open(&state);
+    let path = root.0.join("chart.tif");
+    // a = 1, b = 0, c = 10 - 0*1 = 10; d = 0, e = -1, f = 50 + 0*1 = 50 (see
+    // `geotiff_placement`), so `place(u, v) = (u + 10, 50 - v)`.
+    write_geotiff(
+        &path,
+        40,
+        20,
+        [1.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 10.0, 50.0, 0.0],
+        false,
+    );
+    image::image_imported(&state, path.to_string_lossy().into_owned(), None).expect("import");
+    let view = view_of(&state);
+    assert!(!view.warped, "no control points were set");
+
+    // (u, v) = (0, 0), (40, 0), (40, 20), (0, 20), each through
+    // place(u, v) = (u + 10, 50 - v) by hand.
+    let expected = [[10.0, 50.0], [50.0, 50.0], [50.0, 30.0], [10.0, 30.0]];
+    assert_eq!(view.corners, expected);
+}
+
+/// A warped image's `corners` is the bent quad, not the plain one: four
+/// control points placed at the image's own four pixel corners make a
+/// homography that sends those corners to exactly their paired targets
+/// (spec.md's warp fit, `n == 4`), so the pairs given to
+/// `control_points_set` *are* the expected `corners` — independent of
+/// `Warp`'s own implementation entirely.
+///
+/// The four targets are chosen mutually distinguishable (no shared
+/// coordinate, no reflection or rotation of one another) so a reversed or
+/// rotated `corners` array fails this rather than passing it.
+#[test]
+fn corners_are_exactly_the_targets_of_a_four_point_warp() {
+    let root = TempRoot::new("corners-warped");
+    let state = app(&root);
+    let layer = an_image_layer(&state, &root); // an 80x40 PNG
+    let (w, h) = (80.0, 40.0);
+    let targets = [[-5.0, 5.0], [5.0, 6.0], [7.0, -8.0], [-9.0, -10.0]];
+    ve_app::image::control_points_set(
+        &state,
+        layer,
+        vec![
+            [0.0, 0.0, targets[0][0], targets[0][1]],
+            [w, 0.0, targets[1][0], targets[1][1]],
+            [w, h, targets[2][0], targets[2][1]],
+            [0.0, h, targets[3][0], targets[3][1]],
+        ],
+    )
+    .expect("set");
+
+    let view = view_of(&state);
+    assert!(view.warped, "four pairs at the corners are a homography");
+    assert_eq!(view.corners.len(), 4);
+    for (got, want) in view.corners.iter().zip(targets.iter()) {
+        assert!(
+            (got[0] - want[0]).abs() < 1e-9 && (got[1] - want[1]).abs() < 1e-9,
+            "corner {got:?} did not land on its target {want:?}"
+        );
+    }
+}
+
 /// Fifty is the cap, and a fifty-first is refused rather than silently
 /// dropped — the fit solves an n x n system and the mesh is re-evaluated
 /// against every pair.
