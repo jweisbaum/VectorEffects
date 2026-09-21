@@ -203,26 +203,40 @@ void main() {
  *
  * The texture coordinate is the vertex's own place in the image, so nothing
  * about the interior is interpolated through the projection.
+ *
+ * A warped image (control points, spec.md 4.9) carries its own lon/lat per
+ * vertex in `aGeo` instead of the affine uniforms: Rust evaluates the warp at
+ * every mesh vertex and hands it over, so projection happens strictly *after*
+ * the warp and every projection (cylindrical, the globe, a general preset)
+ * draws it through the path it already draws an unwarped image through. The
+ * uniforms still carry the plain-placement affine, which the fragment stage
+ * needs for the globe's per-pixel path on an *unwarped* image.
  */
 export const IMAGE_VERT = `#version 300 es
 precision highp float;
 layout(location=0) in vec2 aCell;              // 0..1 across the image
 layout(location=1) in vec2 aScreen;
+layout(location=2) in vec2 aGeo;               // a warped vertex's own lon/lat
 ${PROJECTION}
 uniform vec3 uPlaceLon;     // lon = x*u + y*v + z, with u and v in 0..1
 uniform vec3 uPlaceLat;     // and the same for the latitude
+uniform bool uWarped;
 out vec2 vUV;
 out vec2 vGeo;
 void main() {
   vUV = aCell;
-  vec2 lonLat = vec2(
-    uPlaceLon.x * aCell.x + uPlaceLon.y * aCell.y + uPlaceLon.z,
-    uPlaceLat.x * aCell.x + uPlaceLat.y * aCell.y + uPlaceLat.z
-  );
+  vec2 lonLat = uWarped
+    ? aGeo
+    : vec2(
+        uPlaceLon.x * aCell.x + uPlaceLon.y * aCell.y + uPlaceLon.z,
+        uPlaceLat.x * aCell.x + uPlaceLat.y * aCell.y + uPlaceLat.z
+      );
   vGeo = lonLat;
   // On a globe (mode 15 up) the cells are the whole viewport and the
-  // fragment stage finds the image under each pixel: see IMAGE_FRAG.
-  gl_Position = uProjection >= 15
+  // fragment stage finds the image under each pixel: see IMAGE_FRAG. A
+  // warped image cannot take that path (no closed-form inverse of a spline),
+  // so it is projected vertex by vertex like every other projection instead.
+  gl_Position = (uProjection >= 15 && !uWarped)
     ? vec4(aCell * 2.0 - 1.0, 0.0, 1.0)
     : screenToClip(uProjection == 14 ? meshToScreen(aScreen) : geoToScreen(lonLat));
 }
@@ -243,11 +257,12 @@ uniform vec2 uSpeedRange;
 uniform highp sampler2D uFilterTile;
 uniform vec4 uFilterGeo;
 uniform float uSpeedScale;
+uniform bool uWarped;
 out vec4 fragColor;
 void main() {
   vec2 geo = vGeo;
   vec2 cell = vUV;
-  if (uProjection >= 15) {
+  if (uProjection >= 15 && !uWarped) {
     // On a globe the place is taken from the pixel, not from a mesh. An
     // image can span the earth, and a mesh of it fine enough to follow the
     // sphere at every zoom is a mesh made per frame, which is what the globe
@@ -255,6 +270,10 @@ void main() {
     // where on the earth it is, and the placement is inverted for the texel:
     // exact at the limb, at the antipode and at any zoom, for a few
     // operations a pixel.
+    //
+    // A warped image cannot take this branch: a thin-plate spline has no
+    // closed-form inverse, so there is no placement to invert per pixel.
+    // It arrives here with vUV already correct from the mesh instead.
     geo = azimuthalInverse(vec2(gl_FragCoord.x, uViewport.y - gl_FragCoord.y));
     if (geo.x > 1000.0) discard;
     float centre = uPlaceLon.z + 0.5 * (uPlaceLon.x + uPlaceLon.y);

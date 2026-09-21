@@ -10,10 +10,12 @@
 import {
   type VisibleTile,
   type Camera,
+  type PlaneMesh,
   type Viewport,
   glyphLattice,
   meshPlacement,
   normalizeLon,
+  projectedMesh,
   projectionFor,
   project,
   unproject,
@@ -122,6 +124,16 @@ export interface ImageDraw {
   placeLat: [number, number, number];
   /** How strongly it shows. */
   opacity: number;
+  /**
+   * The warp evaluated at every mesh vertex, lon/lat interleaved
+   * (`ImageLayerView.warp_mesh`), or null for a plain affine image. Compared
+   * by identity, not content, to decide whether to re-upload (spec.md 4.9):
+   * the mesh is rebuilt in Rust only when the control points change, and
+   * uploading it again every frame is exactly the cost that design avoids.
+   */
+  warpMesh: Float32Array | null;
+  /** The cell count `warpMesh` was evaluated at. Unused when `warpMesh` is null. */
+  warpCells: number;
 }
 
 /**
@@ -362,6 +374,36 @@ interface GeoBuffers {
   indexCount: number;
 }
 
+/**
+ * The GL geometry built for one warped image layer (spec.md 4.9).
+ *
+ * One vertex per mesh point, not per triangle corner: `aGeo` is uploaded
+ * from the backend's own array (`geoBuffer`), unmodified and unreordered —
+ * that is what "the mesh is passed through untouched" (spec.md 4.9) means at
+ * the GPU boundary, and `cellScreenBuffer`'s `aCell`/`aScreen` are built to
+ * match its vertex order rather than the other way round. `indexBuffer`
+ * supplies the two triangles a cell is drawn as, so nothing is duplicated to
+ * make a triangle list.
+ *
+ * `source` and `screenFor` are what a rebuild is keyed on: the backend's
+ * mesh array by identity (rebuilt only when the control points change, never
+ * per frame) and, for a fixed general projection only, the plane mesh
+ * `aScreen` was forward-projected against (rebuilt only when panning or
+ * zooming moves to a different zoom band, via `projectedMesh`'s own
+ * memoisation — never per frame either). `screenFor` stays null off a fixed
+ * general projection, so nothing here is rebuilt for a pan or a globe turn.
+ */
+interface WarpMesh {
+  vao: WebGLVertexArrayObject;
+  cellScreenBuffer: WebGLBuffer;
+  geoBuffer: WebGLBuffer;
+  indexBuffer: WebGLBuffer;
+  /** Indices to draw, for `drawElements` — not a vertex count. */
+  indexCount: number;
+  source: Float32Array;
+  screenFor: PlaneMesh | null;
+}
+
 export class MapRenderer {
   private readonly gl: WebGL2RenderingContext;
   private readonly projectedSurface: ProjectedSurface;
@@ -372,6 +414,8 @@ export class MapRenderer {
   private readonly imageMesh: { vao: WebGLVertexArrayObject; count: number };
   /** The unit grid a globe's tiles, base map and images are drawn through. */
   private readonly globeGrid: { vao: WebGLVertexArrayObject; count: number };
+  /** A warped image's own mesh, keyed by layer (spec.md 4.9). */
+  private readonly warpMeshes = new Map<number, WarpMesh>();
   private readonly baseProgram: WebGLProgram;
   private readonly baseUniforms: Uniforms;
   private readonly backdropProgram: WebGLProgram;
@@ -447,7 +491,7 @@ export class MapRenderer {
     ]);
     this.imageUniforms = uniforms(gl, this.imageProgram, [
       ...shared, "uPlaceLon", "uPlaceLat", "uImage", "uOpacity",
-      "uFiltered", "uSpeedRange", "uFilterTile", "uFilterGeo", "uSpeedScale",
+      "uFiltered", "uSpeedRange", "uFilterTile", "uFilterGeo", "uSpeedScale", "uWarped",
     ]);
     this.glyphUniforms = uniforms(gl, this.glyphProgram, [
       ...shared, ...mask, "uTileGeo", "uTile", "uSpeedScale", "uPixelRatio",
@@ -552,6 +596,121 @@ export class MapRenderer {
     gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
     gl.bindVertexArray(null);
     return { vao, count: cells.length / 2 };
+  }
+
+  /**
+   * The mesh a warped image is drawn through (spec.md 4.9): `aCell` and
+   * `aScreen` built here, one vertex per mesh point, and `aGeo` uploaded
+   * straight from `source` — the backend's own array, byte for byte, never
+   * reordered or recomputed. That is what lets the mesh work in every
+   * projection: the vertex shader projects `aGeo` after the fact, and
+   * nothing here has touched it first.
+   *
+   * `aScreen` is the one exception `aGeo` alone cannot answer. A fixed
+   * general projection (`uProjection == 14`, Robinson and the other
+   * 270-odd presets) has no closed-form forward transform in GLSL — that is
+   * why an *unwarped* image under one is drawn through
+   * `ProjectedSurface.bindImage`, cut from a mesh built by forward-projecting
+   * on the CPU. A warp cannot use that cut (it clips by inverting the
+   * placement, and a spline has no inverse), so instead every warp-mesh
+   * vertex is forward-projected here directly, through the same plane mesh
+   * (`projectedMesh`) the rest of the general-projection drawing already
+   * uses. Off a fixed general projection `aScreen` is never read by the
+   * shader, so it is left zero there and no projection is done for it.
+   *
+   * Rebuilt only when `source`'s identity changes (the warp was refitted, in
+   * Rust, not here) or when the plane mesh changes under a fixed general
+   * projection — never per frame, and never for a pan, a zoom or a turn of
+   * the globe.
+   */
+  private warpMeshFor(
+    layer: number,
+    source: Float32Array,
+    cells: number,
+    camera: Camera,
+    view: Viewport,
+  ): WarpMesh {
+    const gl = this.gl;
+    const general = projectionFor(camera).general;
+    const fixedGeneral = general && !general.movable;
+    const screenFor = fixedGeneral ? projectedMesh(camera, view) : null;
+    const existing = this.warpMeshes.get(layer);
+    if (existing && existing.source === source && existing.screenFor === screenFor) {
+      return existing;
+    }
+    if (existing) this.dropWarpMesh(layer);
+
+    const perSide = Math.max(1, cells);
+    const perRow = perSide + 1;
+    const screenOf = (lon: number, lat: number): [number, number] => {
+      if (!screenFor) return [0, 0];
+      const xy = screenFor.toVirtual({ lon, lat });
+      return xy ? [xy.x, xy.y] : [0, 0];
+    };
+    // One vertex per mesh point, in the same row-major order `source` is in,
+    // so its index into `cellScreen` is `aGeo`'s index into `source`.
+    const cellScreen: number[] = [];
+    for (let row = 0; row < perRow; row++) {
+      for (let col = 0; col < perRow; col++) {
+        const i = (row * perRow + col) * 2;
+        const [sx, sy] = screenOf(source[i] ?? 0, source[i + 1] ?? 0);
+        cellScreen.push(col / perSide, row / perSide, sx, sy);
+      }
+    }
+    // Two triangles a cell, indexing the shared corners rather than
+    // repeating them — the same winding as buildImageMesh above.
+    const indices: number[] = [];
+    for (let row = 0; row < perSide; row++) {
+      for (let col = 0; col < perSide; col++) {
+        const tl = row * perRow + col;
+        const tr = tl + 1;
+        const bl = tl + perRow;
+        const br = bl + 1;
+        indices.push(tl, tr, bl, bl, tr, br);
+      }
+    }
+
+    const vao = gl.createVertexArray();
+    const cellScreenBuffer = gl.createBuffer();
+    const geoBuffer = gl.createBuffer();
+    const indexBuffer = gl.createBuffer();
+    if (!vao || !cellScreenBuffer || !geoBuffer || !indexBuffer) {
+      throw new Error("could not allocate a warped image's mesh buffers");
+    }
+    gl.bindVertexArray(vao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, cellScreenBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(cellScreen), gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 16, 0);
+    gl.enableVertexAttribArray(1);
+    gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 16, 8);
+    gl.bindBuffer(gl.ARRAY_BUFFER, geoBuffer);
+    // `source` itself, untouched: see the doc comment above.
+    gl.bufferData(gl.ARRAY_BUFFER, source, gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(2);
+    gl.vertexAttribPointer(2, 2, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint32Array(indices), gl.DYNAMIC_DRAW);
+    gl.bindVertexArray(null);
+
+    const entry: WarpMesh = {
+      vao, cellScreenBuffer, geoBuffer, indexBuffer,
+      indexCount: indices.length, source, screenFor,
+    };
+    this.warpMeshes.set(layer, entry);
+    return entry;
+  }
+
+  /** Drops a warped image's GL geometry: its layer was deleted or unwarped. */
+  private dropWarpMesh(layer: number): void {
+    const existing = this.warpMeshes.get(layer);
+    if (!existing) return;
+    const gl = this.gl;
+    gl.deleteBuffer(existing.cellScreenBuffer);
+    gl.deleteBuffer(existing.geoBuffer);
+    gl.deleteBuffer(existing.indexBuffer);
+    gl.deleteVertexArray(existing.vao);
+    this.warpMeshes.delete(layer);
   }
 
   /** World copies to draw so the map wraps seamlessly at the dateline. */
@@ -883,13 +1042,30 @@ export class MapRenderer {
     const onGpu = projectedOnGpu(projectionFor(state.camera));
     for (const image of images) {
       let count = this.imageMesh.count;
-      if (onGpu) {
+      // A warped mesh is indexed (WarpMesh above), so it draws through
+      // drawElements; every other image draws through drawArrays.
+      let indexed = false;
+      // A warped image is drawn through its own mesh in every projection —
+      // chosen by "has control points", not by size (spec.md 4.9) — because
+      // neither the globe's per-pixel inverse nor the general projection's
+      // affine-clipped cut can invert a spline. It therefore takes neither of
+      // the two branches below, on the globe or on a fixed general projection.
+      const warped = image.warpMesh !== null && image.warpMesh.length > 0;
+      if (warped) {
+        const mesh = this.warpMeshFor(image.layer, image.warpMesh!, image.warpCells, state.camera, state.view);
+        gl.bindVertexArray(mesh.vao);
+        count = mesh.indexCount;
+        indexed = true;
+      } else if (onGpu) {
         // The viewport, as two triangles: IMAGE_FRAG finds the image itself.
         gl.bindVertexArray(this.quadVao);
         count = 6;
       } else if (projectionFor(state.camera).general) {
         count = this.projectedSurface.bindImage(state.camera, state.view, image);
+      } else {
+        gl.bindVertexArray(this.imageMesh.vao);
       }
+      gl.uniform1i(this.imageUniforms.uWarped ?? null, warped ? 1 : 0);
       if (!image.texture || image.opacity <= 0) continue;
       gl.uniform3f(this.imageUniforms.uPlaceLon ?? null, ...image.placeLon);
       gl.uniform3f(this.imageUniforms.uPlaceLat ?? null, ...image.placeLat);
@@ -914,14 +1090,16 @@ export class MapRenderer {
           gl.bindTexture(gl.TEXTURE_2D, shown.texture);
           for (const offset of offsets) {
             this.setShared(this.imageUniforms, state.camera, state.view, offset);
-            gl.drawArrays(gl.TRIANGLES, 0, count);
+            if (indexed) gl.drawElements(gl.TRIANGLES, count, gl.UNSIGNED_INT, 0);
+            else gl.drawArrays(gl.TRIANGLES, 0, count);
           }
         }
         continue;
       }
       for (const offset of offsets) {
         this.setShared(this.imageUniforms, state.camera, state.view, offset);
-        gl.drawArrays(gl.TRIANGLES, 0, count);
+        if (indexed) gl.drawElements(gl.TRIANGLES, count, gl.UNSIGNED_INT, 0);
+        else gl.drawArrays(gl.TRIANGLES, 0, count);
       }
     }
   }
@@ -1495,6 +1673,13 @@ export class MapRenderer {
     // being painted stays on top. Never masked, for the same reason the
     // basemap is not — a mask takes the field away, not what is beneath it.
     const images = state.images ?? [];
+    // A layer that is gone, or is no longer warped, takes its mesh with it.
+    const stillWarped = new Set(
+      images.filter((image) => image.warpMesh !== null).map((image) => image.layer),
+    );
+    for (const layer of [...this.warpMeshes.keys()]) {
+      if (!stillWarped.has(layer)) this.dropWarpMesh(layer);
+    }
     this.drawImages(state, offsets, images.filter((image) => !image.over));
 
     // A clone removes destination pixels only where its source contains data.
@@ -1691,6 +1876,7 @@ export class MapRenderer {
       gl.deleteVertexArray(buffers.vao);
     }
     gl.deleteVertexArray(this.imageMesh.vao);
+    for (const layer of [...this.warpMeshes.keys()]) this.dropWarpMesh(layer);
     if (this.graticule) {
       gl.deleteVertexArray(this.graticule.vao);
       gl.deleteBuffer(this.graticule.buffer);

@@ -12,6 +12,8 @@
  */
 
 import type { ImageLayerView } from "../generated/ImageLayerView";
+import { EARTH_RADIUS_M, distanceM } from "./geo";
+import { reportError } from "../hint";
 import type { ImageDraw } from "./renderer";
 
 /** How a fetch is doing. */
@@ -20,6 +22,62 @@ type Status = "pending" | "ready" | "failed";
 interface Entry {
   texture: WebGLTexture | null;
   status: Status;
+}
+
+/**
+ * A quarter of the earth's circumference, in metres: `distanceM`'s scale.
+ * The threshold `warpSpansTooMuch` reports past (spec.md 4.9).
+ */
+const QUARTER_EARTH_M = (Math.PI * EARTH_RADIUS_M) / 2;
+
+/**
+ * Whether a warped image's footprint reaches past what the mesh/per-pixel
+ * split is justified by: a rubber-sheeted image is *local* by its nature —
+ * a harbour, an approach, a scanned sheet — which is why it is affordable to
+ * follow with a mesh rather than inverting the warp per pixel. A warp whose
+ * corners are more than a quarter of the earth apart is outside that
+ * reasoning. It is not refused — the mesh still draws it — but it is
+ * reported, because a mesh coarse enough for a chart is not fine enough for
+ * a hemisphere and nothing else would say so.
+ */
+export function warpSpansTooMuch(mesh: ArrayLike<number>): boolean {
+  if (mesh.length < 4) return false;
+  let minLon = Infinity;
+  let maxLon = -Infinity;
+  let minLat = Infinity;
+  let maxLat = -Infinity;
+  for (let i = 0; i + 1 < mesh.length; i += 2) {
+    const lon = mesh[i]!;
+    const lat = mesh[i + 1]!;
+    if (lon < minLon) minLon = lon;
+    if (lon > maxLon) maxLon = lon;
+    if (lat < minLat) minLat = lat;
+    if (lat > maxLat) maxLat = lat;
+  }
+  const midLon = (minLon + maxLon) / 2;
+  const midLat = (minLat + maxLat) / 2;
+  const eastWest = distanceM({ lon: minLon, lat: midLat }, { lon: maxLon, lat: midLat });
+  const northSouth = distanceM({ lon: midLon, lat: minLat }, { lon: midLon, lat: maxLat });
+  return Math.max(eastWest, northSouth) > QUARTER_EARTH_M;
+}
+
+/**
+ * The warp mesh a view carries, as a `Float32Array` — or null off a plain
+ * affine image.
+ *
+ * **Passed through untouched.** `view.warp_mesh` is already lon/lat,
+ * evaluated in Rust; this only changes its container, never its values,
+ * their order or their count. That is the whole reason a warped image draws
+ * correctly in every projection (spec.md 4.9): projection happens in the
+ * shader, strictly after the warp, so nothing here may project, normalise or
+ * reorder it first. `ImageCache` wraps this with an identity cache so the
+ * same array comes back while the mesh has not changed; this function itself
+ * stays a straight conversion, which is what makes the conversion checkable
+ * on its own.
+ */
+export function warpMeshFor(view: ImageLayerView): Float32Array | null {
+  if (!view.warped || view.warp_mesh.length === 0) return null;
+  return Float32Array.from(view.warp_mesh);
 }
 
 /**
@@ -48,6 +106,12 @@ export class ImageCache {
   /** The largest texture this GPU will take, which the address carries. */
   private readonly maxEdge: number;
   private readonly entries = new Map<string, Entry>();
+  /**
+   * A warped image's mesh, kept by layer and reused while `view.warp_mesh`
+   * is the same array the backend last sent — so a still scene uploads
+   * nothing new to the renderer, frame after frame (spec.md 4.9).
+   */
+  private readonly warpMeshes = new Map<number, { source: number[]; array: Float32Array }>();
   /** Called when a fetch completes, so the caller can redraw. */
   onChange: (() => void) | null = null;
   /** Called when a fetch fails, so the failure reaches the application log. */
@@ -95,12 +159,21 @@ export class ImageCache {
       if (!view.loaded || view.width === 0 || view.height === 0) continue;
       const key = `image/${token}/${view.layer}/${this.maxEdge}`;
       wanted.add(key);
+      const warpMesh = this.cachedWarpMesh(view);
+      if (warpMesh && warpSpansTooMuch(warpMesh)) {
+        reportError(
+          `“${view.path}”'s warp spans more than a quarter of the earth; the mesh path this ` +
+            "draws it through is built for a local chart and may look coarse that far out.",
+        );
+      }
       out.push({
         layer: view.layer,
         texture: this.texture(key),
         opacity: view.opacity,
         speedRange: view.speedRange,
         over: over.has(view.layer),
+        warpMesh,
+        warpCells: view.warp_cells,
         ...placeVectors(view),
       });
     }
@@ -110,7 +183,33 @@ export class ImageCache {
     for (const key of [...this.entries.keys()]) {
       if (!wanted.has(key)) this.release(key);
     }
+    const stillWarped = new Set(views.filter((v) => v.warped).map((v) => v.layer));
+    for (const layer of [...this.warpMeshes.keys()]) {
+      if (!stillWarped.has(layer)) this.warpMeshes.delete(layer);
+    }
     return out;
+  }
+
+  /**
+   * The warp mesh as a `Float32Array`, or null off a plain affine image.
+   *
+   * Cached by the identity of `view.warp_mesh` — the plain array the backend
+   * sent — not its contents: a still scene hands back the same array object
+   * every time, so this hands back the same `Float32Array` every time too,
+   * which is what lets the renderer skip re-uploading it (spec.md 4.9). The
+   * conversion itself is `warpMeshFor`, above, kept free of this cache so it
+   * stays checkable as a plain pass-through.
+   */
+  private cachedWarpMesh(view: ImageLayerView): Float32Array | null {
+    if (!view.warped || view.warp_mesh.length === 0) {
+      this.warpMeshes.delete(view.layer);
+      return null;
+    }
+    const cached = this.warpMeshes.get(view.layer);
+    if (cached && cached.source === view.warp_mesh) return cached.array;
+    const array = warpMeshFor(view)!;
+    this.warpMeshes.set(view.layer, { source: view.warp_mesh, array });
+    return array;
   }
 
   private texture(key: string): WebGLTexture | null {
@@ -171,5 +270,6 @@ export class ImageCache {
 
   dispose(): void {
     for (const key of [...this.entries.keys()]) this.release(key);
+    this.warpMeshes.clear();
   }
 }

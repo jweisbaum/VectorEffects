@@ -20,6 +20,8 @@ import {
   GEO_VERT,
   GLYPH_FRAG,
   GLYPH_VERT,
+  IMAGE_FRAG,
+  IMAGE_VERT,
   RASTER_FRAG,
   RASTER_VERT,
   SMEAR_FRAG,
@@ -345,5 +347,44 @@ describe("the shader's projection and the pointer's", () => {
     // else would draw flat wherever its own branch was not written.
     expect(PROJECTIONS.map((p) => p.mode)).toEqual(Array.from({ length: 14 }, (_, i) => i));
     expect(projectionOf("equirectangular").mode).toBe(0);
+  });
+});
+
+describe("a warped image (spec.md 4.9, control points)", () => {
+  /**
+   * The warped path hands the vertex shader lon/lat directly, so projection
+   * happens strictly after the warp — which is the whole reason this works in
+   * every projection. The shader must therefore read `aGeo` when `uWarped` is
+   * set and never recompute the place from the affine uniforms.
+   */
+  it("takes a warped image's position from the mesh, not from the affine", () => {
+    expect(IMAGE_VERT).toContain("aGeo");
+    expect(IMAGE_VERT).toMatch(/uWarped\s*\?\s*aGeo/);
+  });
+
+  /**
+   * The globe's per-pixel inverse cannot invert a spline, so a warped image
+   * must not take that branch. `uProjection >= 15` has to be guarded by
+   * `!uWarped` or a bent chart is sampled through a 2x2 affine inverse and
+   * comes out scrambled.
+   */
+  it("keeps a warped image off the globe's per-pixel inverse", () => {
+    // The shared projection prelude also matches `uProjection >= 15` — that
+    // is `geoToScreen`'s own forward branch, correct for a warped image too
+    // (it is what draws one on the globe, vertex by vertex). The lookahead
+    // singles out the per-pixel *inverse* block specifically, by the call
+    // that only it makes.
+    const branch = IMAGE_FRAG.match(
+      /if\s*\([^)]*uProjection\s*>=\s*15[^)]*\)(?=\s*\{[^}]*azimuthalInverse)/,
+    );
+    expect(branch, "the globe's per-pixel inverse branch moved").not.toBeNull();
+    expect(branch![0]).toContain("!uWarped");
+  });
+
+  /** An integer uniform in a shared prelude must state its precision. */
+  it("declares uWarped in both stages without relying on a default", () => {
+    for (const source of [IMAGE_VERT, IMAGE_FRAG]) {
+      expect(source).toMatch(/uniform bool uWarped;/);
+    }
   });
 });
