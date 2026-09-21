@@ -64,6 +64,15 @@ warp_cells: number,
  */
 corners: Array<[number, number]>, 
 /**
+ * How far the spline moves each of the four corners above, in degrees,
+ * from where the warp's own plain projective fit alone would put them
+ * (spec.md §2, §5): "how much is the spline doing out here". Same
+ * corner order as `corners`. Zero at every corner for a warp with four
+ * or fewer pairs, since none of those has a spline term to differ from
+ * itself by.
+ */
+corner_residual_deg: Array<number>, 
+/**
  * Whether the file carried its own georeference.
  *
  * A hand-placed image says so, because "the corners are where the file

@@ -488,6 +488,49 @@ fn resetting_the_placement_clears_the_control_points() {
     assert!(!image.warped);
 }
 
+/// Review finding 3(b): a hand-placed image — no file georeference to go
+/// back to — used to make `reset_image_placement` refuse outright, so once
+/// its control points had bent it badly the only way back was undo, which
+/// does not survive a save and reopen. Design §3 promises that deleting
+/// every pair "puts the image back where it started" for *any* image, and
+/// this is the interface that has to make that reachable.
+///
+/// A hand-placed image's `placement` is set once, at import, and nothing but
+/// `placement_reset` and that import ever write it — every move since goes
+/// through a control point instead. So it is already "where it started";
+/// reset has nothing to restore there and only needs to clear the pairs.
+#[test]
+fn resetting_a_hand_placed_images_placement_clears_the_control_points_without_refusing() {
+    let root = TempRoot::new("reset-hand-placed");
+    let state = app(&root);
+    let layer = an_image_layer(&state, &root);
+    let placement_before = view_of(&state).placement;
+
+    ve_app::image::control_points_set(
+        &state,
+        layer,
+        vec![
+            [0.0, 0.0, -2.0, 1.0],
+            [80.0, 0.0, 2.0, 1.0],
+            [80.0, 40.0, 1.0, -1.0],
+            [0.0, 40.0, -1.0, -1.0],
+        ],
+    )
+    .expect("set");
+    assert!(view_of(&state).warped, "four pairs should warp the image");
+
+    ve_app::image::placement_reset(&state, layer)
+        .expect("a hand-placed image must still be resettable");
+
+    let after = view_of(&state);
+    assert!(after.control_points.is_empty(), "the warp survived a reset");
+    assert!(!after.warped);
+    // Nothing georeferenced this image, so there is nothing to restore the
+    // placement *from* — it stays exactly what it was, which is what "back
+    // where it started" means for this case.
+    assert_eq!(after.placement, placement_before, "the placement moved");
+}
+
 /// An unwarped image's `corners` is the plain quad its own placement puts it
 /// at — top-left first, clockwise — computed here by hand from the same six
 /// numbers the placement stores, not by calling `Placement::place` or

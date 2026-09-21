@@ -928,7 +928,8 @@ function GisControls({
  */
 const CORNER_RESIDUAL_CAUTION_DEG = 0.1;
 
-function ImageControls({
+/** Exported for direct testing (review finding 3(b): the reset button's visibility). */
+export function ImageControls({
   image,
   onOpacity,
   onReset,
@@ -973,8 +974,15 @@ function ImageControls({
       >
         Align…
       </button>
-      {image.georeferenced && (
-        <button onClick={onReset} title="Put the image back where its own file says it goes">
+      {(image.georeferenced || image.warped) && (
+        <button
+          onClick={onReset}
+          title={
+            image.georeferenced
+              ? "Put the image back where its own file says it goes, and clear every control point"
+              : "Clear every control point and put the image back where it was before any were placed"
+          }
+        >
           Reset place
         </button>
       )}

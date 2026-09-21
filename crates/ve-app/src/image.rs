@@ -849,10 +849,26 @@ pub fn opacity_set(
     )
 }
 
-/// Puts an image back where its file says it goes.
+/// Puts an image back where it started: its file's own georeference if it
+/// has one, or its stored placement unchanged if it does not — either way,
+/// with every control point cleared (spec.md §4.9, design §3, §6).
 ///
-/// Only for a file that says: a hand-placed image has nothing to go back to,
-/// and the command says so rather than silently doing nothing.
+/// A hand-placed image's `placement` is set once, at import (`centred`'s
+/// answer, or the file's own georeference when there is one), and nothing
+/// but this function and that import ever write it — every move since has
+/// gone through a control point instead (design §6: nudging one is now a
+/// one-pair translation, not a drag). So `placement` already *is* "where it
+/// started" for a hand-placed image, and there is nothing to re-derive: this
+/// only needs to clear the pairs laid on top of it. A file with its own
+/// georeference is put back to exactly that, in case it has drifted from
+/// what is stored (a corner-drag once could; nothing does today, but
+/// re-reading it costs nothing and keeps the two cases one function).
+///
+/// This used to refuse outright for a hand-placed image — "nothing to go
+/// back to" — which was true before control points existed: undo was the
+/// only way back, and it does not survive a save and reopen. Design §3's
+/// promise that "deleting every pair puts the image back where it started"
+/// has to be reachable for that image too, not just a georeferenced one.
 #[tauri::command]
 pub fn reset_image_placement(
     state: tauri::State<'_, AppState>,
@@ -862,10 +878,6 @@ pub fn reset_image_placement(
 }
 
 /// Implementation of [`reset_image_placement`].
-///
-/// Clears the control points along with restoring the placement: a warp is
-/// part of where the image sits, and leaving the pairs behind would put the
-/// base back and then immediately bend away from it again.
 pub fn placement_reset(state: &AppState, layer: u64) -> Result<crate::projects::ProjectSummary> {
     write(state, layer, None, |source, probed| {
         let LayerSource::Image {
@@ -876,10 +888,9 @@ pub fn placement_reset(state: &AppState, layer: u64) -> Result<crate::projects::
         else {
             return Err(not_an_image());
         };
-        *placement = probed.placement.ok_or_else(|| AppError::BadOption {
-            field: "image",
-            value: "this image carries no georeference of its own to go back to".to_owned(),
-        })?;
+        if let Some(file_placement) = probed.placement {
+            *placement = file_placement;
+        }
         control_points.clear();
         Ok(())
     })
