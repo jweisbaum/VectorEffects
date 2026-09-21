@@ -15,6 +15,17 @@
 //! warp that collapses the picture to a line or a point. Homography degrades
 //! to affine, affine to similarity, similarity to translation; translation
 //! never fails, since one pair has nothing to solve.
+//!
+//! A homography can also be *solvable* and still unusable: four (or more)
+//! pairs placed in a crossing order — or merely close to one — fit a
+//! homography whose vanishing line lies on or near the image's own
+//! rectangle, so evaluating it anywhere near that line divides by something
+//! close enough to zero to send the answer to the thousands of degrees
+//! `Warp::mesh` then narrows to `f32`. `homography_covers` checks the fitted
+//! homography against the image's four corners — sufficient by convexity,
+//! see its own doc — and a homography that fails it degrades exactly like a
+//! singular one: to the affine tail, never to a warp that quietly ships a
+//! blown-up mesh.
 
 use crate::document::{ControlPoint, Placement};
 
@@ -22,9 +33,12 @@ use crate::document::{ControlPoint, Placement};
 ///
 /// Past this, the fit solves an `n`-by-`n` dense system and a later change's
 /// mesh is re-evaluated against every pair, so the cost is quadratic in one
-/// place and linear in a hot one. `Warp::fit` simply never sees a point past
-/// this count; the caller that lets the user place them is what refuses a
-/// fifty-first click with a hint.
+/// place and linear in a hot one. `Warp::fit` silently truncates to the first
+/// `MAX_CONTROL_POINTS` of whatever slice it is given — it does see the rest,
+/// as far as the argument goes, but never fits them — which is why the
+/// caller that lets the user place them is what has to refuse a fifty-first
+/// click with a hint; by the time `fit` runs, silence is all a point past
+/// this count would get.
 pub const MAX_CONTROL_POINTS: usize = 50;
 
 /// Below this, a pixel-space quantity with units of pixels² is treated as
@@ -118,6 +132,7 @@ impl Warp {
             ),
             3 => Kind::Affine(best_affine(points, width, height, base)),
             4 => homography_through(points)
+                .filter(|h| homography_covers(h, width, height))
                 .map(Kind::Projective)
                 .unwrap_or_else(|| Kind::Affine(best_affine(points, width, height, base))),
             _ => spline_through(points, width, height, base),
@@ -243,6 +258,47 @@ impl Warp {
             ((lon - base_lon).powi(2) + (lat - base_lat).powi(2)).sqrt()
         })
     }
+}
+
+/// Below this, a corner's homography denominator `w` is close enough to the
+/// vanishing line (`w == 0`) that dividing by it inflates whatever numerator
+/// remains into millions of degrees before `Warp::mesh` narrows the result to
+/// `f32` — no more usable than landing on the line outright, so it is
+/// rejected the same way. Four orders of magnitude looser than
+/// `project_through`'s own `1e-12`, which exists only to protect that one
+/// division from a literal zero and says nothing about whether the *result*
+/// stays sane; a corner at `w = 1e-10` clears `1e-12` and still produces the
+/// roughly-1e10-degree value this threshold exists to catch.
+const HOMOGRAPHY_MIN_W: f64 = 1e-6;
+
+/// Whether a fitted homography is usable across the image's own rectangle —
+/// `(0, 0)` to `(width, height)`, regardless of where the control points
+/// themselves fell — rather than only at the pairs it was fit through.
+///
+/// `w = h6*u + h7*v + h8` is linear in `(u, v)`, so its extreme values over a
+/// convex region are attained at the region's corners; checking only the
+/// four image corners therefore bounds `|w|` everywhere inside the
+/// rectangle, not just at the corners themselves. A sign that differs
+/// between corners means the vanishing line passes through the rectangle's
+/// interior — exactly the fit a four-pair set placed in a crossing order
+/// produces — and no bound on `|w|` at the corners helps there, since some
+/// point *between* them still lands on the line.
+fn homography_covers(h: &[f64; 9], width: u32, height: u32) -> bool {
+    let w = f64::from(width);
+    let ht = f64::from(height);
+    let mut sign = 0.0_f64;
+    for (u, v) in [(0.0, 0.0), (w, 0.0), (w, ht), (0.0, ht)] {
+        let denom = h[6] * u + h[7] * v + h[8];
+        if !denom.is_finite() || denom.abs() < HOMOGRAPHY_MIN_W {
+            return false;
+        }
+        if sign == 0.0 {
+            sign = denom.signum();
+        } else if denom.signum() != sign {
+            return false;
+        }
+    }
+    true
 }
 
 /// A translation: `base` shifted so pixel `p.u, p.v` lands exactly on `p`'s
@@ -479,7 +535,9 @@ fn phi(r: f64) -> f64 {
 /// system is — which happens when two pairs share a pixel, since then two
 /// of `K`'s rows are identical.
 fn spline_through(points: &[ControlPoint], width: u32, height: u32, base: Placement) -> Kind {
-    let Some(projective) = homography_least_squares(points) else {
+    let Some(projective) =
+        homography_least_squares(points).filter(|h| homography_covers(h, width, height))
+    else {
         return Kind::Affine(best_affine(points, width, height, base));
     };
     let n = points.len();
@@ -751,6 +809,69 @@ mod tests {
         assert!((a.1 - b.1).abs() > 1e-6, "the image collapsed to a line");
     }
 
+    /// Four pairs placed in a "crossing order" — the target quad's diagonal
+    /// pair swapped relative to the picture's — fit a homography whose
+    /// vanishing line runs straight through the image: `w` is `+1` at two
+    /// corners and `-1` at the other two (worked by hand with a computer
+    /// algebra check, not by trusting this module's own fit). Review
+    /// finding 3(a): before `homography_covers` existed, this produced a
+    /// `Kind::Projective` that sent nearby pixels to on the order of
+    /// `1/w -> infinity` degrees. It must fall back to the affine tail
+    /// instead, the same way a collinear or coincident input does.
+    #[test]
+    fn four_pairs_in_a_crossing_order_fall_back_rather_than_diverging() {
+        let points = [
+            at(0.0, 0.0, -10.0, 5.0),
+            at(800.0, 0.0, -8.0, 3.0),
+            at(800.0, 600.0, -8.0, 5.0),
+            at(0.0, 600.0, -10.0, 3.0),
+        ];
+        let warp = Warp::fit(&points, 800, 600, base());
+        assert!(
+            warp.is_identity_affine(),
+            "a crossing-order homography must fall back to the affine tail"
+        );
+        // The affine tail is still exact through three of the four pairs
+        // (the fourth cannot be, or it would not be an affine).
+        for p in &points[..3] {
+            let (lon, lat) = warp.place(p.u, p.v);
+            assert!((lon - p.lon).abs() < 1e-6 && (lat - p.lat).abs() < 1e-6);
+        }
+        // And every point inside the rectangle stays a sane geographic
+        // number — the regression this closes returned values in the
+        // billions of degrees for points right beside the vanishing line.
+        for (u, v) in [(400.0, 300.0), (799.0, 1.0), (1.0, 599.0)] {
+            let (lon, lat) = warp.place(u, v);
+            assert!(lon.abs() < 1000.0 && lat.abs() < 1000.0, "{lon}, {lat}");
+        }
+    }
+
+    /// A homography fit through points placed so that the image's own far
+    /// corners land almost exactly on the vanishing line: consistent sign
+    /// (no crossing) but `w` on the order of `1e-9` at two corners, computed
+    /// independently in Python before being hard-coded here as the pairs.
+    /// Review finding 3(a)'s other half — the near-singular case the
+    /// original `|w| < 1e-12` guard let through, since `1e-9 > 1e-12`.
+    #[test]
+    fn a_near_singular_homography_falls_back_rather_than_diverging() {
+        let points = [
+            at(50.0, 50.0, -11.199999999253333, 11.73333333255111),
+            at(750.0, 50.0, 167.99999748000042, 175.99999736000044),
+            at(750.0, 550.0, 167.99999748000042, 15.99999976000004),
+            at(50.0, 550.0, -11.199999999253333, 1.0666666665955555),
+        ];
+        let warp = Warp::fit(&points, 800, 600, base());
+        assert!(
+            warp.is_identity_affine(),
+            "a near-singular homography must fall back to the affine tail"
+        );
+        for (u, v) in [(0.0, 0.0), (800.0, 0.0), (800.0, 600.0), (0.0, 600.0)] {
+            let (lon, lat) = warp.place(u, v);
+            assert!(lon.is_finite() && lat.is_finite(), "{lon}, {lat}");
+            assert!(lon.abs() < 1000.0 && lat.abs() < 1000.0, "{lon}, {lat}");
+        }
+    }
+
     /// Five or more pairs bend, and every one of them still lands exactly.
     /// This is what "perfectly warped" means and is the test that would
     /// catch a wrong spline.
@@ -775,8 +896,12 @@ mod tests {
         assert!(!warp.is_identity_affine());
     }
 
-    /// Exactly four pairs must stay a pure homography: the spline's residual
-    /// is identically zero there, and a picture taken at an angle should not
+    /// Exactly four pairs must stay a pure homography — `n == 4` never
+    /// reaches `spline_through` at all, so there is no spline residual to be
+    /// zero, only a projective map to check is still projective. A
+    /// homography sends straight lines to straight lines, so three collinear
+    /// pixels staying collinear here is the property that would catch a
+    /// spline term sneaking in; a picture taken at an angle should not
     /// acquire bending it did not ask for.
     #[test]
     fn four_pairs_bend_not_at_all() {
