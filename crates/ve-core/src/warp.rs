@@ -806,6 +806,69 @@ mod tests {
         assert_exact(&points, &warp);
     }
 
+    /// The antimeridian case above uses four pairs, which never reaches
+    /// `Kind::Spline` — it is Task 2's exact homography, unchanged by this
+    /// module's spline code. This is the same property proved through the
+    /// spline arm instead: nine pairs (forcing `Kind::Spline`), a target with
+    /// a genuine sine curl no homography could reach (so this is not a
+    /// homography that merely happens to still fit), longitudes that run
+    /// past 180 on both sides of the seam, and every pair still landing
+    /// exactly. The fold check is the regression this exists to catch: if
+    /// `Warp::place`'s `Spline` arm ever normalised longitude the way
+    /// `Placement::place` deliberately does not, a pixel between two pairs
+    /// whose longitudes are, say, 177 and 180 would jump to something near
+    /// -180 instead of landing between them.
+    #[test]
+    fn a_spline_across_the_antimeridian_is_not_folded() {
+        let mut points = Vec::new();
+        for &u in &[0.0, 400.0, 800.0] {
+            for &v in &[0.0, 300.0, 600.0] {
+                let lon = 180.0 + (u - 400.0) / 400.0 * 3.0 + 0.4 * (v / 300.0_f64).sin();
+                let lat = 10.0 - (v - 300.0) / 300.0 + 0.3 * (u / 400.0_f64).cos();
+                points.push(at(u, v, lon, lat));
+            }
+        }
+        let warp = Warp::fit(&points, 800, 600, base());
+        assert_exact(&points, &warp);
+        assert!(!warp.is_identity_affine());
+
+        // A pixel strictly between the u=0 and u=400 columns (row v=300, an
+        // untouched interior point) must land between those two columns' own
+        // longitudes — not 360 degrees away on the far side of the seam.
+        let left = warp.place(0.0, 300.0).0;
+        let mid = warp.place(200.0, 300.0).0;
+        let right = warp.place(400.0, 300.0).0;
+        assert!(
+            (left.min(right)..=left.max(right)).contains(&mid),
+            "the seam folded the image: {left}, {mid}, {right}"
+        );
+    }
+
+    /// The pole case above uses three pairs — `best_affine_3`, unchanged by
+    /// this task. Proved again through the spline arm: nine pairs (forcing
+    /// `Kind::Spline`) with a target that curls in both pixel directions —
+    /// unreachable by any homography — one of them pinned exactly at the
+    /// pole. `assert_exact` is what would catch a spline that reaches the
+    /// pole only approximately, the way a naive residual-then-clamp
+    /// implementation might.
+    #[test]
+    fn a_spline_at_the_pole_lands_on_the_pole() {
+        let mut points = Vec::new();
+        for &u in &[0.0, 400.0, 800.0] {
+            for &v in &[0.0, 300.0, 600.0] {
+                let lon = (u - 400.0) / 40.0 + 0.5 * (v / 300.0_f64).sin();
+                let lat = 90.0 - v / 8.0 + 0.4 * (u / 400.0_f64).cos();
+                points.push(at(u, v, lon, lat));
+            }
+        }
+        // Pin the first pair exactly at the pole, in place of its formula
+        // value (which would land a fraction of a degree short of it).
+        points[0] = at(0.0, 0.0, 0.0, 90.0);
+        let warp = Warp::fit(&points, 800, 600, base());
+        assert_exact(&points, &warp);
+        assert!(!warp.is_identity_affine());
+    }
+
     /// The solver against a system whose answer is known by inspection,
     /// and one that is singular and must say so rather than return noise.
     #[test]
