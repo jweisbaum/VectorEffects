@@ -927,27 +927,72 @@ the top-left pixel and the placement names its corner. A GeoTIFF in a
 to do: reprojecting a raster is a different piece of work from placing one, and
 metres quietly read as degrees put an image somewhere plausible and wrong.
 
-**Placed by hand otherwise.** The image lands filling the visible map, north-up
-and keeping its aspect, so its handles are on screen and grabbable. Three
-control points — the top-left, top-right and bottom-left corners — drag it into
-place. Three, because three points determine an affine exactly: a fourth handle
-would let the user ask for a shape no affine can make. A plain drag moves one
-point and shears the image; **shift** keeps it north-up and its aspect true,
-which is the translate-and-scale case a chart scan almost always wants. Three
-points on a line have no area and are refused.
+**Placed by hand otherwise, and refined by pointing.** With no
+georeference of its own the image lands filling the visible map, north-up and
+keeping its aspect — that landing is the `placement` above, and it is also
+what zero control points means and what *Reset place* returns to.
 
-**The picture itself is dragged to move it** (M36). With the hand in hand, a
-drag inside the active image's outline carries the whole thing — every control
-point by the same delta, so the size, the aspect and any shear are kept, since
-a move is not a placement. The cursor says so over the picture, the move stops
-at the poles rather than folding over one, and the whole drag is one undo entry
-like a corner's. It is the rule the hand already follows for a selected object:
-what is selected is what a drag moves, and a drag anywhere else pans.
+From there the user aligns it by pointing: click a feature in the picture,
+then the place it belongs on the map, alternating, as many times as they
+like, then press **Enter**. Each click is refused with a hint rather than
+stored if it cannot be resolved to a real image pixel — a point outside the
+picture, or, for an already-warped image, one that falls in the gap between
+the mesh's own bowed edge and the coarse quad `corners` reports — because a
+wrong pair written silently is far costlier to find later than one more
+click now. **Escape** cancels the session with nothing written; **Backspace**
+drops the last pair, or the picture click waiting for its map half if there
+is one. **Enter with no pairs placed behaves as Escape**: a session opened
+and closed without a click must not silently erase control points the image
+already had, since the write replaces the whole set.
 
-The control points, and the picture's own drag, belong to the **active layer**
-only. A project with several
-charts under it would otherwise stack handles from all of them on one corner of
-the map, with no way to say which a drag meant.
+**What is stored is the pairs, never the warp.** `LayerSource::Image` carries
+`control_points: Vec<ControlPoint>`, each a `{u, v, lon, lat}` — `u` and `v`
+in the image's own pixels, not the placement's degrees, so a pair means the
+same thing regardless of whatever placement was in force when it was made,
+and pairs accumulate across sessions without drift. The warp itself is
+derived state, recomputed from the pairs on load and never serialised
+(invariants 1 and 2), exactly as a render is. *Reset place* clears the
+control points along with restoring the placement: the warp is part of where
+the image sits, and leaving the pairs behind would put the base back and
+then immediately bend away from it again.
+
+**The fit is exact, and its shape follows the pair count.** Zero pairs is the
+stored placement, untouched. One is a translation. Two are a similarity —
+rotate and scale, never shear. Three are the affine through them, exactly as
+the old three corner handles gave. Four are a homography, which an affine
+cannot be. Five and up are a homography fit by least squares plus a
+thin-plate-spline correction for the residual no projective map can reach —
+the rubber-sheet bend a creased or hand-drawn chart actually needs — and
+every pair still lands exactly, however many there are. **Fifty pairs is the
+cap**: the fit solves a dense system in the pair count and the mesh below is
+re-evaluated against every pair on each change, so both costs are bounded by
+holding the count down. More than fifty are refused, with a hint, rather than
+silently accepted — the click itself is not stopped, so the refusal is found
+at Enter, against the whole set placed since the session began.
+
+Outside the pairs' own hull, an unconstrained spline can run away — its
+radial term grows like `r²·ln r` — so only that radial term is damped back
+towards zero there; the fit's affine tail is left undamped, and a far corner
+tends to the homography **plus that bounded linear term**, not to the
+homography alone. The tail is linear, so it cannot diverge the way the
+radial term does, and outside the hull is usually just past an image's own
+corner — exactly where the tail's reading of the residual's local trend is
+most worth keeping rather than throwing away.
+
+**A warped image is drawn through a mesh, in every projection; an unwarped
+one keeps the globe's per-pixel inverse.** A thin-plate spline has no
+closed-form inverse, so the per-pixel path — built for a picture that can
+span the whole earth — cannot serve one. A rubber-sheeted image does not need
+it: it is local by nature, a harbour, an approach, a scanned sheet, so
+following it with a mesh is affordable. The mesh is sampled from the warp in
+Rust whenever the control points change, never once a camera moves, so the
+vertex shader only *projects* the lon/lat it is handed — which is what makes
+a warped image correct in every projection with no per-projection case for
+the spline.
+
+The control points belong to the **active layer** only. A project with
+several charts under it would otherwise mix up which chart a click was
+meant for.
 
 **Decoded on the way to the screen, never into the document.** PNG, JPEG and
 TIFF, through pure-Rust decoders. The picture is served through the same
@@ -973,31 +1018,9 @@ is nearly opaque, so leaving it under would make it vanish. The stack decides
 which side of the field it lands on, and hidden layers count for neither: a
 hidden field layer holds nothing down, and a hidden image is not drawn at all.
 
-**Eight grips, and three points behind them** (M50). Three corners determine
-an affine exactly, which is why there are three corner handles and not four —
-a fourth would let the user ask for a shape no affine can make. But reaching
-every placement through two of them is a poor way to do the two things a chart
-scan actually needs: an **edge** grip on each side moves that side and leaves
-the opposite one, and a **rotation** grip on a stalk above the top edge turns
-the picture about its centre. Both are the same three points arrived at
-differently, so the document, the command and the undo are unchanged.
-
-An edge reads the pointer in the *picture's* own coordinates, so a sheared or
-turned picture answers along its own axes rather than the map's, and it stops
-before the picture could be folded through itself. A rotation is stateless —
-the grip goes where the pointer is — and is computed in a space where a degree
-of longitude is scaled by the cosine of the centre's latitude: the placement is
-affine in degrees, and turning it in raw degrees would lean the picture rather
-than turn it anywhere but the equator.
-
-A grip takes the drag ahead of every tool, so it takes the cursor too: the
-crosshair of the tool in hand would promise a stroke that is not going to
-happen.
-
-**A hidden image layer is hidden completely** (M49). It is not drawn, offers no
-control points and cannot be dragged: an eye that hides a layer hides all of
-it, and a picture that answered the pointer while invisible would be a handle
-on nothing.
+**A hidden image layer is hidden completely** (M49). It is not drawn and
+cannot be aligned: an eye that hides a layer hides all of it, and a picture
+that answered a click while invisible would be a control point on nothing.
 
 Drawn as a subdivided quad with world copies at ±360°. Subdivided because the placement is affine in *degrees*: a
 straight line across the image is straight in lon/lat, and a straight line in

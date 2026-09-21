@@ -81,7 +81,8 @@ crates/
                `capture` holds the `.vecap` container a region capture
                travels in; `follow` resolves objects that follow objects;
                `annotation` holds the measurements of spec 10, which are
-               document state that reaches no scene and no export
+               document state that reaches no scene and no export; `warp`
+               fits the image control-point warp of spec §4.9
   ve-render/   Scene flattening, SDF rasterisation, compositing,
                FieldEvaluator trait, CpuEvaluator, GpuEvaluator (+ WGSL),
                tile pyramid, content-hashed render cache
@@ -605,6 +606,12 @@ demand by the URI scheme and cached as a PNG.
 4. Write the fixture in the test, byte by byte, including the IFD if it has
    one. A committed image whose provenance is "it decoded" asserts nothing
    about the tags being read right (`tests/image_layers.rs`).
+
+**An image with control points draws through its mesh, in every projection,
+and must never take the globe's per-pixel inverse** (spec §4.9). The mesh is
+`ve_core::warp::Warp::mesh`, sampled from the control points in Rust; the
+per-pixel path is for a plain affine placement only, because a thin-plate
+spline has no closed-form inverse for it to invert.
 
 ### Touching the render cache
 
