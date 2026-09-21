@@ -28,17 +28,22 @@ use crate::document::{ControlPoint, Placement};
 /// fifty-first click with a hint.
 pub const MAX_CONTROL_POINTS: usize = 50;
 
-/// Below this, a pixel-space quantity with units of pixels² — a squared
-/// distance or a 2×2 determinant of pixel vectors — is treated as zero.
+/// Below this, a pixel-space quantity with units of pixels² is treated as
+/// zero and the fit degrades to a simpler one rather than dividing by it:
+/// `similarity_through`'s squared distance between its two pixels, or
+/// `best_affine_3`'s 2×2 determinant of pixel vectors — the signed area,
+/// twice over, of the triangle its three pairs form.
 ///
-/// Scaled by the image's own area rather than fixed, because "zero" means
-/// something different at different scales: a determinant that is plainly
-/// collinear noise for an 800×600 screenshot could be a real, if tight,
-/// triangle on a 4000×3000 scan, and the reverse. This is the same threshold
-/// `Placement::from_corners` already uses — that function's `a`, `b`, `d`,
-/// `e` are this module's raw pixel vectors divided by `width` or `height`
-/// first, so comparing *its* determinant to `1e-12` is comparing this
-/// module's raw determinant to `1e-12 * width * height`.
+/// Scaled by the image's own area rather than fixed, because "nearly
+/// coincident" or "nearly collinear" should mean the same fraction of the
+/// picture at any resolution. A user's two control points landing a couple
+/// of pixels apart is most likely a missed second click on an 80×60
+/// thumbnail — a real, if extreme, similarity — and almost certainly a
+/// mis-click on the same pixel, or three points that are truly collinear,
+/// on a 4000×3000 scan. A threshold fixed in raw pixels² would have to pick
+/// one of those readings and be wrong for the other; scaling by
+/// `width * height` keeps the same *relative* tolerance at every image
+/// size.
 fn degeneracy_threshold(width: u32, height: u32) -> f64 {
     f64::from(width.max(1)) * f64::from(height.max(1)) * 1e-12
 }
