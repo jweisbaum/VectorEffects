@@ -26,8 +26,6 @@ export interface CursorContext {
   panning: boolean;
   /** A macro capture is running: the region is dragged with the selection cursor. */
   recording: boolean;
-  /** The pointer is over the active image layer's picture, which a drag moves (M36). */
-  onImage: boolean;
   /**
    * The tool in hand cannot work on the layer in hand (spec.md 6.1, M51).
    *
@@ -35,14 +33,6 @@ export interface CursorContext {
    * had been drawn and previewed. The cursor says it on hover instead.
    */
   forbidden: boolean;
-  /**
-   * The picture grip under the pointer, if any (M50).
-   *
-   * A grip takes the drag ahead of every tool, so it takes the cursor too:
-   * the crosshair of the tool in hand would promise a stroke where a drag
-   * would resize a chart instead.
-   */
-  grip: "corner" | "edge" | "rotate" | null;
 }
 
 /**
@@ -88,24 +78,13 @@ export function cursorFor(context: CursorContext): string {
   // While a capture records, the region is dragged with the selection cursor
   // (spec.md 8.7): nothing else on the map does anything.
   if (context.recording) return "default";
-  // A picture's grip takes the drag ahead of every tool (M50), so it takes
-  // the cursor: `crosshair` here would promise a stroke that will not happen.
-  // Ahead of the refusal below, since a grip works whatever the tool is —
-  // that is what makes it a handle.
-  if (context.grip === "corner") return "nwse-resize";
-  if (context.grip === "edge") return "move";
-  if (context.grip === "rotate") return "grab";
-  // The tool will not work on this layer (M51). After the handles and before
-  // the tools, which is exactly where the refusal sits in the click.
+  // The tool will not work on this layer (M51). Before the tools, which is
+  // exactly where the refusal sits in the click.
   if (context.forbidden) return FORBIDDEN_CURSOR;
   if (context.insideRegion) return BUCKET_CURSOR;
   switch (context.tool) {
     case HAND:
-      if (context.panning) return "grabbing";
-      // Over the picture the hand moves it rather than the map (M36), and
-      // says so: a grab hand here would promise a pan that is not what a
-      // drag does.
-      return context.onImage ? "move" : "grab";
+      return context.panning ? "grabbing" : "grab";
     case SELECT:
     case CAPTURE:
     case INSERT:

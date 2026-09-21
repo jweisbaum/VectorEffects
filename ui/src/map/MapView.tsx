@@ -167,19 +167,6 @@ import {
 } from "./region";
 import { ImageCache } from "./images";
 import type { ImageLayerView } from "../generated/ImageLayerView";
-import {
-  CORNER_REACH_CSS,
-  type Corners,
-  type GripPick,
-  draggedByGrip,
-  edgeGrips,
-  gripUnder,
-  rotateGrip,
-  cornersOf,
-  imageUnder,
-  movedCorners,
-  hasArea,
-} from "./place";
 import { MapRenderer, type OperatorPreview, type RenderState } from "./renderer";
 import { uniqueTiles } from "../timeline/playback";
 import { preparationTargets, type PlaybackMap, type PreparationRequest } from "../timeline/preparation";
@@ -820,26 +807,6 @@ export default function MapView({
     inFlight: false,
     queued: null,
   });
-  /** The image control point being dragged (spec.md 4.9, M18). */
-  const cornerDrag = useRef<GripPick | null>(null);
-  /** The placement in flight, and the one waiting behind it. */
-  const cornerMove = useRef<{
-    inFlight: boolean;
-    queued: Corners | null;
-  }>({ inFlight: false, queued: null });
-  /**
-   * The image being dragged bodily, and what it was when the drag began
-   * (M36).
-   *
-   * From the corners at the press rather than from wherever the last round
-   * trip left them: a move made of accumulated deltas drifts, and the picture
-   * has to end up where the hand does.
-   */
-  const imageDrag = useRef<{
-    layer: number;
-    from: { lon: number; lat: number };
-    corners: ReturnType<typeof cornersOf>;
-  } | null>(null);
   /** The measurement handle being dragged. */
   const measureDrag = useRef<HandlePick | null>(null);
   /**
@@ -3365,10 +3332,14 @@ export default function MapView({
 
     const cursor = cursorRef.current;
 
-    // The active image layer's outline and control points (spec.md 4.9, M18).
-    // Only the active one: a project with several charts under it would
-    // otherwise stack handles from all of them on the same corner, with no way
-    // to say which a drag meant.
+    // The active image layer's outline (spec.md 4.9, M18). Only the active
+    // one: a project with several charts under it would otherwise stack
+    // outlines from all of them, with no way to say which was meant.
+    //
+    // The corner-drag handles, the M50 edge grips and the rotation grip that
+    // used to be drawn here are gone with the corner-placement model; Task 7
+    // builds their replacement, the control-point alignment interaction, on
+    // this same outline.
     const placing = imageLayersRef.current.find((image) => image.layer === activeLayer);
     if (placing?.loaded) {
       const outline = placing.corners.map((corner) =>
@@ -3386,44 +3357,6 @@ export default function MapView({
         context.setLineDash([5 * dpr, 4 * dpr]);
         context.stroke();
         context.setLineDash([]);
-
-        // Three corner handles, not four: three points determine an affine,
-        // and a fourth would let the user ask for a shape no affine can make.
-        // The edges and the rotation grip are the same three points reached a
-        // different way (M50), so they add gestures rather than freedom.
-        const corners = cornersOf(placing);
-        const dot = (point: readonly [number, number], radius: number) => {
-          const at = toScreen(camera, view, { lon: point[0], lat: point[1] });
-          context.beginPath();
-          context.arc(at.x, at.y, radius * dpr, 0, Math.PI * 2);
-          context.fillStyle = "rgba(120, 200, 255, 0.95)";
-          context.fill();
-          context.strokeStyle = "rgba(20, 28, 44, 0.9)";
-          context.lineWidth = Math.max(1, dpr);
-          context.stroke();
-          return at;
-        };
-        // The edges smaller than the corners, so which is which reads at a
-        // glance and a corner still looks like the finer control it is.
-        for (const edge of Object.values(edgeGrips(corners))) dot(edge, 3.5);
-        for (const corner of [corners.topLeft, corners.topRight, corners.bottomLeft]) {
-          dot(corner, 5);
-        }
-        // The rotation grip, on a stalk from the top edge so it reads as
-        // belonging to the picture rather than floating beside it.
-        const stalkFrom = toScreen(camera, view, {
-          lon: edgeGrips(corners).top[0],
-          lat: edgeGrips(corners).top[1],
-        });
-        const grip = rotateGrip(corners);
-        const stalkTo = toScreen(camera, view, { lon: grip[0], lat: grip[1] });
-        context.beginPath();
-        context.moveTo(stalkFrom.x, stalkFrom.y);
-        context.lineTo(stalkTo.x, stalkTo.y);
-        context.strokeStyle = "rgba(120, 200, 255, 0.85)";
-        context.lineWidth = Math.max(1, dpr);
-        context.stroke();
-        dot(grip, 4.5);
         context.restore();
       }
     }
@@ -4079,12 +4012,7 @@ export default function MapView({
    * `createReadoutStore` exists to prevent.
    */
   const applyCursor = useCallback(
-    (
-      insideRegion: boolean,
-      panning: boolean,
-      onImage = false,
-      grip: "corner" | "edge" | "rotate" | null = null,
-    ) => {
+    (insideRegion: boolean, panning: boolean) => {
       const canvas = canvasRef.current;
       if (!canvas) return;
       if (shapeModeRef.current !== null) {
@@ -4111,7 +4039,6 @@ export default function MapView({
         insideRegion,
         panning,
         recording: recording !== null,
-        onImage,
         // What the layer will not take, and what is not on the map at all
         // (M51, M68). Both are refusals the cursor can say on hover rather
         // than leaving the user to discover on release — which is the whole
@@ -4126,7 +4053,6 @@ export default function MapView({
           ) ||
             activeLayerHidden() ||
             (tool === INSERT && !canInsertMacro())),
-        grip,
       });
       if (canvas.style.cursor !== wanted) canvas.style.cursor = wanted;
     },
@@ -4182,50 +4108,11 @@ export default function MapView({
       return;
     }
 
-    // An image layer's control point, whatever the tool (spec.md 4.9, M18).
-    // A handle takes precedence over what is under it — the same rule the
-    // transform handles and the placed markers follow — and only the active
-    // layer has any, so a chart being placed does not take clicks meant for the
-    // brush on some other layer.
-    {
-      const grabbed = gripUnder(
-        imageLayersRef.current,
-        activeLayer,
-        cameraRef.current,
-        viewRef.current,
-        point,
-        CORNER_REACH_CSS * (window.devicePixelRatio || 1),
-      );
-      if (grabbed !== null) {
-        cornerDrag.current = grabbed;
-        requestOverlay();
-        return;
-      }
-      // Inside the picture, the hand moves the whole thing (M36) — the same
-      // tool that moves a selected object, and the same rule: what is
-      // selected is what a drag moves, and a drag anywhere else pans. The
-      // active image layer is the selection, which is what puts the outline
-      // and the control points on the map.
-      if (tool === HAND) {
-        const image = imageUnder(
-          imageLayersRef.current,
-          activeLayer,
-          cameraRef.current,
-          viewRef.current,
-          point,
-        );
-        if (image !== null) {
-          const geo = unproject(cameraRef.current, viewRef.current, point);
-          imageDrag.current = {
-            layer: image.layer,
-            from: geo,
-            corners: cornersOf(image),
-          };
-          requestOverlay();
-          return;
-        }
-      }
-    }
+    // An image layer's corner-drag handles and its M36 whole-picture drag
+    // used to be picked up here (spec.md 4.9, M18). Both are gone with the
+    // corner-placement model; Task 7's alignment interaction is their
+    // replacement and picks up clicks on the active image's picture in its
+    // own way, on `imageUnder`.
 
     // While a capture runs, the region can be *dragged* — and nothing else on
     // the map does anything (spec.md 8.7). By delta from where the pointer
@@ -4641,6 +4528,12 @@ export default function MapView({
     // The cursor says what a click here would do: a bucket inside a selected
     // region with a tool that fills one — the same predicate the click uses —
     // and the tool's own cursor everywhere else (M24).
+    //
+    // This used to also report the image grip under the pointer and whether
+    // the hand was over the active picture (M36, M50), for cursors that
+    // promised the corner-drag and whole-picture-drag gestures. Both are gone
+    // with the corner-placement model; Task 7's alignment interaction defines
+    // its own cursor cues, if it needs any.
     {
       const geo = unproject(cameraRef.current, viewRef.current, point);
       applyCursor(
@@ -4649,25 +4542,6 @@ export default function MapView({
           editsRegion(tool) &&
           regionContains(region, geo.lon, geo.lat),
         dragging.current !== null,
-        imageDrag.current !== null ||
-          imageUnder(
-            imageLayersRef.current,
-            activeLayer,
-            cameraRef.current,
-            viewRef.current,
-            point,
-          ) !== null,
-        // The grip under the pointer, or the one being dragged: a drag that
-        // has left the grip behind still says what it is doing (M50).
-        (cornerDrag.current ??
-          gripUnder(
-            imageLayersRef.current,
-            activeLayer,
-            cameraRef.current,
-            viewRef.current,
-            point,
-            CORNER_REACH_CSS * (window.devicePixelRatio || 1),
-          ))?.grip.kind ?? null,
       );
     }
 
@@ -4855,87 +4729,10 @@ export default function MapView({
       return;
     }
 
-    // The whole picture being dragged (M36). The same one-in-flight rule and
-    // the same coalescing key as a control point, so a move and a placement
-    // are one undo entry each and the picture follows the hand either way.
-    if (imageDrag.current) {
-      const held = imageDrag.current;
-      const geo = unproject(cameraRef.current, viewRef.current, point);
-      const next = movedCorners(
-        held.corners,
-        normalizeLon(geo.lon - held.from.lon),
-        geo.lat - held.from.lat,
-      );
-      const flight = cornerMove.current;
-      flight.queued = next;
-      if (!flight.inFlight) {
-        const send = () => {
-          const wanted = flight.queued;
-          flight.queued = null;
-          if (wanted === null) {
-            flight.inFlight = false;
-            return;
-          }
-          flight.inFlight = true;
-          void api
-            .setImageCorners(
-              held.layer,
-              wanted.topLeft,
-              wanted.topRight,
-              wanted.bottomLeft,
-              `image:${held.layer}:place`,
-            )
-            .then(onProjectChanged)
-            .catch(() => undefined)
-            .finally(send);
-        };
-        send();
-      }
-      return;
-    }
-
-    // An image control point being dragged (spec.md 4.9, M18). One request in
-    // flight, latest wins, and the same coalescing key throughout — so the
-    // whole drag is one undo and the picture follows the hand.
-    if (cornerDrag.current) {
-      const grabbed = cornerDrag.current;
-      const image = imageLayersRef.current.find((v) => v.layer === grabbed.layer);
-      if (image) {
-        const geo = unproject(cameraRef.current, viewRef.current, point);
-        const next = draggedByGrip(image, grabbed.grip, [geo.lon, geo.lat], event.shiftKey);
-        // A drag that would flatten the image is refused by the backend; not
-        // sending it means the picture simply stops following rather than
-        // filling the log at pointer rate.
-        if (hasArea(next)) {
-          const flight = cornerMove.current;
-          flight.queued = next;
-          if (!flight.inFlight) {
-            const send = () => {
-              const wanted = flight.queued;
-              flight.queued = null;
-              if (wanted === null) {
-                flight.inFlight = false;
-                return;
-              }
-              flight.inFlight = true;
-              void api
-                .setImageCorners(
-                  grabbed.layer,
-                  wanted.topLeft,
-                  wanted.topRight,
-                  wanted.bottomLeft,
-                  `image:${grabbed.layer}:place`,
-                )
-                .then(onProjectChanged)
-                .catch(() => undefined)
-                .finally(send);
-            };
-            send();
-          }
-        }
-      }
-      return;
-    }
+    // The whole-picture drag (M36) and the image control-point drag
+    // (spec.md 4.9, M18) used to be handled here. Both moved an image by its
+    // three affine corners, which control points replace; Task 7's alignment
+    // interaction is their successor and has its own gesture to add here.
 
     // A measurement handle being dragged (spec.md 10, M8). One request in
     // flight, latest wins: the pointer reports faster than a round trip, and a
@@ -5392,16 +5189,6 @@ export default function MapView({
     // is capture state, not a history entry.
     if (captureDrag.current) {
       captureDrag.current = null;
-      requestOverlay();
-      return;
-    }
-
-    // An image control point or the picture itself lets go: the coalescing
-    // group ends, so the next drag is its own undo entry (spec.md 4.9, M18).
-    if (cornerDrag.current || imageDrag.current) {
-      cornerDrag.current = null;
-      imageDrag.current = null;
-      void api.endGesture().catch(() => undefined);
       requestOverlay();
       return;
     }

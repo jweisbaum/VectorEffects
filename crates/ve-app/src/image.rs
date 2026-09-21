@@ -95,6 +95,12 @@ pub struct ImageLayerView {
     /// The cell count `warp_mesh` was evaluated at. Zero when `warped` is
     /// false.
     pub warp_cells: u32,
+    /// The image's four corners as `[lon, lat]`, top-left first, clockwise.
+    ///
+    /// Taken from the warp at image pixels (0,0), (w,0), (w,h), (0,h), so it
+    /// is the *bent* quad for a warped image and the plain one otherwise. The
+    /// map hit-tests against this; it is not what the picture is drawn from.
+    pub corners: Vec<[f64; 2]>,
     /// Whether the file carried its own georeference.
     ///
     /// A hand-placed image says so, because "the corners are where the file
@@ -228,6 +234,12 @@ pub fn view(layer: Id, source: &LayerSource) -> Option<ImageLayerView> {
     } else {
         (Vec::new(), 0)
     };
+    let w = f64::from(width);
+    let h = f64::from(height);
+    let corners = [(0.0, 0.0), (w, 0.0), (w, h), (0.0, h)]
+        .map(|(u, v)| warp.place(u, v))
+        .map(|(lon, lat)| [lon, lat])
+        .to_vec();
     Some(ImageLayerView {
         layer: layer.raw(),
         path: path.to_string_lossy().into_owned(),
@@ -250,6 +262,7 @@ pub fn view(layer: Id, source: &LayerSource) -> Option<ImageLayerView> {
         warped,
         warp_mesh,
         warp_cells,
+        corners,
         georeferenced: probed.as_ref().is_some_and(|p| p.placement.is_some()),
     })
 }
@@ -840,15 +853,25 @@ pub fn reset_image_placement(
 }
 
 /// Implementation of [`reset_image_placement`].
+///
+/// Clears the control points along with restoring the placement: a warp is
+/// part of where the image sits, and leaving the pairs behind would put the
+/// base back and then immediately bend away from it again.
 pub fn placement_reset(state: &AppState, layer: u64) -> Result<crate::projects::ProjectSummary> {
     write(state, layer, None, |source, probed| {
-        let LayerSource::Image { placement, .. } = source else {
+        let LayerSource::Image {
+            placement,
+            control_points,
+            ..
+        } = source
+        else {
             return Err(not_an_image());
         };
         *placement = probed.placement.ok_or_else(|| AppError::BadOption {
             field: "image",
             value: "this image carries no georeference of its own to go back to".to_owned(),
         })?;
+        control_points.clear();
         Ok(())
     })
 }

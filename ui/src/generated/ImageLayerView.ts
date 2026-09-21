@@ -56,6 +56,14 @@ warp_mesh: Array<number>,
  */
 warp_cells: number,
 /**
+ * The image's four corners as `[lon, lat]`, top-left first, clockwise.
+ *
+ * Taken from the warp at image pixels (0,0), (w,0), (w,h), (0,h), so it
+ * is the *bent* quad for a warped image and the plain one otherwise. The
+ * map hit-tests against this; it is not what the picture is drawn from.
+ */
+corners: Array<[number, number]>,
+/**
  * Whether the file carried its own georeference.
  *
  * A hand-placed image says so, because "the corners are where the file

@@ -652,21 +652,9 @@ export const api = {
    */
   importImage: (path: string, view: [number, number, number, number] | null) =>
     call<ProjectSummary>("import_image", { path, view }),
-  /** Moves an image by its three control points. */
-  setImageCorners: (
-    layer: number,
-    topLeft: [number, number],
-    topRight: [number, number],
-    bottomLeft: [number, number],
-    gesture: string | null,
-  ) =>
-    call<ProjectSummary>("set_image_corners", {
-      layer,
-      topLeft,
-      topRight,
-      bottomLeft,
-      gesture,
-    }),
+  /** Sets the pairs that warp an image: each `[u, v, lon, lat]` (spec.md 4.9). */
+  setImageControlPoints: (layer: number, points: [number, number, number, number][]) =>
+    call<ProjectSummary>("set_image_control_points", { layer, points }),
   /** Sets how strongly an image shows. */
   setImageOpacity: (layer: number, opacity: number) =>
     call<ProjectSummary>("set_image_opacity", { layer, opacity }),

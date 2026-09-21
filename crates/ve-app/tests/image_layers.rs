@@ -442,6 +442,52 @@ fn control_points_are_set_seen_and_undone() {
     );
 }
 
+/// Resetting an image is "put it back where its file says", and a warp is
+/// part of where it sits. Leaving the pairs behind would restore the base
+/// and then immediately bend away from it again.
+///
+/// A GeoTIFF, not the plain PNG `an_image_layer` uses: a reset needs a
+/// georeference of the file's own to go back to, and a plain PNG has none.
+#[test]
+fn resetting_the_placement_clears_the_control_points() {
+    let root = TempRoot::new("reset-clears");
+    let state = app(&root);
+    open(&state);
+    let path = root.0.join("chart.tif");
+    write_geotiff(
+        &path,
+        40,
+        20,
+        [0.5, 0.5, 0.0],
+        [0.0, 0.0, 0.0, -10.0, 50.0, 0.0],
+        false,
+    );
+    image::image_imported(&state, path.to_string_lossy().into_owned(), None).expect("import");
+    let layer = image_layer(&state);
+
+    ve_app::image::control_points_set(
+        &state,
+        layer,
+        vec![
+            [0.0, 0.0, -2.0, 1.0],
+            [800.0, 0.0, 2.0, 1.0],
+            [0.0, 600.0, -2.0, -1.0],
+        ],
+    )
+    .expect("set");
+    ve_app::image::placement_reset(&state, layer).expect("reset");
+    let tree = ve_app::document::tree(&state, 0).expect("tree");
+    let image = tree
+        .layers
+        .last()
+        .expect("layer")
+        .image
+        .as_ref()
+        .expect("image");
+    assert!(image.control_points.is_empty(), "the warp survived a reset");
+    assert!(!image.warped);
+}
+
 /// Fifty is the cap, and a fifty-first is refused rather than silently
 /// dropped — the fit solves an n x n system and the mesh is re-evaluated
 /// against every pair.

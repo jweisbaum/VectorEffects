@@ -540,7 +540,7 @@ export default function LayerPanel({
         </button>
         <button
           className="import-grib"
-          title="Lay a georeferenced image under the field. A GeoTIFF or an image with a world file lands where it says; anything else lands on the view, to be placed by its corners."
+          title="Lay a georeferenced image under the field. A GeoTIFF or an image with a world file lands where it says; anything else lands on the view, to be placed by hand."
           onClick={() => void importImage()}
         >
           + image
