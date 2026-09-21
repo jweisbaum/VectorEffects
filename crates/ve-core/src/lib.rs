@@ -28,6 +28,7 @@ pub mod shape_animation;
 pub mod units;
 pub mod value;
 pub mod vector;
+pub mod warp;
 
 pub use angle::Angle;
 pub use command::Command;

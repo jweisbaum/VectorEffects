@@ -1,0 +1,540 @@
+//! Fits an image warp from user-placed control points (spec.md §4.9).
+//!
+//! A control point pairs a pixel in a picture with where it belongs on the
+//! earth. Given zero, one, two, three, or four-or-more such pairs, this
+//! module picks the least-surprising *exact* fit: the stored placement, a
+//! translation, a similarity, a full affine, or, from four pairs on, a
+//! homography. A fifth pair and beyond bends the picture further with a
+//! thin-plate spline on top of the homography, which is a later change's
+//! `Kind::Spline`, added together with the code that constructs it — this
+//! module defines only the two fits it can itself produce, so that every
+//! variant declared here is reachable.
+//!
+//! **The degenerate rule**, followed throughout: wherever a fit's own linear
+//! system turns out singular — control points on a line, or two pairs on the
+//! same pixel — fall back to the next simpler fit rather than returning a
+//! warp that collapses the picture to a line or a point. Homography degrades
+//! to affine, affine to similarity, similarity to translation; translation
+//! never fails, since one pair has nothing to solve.
+
+use crate::document::{ControlPoint, Placement};
+
+/// The most control points a warp will fit.
+///
+/// Past this, the fit solves an `n`-by-`n` dense system and a later change's
+/// mesh is re-evaluated against every pair, so the cost is quadratic in one
+/// place and linear in a hot one. `Warp::fit` simply never sees a point past
+/// this count; the caller that lets the user place them is what refuses a
+/// fifty-first click with a hint.
+pub const MAX_CONTROL_POINTS: usize = 50;
+
+/// Below this, a pixel-space quantity with units of pixels² — a squared
+/// distance or a 2×2 determinant of pixel vectors — is treated as zero.
+///
+/// Scaled by the image's own area rather than fixed, because "zero" means
+/// something different at different scales: a determinant that is plainly
+/// collinear noise for an 800×600 screenshot could be a real, if tight,
+/// triangle on a 4000×3000 scan, and the reverse. This is the same threshold
+/// `Placement::from_corners` already uses — that function's `a`, `b`, `d`,
+/// `e` are this module's raw pixel vectors divided by `width` or `height`
+/// first, so comparing *its* determinant to `1e-12` is comparing this
+/// module's raw determinant to `1e-12 * width * height`.
+fn degeneracy_threshold(width: u32, height: u32) -> f64 {
+    f64::from(width.max(1)) * f64::from(height.max(1)) * 1e-12
+}
+
+/// How an image's pixels are mapped onto the earth.
+///
+/// Opaque: a caller constructs one with [`Warp::fit`] and reads it with
+/// [`Warp::place`]. [`Warp::is_identity_affine`] and [`Warp::as_placement`]
+/// exist so a caller that only cares whether the warp reduces to a plain
+/// six-number [`Placement`] — a later change's choice of render path — never
+/// has to look inside.
+#[derive(Debug)]
+pub struct Warp {
+    kind: Kind,
+    /// The placement `fit` was given. Read only by [`Warp::place`]'s
+    /// projective arm, as the answer for a pixel on the homography's
+    /// vanishing line (see there); every other arm answers entirely from
+    /// `kind`.
+    base: Placement,
+}
+
+/// The fitted transform. Never matched on outside this module.
+#[derive(Debug)]
+enum Kind {
+    /// A translation, a similarity, or a full affine — the three differ only
+    /// in which of the six numbers a fit was free to choose, so one variant
+    /// holds all of them.
+    Affine(Placement),
+    /// A homography's nine matrix entries, row-major, with the ninth fixed
+    /// at 1 (see [`Warp::place`]).
+    Projective([f64; 9]),
+}
+
+impl Warp {
+    /// Fits a warp through `points`, degrading by count and by degeneracy
+    /// exactly as the module doc describes.
+    ///
+    /// `width` and `height` are the image's pixel dimensions, used only to
+    /// scale the degeneracy checks to its size (`degeneracy_threshold`).
+    /// `base` is returned unchanged when `points` is empty, and is the
+    /// fallback both for a single pair's translation and for a projective
+    /// warp's vanishing line.
+    pub fn fit(points: &[ControlPoint], width: u32, height: u32, base: Placement) -> Warp {
+        let n = points.len().min(MAX_CONTROL_POINTS);
+        let points = &points[..n];
+        let kind = match n {
+            0 => Kind::Affine(base),
+            1 => Kind::Affine(translation_through(points[0], base)),
+            2 => Kind::Affine(
+                similarity_through(points[0], points[1], width, height)
+                    .unwrap_or_else(|| translation_through(points[0], base)),
+            ),
+            3 => Kind::Affine(best_affine(points, width, height, base)),
+            _ => homography_through(&points[0..4])
+                .map(Kind::Projective)
+                .unwrap_or_else(|| Kind::Affine(best_affine(&points[0..4], width, height, base))),
+        };
+        Warp { kind, base }
+    }
+
+    /// Where a pixel lands, in degrees.
+    ///
+    /// The longitude is not normalised, for the same reason `Placement::place`
+    /// does not: a warped image spanning the antimeridian must keep its right
+    /// edge to the right of its left one.
+    pub fn place(&self, u: f64, v: f64) -> (f64, f64) {
+        match &self.kind {
+            Kind::Affine(placement) => placement.place(u, v),
+            Kind::Projective(h) => {
+                let w = h[6] * u + h[7] * v + h[8];
+                // `w` is zero on the homography's vanishing line: real
+                // pixels a perspective transform sends to the horizon,
+                // mapped to infinity. A control-point fit that runs that
+                // line through the visible image is a pathological input,
+                // not one this module's tests exercise, but dividing by
+                // near-zero would still hand the caller an enormous or
+                // infinite lon/lat rather than failing loudly. `base` is a
+                // deterministic, finite answer that nothing else can be
+                // blamed for.
+                if w.abs() < 1e-12 {
+                    return self.base.place(u, v);
+                }
+                (
+                    (h[0] * u + h[1] * v + h[2]) / w,
+                    (h[3] * u + h[4] * v + h[5]) / w,
+                )
+            }
+        }
+    }
+
+    /// True when the warp is exactly a [`Placement`] — zero, one, two, or
+    /// three well-placed pairs, never four or more. A later change's render
+    /// path uses this to choose between the cheap affine path and the warp
+    /// mesh.
+    pub fn is_identity_affine(&self) -> bool {
+        matches!(self.kind, Kind::Affine(_))
+    }
+
+    /// The warp's [`Placement`], when it has one.
+    pub fn as_placement(&self) -> Option<Placement> {
+        match self.kind {
+            Kind::Affine(placement) => Some(placement),
+            Kind::Projective(_) => None,
+        }
+    }
+}
+
+/// A translation: `base` shifted so pixel `p.u, p.v` lands exactly on `p`'s
+/// target and nothing else changes. This is what makes one pair move the
+/// picture without touching its scale or rotation.
+fn translation_through(p: ControlPoint, base: Placement) -> Placement {
+    let (lon, lat) = base.place(p.u, p.v);
+    Placement {
+        c: base.c + (p.lon - lon),
+        f: base.f + (p.lat - lat),
+        ..base
+    }
+}
+
+/// The similarity (translate, rotate, uniform scale — never shear) through
+/// two pairs, solved in closed form.
+///
+/// A similarity's matrix is always a scalar multiple of a rotation, so it has
+/// the constrained form `[[A, -B], [B, A]]`. Writing the map as
+/// `lon = A*u - B*v + tx`, `lat = B*u + A*v + ty` and subtracting the first
+/// pair's equations from the second's cancels `tx` and `ty`, leaving a 2×2
+/// linear system in `A` and `B` alone:
+///
+/// ```text
+/// A*du - B*dv = dlon
+/// B*du + A*dv = dlat
+/// ```
+///
+/// where `du, dv` and `dlon, dlat` are the pixel and target vectors between
+/// the two points. Its determinant is `du² + dv²`, so it is singular only
+/// when the two pixels coincide — the "two pairs on the same pixel" case the
+/// caller falls back from.
+fn similarity_through(
+    p0: ControlPoint,
+    p1: ControlPoint,
+    width: u32,
+    height: u32,
+) -> Option<Placement> {
+    let du = p1.u - p0.u;
+    let dv = p1.v - p0.v;
+    let denom = du * du + dv * dv;
+    if denom < degeneracy_threshold(width, height) {
+        return None;
+    }
+    let dlon = p1.lon - p0.lon;
+    let dlat = p1.lat - p0.lat;
+    let a = (dlon * du + dlat * dv) / denom;
+    let b = (dlat * du - dlon * dv) / denom;
+    Some(Placement {
+        a,
+        b: -b,
+        c: p0.lon - a * p0.u + b * p0.v,
+        d: b,
+        e: a,
+        f: p0.lat - b * p0.u - a * p0.v,
+    })
+}
+
+/// The affine through three pairs, solved in closed form.
+///
+/// An affine map is linear plus a translation, so subtracting the first
+/// pair's equations from the other two removes the translation and leaves a
+/// plain 2×2 linear map `M` between pixel-space vectors and target-space
+/// vectors: `M * e1 = f1`, `M * e2 = f2`, where `e1, e2` are the pixel
+/// offsets of the second and third pairs from the first, and `f1, f2` their
+/// target offsets. Two vector equations in a 2×2 unknown give
+/// `M = F * E⁻¹`, `E⁻¹` by the ordinary 2×2 cofactor formula — the same
+/// shape as `Placement::from_corners`, generalised from three specific
+/// corners to three arbitrary pairs. `E`'s determinant is the (signed) area
+/// of the pixel triangle the three pairs form; it is singular exactly when
+/// they are collinear, which is the degenerate input this function declines.
+fn best_affine_3(
+    p0: ControlPoint,
+    p1: ControlPoint,
+    p2: ControlPoint,
+    width: u32,
+    height: u32,
+) -> Option<Placement> {
+    let e1 = (p1.u - p0.u, p1.v - p0.v);
+    let e2 = (p2.u - p0.u, p2.v - p0.v);
+    let det = e1.0 * e2.1 - e2.0 * e1.1;
+    if det.abs() < degeneracy_threshold(width, height) {
+        return None;
+    }
+    let inv = 1.0 / det;
+    // E^{-1}, by the cofactor formula for a 2x2 matrix with columns e1, e2.
+    let inv00 = e2.1 * inv;
+    let inv01 = -e2.0 * inv;
+    let inv10 = -e1.1 * inv;
+    let inv11 = e1.0 * inv;
+    let f1 = (p1.lon - p0.lon, p1.lat - p0.lat);
+    let f2 = (p2.lon - p0.lon, p2.lat - p0.lat);
+    // M = F * E^{-1}, F's columns are f1, f2.
+    let a = f1.0 * inv00 + f2.0 * inv10;
+    let b = f1.0 * inv01 + f2.0 * inv11;
+    let d = f1.1 * inv00 + f2.1 * inv10;
+    let e = f1.1 * inv01 + f2.1 * inv11;
+    Some(Placement {
+        a,
+        b,
+        c: p0.lon - a * p0.u - b * p0.v,
+        d,
+        e,
+        f: p0.lat - d * p0.u - e * p0.v,
+    })
+}
+
+/// The best affine fit that `points` supports: the exact affine through its
+/// first three pairs if they are not collinear, else the similarity through
+/// its first two if they are not coincident, else the translation through
+/// its first — the affine tail of the module's degenerate rule, shared by
+/// the three-pair path and by a homography's own fallback.
+fn best_affine(points: &[ControlPoint], width: u32, height: u32, base: Placement) -> Placement {
+    if points.len() >= 3
+        && let Some(p) = best_affine_3(points[0], points[1], points[2], width, height)
+    {
+        return p;
+    }
+    if points.len() >= 2
+        && let Some(p) = similarity_through(points[0], points[1], width, height)
+    {
+        return p;
+    }
+    translation_through(points[0], base)
+}
+
+/// The homography through exactly four pairs.
+///
+/// A homography maps `(u, v)` to `((h0*u + h1*v + h2) / w, (h3*u + h4*v + h5)
+/// / w)` with `w = h6*u + h7*v + 1` — nine matrix entries with the ninth
+/// fixed at 1, since scaling every entry by the same nonzero number leaves
+/// the map unchanged. Clearing each pair's denominator turns
+/// `lon = (...)/ w` into one linear equation in `h0..h7`.
+/// Four pairs give eight such equations (two per pair), solved as one 8×8
+/// system. `solve` reports `None` when the four points cannot determine a
+/// homography — three or more of them collinear, most commonly — which the
+/// caller answers by falling back to the affine tail.
+fn homography_through(points: &[ControlPoint]) -> Option<[f64; 9]> {
+    debug_assert_eq!(points.len(), 4);
+    let mut a = [0.0_f64; 64];
+    let mut b = [0.0_f64; 8];
+    for (i, p) in points.iter().enumerate() {
+        let x_row = 2 * i;
+        let y_row = 2 * i + 1;
+        // lon*w = h0*u + h1*v + h2  =>  h0*u + h1*v + h2 - lon*h6*u - lon*h7*v = lon
+        a[x_row * 8] = p.u;
+        a[x_row * 8 + 1] = p.v;
+        a[x_row * 8 + 2] = 1.0;
+        a[x_row * 8 + 6] = -p.lon * p.u;
+        a[x_row * 8 + 7] = -p.lon * p.v;
+        b[x_row] = p.lon;
+        // lat*w = h3*u + h4*v + h5, the same shape one row down.
+        a[y_row * 8 + 3] = p.u;
+        a[y_row * 8 + 4] = p.v;
+        a[y_row * 8 + 5] = 1.0;
+        a[y_row * 8 + 6] = -p.lat * p.u;
+        a[y_row * 8 + 7] = -p.lat * p.v;
+        b[y_row] = p.lat;
+    }
+    solve(&mut a, &mut b, 8)?;
+    Some([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7], 1.0])
+}
+
+/// Solves `a x = b` in place by Gaussian elimination with partial pivoting.
+///
+/// `a` is row-major and `n` by `n`; the solution is written back into `b`.
+/// `None` means the system is singular — for this module's callers that is
+/// control points on a line, or two pairs on the same pixel, and every
+/// caller answers it by falling back to a simpler fit rather than failing.
+///
+/// Written here because the largest system this ever sees is 53 by 53 (the
+/// fifty-pair cap plus the spline's three affine terms), which is far too
+/// small to justify a linear-algebra dependency — and several of them bring
+/// a `-sys` crate, which invariant 5 and the three-platform build forbid.
+fn solve(a: &mut [f64], b: &mut [f64], n: usize) -> Option<()> {
+    debug_assert_eq!(a.len(), n * n);
+    debug_assert_eq!(b.len(), n);
+    for column in 0..n {
+        // Partial pivoting: the largest remaining magnitude in this column.
+        // Without it a zero on the diagonal stops an otherwise fine system,
+        // and a small one loses most of its digits.
+        let mut pivot = column;
+        for row in (column + 1)..n {
+            if a[row * n + column].abs() > a[pivot * n + column].abs() {
+                pivot = row;
+            }
+        }
+        if a[pivot * n + column].abs() < 1e-12 {
+            return None;
+        }
+        if pivot != column {
+            for k in 0..n {
+                a.swap(column * n + k, pivot * n + k);
+            }
+            b.swap(column, pivot);
+        }
+        let diagonal = a[column * n + column];
+        for row in (column + 1)..n {
+            let factor = a[row * n + column] / diagonal;
+            if factor == 0.0 {
+                continue;
+            }
+            for k in column..n {
+                a[row * n + k] -= factor * a[column * n + k];
+            }
+            b[row] -= factor * b[column];
+        }
+    }
+    // Back-substitution.
+    for row in (0..n).rev() {
+        let mut sum = b[row];
+        for k in (row + 1)..n {
+            sum -= a[row * n + k] * b[k];
+        }
+        b[row] = sum / a[row * n + row];
+    }
+    Some(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::document::{ControlPoint, Placement};
+
+    fn base() -> Placement {
+        // 800x600 pixels over one degree square, north up.
+        Placement::spanning(-71.0, 42.0, -70.0, 41.0, 800, 600)
+    }
+
+    fn at(u: f64, v: f64, lon: f64, lat: f64) -> ControlPoint {
+        ControlPoint { u, v, lon, lat }
+    }
+
+    /// The defining property, and the one that means "perfectly": whatever
+    /// the pairs, the fitted warp puts each pixel exactly on its target.
+    fn assert_exact(points: &[ControlPoint], warp: &Warp) {
+        for (n, p) in points.iter().enumerate() {
+            let (lon, lat) = warp.place(p.u, p.v);
+            assert!(
+                (lon - p.lon).abs() < 1e-9 && (lat - p.lat).abs() < 1e-9,
+                "pair {n} landed at {lon}, {lat} and not at {}, {}",
+                p.lon,
+                p.lat
+            );
+        }
+    }
+
+    /// No pairs is today's behaviour: the stored placement, untouched.
+    #[test]
+    fn no_pairs_is_the_placement_unchanged() {
+        let warp = Warp::fit(&[], 800, 600, base());
+        assert_eq!(warp.place(0.0, 0.0), base().place(0.0, 0.0));
+        assert_eq!(warp.place(800.0, 600.0), base().place(800.0, 600.0));
+        assert!(warp.is_identity_affine());
+    }
+
+    /// One pair moves the picture and changes nothing else. Checked against
+    /// a second, independent point: it must move by exactly the same offset.
+    #[test]
+    fn one_pair_is_a_translation() {
+        let (lon0, lat0) = base().place(400.0, 300.0);
+        let points = [at(400.0, 300.0, lon0 + 0.25, lat0 - 0.5)];
+        let warp = Warp::fit(&points, 800, 600, base());
+        assert_exact(&points, &warp);
+        let (was_lon, was_lat) = base().place(0.0, 0.0);
+        let (now_lon, now_lat) = warp.place(0.0, 0.0);
+        assert!((now_lon - was_lon - 0.25).abs() < 1e-12);
+        assert!((now_lat - was_lat + 0.5).abs() < 1e-12);
+    }
+
+    /// Two pairs rotate and scale but never shear: a square stays square.
+    /// Checked by the property that defines a similarity — every distance
+    /// is scaled by the same factor.
+    #[test]
+    fn two_pairs_are_a_similarity_and_keep_the_aspect() {
+        let points = [
+            at(0.0, 0.0, 0.0, 0.0),
+            at(800.0, 0.0, 0.0, 1.0), // the top edge now runs north
+        ];
+        let warp = Warp::fit(&points, 800, 600, base());
+        assert_exact(&points, &warp);
+        let a = warp.place(0.0, 0.0);
+        let b = warp.place(800.0, 0.0);
+        let c = warp.place(0.0, 800.0);
+        let ab = ((b.0 - a.0).powi(2) + (b.1 - a.1).powi(2)).sqrt();
+        let ac = ((c.0 - a.0).powi(2) + (c.1 - a.1).powi(2)).sqrt();
+        assert!((ab - ac).abs() < 1e-9, "a square became {ab} by {ac}");
+    }
+
+    /// Three points determine an affine exactly. The expected answer here is
+    /// arithmetic worked by hand, not a second copy of the fit: the image's
+    /// top-left, top-right and bottom-left are sent to three chosen places,
+    /// so the centre must land at their mean.
+    #[test]
+    fn three_pairs_are_the_affine_through_them() {
+        let points = [
+            at(0.0, 0.0, -10.0, 5.0),
+            at(800.0, 0.0, -8.0, 5.0),
+            at(0.0, 600.0, -10.0, 3.0),
+        ];
+        let warp = Warp::fit(&points, 800, 600, base());
+        assert_exact(&points, &warp);
+        let (lon, lat) = warp.place(400.0, 300.0);
+        assert!((lon - -9.0).abs() < 1e-9, "{lon}");
+        assert!((lat - 4.0).abs() < 1e-9, "{lat}");
+        assert!(warp.is_identity_affine(), "three pairs are still an affine");
+    }
+
+    /// Four pairs are a homography, which an affine cannot be: the image's
+    /// four corners go to a trapezium. The property that proves it is
+    /// projective and not affine: a homography sends a line through a point
+    /// to a line through its image, so the pixel rectangle's own diagonal
+    /// crossing — its centre — must land exactly where the target
+    /// trapezium's diagonals cross, not at the corners' plain mean.
+    ///
+    /// The crossing point is worked out here from the two diagonal lines by
+    /// hand, independently of the fit: `(-2,1)-(1,-1)` reaches `x = 0` at
+    /// `s = 2/3` along itself, where `y = 1 - 2s = -1/3`; `(2,1)-(-1,-1)`
+    /// reaches `x = 0` at `t = 2/3` along itself, where `y = 1 - 2t = -1/3`
+    /// too, as any two diagonals of one quadrilateral must agree. That
+    /// point is *below* the corners' mean of 0, which is the brief's
+    /// original assertion inverted — this was checked independently against
+    /// the line-intersection formula above (not against this module's own
+    /// fit) before concluding the brief's inequality had the wrong sign.
+    #[test]
+    fn four_pairs_are_a_homography_that_no_affine_could_be() {
+        let points = [
+            at(0.0, 0.0, -2.0, 1.0),
+            at(800.0, 0.0, 2.0, 1.0),
+            at(800.0, 600.0, 1.0, -1.0),
+            at(0.0, 600.0, -1.0, -1.0),
+        ];
+        let warp = Warp::fit(&points, 800, 600, base());
+        assert_exact(&points, &warp);
+        let (lon, lat) = warp.place(400.0, 300.0);
+        assert!(
+            lon.abs() < 1e-9,
+            "the centre should stay on the axis: {lon}"
+        );
+        assert!(
+            (lat - (-1.0 / 3.0)).abs() < 1e-9,
+            "expected the diagonals' crossing at -1/3, got {lat}"
+        );
+        let mean_lat = (1.0 + 1.0 - 1.0 - 1.0) / 4.0;
+        assert!(
+            (lat - mean_lat).abs() > 1e-6,
+            "an affine would give the corners' mean, {mean_lat}; a homography must not"
+        );
+        assert!(!warp.is_identity_affine(), "a homography is not an affine");
+    }
+
+    /// Pairs on a line cannot determine an area. The fit must say so rather
+    /// than return a degenerate warp that collapses the picture.
+    #[test]
+    fn pairs_on_a_line_fall_back_rather_than_collapsing_the_image() {
+        let points = [
+            at(0.0, 0.0, 0.0, 0.0),
+            at(100.0, 0.0, 1.0, 0.0),
+            at(200.0, 0.0, 2.0, 0.0),
+        ];
+        let warp = Warp::fit(&points, 800, 600, base());
+        // Not asserted to be exact — it cannot be — but it must still be a
+        // usable warp with area, not a collapse to a line.
+        let a = warp.place(0.0, 0.0);
+        let b = warp.place(0.0, 600.0);
+        assert!((a.1 - b.1).abs() > 1e-6, "the image collapsed to a line");
+    }
+
+    /// The solver against a system whose answer is known by inspection,
+    /// and one that is singular and must say so rather than return noise.
+    #[test]
+    fn the_solver_solves_and_reports_a_singular_system() {
+        // 2x + y = 5, x + 3y = 10  =>  x = 1, y = 3.
+        let mut a = [2.0, 1.0, 1.0, 3.0];
+        let mut b = [5.0, 10.0];
+        solve(&mut a, &mut b, 2).expect("solvable");
+        assert!((b[0] - 1.0).abs() < 1e-12, "{b:?}");
+        assert!((b[1] - 3.0).abs() < 1e-12, "{b:?}");
+
+        // Two copies of the same equation determine nothing.
+        let mut a = [1.0, 2.0, 2.0, 4.0];
+        let mut b = [3.0, 6.0];
+        assert!(solve(&mut a, &mut b, 2).is_none());
+
+        // A zero in the first pivot position is fine once rows are swapped.
+        let mut a = [0.0, 1.0, 1.0, 0.0];
+        let mut b = [2.0, 3.0];
+        solve(&mut a, &mut b, 2).expect("pivoting handles a zero diagonal");
+        assert!(
+            (b[0] - 3.0).abs() < 1e-12 && (b[1] - 2.0).abs() < 1e-12,
+            "{b:?}"
+        );
+    }
+}
