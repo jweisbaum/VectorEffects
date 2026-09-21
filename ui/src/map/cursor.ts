@@ -76,18 +76,49 @@ const FORBIDDEN_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height
 /** The refusal as a CSS cursor, with the platform's own to fall back on. */
 export const FORBIDDEN_CURSOR = `url("data:image/svg+xml;utf8,${encodeURIComponent(FORBIDDEN_SVG)}") 12 12, not-allowed`;
 
+/**
+ * Which of the map's own modes claims a pointer-down ahead of every tool,
+ * and ahead of each other in this order: a pick, then a running capture,
+ * then the alignment mode.
+ *
+ * `cursorFor` below and `MapView`'s own pointer dispatch both call this, so
+ * the cursor shown and the click actually handled cannot enforce a
+ * different order from one another. That is not a hypothetical: a running
+ * capture and an armed alignment session both being possible at once let
+ * `cursorFor` promise the capture would win (`recording` checked before
+ * `aligning`) while the dispatch checked alignment first and a click that
+ * should have dragged the capture's region instead placed a control point
+ * — silent, and `cursor.test.ts`'s own passing assertion about the cursor
+ * string gave no sign anything was wrong (Task 7 review finding). A test
+ * against this function's *return value*, not the cursor, is what pins the
+ * dispatch order; a test of `cursorFor` alone cannot.
+ */
+export type PointerPriority = "picking" | "recording" | "aligning" | "tool";
+
+export function pointerPriorityFor(context: {
+  picking: boolean;
+  recording: boolean;
+  aligning: boolean;
+}): PointerPriority {
+  if (context.picking) return "picking";
+  if (context.recording) return "recording";
+  if (context.aligning) return "aligning";
+  return "tool";
+}
+
 /** The CSS `cursor` value for a context. */
 export function cursorFor(context: CursorContext): string {
+  const priority = pointerPriorityFor(context);
   // A pick takes the click ahead of every tool, so its cursor comes first.
-  if (context.picking) return "crosshair";
+  if (priority === "picking") return "crosshair";
   // The eyedropper's magnifier is drawn on the overlay at the pointer; a
   // system cursor on top of it would hide the plus that marks the sample.
   if (context.eyedropper) return "none";
   // While a capture records, the region is dragged with the selection cursor
   // (spec.md 8.7): nothing else on the map does anything.
-  if (context.recording) return "default";
+  if (priority === "recording") return "default";
   // Alignment takes every click, whatever the tool in hand (Task 7).
-  if (context.aligning) return "crosshair";
+  if (priority === "aligning") return "crosshair";
   // The tool will not work on this layer (M51). Before the tools, which is
   // exactly where the refusal sits in the click.
   if (context.forbidden) return FORBIDDEN_CURSOR;

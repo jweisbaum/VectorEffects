@@ -131,11 +131,16 @@ export interface AlignableView {
 
 /**
  * A map position, carried back to the image's own pixel space through the
- * view's *current* warp.
+ * view's *current* warp — or `null` when `at` cannot be resolved to a real
+ * pixel, which the caller must refuse rather than store: an extrapolated
+ * guess here is a wrong control point that looks exactly like a right one
+ * once it is written.
  *
  * **Unwarped**: the 2×2 affine in `placement` inverted directly — the same
  * six numbers `placeVectors` (`images.ts`) reads to draw the image, run
- * backwards.
+ * backwards. `null` only for a degenerate placement (zero determinant: no
+ * width, no height, or a shear that collapses the image to a line), which a
+ * real image never has.
  *
  * **Warped**: a thin-plate spline has no closed-form inverse (the same fact
  * that forced the mesh render path), so this searches `warp_mesh` — the
@@ -143,10 +148,16 @@ export interface AlignableView {
  * then inverts *that* cell's bilinear patch by Newton's method. Bilinear
  * inversion is exact once the cell is found; the only approximation is the
  * mesh's own resolution standing in for the true spline, the same trade the
- * render path already makes. At 64 cells over an image that is far finer
- * than anyone can click by eye.
+ * render path already makes, and at 64 cells over an image that is far finer
+ * than anyone can click by eye. `null` when no cell contains `at` at all: the
+ * mesh's own true, bowed edge does not coincide with the straight-edged quad
+ * `corners` draws (`insideImage`/`imageUnder` hit-test against that coarser
+ * quad, so a click can pass that test and still land in the gap between it
+ * and the real boundary). Extrapolating the nearest cell's bilinear patch
+ * past its own unit square would answer confidently and wrongly; refusing is
+ * the honest answer.
  */
-export function imagePixelAt(view: AlignableView, at: GeoPoint): [number, number] {
+export function imagePixelAt(view: AlignableView, at: GeoPoint): [number, number] | null {
   const mesh = view.warped ? view.warp_mesh : undefined;
   if (mesh && mesh.length > 0 && view.warp_cells) {
     // Neither `place` nor `mesh` normalises longitude on the Rust side, so an
@@ -179,12 +190,12 @@ export function pictureToMap(view: AlignableView, u: number, v: number): GeoPoin
   return { lon: a! * u + b! * v + c!, lat: d! * u + e! * v + f! };
 }
 
-function imagePixelFromAffine(placement: number[], at: GeoPoint): [number, number] {
+function imagePixelFromAffine(placement: number[], at: GeoPoint): [number, number] | null {
   const [a, b, c, d, e, f] = placement;
   const det = a! * e! - b! * d!;
+  if (Math.abs(det) < 1e-15) return null;
   const lonC = at.lon - c!;
   const latF = at.lat - f!;
-  if (Math.abs(det) < 1e-15) return [0, 0];
   const u = (e! * lonC - b! * latF) / det;
   const v = (a! * latF - d! * lonC) / det;
   return [u, v];
@@ -196,18 +207,19 @@ function meshVertex(mesh: number[], cells: number, row: number, col: number): [n
   return [mesh[i]!, mesh[i + 1]!];
 }
 
-/** Even-odd point-in-polygon, walking the quad's own perimeter. */
-function pointInQuad(at: GeoPoint, quad: [number, number][]): boolean {
-  let inside = false;
-  for (let i = 0, j = quad.length - 1; i < quad.length; j = i++) {
-    const a = quad[i]!;
-    const b = quad[j]!;
-    const crosses = a[1] > at.lat !== b[1] > at.lat;
-    if (crosses && at.lon < ((b[0] - a[0]) * (at.lat - a[1])) / (b[1] - a[1]) + a[0]) {
-      inside = !inside;
-    }
-  }
-  return inside;
+/** A cell's bilinear patch, evaluated forward at parameters `(s, t)` in `[0, 1]`. */
+function bilinearPoint(
+  p00: [number, number],
+  p10: [number, number],
+  p01: [number, number],
+  p11: [number, number],
+  s: number,
+  t: number,
+): [number, number] {
+  return [
+    (1 - s) * (1 - t) * p00[0] + s * (1 - t) * p10[0] + (1 - s) * t * p01[0] + s * t * p11[0],
+    (1 - s) * (1 - t) * p00[1] + s * (1 - t) * p10[1] + (1 - s) * t * p01[1] + s * t * p11[1],
+  ];
 }
 
 /**
@@ -215,6 +227,12 @@ function pointInQuad(at: GeoPoint, quad: [number, number][]): boolean {
  * cell's centre. A bilinear map is exact, so this converges to machine
  * precision in a handful of iterations — there is no approximation here
  * beyond the mesh standing in for the spline between its own vertices.
+ *
+ * Does not itself say whether `target` is actually inside this cell: a
+ * singular Jacobian breaks out early, at whatever `(s, t)` the loop had
+ * reached, which can still be inside `[0, 1]` by coincidence. The caller
+ * checks the bounds and, because of that coincidence risk, checks the
+ * *residual* too.
  */
 function invertBilinearCell(
   p00: [number, number],
@@ -226,10 +244,7 @@ function invertBilinearCell(
   let s = 0.5;
   let t = 0.5;
   for (let iter = 0; iter < 20; iter++) {
-    const x =
-      (1 - s) * (1 - t) * p00[0] + s * (1 - t) * p10[0] + (1 - s) * t * p01[0] + s * t * p11[0];
-    const y =
-      (1 - s) * (1 - t) * p00[1] + s * (1 - t) * p10[1] + (1 - s) * t * p01[1] + s * t * p11[1];
+    const [x, y] = bilinearPoint(p00, p10, p01, p11, s, t);
     const fx = x - target.lon;
     const fy = y - target.lat;
     const dxds = (1 - t) * (p10[0] - p00[0]) + t * (p11[0] - p01[0]);
@@ -247,42 +262,81 @@ function invertBilinearCell(
   return { s, t };
 }
 
+/**
+ * How far outside `[0, 1]` a solved `(s, t)` — or how far off `target` a
+ * solved point — may fall and still count as "this cell", in cell-parameter
+ * units and degrees respectively. Both exist for floating point only: a
+ * target exactly on a shared vertex or edge solves to `s` or `t` of exactly
+ * 0 or 1 up to rounding, never meaningfully outside it.
+ *
+ * A point-in-polygon test on the cell's own four corners was tried first and
+ * rejected: at a shared vertex or edge — which is exactly what a click on an
+ * *earlier* control point's own pixel, or a mesh vertex, lands on — a
+ * geometric edge-crossing test is ambiguous by construction (which side of a
+ * boundary a point exactly on it falls is a coin flip between adjacent
+ * cells), and every one of the mesh's outer boundary vertices failed it in
+ * testing. Checking the bilinear parameters themselves has no such
+ * ambiguity: they are exactly 0 or 1 at a corner, not "on one side or the
+ * other of a line".
+ */
+const CELL_TOLERANCE = 1e-6;
+
 function imagePixelFromMesh(
   mesh: number[],
   cells: number,
   width: number,
   height: number,
   at: GeoPoint,
-): [number, number] {
-  let nearest: { row: number; col: number; dist: number } | null = null;
+): [number, number] | null {
   for (let row = 0; row < cells; row++) {
     for (let col = 0; col < cells; col++) {
       const p00 = meshVertex(mesh, cells, row, col);
       const p10 = meshVertex(mesh, cells, row, col + 1);
-      const p11 = meshVertex(mesh, cells, row + 1, col + 1);
       const p01 = meshVertex(mesh, cells, row + 1, col);
-      // Walked in perimeter order — p00, p10, p11, p01 — not the bilinear
-      // corner order used below, which would cross itself as a polygon.
-      if (pointInQuad(at, [p00, p10, p11, p01])) {
-        const { s, t } = invertBilinearCell(p00, p10, p01, p11, at);
-        return cellToPixel(row, col, s, t, cells, width, height);
+      const p11 = meshVertex(mesh, cells, row + 1, col + 1);
+      // A quick reject on the cell's own bounding box, before the Newton
+      // solve: a bilinear patch never reaches outside the box its four
+      // corners span, and most cells are nowhere near `at`.
+      const minLon = Math.min(p00[0], p10[0], p01[0], p11[0]);
+      const maxLon = Math.max(p00[0], p10[0], p01[0], p11[0]);
+      const minLat = Math.min(p00[1], p10[1], p01[1], p11[1]);
+      const maxLat = Math.max(p00[1], p10[1], p01[1], p11[1]);
+      if (at.lon < minLon || at.lon > maxLon || at.lat < minLat || at.lat > maxLat) continue;
+      const { s, t } = invertBilinearCell(p00, p10, p01, p11, at);
+      if (
+        s < -CELL_TOLERANCE ||
+        s > 1 + CELL_TOLERANCE ||
+        t < -CELL_TOLERANCE ||
+        t > 1 + CELL_TOLERANCE
+      ) {
+        continue;
       }
-      const cx = (p00[0] + p10[0] + p01[0] + p11[0]) / 4;
-      const cy = (p00[1] + p10[1] + p01[1] + p11[1]) / 4;
-      const dist = (cx - at.lon) ** 2 + (cy - at.lat) ** 2;
-      if (nearest === null || dist < nearest.dist) nearest = { row, col, dist };
+      const clampedS = Math.min(Math.max(s, 0), 1);
+      const clampedT = Math.min(Math.max(t, 0), 1);
+      // The residual check `invertBilinearCell`'s own doc comment asks for:
+      // confirms Newton actually converged onto `at`, inside this cell,
+      // rather than breaking out early — a singular Jacobian — at
+      // coordinates that happen to fall inside `[0, 1]` by coincidence.
+      const landed = bilinearPoint(p00, p10, p01, p11, clampedS, clampedT);
+      if (
+        Math.abs(landed[0] - at.lon) > CELL_TOLERANCE ||
+        Math.abs(landed[1] - at.lat) > CELL_TOLERANCE
+      ) {
+        continue;
+      }
+      return cellToPixel(row, col, clampedS, clampedT, cells, width, height);
     }
   }
-  // A click a hair outside every cell — the mesh's own edge, or a warp so
-  // extreme the corner sits outside its neighbours' hull. Newton still
-  // converges; it simply extrapolates the nearest patch a little.
-  const { row, col } = nearest!;
-  const p00 = meshVertex(mesh, cells, row, col);
-  const p10 = meshVertex(mesh, cells, row, col + 1);
-  const p11 = meshVertex(mesh, cells, row + 1, col + 1);
-  const p01 = meshVertex(mesh, cells, row + 1, col);
-  const { s, t } = invertBilinearCell(p00, p10, p01, p11, at);
-  return cellToPixel(row, col, s, t, cells, width, height);
+  // No cell contains `at` at all: the mesh's own true, bowed edge does not
+  // coincide with the coarse straight-edged quad `corners` draws and
+  // `imageUnder` hit-tests, so a click can pass that coarser test and still
+  // land in the gap. There used to be a fallback here that took the nearest
+  // cell's centroid and let Newton's method extrapolate past its own unit
+  // square — which answers confidently and, right where
+  // `corner_residual_deg` is already warning the spline is unreliable, is
+  // most likely to answer *wrongly*. Refusing is the honest answer; the
+  // caller turns `null` into a hint rather than a stored control point.
+  return null;
 }
 
 function cellToPixel(
@@ -319,7 +373,6 @@ function pictureFromMesh(
   const p10 = meshVertex(mesh, cells, row, col + 1);
   const p01 = meshVertex(mesh, cells, row + 1, col);
   const p11 = meshVertex(mesh, cells, row + 1, col + 1);
-  const lon = (1 - s) * (1 - t) * p00[0] + s * (1 - t) * p10[0] + (1 - s) * t * p01[0] + s * t * p11[0];
-  const lat = (1 - s) * (1 - t) * p00[1] + s * (1 - t) * p10[1] + (1 - s) * t * p01[1] + s * t * p11[1];
+  const [lon, lat] = bilinearPoint(p00, p10, p01, p11, s, t);
   return { lon, lat };
 }

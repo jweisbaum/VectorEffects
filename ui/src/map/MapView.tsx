@@ -35,7 +35,7 @@ import type { MacroOutline } from "../generated/MacroOutline";
 import type { ShortcutAction } from "../generated/ShortcutAction";
 import type { ToolSchema } from "../generated/ToolSchema";
 import { actionFor, chordOf, toolChord } from "../settings/bindings";
-import { cursorFor } from "./cursor";
+import { cursorFor, pointerPriorityFor } from "./cursor";
 import { createPortal } from "react-dom";
 import { reportError, setActivity, setHint } from "../hint";
 import { IconSvg, REDO_ICON, UNDO_ICON } from "./ToolIcon";
@@ -4257,10 +4257,27 @@ export default function MapView({
       return;
     }
 
+    // Which of a pick, a running capture or the alignment mode claims this
+    // click, ahead of every tool and ahead of each other — the one place
+    // this is decided. `cursorFor` reads the same function for the cursor it
+    // shows, and `cursor.test.ts`'s own suite for it pins the return value
+    // directly, rather than through the cursor string a review of this task
+    // found could pass while the dispatch itself checked a different order
+    // (a running capture is supposed to outrank the alignment mode; it did
+    // on the cursor and did not, once, in the dispatch below).
+    const pointerPriority = pointerPriorityFor({
+      picking: picking !== null,
+      recording: recording !== null,
+      aligning: alignStore.current!.get().layer !== null,
+    });
+
     // A pick armed in the inspector takes the click ahead of every tool: the
     // user asked for this one place, and painting or panning instead would
     // both lose the click and do something they did not ask for.
-    if (picking !== null) {
+    // `pointerPriority` is derived from `picking !== null`, so the two can
+    // never disagree; the redundant check is only for TypeScript's own
+    // narrowing of `picking` inside the block.
+    if (pointerPriority === "picking" && picking !== null) {
       onExitShapeEditing?.();
       const geo = unproject(cameraRef.current, viewRef.current, point);
       onPicked();
@@ -4279,49 +4296,22 @@ export default function MapView({
       return;
     }
 
-    // An image layer's corner-drag handles and its M36 whole-picture drag
-    // used to be picked up here (spec.md 4.9, M18). Both are gone with the
-    // corner-placement model; this is their replacement, Task 7's
-    // alignment interaction. Every click here is a control point's picture
-    // or map half, alternating, never a tool's — ahead of the tools below,
-    // the same precedence a pick from the inspector takes above.
-    //
-    // `imagePixelAt` carries a picture click back to the image's own pixel
-    // space through whatever warp is in force when the session began: frozen
-    // for the whole session, since the document — and so the warp — is not
-    // written until `Enter` (the amendment to this task's brief: a spline has
-    // no closed-form inverse, so this searches the mesh already evaluated
-    // forward rather than re-deriving the fit in TypeScript).
-    if (alignStore.current!.get().layer !== null) {
-      if (alignStore.current!.get().expecting === "picture") {
-        // The same hit test the outline is drawn from (`insideImage`): a
-        // "picture" click that misses the quad is not a feature in the
-        // picture and is dropped rather than guessed at.
-        const view = imageUnder(
-          imageLayersRef.current,
-          alignStore.current!.get().layer,
-          cameraRef.current,
-          viewRef.current,
-          point,
-        );
-        if (view) {
-          const geo = unproject(cameraRef.current, viewRef.current, point);
-          const [u, v] = imagePixelAt(view, geo);
-          alignStore.current!.pick("picture", { lon: u, lat: v });
-        }
-      } else {
-        const geo = unproject(cameraRef.current, viewRef.current, point);
-        alignStore.current!.pick("map", geo);
-      }
-      return;
-    }
-
     // While a capture runs, the region can be *dragged* — and nothing else on
-    // the map does anything (spec.md 8.7). By delta from where the pointer
-    // went down, at pointer resolution: each frame holds its own position,
-    // and this moves the step being viewed and no other. It is capture state,
+    // the map does anything (spec.md 8.7), the alignment mode included: an
+    // image layer's corner-drag handles and its M36 whole-picture drag used
+    // to be picked up here (spec.md 4.9, M18) and are gone with the
+    // corner-placement model; this is their replacement, Task 7's alignment
+    // interaction, gated below by `pointerPriority` rather than a capture
+    // check of its own — `pointerPriorityFor` above already decided a
+    // capture wins, so alignment's own block, further down, is only ever
+    // reached when this one is not. By delta from where the pointer went
+    // down, at pointer resolution: each frame holds its own position, and
+    // this moves the step being viewed and no other. It is capture state,
     // never the document, which is why it is not an edit and not undoable.
-    if (recording !== null) {
+    // Same redundant-looking narrowing as the picking block above, for the
+    // same reason: `pointerPriority` and `recording !== null` cannot
+    // disagree, since one is derived from the other.
+    if (pointerPriority === "recording" && recording !== null) {
       const geo = unproject(cameraRef.current, viewRef.current, point);
       // In the preview a click places a *copy* of the macro there (spec.md
       // 8.7, M29): in the preview's own scene, looping with the original,
@@ -4340,6 +4330,49 @@ export default function MapView({
       const anchor = region === null ? null : regionAnchor(region);
       if (region !== null && anchor !== null && regionContains(region, geo.lon, geo.lat)) {
         captureDrag.current = { pointer: [geo.lon, geo.lat], anchor };
+      }
+      return;
+    }
+
+    // The image alignment mode (Task 7, spec.md 4.9 §2, §5): every click here
+    // is a control point's picture or map half, alternating, never a tool's —
+    // ahead of the tools below, gated by `pointerPriority` rather than a
+    // check of `alignStore` alone, so a running capture (handled above)
+    // reliably wins the click even though both can be armed at once.
+    //
+    // `imagePixelAt` carries a picture click back to the image's own pixel
+    // space through whatever warp is in force when the session began: frozen
+    // for the whole session, since the document — and so the warp — is not
+    // written until `Enter` (the amendment to this task's brief: a spline has
+    // no closed-form inverse, so this searches the mesh already evaluated
+    // forward rather than re-deriving the fit in TypeScript).
+    //
+    // A click that cannot be resolved to a real image pixel — outside the
+    // coarse straight-edged quad `imageUnder` hit-tests, or in the gap
+    // between that quad and the mesh's own, bowed true edge — is refused
+    // with a hint rather than stored as an extrapolated guess: a wrong
+    // control point written silently is far costlier to notice and undo
+    // later than one more click now.
+    if (pointerPriority === "aligning") {
+      if (alignStore.current!.get().expecting === "picture") {
+        const view = imageUnder(
+          imageLayersRef.current,
+          alignStore.current!.get().layer,
+          cameraRef.current,
+          viewRef.current,
+          point,
+        );
+        const geo = unproject(cameraRef.current, viewRef.current, point);
+        const pixel = view ? imagePixelAt(view, geo) : null;
+        if (pixel) {
+          reportError(null);
+          alignStore.current!.pick("picture", { lon: pixel[0], lat: pixel[1] });
+        } else {
+          reportError("That point is outside the picture — click a place inside it.");
+        }
+      } else {
+        const geo = unproject(cameraRef.current, viewRef.current, point);
+        alignStore.current!.pick("map", geo);
       }
       return;
     }

@@ -2,6 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import { createAlignStore, imagePixelAt, pictureToMap, type AlignableView } from "./align";
 
+/** Unwraps a resolved pixel, failing loudly if the click was refused. */
+function found(pixel: [number, number] | null): [number, number] {
+  if (pixel === null) throw new Error("expected imagePixelAt to resolve a pixel, got null");
+  return pixel;
+}
+
 describe("createAlignStore", () => {
   /**
    * The mode alternates, starting on the picture, and a half-finished pair is
@@ -134,7 +140,7 @@ describe("imagePixelAt", () => {
       const [a, b, c, d, e, f] = view.placement as [number, number, number, number, number, number];
       const lon = a * u + b * v + c;
       const lat = d * u + e * v + f;
-      const [gotU, gotV] = imagePixelAt(view, { lon, lat });
+      const [gotU, gotV] = found(imagePixelAt(view, { lon, lat }));
       expect(gotU).toBeCloseTo(u, 6);
       expect(gotV).toBeCloseTo(v, 6);
     }
@@ -182,7 +188,7 @@ describe("imagePixelAt", () => {
         const u = (col / cells) * width;
         const v = (row / cells) * height;
         const { lon, lat } = forward(u, v);
-        const [gotU, gotV] = imagePixelAt(view, { lon, lat });
+        const [gotU, gotV] = found(imagePixelAt(view, { lon, lat }));
         expect(gotU).toBeCloseTo(u, 3);
         expect(gotV).toBeCloseTo(v, 3);
       }
@@ -193,7 +199,7 @@ describe("imagePixelAt", () => {
     const u = 130;
     const v = 47;
     const target = forward(u, v);
-    const [gotU, gotV] = imagePixelAt(view, target);
+    const [gotU, gotV] = found(imagePixelAt(view, target));
     // One cell spans width/cells = 100px by height/cells = 75px; the mesh's
     // own piecewise-bilinear approximation of the sine, not the exact
     // curve, bounds the achievable accuracy here — a fraction of a cell,
@@ -242,8 +248,46 @@ describe("imagePixelAt", () => {
     };
     // The right edge, u=800, is lon 182 — which `unproject` would hand back
     // as -178.
-    const [gotU, gotV] = imagePixelAt(view, { lon: -178, lat: 0 });
+    const [gotU, gotV] = found(imagePixelAt(view, { lon: -178, lat: 0 }));
     expect(gotU).toBeCloseTo(width, 1);
     expect(gotV).toBeCloseTo(height / 2, 1);
+  });
+
+  /**
+   * A click nowhere near the mesh at all is refused, not answered with an
+   * extrapolated guess. `insideImage`/`imageUnder` hit-test against the
+   * coarse straight-edged `corners` quad, which does not coincide with the
+   * mesh's own bowed true edge — so a click that passes that coarser test
+   * can still land in the gap and find no cell here. There used to be a
+   * "nearest cell, extrapolated" fallback; a wrong control point written
+   * silently from it is far costlier to notice than a refused click, so it
+   * was removed rather than fixed to clamp.
+   */
+  it("refuses a click that lands in no mesh cell, rather than extrapolating one", () => {
+    const width = 800;
+    const height = 600;
+    const cells = 4;
+    const mesh: number[] = [];
+    for (let row = 0; row <= cells; row++) {
+      for (let col = 0; col <= cells; col++) {
+        mesh.push(-71 + (col / cells) * (width / 800), 42 - (row / cells) * (height / 600));
+      }
+    }
+    const view: AlignableView = {
+      width,
+      height,
+      placement: [1 / width, 0, -71, 0, -1 / height, 42],
+      warped: true,
+      warp_mesh: mesh,
+      warp_cells: cells,
+    };
+    // Far outside the mesh's own lon/lat span entirely.
+    expect(imagePixelAt(view, { lon: 40, lat: -10 })).toBeNull();
+  });
+
+  /** A degenerate (zero-area) affine has no inverse and must say so, not divide by zero. */
+  it("refuses a degenerate, zero-area affine rather than dividing by zero", () => {
+    const view = { width: 100, height: 100, placement: [0, 0, -71, 0, 0, 42] };
+    expect(imagePixelAt(view, { lon: -71, lat: 42 })).toBeNull();
   });
 });

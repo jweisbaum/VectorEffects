@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { BUCKET_CURSOR, FORBIDDEN_CURSOR, type CursorContext, cursorFor } from "./cursor";
+import { BUCKET_CURSOR, FORBIDDEN_CURSOR, type CursorContext, cursorFor, pointerPriorityFor } from "./cursor";
 import { CAPTURE, ERASE, HAND, INSERT, MEASURE, SELECT } from "./tools";
 
 // `onImage` and `grip` are deleted from `CursorContext`, and with them the
@@ -88,6 +88,33 @@ describe("the image alignment mode (Task 7)", () => {
   it("outranks a tool the layer would refuse", () => {
     expect(cursorFor({ ...base, tool: "brush", aligning: true, forbidden: true })).toBe(
       "crosshair",
+    );
+  });
+});
+
+describe("pointerPriorityFor", () => {
+  /**
+   * This is the function `MapView`'s own pointer-down dispatch calls to
+   * decide which of picking, a running capture or the alignment mode gets
+   * the click — not a second copy of the ordering, restated. A test that
+   * only asserted the cursor string here would pass even if the dispatch
+   * checked these three in a different order than `cursorFor` shows, which
+   * is exactly the defect a review of this task found: the cursor promised
+   * a capture would win and the dispatch let alignment steal the click
+   * instead. Pinning this function's return value is what a change to
+   * either side has to keep agreeing with.
+   */
+  it("picking, then a running capture, then alignment, then the tool", () => {
+    const none = { picking: false, recording: false, aligning: false };
+    expect(pointerPriorityFor(none)).toBe("tool");
+    expect(pointerPriorityFor({ ...none, aligning: true })).toBe("aligning");
+    // A running capture wins over alignment (spec.md 8.7): nothing else on
+    // the map does anything while it records.
+    expect(pointerPriorityFor({ ...none, recording: true, aligning: true })).toBe("recording");
+    expect(pointerPriorityFor({ ...none, recording: true })).toBe("recording");
+    // A pick wins over everything, including a running capture.
+    expect(pointerPriorityFor({ picking: true, recording: true, aligning: true })).toBe(
+      "picking",
     );
   });
 });
