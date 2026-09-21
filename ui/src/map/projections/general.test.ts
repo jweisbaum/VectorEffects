@@ -89,6 +89,88 @@ describe("two-dimensional cameras",()=>{
 });
 
 /**
+ * A warped image's mesh (`renderer.ts`'s `warpMeshFor`) forward-projects raw,
+ * un-normalised backend longitudes through this same `toVirtual` for a fixed
+ * general projection (`uProjection == 14`) — a use `mapTransform` was not
+ * previously exercised with, since every other caller's longitudes already
+ * come normalised (a mesh built by `geographicMesh`, a click, a camera
+ * centre). `Placement` deliberately does not normalise (spec.md 4.9), which
+ * is why an image whose control points span the antimeridian carries a raw
+ * value like 182 rather than -178 — that is what keeps a *cylindrical*
+ * image from folding, since `geoToScreen` there is a plain linear function
+ * of longitude with world copies at -360/0/+360 either side.
+ *
+ * A fixed general projection has neither: `worldOffsets` draws it at one
+ * offset only (there is one Robinson, not three side by side), and
+ * `mapTransform`'s `forward` calls `norm(p.lon)` before handing the value to
+ * proj4 — necessary, because a projection's own formula is not defined (and
+ * proj4 does not promise sane output) for a longitude outside its normal
+ * range. So 182 and -178 reach proj4 as the identical, correct, geographic
+ * point — which is the bug: two mesh vertices meant to be adjacent (178,
+ * 182) land wherever *that projection* draws its antimeridian, which for a
+ * world map that is drawn once is the two *opposite* edges of the shape, not
+ * two points a few pixels apart. See the fix report for task 6, review
+ * round 1, for the full analysis: this is confirmed, reproducible, and
+ * *not* fixed here — the antimeridian is a real cut in a projection like
+ * this one, and clipping a warp mesh against it is unimplemented, not
+ * merely untested.
+ */
+describe("a warped image's mesh across the antimeridian (mode 14, spec.md 4.9)",()=>{
+  const view={width:1200,height:760};
+
+  /**
+   * KNOWN FAILING — left `skip`ped so the suite stays green while this is
+   * unresolved; un-skip once the antimeridian is actually handled (mesh
+   * clipping, most likely) rather than removing the coverage.
+   *
+   * Two mesh vertices 4 degrees apart across the seam (178, then the raw,
+   * un-normalised 182) should project to screen positions a *comparable*
+   * few pixels apart, continuing rightward — not fold back across the map.
+   * Measured on Robinson: lon 178 -> x=1759.29, lon 182 -> x=48.37 (out of
+   * a 1200-wide view), a ~1711px jump the wrong way. Every latitude tried,
+   * including the pole itself (90), reproduces it.
+   */
+  it.skip("keeps a vertex just past +180 close to, and to the right of, one just before it",()=>{
+    const camera=cameraForProjection({centerLon:0,centerLat:0,pxPerDeg:2},view,"robinson");
+    const mesh=projectedMesh(camera,view);
+    const before=mesh.toVirtual({lon:178,lat:10});
+    const after=mesh.toVirtual({lon:182,lat:10});
+    expect(before).not.toBeNull();
+    expect(after).not.toBeNull();
+    expect(after!.x).toBeGreaterThan(before!.x);
+  });
+
+  /**
+   * The polar case CLAUDE.md's testing rule asks for alongside it — a
+   * different failure mode from the fold above, and this one passes.
+   *
+   * At the true pole of a projection where the pole *is* a point (not a
+   * line, which is what Robinson has: probed separately, and Robinson's
+   * pole varies by longitude exactly the way its antimeridian does, so it
+   * would only restate the fold above rather than add a new case),
+   * longitude is meaningless and every value has to land on the same spot.
+   * `epsg_3413` (polar stereographic, `lon_0=-45`) is such a projection, and
+   * is a fixed general projection like Robinson — the same `toVirtual` path.
+   * Checked with longitudes on both sides of the antimeridian (178, 182,
+   * -178) precisely because that is where the fold above lives; here they
+   * agree, which is what says this is a *different* code path's problem, not
+   * a general "longitude near 180 is broken" one.
+   */
+  it("collapses every longitude to the same point at the true pole, including across the seam",()=>{
+    const camera=cameraForProjection({centerLon:-45,centerLat:85,pxPerDeg:2},view,"epsg_3413");
+    const mesh=projectedMesh(camera,view);
+    const reference=mesh.toVirtual({lon:0,lat:90});
+    expect(reference).not.toBeNull();
+    for(const lon of [90,178,182,-178]){
+      const p=mesh.toVirtual({lon,lat:90});
+      expect(p,`lon ${lon}`).not.toBeNull();
+      expect(p!.x,`lon ${lon}`).toBeCloseTo(reference!.x,6);
+      expect(p!.y,`lon ${lon}`).toBeCloseTo(reference!.y,6);
+    }
+  });
+});
+
+/**
  * A fixed projection's mesh is made in the projection's own plane, so that a
  * pan or a zoom moves it rather than remaking it: remaking it was 150 to 400
  * ms a frame. What has to hold is that the *same* mesh, placed for whatever
