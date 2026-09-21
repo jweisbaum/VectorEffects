@@ -194,6 +194,31 @@ impl Warp {
             Kind::Projective(_) | Kind::Spline { .. } => None,
         }
     }
+
+    /// Samples the warp on a `(cells + 1)` by `(cells + 1)` grid over the
+    /// image, in the order a vertex buffer wants it: row by row from the
+    /// top-left, `v = 0` first and each row running `u = 0` to `u = width`.
+    ///
+    /// This is a rebuild-time cost, not a per-frame one: the caller re-runs
+    /// it when the control points change and hands the renderer lon/lat per
+    /// vertex, so the vertex shader only projects what it is given and needs
+    /// no per-projection warp logic. `f32` because that is what reaches a
+    /// vertex buffer; `place` itself stays `f64` throughout.
+    ///
+    /// Not normalised, matching `place`: a mesh over an image spanning the
+    /// antimeridian must keep its right edge to the right of its left one.
+    pub fn mesh(&self, width: u32, height: u32, cells: u32) -> Vec<[f32; 2]> {
+        let mut out = Vec::with_capacity((cells as usize + 1) * (cells as usize + 1));
+        for row in 0..=cells {
+            let v = f64::from(row) / f64::from(cells) * f64::from(height);
+            for col in 0..=cells {
+                let u = f64::from(col) / f64::from(cells) * f64::from(width);
+                let (lon, lat) = self.place(u, v);
+                out.push([lon as f32, lat as f32]);
+            }
+        }
+        out
+    }
 }
 
 /// A translation: `base` shifted so pixel `p.u, p.v` lands exactly on `p`'s
@@ -893,5 +918,35 @@ mod tests {
             (b[0] - 3.0).abs() < 1e-12 && (b[1] - 2.0).abs() < 1e-12,
             "{b:?}"
         );
+    }
+
+    /// The mesh is the warp sampled on a grid, in the order the vertex
+    /// buffer wants: row by row from the image's top-left. Checked against
+    /// `place` at the same pixels, which is the definition.
+    #[test]
+    fn the_mesh_is_the_warp_sampled_row_by_row() {
+        let points = [
+            at(0.0, 0.0, -2.0, 1.0),
+            at(800.0, 0.0, 2.0, 1.0),
+            at(800.0, 600.0, 1.0, -1.0),
+            at(0.0, 600.0, -1.0, -1.0),
+        ];
+        let warp = Warp::fit(&points, 800, 600, base());
+        let cells = 4u32;
+        let mesh = warp.mesh(800, 600, cells);
+        assert_eq!(mesh.len() as u32, (cells + 1) * (cells + 1));
+        for row in 0..=cells {
+            for col in 0..=cells {
+                let u = f64::from(col) / f64::from(cells) * 800.0;
+                let v = f64::from(row) / f64::from(cells) * 600.0;
+                let (lon, lat) = warp.place(u, v);
+                let got = mesh[(row * (cells + 1) + col) as usize];
+                assert!((f64::from(got[0]) - lon).abs() < 1e-4, "{got:?} vs {lon}");
+                assert!((f64::from(got[1]) - lat).abs() < 1e-4, "{got:?} vs {lat}");
+            }
+        }
+        // The first vertex is the image's top-left corner.
+        let corner = warp.place(0.0, 0.0);
+        assert!((f64::from(mesh[0][0]) - corner.0).abs() < 1e-4);
     }
 }
