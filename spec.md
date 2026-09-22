@@ -1584,6 +1584,10 @@ eye).
 
 ### 5.6 Map chrome
 
+The main application window starts in native full-screen mode on every launch
+on macOS, Windows and Linux. Leaving full screen during a session does not
+change the next launch's initial mode.
+
 Everything drawn over the map — the active tool's options, the colour legend,
 the cursor readout, selection handles, gesture previews — obeys three rules.
 

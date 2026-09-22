@@ -1,5 +1,9 @@
 # VectorEffects — Implementation Plan
 
+**2026-09-22: Open full screen.** The main Tauri window now starts in native
+full-screen mode on every launch, using the shared desktop window configuration.
+The initial mode is independent of whether the previous session left full screen.
+
 **2026-09-21 (follow-up): Image resize handles and playback status.** The active
 image offers four proportional corner handles and four independent side stretch
 handles with the Hand tool. Rust holds a frozen source per drag, transforms the
