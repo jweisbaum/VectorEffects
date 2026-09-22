@@ -228,6 +228,9 @@ pub fn view(layer: Id, source: &LayerSource) -> Option<ImageLayerView> {
     let (width, height) = probed.as_ref().map_or((0, 0), |p| (p.width, p.height));
     let warp = Warp::fit(control_points, width, height, *placement);
     let warped = !warp.is_identity_affine();
+    // A one-, two- or three-pair fit uses the cheap affine draw path too.
+    // Send that fit, not the unaligned import placement.
+    let display_placement = warp.as_placement().unwrap_or(*placement);
     // No mesh for an unwarped image: it needs none, and shipping tens of
     // thousands of floats per tree fetch for nothing is waste.
     let (warp_mesh, warp_cells) = if warped {
@@ -255,12 +258,12 @@ pub fn view(layer: Id, source: &LayerSource) -> Option<ImageLayerView> {
         width,
         height,
         placement: [
-            placement.a,
-            placement.b,
-            placement.c,
-            placement.d,
-            placement.e,
-            placement.f,
+            display_placement.a,
+            display_placement.b,
+            display_placement.c,
+            display_placement.d,
+            display_placement.e,
+            display_placement.f,
         ],
         opacity: *opacity,
         control_points: control_points
@@ -857,7 +860,7 @@ pub fn image_moved(
             value: "an image can only be moved to a real position".to_owned(),
         });
     }
-    write(state, layer, gesture, |source, _| {
+    write(state, layer, gesture, |source, probed| {
         let LayerSource::Image {
             placement,
             control_points,
@@ -866,16 +869,246 @@ pub fn image_moved(
         else {
             return Err(not_an_image());
         };
-        let dlon = lon - placement.c;
-        let dlat = lat - placement.f;
-        placement.c = lon;
-        placement.f = lat;
+        let shown = Warp::fit(control_points, probed.width, probed.height, *placement)
+            .as_placement()
+            .unwrap_or(*placement);
+        let dlon = lon - shown.c;
+        let dlat = lat - shown.f;
+        placement.c += dlon;
+        placement.f += dlat;
         for point in control_points.iter_mut() {
             point.lon += dlon;
             point.lat += dlat;
         }
         Ok(())
     })
+}
+
+/// Geometry captured once per resize, independent of pointer delivery rate.
+#[derive(Debug)]
+pub struct ResizeBaseline {
+    token: u64,
+    layer: u64,
+    key: String,
+    handle: u8,
+    original: LayerSource,
+    source: LayerSource,
+    anchor: [f64; 2],
+    span: [f64; 2],
+    tangent: [f64; 2],
+}
+
+/// Resize from a corner (0–3, clockwise from top-left) or side (4–7,
+/// clockwise from top). Corners keep proportions; sides keep the opposite
+/// edge fixed. Pointer positions are absolute against the press baseline.
+#[tauri::command]
+pub fn resize_image(
+    state: tauri::State<'_, AppState>,
+    layer: u64,
+    handle: u8,
+    from: [f64; 2],
+    to: [f64; 2],
+    gesture: String,
+) -> Result<crate::projects::ProjectSummary> {
+    image_resized(&state, layer, handle, from, to, gesture)
+}
+
+/// Implementation of [`resize_image`], shared with the native tests.
+pub fn image_resized(
+    state: &AppState,
+    layer: u64,
+    handle: u8,
+    from: [f64; 2],
+    to: [f64; 2],
+    gesture: String,
+) -> Result<crate::projects::ProjectSummary> {
+    let invalid = || AppError::BadOption {
+        field: "image",
+        value: "resize needs a real position and a non-collapsed image".to_owned(),
+    };
+    if handle > 7 || from.iter().chain(&to).any(|v| !v.is_finite()) {
+        return Err(invalid());
+    }
+    with_session(state, |session| {
+        let id = Id::from_raw(layer);
+        let open = session.require_open()?;
+        let before = open
+            .project
+            .layer(id)
+            .ok_or(ve_core::CoreError::MissingLayer(layer))?
+            .source
+            .clone();
+        let token = open.image_token;
+        if !session.image_resize.as_ref().is_some_and(|base| {
+            base.token == token
+                && base.layer == layer
+                && base.key == gesture
+                && base.handle == handle
+        }) {
+            let LayerSource::Image {
+                placement,
+                control_points,
+                path,
+                ..
+            } = &before
+            else {
+                return Err(not_an_image());
+            };
+            let probed = probe(path)?;
+            let w = f64::from(probed.width);
+            let h = f64::from(probed.height);
+            let warp = Warp::fit(control_points, probed.width, probed.height, *placement);
+            let uv = [
+                [0.0, 0.0],
+                [w, 0.0],
+                [w, h],
+                [0.0, h],
+                [w / 2.0, 0.0],
+                [w, h / 2.0],
+                [w / 2.0, h],
+                [0.0, h / 2.0],
+            ];
+            let at = |i: usize| {
+                let (lon, lat) = warp.place(uv[i][0], uv[i][1]);
+                [lon, lat]
+            };
+            let i = usize::from(handle);
+            let opposite = if i < 4 {
+                (i + 2) % 4
+            } else {
+                4 + (i - 4 + 2) % 4
+            };
+            let anchor = at(opposite);
+            let span = subtract(at(i), anchor);
+            let edge = (i + 2) % 4;
+            let tangent = subtract(at((edge + 1) % 4), at(edge));
+            let mut source = before.clone();
+            // Two pairs constrain a similarity only. A side stretch needs
+            // a third non-collinear sample to retain the affine result.
+            if i >= 4 && control_points.len() == 2 {
+                let p = control_points[0];
+                let q = control_points[1];
+                let best = uv[..4]
+                    .iter()
+                    .max_by(|a, b| {
+                        let area = |v: &[f64; 2]| {
+                            ((q.u - p.u) * (v[1] - p.v) - (q.v - p.v) * (v[0] - p.u)).abs()
+                        };
+                        area(a).total_cmp(&area(b))
+                    })
+                    .ok_or_else(invalid)?;
+                let (lon, lat) = warp.place(best[0], best[1]);
+                if let LayerSource::Image { control_points, .. } = &mut source {
+                    control_points.push(ControlPoint {
+                        u: best[0],
+                        v: best[1],
+                        lon,
+                        lat,
+                    });
+                }
+            }
+            session.image_resize = Some(ResizeBaseline {
+                token,
+                layer,
+                key: gesture.clone(),
+                handle,
+                original: before.clone(),
+                source,
+                anchor,
+                span,
+                tangent,
+            });
+        }
+        let base = session.image_resize.as_ref().ok_or_else(invalid)?;
+        // Pointer unprojection wraps at the dateline; image geometry does not.
+        let delta = [
+            (to[0] - from[0] + 180.0).rem_euclid(360.0) - 180.0,
+            to[1] - from[1],
+        ];
+        if delta.iter().any(|v| !v.is_finite()) {
+            return Err(invalid());
+        }
+        let corner = handle < 4;
+        let dot = |a: [f64; 2], b: [f64; 2]| a[0] * b[0] + a[1] * b[1];
+        let cross = |a: [f64; 2], b: [f64; 2]| a[0] * b[1] - a[1] * b[0];
+        let denominator = if corner {
+            dot(base.span, base.span)
+        } else {
+            cross(base.tangent, base.span)
+        };
+        if !denominator.is_finite() || denominator.abs() < 1e-15 {
+            return Err(invalid());
+        }
+        let scale = (1.0
+            + if corner {
+                dot(delta, base.span)
+            } else {
+                cross(base.tangent, delta)
+            } / denominator)
+            .clamp(0.01, 1000.0);
+        if !scale.is_finite() {
+            return Err(invalid());
+        }
+        let transform = |point: [f64; 2]| {
+            let relative = subtract(point, base.anchor);
+            if corner {
+                [
+                    base.anchor[0] + scale * relative[0],
+                    base.anchor[1] + scale * relative[1],
+                ]
+            } else {
+                let amount = (scale - 1.0) * cross(base.tangent, relative) / denominator;
+                [
+                    point[0] + amount * base.span[0],
+                    point[1] + amount * base.span[1],
+                ]
+            }
+        };
+        // Scale one is the exact original, without introducing a support pair.
+        let mut after = base.source.clone();
+        if let LayerSource::Image {
+            placement,
+            control_points,
+            ..
+        } = &mut after
+        {
+            let origin = transform([placement.c, placement.f]);
+            let x = transform([placement.c + placement.a, placement.f + placement.d]);
+            let y = transform([placement.c + placement.b, placement.f + placement.e]);
+            *placement = Placement {
+                a: x[0] - origin[0],
+                b: y[0] - origin[0],
+                c: origin[0],
+                d: x[1] - origin[1],
+                e: y[1] - origin[1],
+                f: origin[1],
+            };
+            for point in control_points {
+                [point.lon, point.lat] = transform([point.lon, point.lat]);
+            }
+        }
+        if (scale - 1.0).abs() < 1e-12 {
+            after = base.original.clone();
+        }
+        let open = session.require_open()?;
+        if after != before {
+            open.history.push_coalesced(
+                &mut open.project,
+                ve_core::command::Command::SetLayerSource {
+                    layer: id,
+                    before: Box::new(before),
+                    after: Box::new(after),
+                },
+                gesture,
+            )?;
+            open.touch();
+        }
+        Ok(crate::projects::ProjectSummary::of(open))
+    })
+}
+
+fn subtract(a: [f64; 2], b: [f64; 2]) -> [f64; 2] {
+    [a[0] - b[0], a[1] - b[1]]
 }
 
 /// Sets how strongly an image shows.
@@ -917,22 +1150,9 @@ pub fn opacity_set(
 /// has one, or its stored placement unchanged if it does not — either way,
 /// with every control point cleared (spec.md §4.9, design §3, §6).
 ///
-/// A hand-placed image's `placement` is set once, at import (`centred`'s
-/// answer, or the file's own georeference when there is one), and nothing
-/// but this function and that import ever write it — every move since has
-/// gone through a control point instead (design §6: nudging one is now a
-/// one-pair translation, not a drag). So `placement` already *is* "where it
-/// started" for a hand-placed image, and there is nothing to re-derive: this
-/// only needs to clear the pairs laid on top of it. A file with its own
-/// georeference is put back to exactly that, in case it has drifted from
-/// what is stored (a corner-drag once could; nothing does today, but
-/// re-reading it costs nothing and keeps the two cases one function).
-///
-/// This used to refuse outright for a hand-placed image — "nothing to go
-/// back to" — which was true before control points existed: undo was the
-/// only way back, and it does not survive a save and reopen. Design §3's
-/// promise that "deleting every pair puts the image back where it started"
-/// has to be reachable for that image too, not just a georeferenced one.
+/// A hand-placed image keeps its current base placement, including moves
+/// and resizes, and drops the alignment pairs laid over it. A georeferenced
+/// image also restores the file's placement. Neither case modifies the file.
 #[tauri::command]
 pub fn reset_image_placement(
     state: tauri::State<'_, AppState>,

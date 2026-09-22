@@ -660,6 +660,8 @@ export const api = {
    * shifts every control point's target by the same amount, so the picture
    * travels as one rigid thing.
    */
+  resizeImage: (layer: number, handle: number, from: [number, number], to: [number, number], gesture: string) =>
+    call<ProjectSummary>("resize_image", { layer, handle, from, to, gesture }),
   moveImage: (layer: number, lon: number, lat: number, gesture: string | null) =>
     call<ProjectSummary>("move_image", { layer, lon, lat, gesture }),
   setImageControlPoints: (layer: number, points: [number, number, number, number][]) =>

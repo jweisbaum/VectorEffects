@@ -305,15 +305,17 @@ export default function Timeline({
 
   // --- Readiness ---
   const memory = useRef<ReadinessMemory>(freshMemory());
-  const [states, setStates] = useState<StepState[]>([]);
-  const [progress, setProgress] = useState<number[]>([]);
+  const viewportKey = viewport.map((t) => `${t.z}/${t.x}/${t.y}`).join(",");
+  const identity = `${project.revision}:${viewportKey}`;
+  const [readiness, setReadiness] = useState<{ identity: string; states: StepState[]; progress: number[] }>({
+    identity: "", states: [], progress: [],
+  });
+  // Both the ruler and preparation must describe this viewport, even before
+  // its first probe completes. A blue strip from the previous view is stale.
+  const states = readiness.identity === identity ? readiness.states : [];
+  const progress = readiness.identity === identity ? readiness.progress : [];
   const statesRef = useRef<StepState[]>([]);
   statesRef.current = states;
-  const viewportKey = viewport.map((t) => `${t.z}/${t.x}/${t.y}`).join(",");
-
-  const readinessIdentity = useRef("");
-  const identity = `${project.revision}:${viewportKey}`;
-  if (readinessIdentity.current !== identity) statesRef.current = [];
 
   useEffect(() => {
     if (viewport.length === 0) return;
@@ -327,10 +329,11 @@ export default function Timeline({
     }, (report) => {
       if (report.revision !== revision) return;
       const next = classify(report, memory.current);
-      readinessIdentity.current = identity;
       statesRef.current = next.states;
-      setStates((old) => old.length === next.states.length && old.every((value, i) => value === next.states[i]) ? old : next.states);
-      setProgress((old) => old.length === next.progress.length && old.every((value, i) => value === next.progress[i]) ? old : next.progress);
+      setReadiness((old) => old.identity === identity
+        && old.states.length === next.states.length && old.states.every((value, i) => value === next.states[i])
+        && old.progress.length === next.progress.length && old.progress.every((value, i) => value === next.progress[i])
+        ? old : { identity, ...next });
       // An eviction or failed render can make an idle pool need work again.
       if (next.states.some((state) => state !== "solid")) {
         void api.renderAhead(stepRef.current, viewport).catch(() => undefined);
@@ -1089,7 +1092,7 @@ export default function Timeline({
             <span className="tl-when"> · {utcLabel(step, project.step_hours, project.start_unix_s)}</span>
           )}
           {buffering && <span className="tl-buffering"> · buffering…</span>}
-          {!buffering && prepared.ready < prepared.total && <span className="tl-buffering"> · preparing playback {prepared.ready}/{prepared.total}</span>}
+          {!playing && prepared.ready < prepared.total && <span className="tl-buffering"> · preparing playback {prepared.ready}/{prepared.total}</span>}
         </span>
         {startDraft !== null && (
           <span className="tl-start-editor" role="group" aria-label="Start time (UTC)">

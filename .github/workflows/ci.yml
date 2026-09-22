@@ -150,8 +150,12 @@ jobs:
         run: git diff --exit-code -- ui/src/generated
 
   frontend:
-    name: frontend
-    runs-on: ubuntu-latest
+    name: frontend / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-2022]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

@@ -246,6 +246,8 @@ pub struct Session {
     pub preview: Option<crate::macros::PreviewScene>,
     /// The transform drag in progress, if any.
     pub transform: Option<TransformGesture>,
+    /// Frozen image geometry for an absolute resize drag.
+    pub image_resize: Option<crate::image::ResizeBaseline>,
     /// Counter behind [`Session::next_gesture_id`].
     gesture_counter: u64,
 }

@@ -1,5 +1,65 @@
 # VectorEffects — Implementation Plan
 
+**2026-09-21 (follow-up): Image resize handles and playback status.** The active
+image offers four proportional corner handles and four independent side stretch
+handles with the Hand tool. Rust holds a frozen source per drag, transforms the
+placement and reference targets together, and keeps the opposite corner or edge
+fixed. Two-pair side stretches gain an affine support point. Pointer writes are
+coalesced and serialized through release before ending the undo gesture; a later
+drag waits for that release. Affine aligned images now send the fitted placement
+to the renderer, and the two-pair similarity preserves the source's handedness.
+No file schema or image texture address changes.
+
+The reported preparation count during playback was the rolling GPU window:
+it can remain incomplete as each presented frame admits a new target. Its
+`preparing playback` label is now limited to paused preparation; actual held
+frames continue to report buffering. The transport test holds readiness at 2/3
+while presenting frames and checks both this distinction and buffer recovery.
+
+Validation: 1,312 Rust tests passed (24 ignored), Clippy and formatting passed;
+864 frontend tests passed (one skipped), with the affected 22 tests rerun after
+final UI changes; the production build and offline check passed. Native WebKit
+checks exercised corner and side drags, their cursors, final-position coalescing,
+and one-step Undo, with screenshots inspected. Sixty burst pointer reports
+coalesced to one resize write per drag, taking 3–4 ms in that run. Native playback
+of `hourly one month` reached 240 solid steps and showed no preparation label
+while playing. Its cold streaming sample still buffered (2.68 displayed steps/s,
+5 ms median draw, 2 ms median texture upload plus metadata work); this label fix
+does not claim to remove GPU transfer cost. Windows native verification remains
+outstanding; the cross-platform frontend CI matrix from the preceding fix stays.
+
+**2026-09-21: Background preparation, one loading page, and alternating image
+alignment.** Playback's cached viewport now follows each map draw and is
+invalidated when a projection mesh arrives; camera identity alone did not
+cover worker completions. The ruler and preparation share an identity-tagged
+readiness snapshot, so a view change clears the previous view's blue strip
+immediately and late reports cannot restore it. The loading screen has one
+persistent owner outside the start/editor branches, preserving its listener,
+DOM and fade through reading and drawing. Align selects its image layer;
+each picture click hides that layer until the map click, with a basemap-only
+magnifier copied before images and field draw. Hover reuses the copy, and
+image textures and warp meshes survive the temporary hide. Backspace, Enter
+and Escape restore the image through the same redraw subscription.
+
+Checked in the isolated native app against the user's `hourly one month`
+autosave (240 hourly steps): all 240 backend steps became solid, preparation
+cleared, view changes resumed background work, and playback remained
+sequential. Ten-second playback samples measured 7.60 steps/s on the original
+frontend and 7.90 on the changed frontend (8.00 between presented frames);
+these were streaming runs with different cache warmth, not evidence of a
+throughput improvement. The exact persistent `2/3` state did not reproduce
+from the autosave in isolation. Native warm-tile serving measured 74 µs.
+The loading check kept the same single 1440 × 872 page through opening;
+image clicks, Backspace and Enter were exercised, with the magnifier captured
+and inspected; 60 hover moves triggered zero field redraws, and leaving the
+canvas removed the lens. The full Rust suite, Clippy, formatting, 860 frontend
+tests, TypeScript build and offline check passed. The MCP socket tests needed
+the workspace suite rerun outside the sandbox. The existing preparation
+diagnostic remains, augmented with missing residency and transfer failures,
+since the exact persistent 2/3 report has not yet reproduced. Windows frontend
+checks now run alongside Linux in CI; native WebView2 rendering still needs a
+Windows run.
+
 **2026-09-20 (evening): Charts, OpenStreetMap and GIS data, all under the
 field.** Three features asked for together, and they turned out to be one
 mechanism: whatever is drawn *under* the map is painted in Rust onto the

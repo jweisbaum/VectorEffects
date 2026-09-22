@@ -574,7 +574,9 @@ beside `LONG_RUNNING` and for the same reason), not by whichever screen asked.
 It **stays until the map is showing the project**, not until the command
 answers: rendered is not shown (§9.4), and a page that left when the files
 were read gave way to a blank map. That last wait is bounded at six seconds.
-It arrives after a short delay, so a project that opens in a frame or two
+One persistent page spans both reading and drawing, including the transition
+from the start screen to the editor; that transition never remounts the page
+or restarts its fade. It arrives after a short delay, so a project that opens in a frame or two
 never flashes a page, and it goes at once when an opening is refused. An
 import *into* an open project shows no page: the project is on screen and
 usable, and that wait is the status bar's. A layer whose file could not be
@@ -932,9 +934,29 @@ georeference of its own the image lands filling the visible map, north-up and
 keeping its aspect — that landing is the `placement` above, and it is also
 what zero control points means and what *Reset place* returns to.
 
+With the **Hand** tool and an image layer selected, four corner handles
+resize it proportionally about the opposite corner. Four side handles stretch
+width or height independently, holding the opposite edge in place. Handles
+follow the image's fitted geometry in the current projection; they are hidden
+during alignment. Dragging the body still moves the whole image. Each drag is
+one undo entry, including its final pointer position, and uses a frozen baseline
+rather than accumulating deltas. Resizing transforms the stored placement and
+all reference targets together. A side stretch of a two-pair similarity adds
+one non-collinear support pair so the resulting affine shape remains representable.
+Crossing the opposite edge clamps at a small positive size instead of flipping
+or collapsing the image. The texture remains loaded throughout.
+
 From there the user aligns it by pointing: click a feature in the picture,
 then the place it belongs on the map, alternating, as many times as they
-like, then press **Enter**. Each click is refused with a hint rather than
+like, then press **Enter**. While waiting for each **map** click, the selected
+image is temporarily hidden, and hovering shows a circular, magnified basemap
+with a crosshair, without images, field colours or glyphs inside it. Placing
+the map point removes that circle and restores the image for the next picture
+click. This alternates until Enter; Backspace and Escape also restore the
+image when they leave the map half. This is display state only: visibility,
+opacity and the image texture are retained. The basemap is copied before the
+field draws, so moving the magnifier redraws only the overlay.
+Each click is refused with a hint rather than
 stored if it cannot be resolved to a real image pixel — a point outside the
 picture, or, for an already-warped image, one that falls in the gap between
 the mesh's own bowed edge and the coarse quad `corners` reports — because a
@@ -962,7 +984,9 @@ then immediately bend away from it again.
 
 **The fit is exact, and its shape follows the pair count.** Zero pairs is the
 stored placement, untouched. One is a translation. Two are a similarity —
-rotate and scale, never shear. Three are the affine through them, exactly as
+rotate and scale, never shear, retaining the original image handedness (pixel
+v runs down while latitude runs up). Affine fits from one to three pairs are
+sent to the renderer as their fitted placement, so the outline and picture agree. Three are the affine through them, exactly as
 the old three corner handles gave. Four are a homography, which an affine
 cannot be. Five and up are a homography fit by least squares plus a
 thin-plate-spline correction for the residual no projective map can reach —
@@ -3885,8 +3909,11 @@ falls back to the follower's own keys.
 - **Playback preparation continues while paused.** Background rendering stores
   field tiles in the backend cache. Display preparation resolves their content
   keys, fetches the bytes, and uploads textures. The transport reports
-  `preparing playback n/total` until its preparation range is resident, so a
-  solid backend strip alone does not claim that every frame is ready to show.
+  `preparing playback n/total` **while paused**, until its preparation range is
+  resident. During playback the rolling window continually admits new frames;
+  its incomplete count is normal background activity, so only an actual held
+  frame reports `buffering`. A solid backend strip alone does not claim that
+  every frame is resident on the GPU.
   Resolution directly schedules fetching, and fetching schedules uploading;
   none of these stages needs a playing timeline to drive it.
 - **Preparation is bounded and prioritizes the playhead.** A fitting timeline
@@ -3971,7 +3998,10 @@ A worker pool renders frames ahead of the playhead.
   ready — editing an object with a narrow `active_range` does not invalidate the
   whole timeline.
 - Changing zoom or panning far requeues, but previously rendered tiles at other
-  zooms remain cached.
+  zooms remain cached. The old viewport's readiness clears immediately. A
+  projection mesh arriving from its worker also refreshes the preparation
+  viewport, even when the camera is unchanged: the ruler, texture preparation
+  and map must name the same tiles.
 - **The pool renders through the same function that serves the map's own tile
   requests.** The key, the backend, the quality and the encoding are decided
   once, so a tile rendered ahead is byte for byte the tile the map will fetch,

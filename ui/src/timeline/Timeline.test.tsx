@@ -35,7 +35,7 @@ it("prepares while paused, publishes only drawn steps, and maintains the selecte
   const drawn: number[] = [];
   const published: number[] = [];
   const playback: PlaybackMap = {
-    prepare: vi.fn(() => ({ ready: 10, total: 10, streaming: false })),
+    prepare: vi.fn(() => ({ ready: 2, total: 3, streaming: true })),
     present: (step) => { if (now < 500) return false; drawn.push(step); return true; },
   };
   const project = { revision: 7, step_count: 10, step_hours: 1, start_unix_s: null } as ProjectSummary;
@@ -54,11 +54,13 @@ it("prepares while paused, publishes only drawn steps, and maintains the selecte
   try {
     await act(async () => root.render(<Host />));
     expect(playback.prepare).toHaveBeenCalled();
+    expect(container.textContent).toContain("preparing playback 2/3");
     expect(published).toEqual([]);
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[aria-label="Loop"]')!.click();
       container.querySelector<HTMLButtonElement>(".tl-transport button")!.click();
     });
+    expect(container.textContent).not.toContain("preparing playback");
     for (let frame = 1; frame <= 330; frame++) {
       now = frame * 1000 / 60;
       await act(async () => {
@@ -66,6 +68,8 @@ it("prepares while paused, publishes only drawn steps, and maintains the selecte
         callbacks.clear();
         pending.forEach((callback) => callback(now));
       });
+      expect(container.textContent).not.toContain("preparing playback");
+      if (now > 150 && now < 500) expect(container.textContent).toContain("buffering");
       if (now < 500) expect(published).toEqual([]);
     }
     // One at buffer recovery, then 40 over the following five seconds.
@@ -198,4 +202,40 @@ it.each(["macro", "patch"])("does not offer shape animation for a %s", async (to
     expect(container.querySelector(".tl-object-name")?.textContent).toBe("Capture");
     expect(container.querySelector(".tl-shape-toggle")).toBeNull();
   } finally { await act(async () => root.unmount()); container.remove(); backend.tree.mockResolvedValue({layers:[]}); }
+});
+
+it("clears old viewport readiness immediately and ignores its late reports", async () => {
+  vi.useFakeTimers();
+  const project = { revision: 7, step_count: 10, step_hours: 1, start_unix_s: null } as ProjectSummary;
+  const complete = { revision: 7, steps: Array.from({ length: 10 }, (_, step) => ({ step, ready: 1, total: 1 })) };
+  backend.readiness.mockResolvedValue(complete);
+  const container = document.createElement("div"); document.body.append(container);
+  const root = createRoot(container);
+  const prepare = vi.fn((_request: import("./preparation").PreparationRequest) => ({ ready: 0, total: 10, streaming: false }));
+  const render = (x: number) => root.render(<Timeline project={project} step={0} onStepChange={() => {}}
+    selection={[]} onSelect={() => {}} viewport={[{ z: 1, x, y: 0 }]}
+    playback={{ prepare, present: () => false }} autoKey={false} onAutoKey={() => {}}
+    onChanged={() => {}} onFramesSelected={() => {}} onKeysSelected={() => {}} settings={null}
+    capture={null} onCapture={() => {}} />);
+  try {
+    await act(async () => render(0));
+    expect(container.querySelectorAll(".tl-tick.solid")).toHaveLength(10);
+    let oldReport!: (value: typeof complete) => void;
+    backend.readiness.mockImplementationOnce(() => new Promise(resolve => { oldReport = resolve; }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    let newReport!: (value: typeof complete) => void;
+    backend.readiness.mockImplementationOnce(() => new Promise(resolve => { newReport = resolve; }));
+    await act(async () => render(1));
+    expect(container.querySelectorAll(".tl-tick.solid")).toHaveLength(0);
+    expect(prepare.mock.calls.at(-1)?.[0].states).toEqual([]);
+    await act(async () => oldReport(complete));
+    expect(container.querySelectorAll(".tl-tick.solid")).toHaveLength(0);
+    await act(async () => newReport(complete));
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+    expect(container.querySelectorAll(".tl-tick.solid")).toHaveLength(10);
+    expect(prepare.mock.calls.at(-1)?.[0].states).toEqual(Array(10).fill("solid"));
+    expect(backend.renderAhead).toHaveBeenLastCalledWith(0, [{ z: 1, x: 1, y: 0 }]);
+  } finally {
+    await act(async () => root.unmount()); container.remove();
+  }
 });

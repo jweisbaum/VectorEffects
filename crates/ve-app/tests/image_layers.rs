@@ -961,3 +961,220 @@ fn an_image_layer(state: &AppState, root: &TempRoot) -> u64 {
     image::image_imported(state, path.to_string_lossy().into_owned(), None).expect("import");
     image_layer(state)
 }
+
+/// Fixed world-file bounds: [-10, 5] to [10, -5], 80 by 40 pixels.
+fn resize_fixture(state: &AppState, root: &TempRoot) -> u64 {
+    open(state);
+    let path = root.0.join("resize.png");
+    write_png(&path, 80, 40);
+    write_world(
+        &path.with_extension("pgw"),
+        0.25,
+        0.0,
+        0.0,
+        -0.25,
+        -9.875,
+        4.875,
+    );
+    image::image_imported(state, path.to_string_lossy().into_owned(), None).expect("import");
+    image_layer(state)
+}
+
+fn near_corners(view: &image::ImageLayerView, expected: [[f64; 2]; 4]) {
+    for (actual, expected) in view.corners.iter().zip(expected) {
+        for (a, b) in actual.iter().zip(expected) {
+            assert!((a - b).abs() < 1e-7, "{actual:?} != {expected:?}");
+        }
+    }
+}
+
+#[test]
+fn all_resize_handles_anchor_the_opposite_corner_or_side_and_undo_as_one_drag() {
+    let cases = [
+        ([-10., 5.], [-30., 15.], [-30., 15., 10., -5.]),
+        ([10., 5.], [30., 15.], [-10., 15., 30., -5.]),
+        ([10., -5.], [30., -15.], [-10., 5., 30., -15.]),
+        ([-10., -5.], [-30., -15.], [-30., 5., 10., -15.]),
+        ([0., 5.], [0., 15.], [-10., 15., 10., -5.]),
+        ([10., 0.], [30., 0.], [-10., 5., 30., -5.]),
+        ([0., -5.], [0., -15.], [-10., 5., 10., -15.]),
+        ([-10., 0.], [-30., 0.], [-30., 5., 10., -5.]),
+    ];
+    for (handle, (from, to, [west, north, east, south])) in cases.into_iter().enumerate() {
+        let root = TempRoot::new("resize-handles");
+        let state = app(&root);
+        let layer = resize_fixture(&state, &root);
+        let before = view_of(&state);
+        let mid = [(from[0] + to[0]) / 2., (from[1] + to[1]) / 2.];
+        let resize = |at| {
+            image::image_resized(&state, layer, handle as u8, from, at, "resize".into())
+                .expect("resize")
+        };
+        resize(mid);
+        let last = resize(to);
+        let again = resize(to);
+        assert_eq!(
+            last.revision, again.revision,
+            "repeated absolute position writes nothing"
+        );
+        near_corners(
+            &view_of(&state),
+            [[west, north], [east, north], [east, south], [west, south]],
+        );
+        ve_app::document::finish_gesture(&state).expect("release");
+        ve_app::edit::undo_for_test(&state).expect("undo");
+        assert_eq!(view_of(&state).placement, before.placement);
+        ve_app::edit::redo_for_test(&state).expect("redo");
+        let after = view_of(&state);
+        let path = root.0.join("resized.veproj");
+        projects::save_as(&state, path.to_string_lossy().into_owned()).expect("save");
+        projects::open(&state, path.to_string_lossy().into_owned(), true).expect("reopen");
+        assert_eq!(view_of(&state).placement, after.placement);
+        assert_eq!(
+            last.image_token, again.image_token,
+            "texture survives resizing"
+        );
+    }
+}
+
+#[test]
+fn side_resize_preserves_two_alignment_pairs_and_adds_an_affine_support_point() {
+    let root = TempRoot::new("resize-pairs");
+    let state = app(&root);
+    let layer = resize_fixture(&state, &root);
+    image::control_points_set(
+        &state,
+        layer,
+        vec![[0., 0., -10., 5.], [80., 40., 10., -5.]],
+    )
+    .expect("pairs");
+    let resize =
+        |to| image::image_resized(&state, layer, 5, [10., 0.], to, "side".into()).expect("resize");
+    resize([30., 0.]);
+    let after = view_of(&state);
+    near_corners(&after, [[-10., 5.], [30., 5.], [30., -5.], [-10., -5.]]);
+    assert_eq!(
+        &after.control_points[..2],
+        &[[0., 0., -10., 5.], [80., 40., 30., -5.]]
+    );
+    assert_eq!(after.control_points.len(), 3);
+    resize([10., 0.]);
+    assert_eq!(
+        view_of(&state).control_points.len(),
+        2,
+        "returning to the press restores the original pairs"
+    );
+    near_corners(
+        &view_of(&state),
+        [[-10., 5.], [10., 5.], [10., -5.], [-10., -5.]],
+    );
+}
+
+#[test]
+fn corner_resize_transforms_a_warp_and_its_reference_targets_together() {
+    let root = TempRoot::new("resize-warp");
+    let state = app(&root);
+    let layer = resize_fixture(&state, &root);
+    let pairs = vec![
+        [0., 0., -10., 5.],
+        [80., 0., 8., 6.],
+        [80., 40., 10., -5.],
+        [0., 40., -8., -6.],
+        [40., 20., 1., 1.],
+    ];
+    image::control_points_set(&state, layer, pairs.clone()).expect("pairs");
+    image::image_resized(&state, layer, 2, [10., -5.], [30., -15.], "corner".into())
+        .expect("resize");
+    let after = view_of(&state);
+    for (actual, [u, v, lon, lat]) in after.control_points.iter().zip(pairs) {
+        assert_eq!(actual[0], u);
+        assert_eq!(actual[1], v);
+        assert!((actual[2] - (-10. + 2. * (lon + 10.))).abs() < 1e-7);
+        assert!((actual[3] - (5. + 2. * (lat - 5.))).abs() < 1e-7);
+    }
+    assert!(after.warped);
+    near_corners(&after, [[-10., 5.], [26., 7.], [30., -15.], [-6., -17.]]);
+}
+
+#[test]
+fn resize_crosses_the_dateline_at_high_latitude_without_flipping_or_collapsing() {
+    let root = TempRoot::new("resize-dateline");
+    let state = app(&root);
+    open(&state);
+    let path = root.0.join("polar.png");
+    write_png(&path, 80, 40);
+    write_world(
+        &path.with_extension("pgw"),
+        0.125,
+        0.,
+        0.,
+        -0.125,
+        175.0625,
+        84.9375,
+    );
+    image::image_imported(&state, path.to_string_lossy().into_owned(), None).expect("import");
+    let layer = image_layer(&state);
+    image::image_resized(
+        &state,
+        layer,
+        7,
+        [175., 82.5],
+        [-175., 82.5],
+        "dateline".into(),
+    )
+    .expect("resize");
+    let after = view_of(&state);
+    assert!(
+        (after.corners[1][0] - 185.).abs() < 1e-8,
+        "opposite side stays fixed"
+    );
+    assert!(
+        after.corners[0][0] < after.corners[1][0],
+        "crossing cannot mirror the image"
+    );
+    assert!(
+        after.corners[1][0] - after.corners[0][0] < 0.11,
+        "short dateline crossing clamps at minimum size"
+    );
+    assert_eq!(after.corners[0][1], 85.);
+    assert!(image::image_resized(&state, layer, 8, [0., 0.], [1., 1.], "bad".into()).is_err());
+    assert!(
+        image::image_resized(&state, layer, 0, [0., 0.], [f64::NAN, 1.], "bad".into()).is_err()
+    );
+}
+
+#[test]
+fn affine_alignment_is_the_placement_sent_to_the_renderer_and_moves_from_that_position() {
+    let root = TempRoot::new("affine-view");
+    let state = app(&root);
+    let layer = resize_fixture(&state, &root);
+    image::control_points_set(&state, layer, vec![[0., 0., 20., 30.]]).expect("pair");
+    let view = view_of(&state);
+    assert!(!view.warped);
+    assert_eq!(view.placement[2], 20.);
+    assert_eq!(view.placement[5], 30.);
+    image::image_moved(&state, layer, 25., 32., None).expect("move");
+    near_corners(
+        &view_of(&state),
+        [[25., 32.], [45., 32.], [45., 22.], [25., 22.]],
+    );
+}
+
+#[test]
+fn side_stretch_of_a_sheared_alignment_keeps_the_entire_opposite_edge_fixed() {
+    let root = TempRoot::new("resize-shear");
+    let state = app(&root);
+    let layer = resize_fixture(&state, &root);
+    image::control_points_set(
+        &state,
+        layer,
+        vec![[0., 0., 0., 0.], [80., 0., 20., 10.], [0., 40., 5., -10.]],
+    )
+    .expect("sheared alignment");
+    image::image_resized(&state, layer, 5, [22.5, 5.], [42.5, 15.], "shear".into())
+        .expect("stretch");
+    near_corners(
+        &view_of(&state),
+        [[0., 0.], [40., 20.], [45., 10.], [5., -10.]],
+    );
+}

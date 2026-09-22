@@ -17,6 +17,19 @@ export function playbackTime(name: string, ms: number): void {
   if (samples.length < LIMIT) samples.push(ms);
 }
 
+/**
+ * TEMPORARY (2026-09-21): the latest preparation decision, always recorded.
+ *
+ * Diagnosing "preparing playback 2/3" under an all-solid ruler. Unlike the
+ * counters above this is not gated on `start()`, because the question is
+ * what the steady state looks like rather than what a playback run did.
+ * Read it with `__vePlayback.preparation()`. Remove with the fix.
+ */
+let preparation: unknown = null;
+export function playbackPreparation(detail: unknown): void {
+  preparation = detail;
+}
+
 export function playbackPresented(frame: string): void {
   if (started === null || stopped !== null || frame === lastFrame) return;
   lastFrame = frame;
@@ -56,6 +69,10 @@ export const playbackMetrics = {
   stop() {
     stopped = performance.now();
     return this.snapshot();
+  },
+  /** TEMPORARY (2026-09-21): see `playbackPreparation`. */
+  preparation() {
+    return preparation;
   },
 };
 

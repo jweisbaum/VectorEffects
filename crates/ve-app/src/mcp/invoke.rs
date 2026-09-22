@@ -181,6 +181,7 @@ pub const TABLE: &[(&str, Handler)] = &[
     command!(recover_autosave, crate::autosave::recover_autosave, { id: u64, discard_unsaved: bool }),
     command!(discard_autosave, crate::autosave::discard_autosave, { id: u64 }),
     command!(import_image, crate::image::import_image, { path: String, view: Option<[f64; 4]> }),
+    command!(resize_image, crate::image::resize_image, { layer: u64, handle: u8, from: [f64; 2], to: [f64; 2], gesture: String }),
     command!(move_image, crate::image::move_image, { layer: u64, lon: f64, lat: f64, gesture: Option<String> }),
     command!(set_image_control_points, crate::image::set_image_control_points, { layer: u64, points: Vec<[f64; 4]> }),
     command!(set_image_opacity, crate::image::set_image_opacity, { layer: u64, opacity: f64 }),

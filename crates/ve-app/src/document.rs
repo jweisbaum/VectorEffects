@@ -761,6 +761,7 @@ pub fn finish_gesture(state: &AppState) -> Result<()> {
         // Dropping the baseline matters as much as closing the entry: a stale
         // one would make the next drag compute from where the last one started.
         session.transform = None;
+        session.image_resize = None;
         session.require_open()?.history.break_coalescing();
         Ok(())
     })

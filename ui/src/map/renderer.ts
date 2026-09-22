@@ -300,6 +300,10 @@ export interface RenderState {
    * the field the user is painting stays on top of it.
    */
   images?: readonly ImageDraw[];
+  /** Copy the basemap before images and field obscure it, for alignment. */
+  onBasemap?: () => void;
+  /** Hide temporarily without releasing the image's texture or warp mesh. */
+  hiddenImageLayer?: number | null;
 }
 
 const SEA: [number, number, number, number] = [0.043, 0.078, 0.133, 1];
@@ -1041,6 +1045,7 @@ export class MapRenderer {
     gl.activeTexture(gl.TEXTURE0);
     const onGpu = projectedOnGpu(projectionFor(state.camera));
     for (const image of images) {
+      if (image.layer === state.hiddenImageLayer) continue;
       let count = this.imageMesh.count;
       // A warped mesh is indexed (WarpMesh above), so it draws through
       // drawElements; every other image draws through drawArrays.
@@ -1667,6 +1672,24 @@ export class MapRenderer {
     // field entirely wherever a cell reached.
     this.drawBackdrops(state, overlaying);
 
+    const drawCoast = () => {
+      if (onGpu && !overBase) this.drawGlobeBase(state, tiles, "coast", lod, drawGeographicTile);
+      else if (general && !overBase) this.projectedSurface.drawBase(state.camera, state.view, tiles, "coast", lod, drawGeographicTile);
+      if (coast && !general && !overBase) {
+        gl.useProgram(this.geoProgram);
+        gl.bindVertexArray(coast.vao);
+        gl.uniform4f(this.geoUniforms.uColor ?? null, ...COAST);
+        for (const offset of offsets) {
+          this.setShared(this.geoUniforms, state.camera, state.view, offset);
+          gl.drawElements(gl.LINES, coast.indexCount, gl.UNSIGNED_INT, 0);
+        }
+      }
+    };
+    if (state.onBasemap) {
+      drawCoast();
+      state.onBasemap();
+    }
+
     // --- Image layers (spec.md 4.9, M18) ---
     // Above the land and below the field: an image is a reference to trace or
     // compare against, so the coastline under it stays visible and the field
@@ -1756,20 +1779,8 @@ export class MapRenderer {
     // over everything.
     this.drawImages(state, offsets, images.filter((image) => image.over));
 
-    // --- Coastlines, above the raster ---
-    // The field covers land as well as sea, so a coastline drawn underneath it
-    // is almost invisible. Drawn here it stays legible at any wind speed.
-    if (onGpu && !overBase) this.drawGlobeBase(state, tiles, "coast", lod, drawGeographicTile);
-    else if (general && !overBase) this.projectedSurface.drawBase(state.camera, state.view, tiles, "coast", lod, drawGeographicTile);
-    if (coast && !general && !overBase) {
-      gl.useProgram(this.geoProgram);
-      gl.bindVertexArray(coast.vao);
-      gl.uniform4f(this.geoUniforms.uColor ?? null, ...COAST);
-      for (const offset of offsets) {
-        this.setShared(this.geoUniforms, state.camera, state.view, offset);
-        gl.drawElements(gl.LINES, coast.indexCount, gl.UNSIGNED_INT, 0);
-      }
-    }
+    // Coastlines remain legible over the field.
+    drawCoast();
 
     // --- Graticule ---
     if (state.showGraticule && onGpu) {

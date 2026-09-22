@@ -49,7 +49,7 @@ import { DEFAULT_PROJECTION, projectionOf, type ProjectionId } from "./map/proje
  * would mean inventing those values (spec.md 2).
  */
 export default function App() {
-  return <BetaGate><Help><EditorApp /></Help></BetaGate>;
+  return <BetaGate><Help><EditorApp /><LoadingScreen /></Help></BetaGate>;
 }
 
 function EditorApp() {
@@ -568,12 +568,7 @@ function EditorApp() {
   }, [activeLayer, modal, openProject, save, saveAs, selection, startNewProject, step]);
 
   if (!project) {
-    return (
-      <>
-        <StartScreen onOpened={setProject} />
-        <LoadingScreen />
-      </>
-    );
+    return <StartScreen onOpened={setProject} />;
   }
 
   return (
@@ -691,7 +686,10 @@ function EditorApp() {
               onActiveKind={setActiveKind}
               onChanged={setProject}
               viewBounds={viewBounds}
-              onAlign={(layer) => mapRef.current?.beginAlign(layer)}
+              onAlign={(layer) => {
+                setActiveLayer(layer);
+                mapRef.current?.beginAlign(layer);
+              }}
               canAlign={alignable}
             />
           </aside>
@@ -878,7 +876,6 @@ function EditorApp() {
         </button>
       </div>
     </div>
-    <LoadingScreen />
     </UnitsProvider>
   );
 }

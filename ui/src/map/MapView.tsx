@@ -167,8 +167,10 @@ import {
   wholeMap,
 } from "./region";
 import { ImageCache } from "./images";
-import { imageUnder } from "./place";
+import { imageUnder, imageResizeHandles, imageResizeHandleAt } from "./place";
+import { imageGesture } from "./imageGesture";
 import { MAX_CONTROL_POINTS, createAlignStore, imagePixelAt, outlinePath, pictureToMap, type AlignStore } from "./align";
+import { playbackPreparation } from "../timeline/metrics";
 import type { ImageLayerView } from "../generated/ImageLayerView";
 import { MapRenderer, type OperatorPreview, type RenderState } from "./renderer";
 import { uniqueTiles } from "../timeline/playback";
@@ -263,6 +265,39 @@ function macroRegion(outline: MacroOutline, lon: number, lat: number): Region {
 /** The eyedropper's loupe: how much larger the map is inside the ring, and the ring's radius. */
 const MAGNIFIER_ZOOM = 2.5;
 const MAGNIFIER_RADIUS_CSS = 44;
+
+/** A retained basemap or this frame's WebGL canvas, enlarged at the pointer. */
+function drawMagnifier(context: CanvasRenderingContext2D, source: HTMLCanvasElement,
+  cursor: { x: number; y: number }, dpr: number): void {
+  const radius = MAGNIFIER_RADIUS_CSS * dpr;
+  const span = radius * 2 / MAGNIFIER_ZOOM;
+  context.save();
+  context.beginPath();
+  context.arc(cursor.x, cursor.y, radius, 0, Math.PI * 2);
+  context.clip();
+  context.imageSmoothingEnabled = false;
+  context.drawImage(source, cursor.x - span / 2, cursor.y - span / 2, span, span,
+    cursor.x - radius, cursor.y - radius, radius * 2, radius * 2);
+  context.restore();
+  context.save();
+  context.strokeStyle = "rgba(20, 28, 44, 0.9)";
+  context.lineWidth = 3.5 * dpr;
+  context.beginPath();
+  context.arc(cursor.x, cursor.y, radius + 2.5 * dpr, 0, Math.PI * 2);
+  context.stroke();
+  context.strokeStyle = "rgba(255, 255, 255, 0.95)";
+  context.lineWidth = 1.5 * dpr;
+  context.beginPath();
+  context.arc(cursor.x, cursor.y, radius, 0, Math.PI * 2);
+  context.stroke();
+  const arm = 6 * dpr;
+  context.lineWidth = dpr;
+  context.beginPath();
+  context.moveTo(cursor.x - arm, cursor.y); context.lineTo(cursor.x + arm, cursor.y);
+  context.moveTo(cursor.x, cursor.y - arm); context.lineTo(cursor.x, cursor.y + arm);
+  context.stroke();
+  context.restore();
+}
 
 /**
  * Whether a frame token names the macro preview's scene: its revision has
@@ -909,26 +944,17 @@ export default function MapView({
    * changes outside anything React would otherwise re-render for.
    */
   const alignStore = useRef<AlignStore | null>(null);
-  /**
-   * The whole picture being dragged by the hand (M36).
-   *
-   * `origin` is the placement's own top-left as it stood when the pointer
-   * went down — the drag's baseline. Every report sends `origin + (pointer
-   * now - pointer then)`, an absolute position rather than an accumulated
-   * delta, so the same pointer position twice is a no-op and a dropped
-   * report costs nothing. That is the rule `Session::transform`'s baseline
-   * exists to enforce for object drags.
-   */
+  // Retained separately from WebGL's transient drawing buffer: moving the
+  // alignment loupe only redraws the overlay, without rendering the field.
+  const alignBasemap = useRef<HTMLCanvasElement | null>(null);
   const imageDrag = useRef<{
-    layer: number;
-    from: { lon: number; lat: number };
-    origin: [number, number];
+    cursor: string;
+    push: (point: { lon: number; lat: number }) => void;
+    finish: () => void;
   } | null>(null);
-  /** One move in flight at a time, newest position waiting — as the readout does. */
-  const imageMove = useRef<{ inFlight: boolean; queued: [number, number] | null }>({
-    inFlight: false,
-    queued: null,
-  });
+  const imageWriteTail = useRef<Promise<void>>(Promise.resolve());
+  const imageGestureId = useRef(0);
+  useEffect(() => () => imageDrag.current?.finish(), []);
   alignStore.current ??= createAlignStore();
   /**
    * The field sample in flight for the readout, and the position waiting
@@ -1561,9 +1587,13 @@ export default function MapView({
     // The tiles this frame draws, which the backdrops are asked for too: a
     // backdrop that fetched a different set would be a second viewport.
     const viewTiles = visibleTiles(cameraRef.current, viewRef.current);
+    const alignment = alignStore.current!.get();
+    const mapPoint = alignment.layer !== null && alignment.expecting === "map";
+    if (!mapPoint) alignBasemap.current = null;
     const state: RenderState = {
       camera: cameraRef.current,
       view: viewRef.current,
+      hiddenImageLayer: mapPoint ? alignment.layer : null,
       frame,
       heldFrame: shown !== null && shown !== frame ? shown : null,
       ramps: {
@@ -1646,9 +1676,21 @@ export default function MapView({
             ) ?? []),
     };
 
+    if (mapPoint) state.onBasemap = () => {
+      const source = canvasRef.current;
+      if (!source) return;
+      const copy = alignBasemap.current ??= document.createElement("canvas");
+      if (copy.width !== source.width) copy.width = source.width;
+      if (copy.height !== source.height) copy.height = source.height;
+      copy.getContext("2d")?.drawImage(source, 0, 0);
+    };
+
     // Tell the timeline which tiles are on screen, once per change rather
     // than per frame: a pan delivers many frames and one viewport.
     const unique = uniqueTiles(viewTiles);
+    // A worker can replace the projection mesh under an unchanged camera.
+    // Preparation and the ruler must use the tiles this draw actually sees.
+    warmTilesRef.current = { camera: state.camera, view: state.view, tiles: unique };
     const key = unique.map((t) => `${t.z}/${t.x}/${t.y}`).join(",");
     if (key !== reportedViewport.current) {
       reportedViewport.current = key;
@@ -1822,7 +1864,10 @@ export default function MapView({
   // A plane mesh built off the main thread has arrived (camera.ts): draw
   // through it. One listener, because there is one map.
   useEffect(() => {
-    onProjectedMeshReady(() => requestDrawRef.current());
+    onProjectedMeshReady(() => {
+      warmTilesRef.current = null;
+      requestDrawRef.current();
+    });
     return () => onProjectedMeshReady(null);
   }, []);
 
@@ -1844,10 +1889,9 @@ export default function MapView({
     });
   }, []);
 
-  // A change to the alignment mode — a pair placed, undone, or the mode
-  // itself starting or ending — redraws the overlay, which is where its
-  // numbered pairs are drawn. Subscribed once; `requestOverlay` is stable.
-  useEffect(() => alignStore.current!.subscribe(() => requestOverlay()), [requestOverlay]);
+  // Alternating picture/map clicks changes image visibility as well as the
+  // overlay. Undo, cancel and commit restore it through the same draw path.
+  useEffect(() => alignStore.current!.subscribe(requestDraw), [requestDraw]);
 
   // --- Set up GL once ---
   useEffect(() => {
@@ -2582,7 +2626,8 @@ export default function MapView({
    * Playback preparation and presentation reuse this list for the current
    * viewport. Both refs are replaced wholesale rather than mutated (`panBy`,
    * `zoomAbout`, `clampCamera` all return new cameras), so identity is a sound
-   * key.
+   * key between draws. A mesh completion invalidates it separately, and
+   * every draw refreshes it from the actual visible tiles.
    */
   const warmTilesRef = useRef<{
     camera: Camera;
@@ -2619,6 +2664,23 @@ export default function MapView({
     cache.protect(protect, view);
     const frames = plan.targets.filter((step) => request.states[step] === "solid").map(frameOf);
     const ready = cache.prepare(frames, view);
+    // Keep the existing diagnostic until the reported persistent 2/3 stall
+    // reproduces. Include residency/failures to distinguish it from a wait
+    // for the backend or a projection viewport that changed underneath it.
+    playbackPreparation({
+      targets: [...plan.targets],
+      states: plan.targets.map((step) => request.states[step] ?? "(missing)"),
+      framesAsked: frames.length,
+      ready,
+      total: plan.targets.length,
+      streaming: plan.streaming,
+      tilesPerFrame: view.length,
+      capacity: cache.capacity,
+      statesLength: request.states.length,
+      resident: ready < plan.targets.length
+        ? plan.targets.map((step) => cache.residentCount(frameOf(step), view)) : undefined,
+      cache: ready < plan.targets.length ? cache.stats() : undefined,
+    });
     return { ready, total: plan.targets.length, streaming: plan.streaming };
   }, [viewportTiles]);
   const present = useCallback((target: number): boolean => {
@@ -3492,12 +3554,9 @@ export default function MapView({
     // one: a project with several charts under it would otherwise stack
     // outlines from all of them, with no way to say which was meant.
     //
-    // The corner-drag handles, the M50 edge grips and the rotation grip that
-    // used to be drawn here are gone with the corner-placement model; Task 7
-    // builds their replacement, the control-point alignment interaction, on
-    // this same outline.
+    const aligning = alignStore.current!.get();
     const placing = imageLayersRef.current.find((image) => image.layer === activeLayer);
-    if (placing?.loaded) {
+    if (placing?.loaded && !(aligning.layer === placing.layer && aligning.expecting === "map")) {
       // Walked around the picture's edge and projected point by point, never
       // corner to corner: a straight screen line between two projected
       // corners is a chord, which on the globe cut through the planet rather
@@ -3529,6 +3588,19 @@ export default function MapView({
       }
     }
 
+    if (placing?.loaded && tool === HAND && aligning.layer === null) {
+      context.save();
+      context.fillStyle = "#d8f3ff";
+      context.strokeStyle = "#163c57";
+      context.lineWidth = Math.max(1, dpr);
+      for (const handle of imageResizeHandles(placing, camera, view)) {
+        const size = (handle.index < 4 ? 8 : 6) * dpr;
+        context.fillRect(handle.point.x - size / 2, handle.point.y - size / 2, size, size);
+        context.strokeRect(handle.point.x - size / 2, handle.point.y - size / 2, size, size);
+      }
+      context.restore();
+    }
+
     // The image alignment mode (Task 7, spec.md 4.9 §2, §5): every pair
     // placed this session, numbered, with a line from where it was clicked
     // in the picture to where it was told to belong. The picture end is
@@ -3539,7 +3611,6 @@ export default function MapView({
     // nothing but the pair. A picture click waiting on its map half draws the
     // same line to the pointer instead, the position picker's own cue for
     // "here to there".
-    const aligning = alignStore.current!.get();
     if (aligning.layer !== null) {
       const alignedView = imageLayersRef.current.find((v) => v.layer === aligning.layer);
       if (alignedView) {
@@ -3585,6 +3656,14 @@ export default function MapView({
         }
         context.restore();
       }
+    }
+
+    if (aligning.layer !== null) {
+      if (aligning.expecting === "map" && cursor && alignBasemap.current) {
+        drawMagnifier(context, alignBasemap.current, cursor, dpr);
+      }
+      // Alignment owns the pointer; no brush or erase preview belongs here.
+      return;
     }
 
     // The measurements (spec.md 10, M8). Drawn whatever the tool is, because
@@ -3844,52 +3923,9 @@ export default function MapView({
     if (cursor && magnifying) {
       const sample = readoutStore.current?.get().sample ?? null;
       const radius = MAGNIFIER_RADIUS_CSS * dpr;
-      context.save();
-      // The map under the pointer, enlarged into the ring (M28). Copied from
-      // the GL canvas, which still holds this frame because the overlay is
-      // drawn in the same frame as the GL pass — the drawing buffer is not
-      // preserved between frames, which is why a pointer move with the
-      // magnifier up asks for a whole frame and not the overlay alone.
       const source = canvasRef.current;
-      if (source) {
-        const span = (radius * 2) / MAGNIFIER_ZOOM;
-        context.save();
-        context.beginPath();
-        context.arc(cursor.x, cursor.y, radius, 0, Math.PI * 2);
-        context.clip();
-        context.imageSmoothingEnabled = false;
-        context.drawImage(
-          source,
-          cursor.x - span / 2,
-          cursor.y - span / 2,
-          span,
-          span,
-          cursor.x - radius,
-          cursor.y - radius,
-          radius * 2,
-          radius * 2,
-        );
-        context.restore();
-      }
-      context.strokeStyle = "rgba(255, 255, 255, 0.95)";
-      context.lineWidth = Math.max(1, 1.5 * dpr);
-      context.beginPath();
-      context.arc(cursor.x, cursor.y, radius, 0, Math.PI * 2);
-      context.stroke();
-      context.strokeStyle = "rgba(20, 28, 44, 0.9)";
-      context.lineWidth = Math.max(1, 3.5 * dpr);
-      context.beginPath();
-      context.arc(cursor.x, cursor.y, radius + 2.5 * dpr, 0, Math.PI * 2);
-      context.stroke();
-      const arm = 6 * dpr;
-      context.strokeStyle = "rgba(255, 255, 255, 0.95)";
-      context.lineWidth = Math.max(1, dpr);
-      context.beginPath();
-      context.moveTo(cursor.x - arm, cursor.y);
-      context.lineTo(cursor.x + arm, cursor.y);
-      context.moveTo(cursor.x, cursor.y - arm);
-      context.lineTo(cursor.x, cursor.y + arm);
-      context.stroke();
+      if (source) drawMagnifier(context, source, cursor, dpr);
+      context.save();
       if (sample) {
         const here = unproject(camera, view, cursor);
         if (sample.speedKnots > 0.05) {
@@ -4238,7 +4274,7 @@ export default function MapView({
    * `createReadoutStore` exists to prevent.
    */
   const applyCursor = useCallback(
-    (insideRegion: boolean, panning: boolean, onImage = false) => {
+    (insideRegion: boolean, panning: boolean, onImage = false, imageCursor: string | null = null) => {
       const canvas = canvasRef.current;
       if (!canvas) return;
       if (shapeModeRef.current !== null) {
@@ -4258,7 +4294,8 @@ export default function MapView({
             : schemaRef.current?.preview === "field" || schemaRef.current === null
               ? "adds"
               : "edits";
-      const wanted = cursorFor({
+      const wanted = (tool === HAND && !picking && !toolPick && !recording && !eyedropper
+        && alignStore.current!.get().layer === null && imageCursor) || cursorFor({
         tool,
         eyedropper,
         picking: picking !== null || toolPick !== null,
@@ -4298,6 +4335,7 @@ export default function MapView({
   const lastMapPointer = useRef<{x:number;y:number} | null>(null);
 
   const onPointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    if (imageDrag.current) return;
     const point = toDevice(event);
     if (!validGeo(unproject(cameraRef.current, viewRef.current, point))) return;
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -4454,20 +4492,25 @@ export default function MapView({
     // click is a control point's, so a hand over the picture must not steal
     // one — `pointerPriority` has already decided that above.
     if (tool === HAND) {
-      const image = imageUnder(
-        imageLayersRef.current,
-        activeLayer,
-        cameraRef.current,
-        viewRef.current,
-        point,
-      );
-      if (image !== null) {
-        imageDrag.current = {
-          layer: image.layer,
-          from: unproject(cameraRef.current, viewRef.current, point),
-          origin: [image.placement[2]!, image.placement[5]!],
-        };
-        applyCursor(false, false, true);
+      const activeImage = imageLayersRef.current.find((image) => image.layer === activeLayer);
+      const handle = activeImage && imageResizeHandleAt(activeImage, cameraRef.current, viewRef.current,
+        point, 9 * (window.devicePixelRatio || 1));
+      const image = handle ? activeImage : imageUnder(imageLayersRef.current, activeLayer,
+        cameraRef.current, viewRef.current, point);
+      if (image) {
+        const from = unproject(cameraRef.current, viewRef.current, point);
+        const origin = [image.placement[2], image.placement[5]];
+        const key = `image:${image.layer}:${++imageGestureId.current}`;
+        const writer = imageGesture<{ lon: number; lat: number }>(imageWriteTail.current, async (at) => {
+          const summary = handle
+            ? await api.resizeImage(image.layer, handle.index, [from.lon, from.lat], [at.lon, at.lat], key)
+            : await api.moveImage(image.layer, origin[0]! + normalizeLon(at.lon - from.lon),
+              origin[1]! + at.lat - from.lat, key);
+          onProjectChanged(summary);
+        }, () => api.endGesture(), (error) => reportError(String(error)));
+        imageWriteTail.current = writer.done;
+        imageDrag.current = { cursor: handle?.cursor ?? "move", push: writer.push, finish: writer.finish };
+        applyCursor(false, false, true, imageDrag.current.cursor);
         return;
       }
     }
@@ -4859,13 +4902,11 @@ export default function MapView({
     // region with a tool that fills one — the same predicate the click uses —
     // and the tool's own cursor everywhere else (M24).
     //
-    // This used to also report the image grip under the pointer and whether
-    // the hand was over the active picture (M36, M50), for cursors that
-    // promised the corner-drag and whole-picture-drag gestures. Both are gone
-    // with the corner-placement model; Task 7's alignment interaction defines
-    // its own cursor cues, if it needs any.
     {
       const geo = unproject(cameraRef.current, viewRef.current, point);
+      const image = imageLayersRef.current.find((image) => image.layer === activeLayer);
+      const handle = tool === HAND && image && imageResizeHandleAt(image, cameraRef.current,
+        viewRef.current, point, 9 * (window.devicePixelRatio || 1));
       applyCursor(
         region !== null &&
           drawsObjects(tool) &&
@@ -4885,39 +4926,14 @@ export default function MapView({
               viewRef.current,
               point,
             ) !== null),
+        imageDrag.current?.cursor ?? (handle ? handle.cursor : null),
       );
     }
 
-    // The whole picture following the hand (M36). Absolute, against the
-    // baseline taken at the press, so a dropped report costs nothing and the
-    // same position twice writes nothing; one in flight at a time with the
-    // newest waiting, the pattern the readout and the drag preview use. The
-    // gesture key coalesces the whole drag into one undo entry.
     const moving = imageDrag.current;
     if (moving) {
       const geo = unproject(cameraRef.current, viewRef.current, point);
-      const flight = imageMove.current;
-      flight.queued = [
-        moving.origin[0] + normalizeLon(geo.lon - moving.from.lon),
-        moving.origin[1] + (geo.lat - moving.from.lat),
-      ];
-      if (!flight.inFlight) {
-        const send = () => {
-          const wanted = flight.queued;
-          flight.queued = null;
-          if (wanted === null) {
-            flight.inFlight = false;
-            return;
-          }
-          flight.inFlight = true;
-          void api
-            .moveImage(moving.layer, wanted[0], wanted[1], `image:${moving.layer}:move`)
-            .then((summary) => onProjectChanged(summary))
-            .catch((error: unknown) => reportError(String(error)))
-            .finally(send);
-        };
-        send();
-      }
+      if (validGeo(geo)) moving.push(geo);
       return;
     }
 
@@ -5189,7 +5205,7 @@ export default function MapView({
     // The magnifier copies the GL canvas, so it needs the whole frame drawn
     // again under it, not the overlay alone (M28).
     if (eyedropperRef.current) requestDraw();
-    else if (tool !== HAND || picking !== null) requestOverlay();
+    else if (tool !== HAND || picking !== null || alignStore.current!.get().layer !== null) requestOverlay();
 
     if (dragging.current) {
       const dx = point.x - dragging.current.x;
@@ -5491,10 +5507,13 @@ export default function MapView({
     // and it clears the baseline, which a stale one would make the next drag
     // compute from where this one started.
     if (imageDrag.current) {
+      const moving = imageDrag.current;
+      const at = unproject(cameraRef.current, viewRef.current, releasePoint);
+      if (event.type !== "pointercancel" && validGeo(at)) moving.push(at);
+      moving.finish();
       imageDrag.current = null;
       dragging.current = null;
       pressOrigin.current = null;
-      void api.endGesture().catch((error: unknown) => reportError(String(error)));
       applyCursor(false, false, true);
       return;
     }
@@ -6106,6 +6125,12 @@ export default function MapView({
         onPointerDownCapture={(event) => focusMapForGesture(event.currentTarget)}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
+        onPointerLeave={() => {
+          if (alignStore.current!.get().layer !== null) {
+            cursorRef.current = null;
+            requestOverlay();
+          }
+        }}
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
         onLostPointerCapture={(event) => {

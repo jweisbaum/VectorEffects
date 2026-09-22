@@ -127,7 +127,7 @@ impl Warp {
             0 => Kind::Affine(base),
             1 => Kind::Affine(translation_through(points[0], base)),
             2 => Kind::Affine(
-                similarity_through(points[0], points[1], width, height)
+                similarity_through(points[0], points[1], width, height, base)
                     .unwrap_or_else(|| translation_through(points[0], base)),
             ),
             3 => Kind::Affine(best_affine(points, width, height, base)),
@@ -327,6 +327,10 @@ fn translation_through(p: ControlPoint, base: Placement) -> Placement {
 /// B*du + A*dv = dlat
 /// ```
 ///
+/// Pixel v increases down, whereas latitude increases up. Give v the base
+/// placement's handedness before fitting, then restore it in the matrix.
+/// Otherwise a second alignment pair silently reflects a north-up image.
+///
 /// where `du, dv` and `dlon, dlat` are the pixel and target vectors between
 /// the two points. Its determinant is `du² + dv²`, so it is singular only
 /// when the two pixels coincide — the "two pairs on the same pixel" case the
@@ -336,9 +340,15 @@ fn similarity_through(
     p1: ControlPoint,
     width: u32,
     height: u32,
+    base: Placement,
 ) -> Option<Placement> {
+    let handedness = if base.a * base.e - base.b * base.d < 0.0 {
+        -1.0
+    } else {
+        1.0
+    };
     let du = p1.u - p0.u;
-    let dv = p1.v - p0.v;
+    let dv = (p1.v - p0.v) * handedness;
     let denom = du * du + dv * dv;
     if denom < degeneracy_threshold(width, height) {
         return None;
@@ -349,11 +359,11 @@ fn similarity_through(
     let b = (dlat * du - dlon * dv) / denom;
     Some(Placement {
         a,
-        b: -b,
-        c: p0.lon - a * p0.u + b * p0.v,
+        b: -b * handedness,
+        c: p0.lon - a * p0.u + b * p0.v * handedness,
         d: b,
-        e: a,
-        f: p0.lat - b * p0.u - a * p0.v,
+        e: a * handedness,
+        f: p0.lat - b * p0.u - a * p0.v * handedness,
     })
 }
 
@@ -417,7 +427,7 @@ fn best_affine(points: &[ControlPoint], width: u32, height: u32, base: Placement
         return p;
     }
     if points.len() >= 2
-        && let Some(p) = similarity_through(points[0], points[1], width, height)
+        && let Some(p) = similarity_through(points[0], points[1], width, height, base)
     {
         return p;
     }
@@ -728,6 +738,26 @@ mod tests {
         let ab = ((b.0 - a.0).powi(2) + (b.1 - a.1).powi(2)).sqrt();
         let ac = ((c.0 - a.0).powi(2) + (c.1 - a.1).powi(2)).sqrt();
         assert!((ab - ac).abs() < 1e-9, "a square became {ab} by {ac}");
+    }
+
+    #[test]
+    fn two_pairs_keep_the_images_handedness_including_rotated_and_south_up_files() {
+        let north_up = Placement::spanning(-10.0, 5.0, 10.0, -5.0, 80, 40);
+        let points = [at(0.0, 0.0, -10.0, 5.0), at(80.0, 40.0, 10.0, -5.0)];
+        let warp = Warp::fit(&points, 80, 40, north_up);
+        assert_eq!(warp.place(80.0, 0.0), (10.0, 5.0));
+        assert_eq!(warp.place(0.0, 40.0), (-10.0, -5.0));
+        let rotated = [at(0.0, 0.0, 0.0, 0.0), at(80.0, 0.0, 0.0, 20.0)];
+        assert_eq!(
+            Warp::fit(&rotated, 80, 40, north_up).place(0.0, 40.0),
+            (10.0, 0.0)
+        );
+        let south_up = Placement::spanning(-10.0, -5.0, 10.0, 5.0, 80, 40);
+        let points = [at(0.0, 0.0, -10.0, -5.0), at(80.0, 0.0, 10.0, -5.0)];
+        assert_eq!(
+            Warp::fit(&points, 80, 40, south_up).place(0.0, 40.0),
+            (-10.0, 5.0)
+        );
     }
 
     /// Three points determine an affine exactly. The expected answer here is

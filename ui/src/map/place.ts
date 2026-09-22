@@ -3,17 +3,10 @@
  *
  * An image's four corners come from the backend as `ImageLayerView.corners`,
  * taken from its warp — the bent quad for a warped image, the plain affine
- * one otherwise (`ve_core::warp::Warp::place`). This module only asks
- * whether a screen point falls inside that quad, and which loaded, active
- * image layer a point is over; the placement arithmetic stays in Rust and is
+ * one otherwise (`ve_core::warp::Warp::place`). This module projects and hit-tests
+ * resize handles and asks which loaded, active image layer a point is over; the placement arithmetic stays in Rust and is
  * never duplicated here (frontend types and maths are generated, not
  * hand-written).
- *
- * The three-control-point corner drag and the M50 edge and rotation grips
- * this module used to hold are gone, replaced by the control points
- * `set_image_control_points` stores. `imageUnder` and `insideImage` are kept
- * for Task 7's alignment interaction, which still needs to know which image
- * the pointer is over and whether a click has landed on it.
  *
  * Pure and free of React, so the arithmetic can be tested rather than
  * eyeballed against a chart.
@@ -21,6 +14,29 @@
 
 import type { ImageLayerView } from "../generated/ImageLayerView";
 import { type Camera, type ScreenPoint, type Viewport, project } from "./camera";
+import { pictureToMap } from "./align";
+
+/** Same order as resize_image: corners clockwise, then sides clockwise. */
+export function imageResizeHandles(image: ImageLayerView, camera: Camera, viewport: Viewport) {
+  const pixels = [[0, 0], [1, 0], [1, 1], [0, 1], [0.5, 0], [1, 0.5], [0.5, 1], [0, 0.5]];
+  const points = pixels.map(([u, v]) => project(camera, viewport,
+    pictureToMap(image, u! * image.width, v! * image.height)));
+  return points.map((point, index) => {
+    const opposite = points[index < 4 ? (index + 2) % 4 : 4 + (index - 4 + 2) % 4]!;
+    const angle = Math.atan2(point.y - opposite.y, point.x - opposite.x);
+    const direction = Number.isFinite(angle) ? ((Math.round(angle / (Math.PI / 4)) % 4) + 4) % 4
+      : [1, 3, 1, 3, 2, 0, 2, 0][index]!;
+    return { index, point, cursor: ["ew-resize", "nwse-resize", "ns-resize", "nesw-resize"][direction]! };
+  }).filter(({ point }) => Number.isFinite(point.x) && Number.isFinite(point.y));
+}
+
+/** Corners win when handles overlap on a small image. Distances are device pixels. */
+export function imageResizeHandleAt(image: ImageLayerView, camera: Camera, viewport: Viewport,
+  at: ScreenPoint, radius: number) {
+  if (!image.loaded) return null;
+  return imageResizeHandles(image, camera, viewport).find(({ point }) =>
+    Math.hypot(at.x - point.x, at.y - point.y) <= radius) ?? null;
+}
 
 /**
  * Whether a screen point is inside an image's quad.

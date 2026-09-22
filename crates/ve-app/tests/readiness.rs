@@ -462,6 +462,50 @@ fn completed_work_stays_idle_when_the_playhead_moves() {
     );
 }
 
+/// A completed pool must wake for a new view without a playhead change.
+#[test]
+fn changing_the_view_restarts_background_rendering_while_paused() {
+    let (_root, state) = project("paused-view-change");
+    let id = stamp(&state, 0.0, 0.0);
+    animate(&state, id);
+    let pool = RenderPool::new();
+    let first = viewport();
+    pool.request_numbered(&state, 0, &first, Some(1))
+        .expect("first view");
+    pool.drain(&state);
+    assert!(!pool.process_next(&state));
+
+    let zoomed = [TileAddress { z: 2, x: 3, y: 1 }];
+    assert!(
+        pool.readiness(&state, &zoomed)
+            .expect("new view")
+            .steps
+            .iter()
+            .any(|step| step.ready < step.total)
+    );
+    pool.request_numbered(&state, 0, &zoomed, Some(3))
+        .expect("zoom");
+    // A slower request from the previous view must not steal the idle pool.
+    pool.request_numbered(&state, 0, &first, Some(2))
+        .expect("late pan");
+    pool.drain(&state);
+    assert!(
+        pool.readiness(&state, &zoomed)
+            .expect("zoom ready")
+            .steps
+            .iter()
+            .all(|step| step.ready == step.total)
+    );
+    assert!(
+        pool.readiness(&state, &first)
+            .expect("old view retained")
+            .steps
+            .iter()
+            .all(|step| step.ready == step.total)
+    );
+    assert!(!pool.process_next(&state));
+}
+
 #[test]
 fn reprioritizing_does_not_restore_units_already_processed() {
     let (_root, state) = project("outstanding-only");

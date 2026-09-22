@@ -959,7 +959,7 @@ export function ImageControls({
     );
   }
   return (
-    <div className="image-controls">
+    <div className="image-controls" title="Hand tool: drag a corner to resize proportionally, a side to stretch, or the picture to move it.">
       <label>
         Opacity
         <input
