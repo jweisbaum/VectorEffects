@@ -3,8 +3,7 @@
     clippy::unwrap_used,
     reason = "test code; clippy's allow-in-tests does not reach tests/"
 )]
-//! M17's acceptance: a liquify stroke drags the field along the hand, and
-//! nowhere else (spec.md 6.3).
+//! Liquify relocates a selected region and preserves saved legacy smears.
 
 use ve_app::commands::AppState;
 use ve_app::create::{self, Gesture, NewObject, Tool, ToolOption};
@@ -96,30 +95,28 @@ fn number(property: &str, value: f64) -> ToolOption {
     }
 }
 
-/// The acceptance case: a liquify stroke east over a northward field reads the
-/// field from west of each cell, so the slow western field is dragged across
-/// the step and shows up east of it.
+/// A selected western field lands intact east of the step.
 #[test]
-fn a_stroke_east_drags_the_western_field_over_the_step() {
+fn a_selected_region_moves_intact_over_the_step() {
     let (_root, state) = stepped("east");
     assert!(
         (speed(&state, ll(3.0, 0.0)) - 15.0).abs() < 0.5,
         "east of the step is fast"
     );
 
-    // Ten degrees of stroke, eastward, at full strength and hard-edged, so a
-    // cell three degrees east of the step reads from well west of it.
+    // A single painted disc moved thirteen degrees east.
     create::create(
         &state,
         NewObject {
             tool: Tool::Liquify,
-            gesture: Gesture::Stroke {
-                points: vec![[-5.0, 0.0], [0.0, 0.0], [5.0, 0.0]],
+            gesture: Gesture::Relocate {
+                points: vec![[-10.0, 0.0]],
+                from: [-10.0, 0.0],
+                to: [3.0, 0.0],
             },
             options: vec![
-                number("SizeKm", 1_200.0),
-                number("Strength", 100.0),
-                number("Feather", 0.0),
+                number("SizeKm", 500.0),
+                number("InterpolationDistanceKm", 300.0),
             ],
             layer: None,
         },
@@ -136,22 +133,22 @@ fn a_stroke_east_drags_the_western_field_over_the_step() {
     assert!((speed(&state, ll(-15.0, 0.0)) - 5.0).abs() < 0.5);
 }
 
-/// Half strength drags half as far — which here is not far enough to cross the
-/// step from three degrees out.
+/// Cells beyond the destination and its interpolation band stay unchanged.
 #[test]
-fn strength_scales_the_drag() {
+fn relative_displacement_does_not_overwrite_distant_field() {
     let (_root, state) = stepped("strength");
     create::create(
         &state,
         NewObject {
             tool: Tool::Liquify,
-            gesture: Gesture::Stroke {
-                points: vec![[-5.0, 0.0], [0.0, 0.0], [5.0, 0.0]],
+            gesture: Gesture::Relocate {
+                points: vec![[-10.0, 0.0]],
+                from: [-10.0, 0.0],
+                to: [-2.0, 0.0],
             },
             options: vec![
-                number("SizeKm", 1_200.0),
-                number("Strength", 20.0),
-                number("Feather", 0.0),
+                number("SizeKm", 500.0),
+                number("InterpolationDistanceKm", 300.0),
             ],
             layer: None,
         },
@@ -159,12 +156,12 @@ fn strength_scales_the_drag() {
     .expect("liquify");
     assert!(
         (speed(&state, ll(4.5, 0.0)) - 15.0).abs() < 0.5,
-        "a fifth of the drag should not reach four and a half degrees: {} m/s",
+        "the move should not reach four and a half degrees: {} m/s",
         speed(&state, ll(4.5, 0.0))
     );
 }
 
-/// Two liquify strokes stay two objects: a smear's deltas are its own.
+/// Two source selections retain their own independent displacements.
 #[test]
 fn a_liquify_never_merges() {
     let (_root, state) = stepped("merge");
@@ -190,4 +187,139 @@ fn a_liquify_never_merges() {
         objects, 4,
         "two brush strokes and two liquifies, none absorbed"
     );
+}
+
+#[test]
+fn saved_legacy_smears_keep_their_recorded_strength() {
+    use ve_core::{
+        PropValue,
+        document::{Geometry, Object, SmearPoint},
+        schema::{PropId, ToolKind},
+    };
+    for (strength, probe, expected) in [(1.0, 3.0, 5.0), (0.2, 4.5, 15.0)] {
+        let (root, state) = stepped("legacy");
+        let mut object = Object::new(ToolKind::Liquify, "Legacy smear", 2);
+        object
+            .props
+            .get_mut(PropId::Position)
+            .unwrap()
+            .set_base(PropValue::LonLat(ll(-5.0, 0.0)));
+        object
+            .props
+            .get_mut(PropId::SizeKm)
+            .unwrap()
+            .set_base(PropValue::F32(1200.0));
+        let frame = ve_render::aeqd::Frame::in_space(
+            ll(-5.0, 0.0),
+            0.0,
+            100.0,
+            ve_render::aeqd::Space::Geodesic,
+        );
+        let points = [ll(-5.0, 0.0), ll(0.0, 0.0), ll(5.0, 0.0)].map(|p| frame.to_local(p));
+        object.geometry = Geometry::Smear {
+            chains: vec![
+                points
+                    .iter()
+                    .enumerate()
+                    .map(|(i, p)| {
+                        let before = points[i.saturating_sub(1)];
+                        SmearPoint::new(
+                            p[0],
+                            p[1],
+                            (p[0] - before[0]) * strength,
+                            (p[1] - before[1]) * strength,
+                        )
+                    })
+                    .collect(),
+            ],
+        };
+        let mut session = state.session.lock().unwrap();
+        let open = session.require_open().unwrap();
+        open.project.layers[0].objects.push(object);
+        let path = root.0.join("legacy.veproj");
+        ve_core::io::save(&open.project, &path).unwrap();
+        open.project = ve_core::io::load(&path).unwrap();
+        drop(session);
+        assert!((speed(&state, ll(probe, 0.0)) - expected).abs() < 0.5);
+    }
+}
+
+#[test]
+fn selection_and_destination_have_surface_outlines_and_one_displacement_track() {
+    use ve_core::schema::PropId;
+    for at in [[179.0, 72.0], [-150.0, 0.0]] {
+        let (_root, state) = stepped("outlines");
+        let made = create::create(
+            &state,
+            NewObject {
+                tool: Tool::Liquify,
+                gesture: Gesture::Relocate {
+                    points: vec![at, [at[0], at[1] + 1.0]],
+                    from: at,
+                    to: [at[0] + 4.0, at[1]],
+                },
+                options: vec![number("SizeKm", 200.0), number("Feather", 0.6)],
+                layer: None,
+            },
+        )
+        .unwrap();
+        let outlines =
+            ve_app::transform::outlines_at(&state, 0, Some(Tool::Liquify), &[], None, false)
+                .unwrap();
+        let outline = outlines.iter().find(|o| o.object == made.object).unwrap();
+        let moved = outline.relocation.as_ref().unwrap();
+        let session = state.session.lock().unwrap();
+        let object = session
+            .open
+            .as_ref()
+            .unwrap()
+            .project
+            .object(ve_core::Id::from_raw(made.object))
+            .unwrap();
+        let flat = ve_render::scene::flatten_object(object, 0).unwrap();
+        let ve_render::scene::Modifier::Relocate { displacement, .. } = flat.modifier.unwrap()
+        else {
+            panic!("relocate")
+        };
+        let local: Vec<_> = moved
+            .connection
+            .iter()
+            .map(|p| flat.frame.to_local(ll(p[0], p[1])))
+            .collect();
+        for i in 0..2 {
+            assert!((local.last().unwrap()[i] - local[0][i] - displacement[i]).abs() < 0.05);
+        }
+        // Every point stays in the plane between the two centres, then is
+        // lifted back onto the globe instead of a chord through the sphere.
+        for (index, point) in local.iter().enumerate() {
+            for axis in 0..2 {
+                assert!(
+                    (point[axis] - local[0][axis] - displacement[axis] * index as f64 / 64.0).abs()
+                        < 0.05
+                );
+            }
+        }
+        assert!(matches!(
+            &moved.destination,
+            ve_app::transform::ObjectOutline::Contours { .. }
+        ));
+        assert_eq!(
+            object.props.get(PropId::Feather).unwrap().base().as_f32(),
+            Some(0.6)
+        );
+        drop(session);
+        let tracks = ve_app::animation::tracks_of(&state, made.object, 0).unwrap();
+        let positions: Vec<_> = tracks
+            .tracks
+            .iter()
+            .filter(|t| t.property.starts_with("Displacement"))
+            .collect();
+        assert_eq!(positions.len(), 1);
+        assert_eq!(positions[0].label, "Displacement position");
+        assert!(matches!(positions[0].base, PropertyValue::Offset { .. }));
+        let samples =
+            ve_app::animation::samples_of(&state, made.object, "DisplacementPosition").unwrap();
+        assert_eq!(samples.series.len(), 2);
+        assert!(samples.series.iter().all(|s| s.unit == "kilometres"));
+    }
 }

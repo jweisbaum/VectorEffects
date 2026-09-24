@@ -119,7 +119,7 @@ function trackId(object: number, property: string): string {
  * a line through them would say nothing the diamonds do not.
  */
 function graphable(base: PropertyValue): boolean {
-  return base.kind === "number" || base.kind === "angle" || base.kind === "position";
+  return base.kind === "number" || base.kind === "angle" || base.kind === "position" || base.kind === "offset";
 }
 
 /** Names for the easings, in the order the backend offers them. */
@@ -1428,7 +1428,7 @@ export default function Timeline({
                       >
                         {object.name}
                       </span>
-                      {object.tool !== "macro" && object.tool !== "patch" && <button
+                      {object.tool !== "macro" && object.tool !== "patch" && object.tool !== "liquify" && <button
                         className={`tl-shape-toggle${shapeEditing === object.id ? " on" : ""}`}
                         aria-label={`Animate shape of ${object.name}`}
                         aria-pressed={shapeEditing === object.id}

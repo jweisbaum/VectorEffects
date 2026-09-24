@@ -26,6 +26,8 @@ pub enum PropValue {
     LonLat(LonLat),
     /// A discriminant into the schema's `variants` list. Never interpolates.
     Enum(u8),
+    /// A relative position in local kilometres; both axes key together.
+    Offset([f32; 2]),
 }
 
 /// The kind of a [`PropValue`], without the value.
@@ -42,6 +44,8 @@ pub enum PropKind {
     LonLat,
     /// See [`PropValue::Enum`].
     Enum,
+    /// See [`PropValue::Offset`].
+    Offset,
 }
 
 impl PropValue {
@@ -53,6 +57,7 @@ impl PropValue {
             Self::Angle(_) => PropKind::Angle,
             Self::LonLat(_) => PropKind::LonLat,
             Self::Enum(_) => PropKind::Enum,
+            Self::Offset(_) => PropKind::Offset,
         }
     }
 
@@ -64,6 +69,7 @@ impl PropValue {
     pub fn is_finite(self) -> bool {
         match self {
             Self::F32(v) => v.is_finite(),
+            Self::Offset(p) => p.iter().all(|v| v.is_finite()),
             Self::Angle(a) => a.degrees().is_finite(),
             Self::LonLat(p) => p.lon.is_finite() && p.lat.is_finite(),
             Self::Bool(_) | Self::Enum(_) => true,
@@ -92,7 +98,7 @@ impl PropValue {
                 lon: crate::canonical::degrees(p.lon),
                 lat: crate::canonical::degrees(p.lat),
             }),
-            Self::F32(_) | Self::Bool(_) | Self::Enum(_) => self,
+            Self::F32(_) | Self::Bool(_) | Self::Enum(_) | Self::Offset(_) => self,
         }
     }
 
@@ -125,6 +131,15 @@ impl PropValue {
         match self {
             Self::LonLat(v) => Some(v),
             _ => None,
+        }
+    }
+
+    /// Extracts a relative position in kilometres.
+    pub fn as_offset(self) -> Option<[f32; 2]> {
+        if let Self::Offset(p) = self {
+            Some(p)
+        } else {
+            None
         }
     }
 
@@ -196,7 +211,7 @@ impl Interpolation {
     pub fn is_valid_for(self, kind: PropKind) -> bool {
         match kind {
             PropKind::Bool | PropKind::Enum => self == Self::Step,
-            PropKind::F32 | PropKind::Angle | PropKind::LonLat => true,
+            PropKind::F32 | PropKind::Angle | PropKind::LonLat | PropKind::Offset => true,
         }
     }
 }
@@ -270,6 +285,11 @@ pub fn interpolate(from: PropValue, to: PropValue, t: f64, interp: Interpolation
     match (from, to) {
         (PropValue::F32(a), PropValue::F32(b)) => {
             PropValue::F32((f64::from(a) + (f64::from(b) - f64::from(a)) * t) as f32)
+        }
+        (PropValue::Offset(a), PropValue::Offset(b)) => {
+            PropValue::Offset(std::array::from_fn(|i| {
+                (f64::from(a[i]) + (f64::from(b[i]) - f64::from(a[i])) * t) as f32
+            }))
         }
         (PropValue::Angle(a), PropValue::Angle(b)) => PropValue::Angle(a.lerp_shortest(b, t)),
         (PropValue::LonLat(a), PropValue::LonLat(b)) => PropValue::LonLat(slerp(a, b, t)),

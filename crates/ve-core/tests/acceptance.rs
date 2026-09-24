@@ -171,6 +171,7 @@ fn build(recipe: &ProjectRecipe) -> Project {
                     PropKind::Bool => PropValue::Bool(key.magnitude > 0.0),
                     PropKind::Enum => PropValue::Enum((key.magnitude.abs() as u8) % 3),
                     PropKind::LonLat => continue,
+                    PropKind::Offset => PropValue::Offset([key.magnitude, -key.magnitude]),
                 };
                 anim.set_key(
                     key.step.min(last),

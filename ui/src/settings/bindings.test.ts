@@ -5,6 +5,8 @@ import { DEFAULT_GLYPHS } from "../map/glyphAppearance";
 import { actionFor, bindingFor, chordLabel, chordOf, toolChord } from "./bindings";
 
 const settings: AppSettings = {
+  theme: "sage",
+  custom_theme: null,
   glyphs: DEFAULT_GLYPHS,
   shortcuts: [
     { action: "play_pause", tool: "", key: " ", shift: false, alt: false, accel: false },

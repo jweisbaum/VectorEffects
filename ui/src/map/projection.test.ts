@@ -24,7 +24,7 @@ describe("every projection", () => {
     expect(STAMP_SPACES).toEqual([
       "geodesic", "projected", "mercator", "miller", "lambert", "behrmann",
       "gall_peters", "hobo_dyer", "gall_stereographic", "braun", "central_cylindrical",
-      "patterson", "compact_miller", "equidistant_30", "equidistant_45",
+      "patterson", "compact_miller", "equidistant_30", "equidistant_45", "orthographic",
     ]);
     for (const projection of PROJECTIONS) {
       expect(STAMP_SPACES[projection.mode + 1]).toBe(projection.mode === 0 ? "projected" : projection.id);

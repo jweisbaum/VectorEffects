@@ -116,6 +116,11 @@ fn tile_raster(
         })
     });
     kept.erased.retain(|erasure| {
+        if erasure.projection == crate::aeqd::Space::Orthographic.choice() {
+            // The screen radius is compressed near the limb; it cannot be
+            // used as a geographic radius to discard part of the stroke.
+            return true;
+        }
         erasure
             .chains
             .iter()
@@ -148,7 +153,10 @@ fn reaches(object: &FlatObject, centre: LonLat, radius_m: f64) -> bool {
 /// writes, and so needs everything beneath it wherever that is.
 fn reads_elsewhere(object: &FlatObject) -> bool {
     object.clone_source.is_some()
-        || matches!(object.modifier, Some(Modifier::Warp(_) | Modifier::Smear))
+        || matches!(
+            object.modifier,
+            Some(Modifier::Warp(_) | Modifier::Smear | Modifier::Relocate { .. })
+        )
 }
 
 /// The tile's centre and the greatest distance from it to any point of the
@@ -293,6 +301,7 @@ mod tests {
             clone_offset: OffsetMode::Aligned,
             modifier: None,
             smear: Vec::new(),
+            transition: Default::default(),
             invert: false,
             capture: None,
             erases: false,
@@ -490,6 +499,7 @@ mod tests {
     #[test]
     fn an_erasure_is_kept_only_where_it_reaches() {
         let erasure = |lon: f64, lat: f64| crate::scene::FlatRasterErasure {
+            projection_origin: None,
             projection: 0,
             chains: vec![vec![LonLat::new(lon, lat).expect("valid")]],
             radius_m: 100_000.0,

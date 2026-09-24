@@ -74,6 +74,10 @@ export async function screenshot(mapPng: string | null, css: string): Promise<st
   }
   const wrapper = document.createElement("html");
   wrapper.setAttribute("xmlns", "http://www.w3.org/1999/xhtml");
+  // Theme roles live on the document root, outside the body being cloned.
+  wrapper.setAttribute("style", document.documentElement.getAttribute("style") ?? "");
+  wrapper.dataset.theme = document.documentElement.dataset.theme ?? "sage";
+  wrapper.dataset.themeScheme = document.documentElement.dataset.themeScheme ?? "dark";
   const style = document.createElement("style");
   style.textContent = css;
   wrapper.append(style, clone);

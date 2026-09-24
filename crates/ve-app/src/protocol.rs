@@ -375,7 +375,11 @@ pub fn handle(app: &tauri::AppHandle, request: &Request<Vec<u8>>) -> Response<Ve
             layer,
             max_edge,
         } => return serve_image(app, token, layer, max_edge),
-        Served::Backdrop { backdrop, id, .. } => return serve_backdrop(app, backdrop, id),
+        Served::Backdrop {
+            backdrop,
+            token,
+            id,
+        } => return serve_backdrop(app, backdrop, token, id),
         Served::Tile {
             revision,
             step,
@@ -435,10 +439,11 @@ struct TileRequest {
 fn serve_backdrop(
     app: &tauri::AppHandle,
     backdrop: crate::charts::Backdrop,
+    token: u64,
     id: tile::TileId,
 ) -> Response<Vec<u8>> {
     let state = app.state::<AppState>();
-    let Some(rgba) = crate::charts::tile(&state, backdrop, id) else {
+    let Some(rgba) = crate::charts::tile_for_token(&state, backdrop, id, Some(token)) else {
         return typed(204, "image/png", Vec::new());
     };
     match crate::image::encode_png(&rgba, tile::TILE_SIZE, tile::TILE_SIZE) {

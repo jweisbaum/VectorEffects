@@ -190,7 +190,7 @@ it("scrubs the ruler without starting text selection and stops on cancel", async
   } finally { await act(async () => root.unmount()); container.remove(); }
 });
 
-it.each(["macro", "patch"])("does not offer shape animation for a %s", async (tool) => {
+it.each(["macro", "patch", "liquify"])("does not offer shape animation for a %s", async (tool) => {
   backend.tree.mockResolvedValue({ layers: [{id:1, name:"Layer", visible:true, locked:false, source:"painted", parameter:"wind", grib:null, image:null, gis:null,
     objects:[{id:2, name:"Capture", tool, tool_label:tool, active_here:true, start_step:0, end_step:9}]}]});
   const project = {revision: 20, step_count:10, step_hours:1, start_unix_s:null} as ProjectSummary;
@@ -238,4 +238,26 @@ it("clears old viewport readiness immediately and ignores its late reports", asy
   } finally {
     await act(async () => root.unmount()); container.remove();
   }
+});
+
+it("shows relative displacement as one position-style track with shared keys", async () => {
+  backend.tree.mockResolvedValue({layers:[{id:1,name:"Layer",visible:true,locked:false,source:"painted",parameter:"wind",grib:null,image:null,gis:null,
+    objects:[{id:2,name:"Liquify 1",tool:"liquify",tool_label:"Liquify",active_here:true,start_step:0,end_step:9}]}]});
+  backend.tracks.mockResolvedValue({object:2,tracks:[{
+    property:"DisplacementPosition",label:"Displacement position",base:{kind:"offset",x:200,y:-100},keys:[],
+    interpolations:[{kind:"linear"}],keyed_here:false,interpolated_here:false,motion_available:false,motion:false,can_follow:false,follows:null,follows_name:null,inherited:[],
+  }]});
+  const project={revision:21,step_count:10,step_hours:1,start_unix_s:null} as ProjectSummary;
+  backend.setKey.mockResolvedValue(project);
+  const container=document.createElement("div");document.body.append(container);const root=createRoot(container);
+  try {
+    await act(async()=>root.render(<Timeline project={project} step={3} onStepChange={()=>{}} selection={[]} onSelect={()=>{}}
+      viewport={[]} playback={{prepare:()=>({ready:0,total:0,streaming:false}),present:()=>false}} autoKey={false} onAutoKey={()=>{}} onChanged={()=>{}} onFramesSelected={()=>{}}
+      onKeysSelected={()=>{}} settings={null} capture={null} onCapture={()=>{}} />));
+    await act(async()=>container.querySelector<HTMLButtonElement>('[title="Show properties"]')!.click());
+    expect([...container.querySelectorAll(".tl-track-name")].map(e=>e.textContent)).toEqual(["Displacement position"]);
+    expect(container.querySelector(".tl-track .tl-graph-toggle")?.tagName).toBe("BUTTON");
+    await act(async()=>container.querySelector<HTMLButtonElement>(".tl-key-here")!.click());
+    expect(backend.setKey).toHaveBeenLastCalledWith(2,"DisplacementPosition",3);
+  } finally {await act(async()=>root.unmount());container.remove();backend.tree.mockResolvedValue({layers:[]});}
 });

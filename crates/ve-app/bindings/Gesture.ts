@@ -10,27 +10,39 @@ import type { PathPoint } from "./PathPoint";
  * stamp are brush-like *because* all three send a [`Self::Stroke`], not
  * because three separate code paths were written to match.
  */
-export type Gesture = { "kind": "stroke", 
+export type Gesture = { "kind": "relocate",
+/**
+ * The source brush path, as longitude/latitude pairs.
+ */
+points: Array<[number, number]>,
+/**
+ * Where the second gesture grabbed the selection.
+ */
+from: [number, number],
+/**
+ * Where that grab was released.
+ */
+to: [number, number], } | { "kind": "stroke",
 /**
  * Pointer positions as `[lon, lat]`, in the order they were drawn.
  */
-points: Array<[number, number]>, } | { "kind": "point", 
+points: Array<[number, number]>, } | { "kind": "point",
 /**
  * Where it was clicked, as `[lon, lat]`.
  */
-at: [number, number], } | { "kind": "extent", 
+at: [number, number], } | { "kind": "extent",
 /**
  * Where the drag began, as `[lon, lat]`. The shape's centre.
  */
-centre: [number, number], 
+centre: [number, number],
 /**
  * Where it ended, as `[lon, lat]`. A point on the shape's edge.
  */
-rim: [number, number], } | { "kind": "ring", 
+rim: [number, number], } | { "kind": "ring",
 /**
  * Vertices in order, as `[lon, lat]`. The closing edge is implied.
  */
-points: Array<[number, number]>, } | { "kind": "path", 
+points: Array<[number, number]>, } | { "kind": "path",
 /**
  * Nodes in order.
  */

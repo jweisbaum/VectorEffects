@@ -29,6 +29,10 @@ import { knownGradients, loadGradients } from "../gradients";
 import GradientPicker from "./GradientPicker";
 import GlyphSettings from "./GlyphSettings";
 import McpSection from "./McpSection";
+import ThemePicker from "./ThemePicker";
+import ThemeEditor from "./ThemeEditor";
+import type { CustomTheme } from "../generated/CustomTheme";
+import { DEFAULT_THEME } from "./themes";
 
 /** The rows the Shortcuts section lists, in order, with their labels. */
 const ACTIONS: ReadonlyArray<{ action: Shortcut["action"]; tool: string; label: string }> = [
@@ -57,7 +61,7 @@ const ACTIONS: ReadonlyArray<{ action: Shortcut["action"]; tool: string; label: 
   { action: "tool", tool: "divergence", label: "Diverge / converge" },
   { action: "tool", tool: "turn", label: "Rotate flow" },
   { action: "tool", tool: "warp", label: "Warp" },
-  { action: "tool", tool: "liquify", label: "Liquify" },
+  { action: "tool", tool: "liquify", label: "Displace" },
   { action: "tool", tool: "measure", label: "Measure" },
   { action: "tool", tool: "capture", label: "Capture a macro" },
   { action: "tool", tool: "insert", label: "Insert a macro" },
@@ -87,6 +91,7 @@ export default function SettingsDialog({
 }) {
   const units = useUnits();
   const [error, setError] = useState<string | null>(null);
+  const [customDraft, setCustomDraft] = useState<CustomTheme | null>(null);
   /** The row waiting for a key press, if any. */
   const [capturing, setCapturing] = useState<string | null>(null);
   const [library, setLibrary] = useState<MacroLibrary | null>(null);
@@ -151,6 +156,25 @@ export default function SettingsDialog({
       >
         <h2>Settings</h2>
         {error !== null && <p className="modal-error">{error}</p>}
+
+        <section>
+          <h3>Appearance</h3>
+          <ThemePicker value={settings.theme ?? DEFAULT_THEME} custom={settings.custom_theme} onChoose={id => {
+            setError(null);
+            setCustomDraft(null);
+            void api.setTheme(id).then(onSettings).catch(report);
+          }} />
+          <p className="muted">Applies throughout the app, across all projects.</p>
+          {customDraft ? <ThemeEditor initial={customDraft} onCancel={() => setCustomDraft(null)} onSave={async custom => {
+            setError(null);
+            const saved = await api.setCustomTheme(custom);
+            onSettings(saved);
+            setCustomDraft(null);
+          }} /> : <button type="button" className="theme-customize" onClick={() => {
+            setCustomDraft(settings.theme === "custom" && settings.custom_theme
+              ? settings.custom_theme : { base: settings.theme ?? DEFAULT_THEME, colours: {} });
+          }}>{settings.theme === "custom" ? "Edit custom theme…" : "Customize…"}</button>}
+        </section>
 
         <GlyphSettings settings={settings} onSettings={value => { setError(null); onSettings(value); }} onError={report} />
 

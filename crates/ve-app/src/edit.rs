@@ -106,6 +106,8 @@ pub enum StampSpace {
     /// A pixel footprint frozen in the equidistant 45 projection.
     #[serde(rename = "equidistant_45")]
     Equidistant45,
+    /// Pixel geometry frozen in the globe view used when it was drawn.
+    Orthographic,
 }
 
 impl StampSpace {

@@ -1,8 +1,10 @@
 import ProjectionPicker from "./ProjectionPicker";
+import { DISPLACE_OUTLINE } from "./colours";
 import ToolSelect from "../ToolSelect";
 import { hitShapePoint, movedShapePoint, type ShapePointHit } from "./shapeEditing";
 import type { ShapeControls } from "../generated/ShapeControls";
 import { useUnits, type DisplayUnits } from "../settings/units";
+import { themeOf, mapColour } from "../settings/themes";
 import {
   type Ref,
   useCallback,
@@ -65,6 +67,7 @@ import {
 } from "./camera";
 import {
   addFootprint,
+  type Footprint,
   buildFootprintPath,
   buildStrokePath,
   footprintOfOutline,
@@ -72,6 +75,7 @@ import {
   footprintHead,
   footprintRadii,
   freshSweptPath,
+  projectedRing,
   type SweptPathProgress,
 } from "./footprint";
 import { destination, distanceM } from "./geo";
@@ -163,7 +167,7 @@ import {
   regionFromDrag,
   regionFromLasso,
   regionOfView,
-  regionRing,
+  regionOutline,
   wholeMap,
 } from "./region";
 import { ImageCache } from "./images";
@@ -280,12 +284,12 @@ function drawMagnifier(context: CanvasRenderingContext2D, source: HTMLCanvasElem
     cursor.x - radius, cursor.y - radius, radius * 2, radius * 2);
   context.restore();
   context.save();
-  context.strokeStyle = "rgba(20, 28, 44, 0.9)";
+  context.strokeStyle = mapColour("ink", 0.9);
   context.lineWidth = 3.5 * dpr;
   context.beginPath();
   context.arc(cursor.x, cursor.y, radius + 2.5 * dpr, 0, Math.PI * 2);
   context.stroke();
-  context.strokeStyle = "rgba(255, 255, 255, 0.95)";
+  context.strokeStyle = mapColour("text", 0.95);
   context.lineWidth = 1.5 * dpr;
   context.beginPath();
   context.arc(cursor.x, cursor.y, radius, 0, Math.PI * 2);
@@ -630,6 +634,7 @@ export default function MapView({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const rendererRef = useRef<MapRenderer | null>(null);
   const glyphSettingsRef = useRef(settings?.glyphs ?? DEFAULT_GLYPHS);
+  const themeRef = useRef(themeOf(settings?.theme, settings?.custom_theme));
   const tilesRef = useRef<TileCache | null>(null);
   /** Textures for the image layers (spec.md 4.9, M18). */
   const imagesRef = useRef<ImageCache | null>(null);
@@ -714,6 +719,13 @@ export default function MapView({
    * in-progress kinds are the four that take more than an instant.
    */
   const gestureRef = useRef<InProgress | null>(null);
+  const liquifySelection = useRef<{
+    points: Array<[number, number]>; state: ToolState; schema: ToolSchema;
+    camera: Camera; layer: number | null;
+    drag: {from: [number, number]; to: [number, number]} | null;
+  } | null>(null);
+  const [liquifyPending, setLiquifyPending] = useState(false);
+
   /**
    * Strokes that have been committed but whose field is not on screen yet.
    *
@@ -753,6 +765,7 @@ export default function MapView({
    * thing that shows up as jank on a fast stroke.
    */
   const maskCanvas = useRef<HTMLCanvasElement | null>(null);
+  const boundaryCanvas = useRef<HTMLCanvasElement | null>(null);
   /**
    * Display options mirrored into refs.
    *
@@ -914,7 +927,7 @@ export default function MapView({
       .then((status) => { if (live) setChartStatus(status); })
       .catch(() => { if (live) setChartStatus(null); });
     return () => { live = false; };
-  }, [settings?.chart_directory]);
+  }, [settings?.chart_directory, settings?.theme, settings?.custom_theme]);
 
   useEffect(() => {
     chartTokenRef.current = chartStatus?.cells ? Number(chartStatus.token) : 0;
@@ -1242,6 +1255,7 @@ export default function MapView({
    */
   const pushDrag = useRef<{
     object: number;
+    liquify: boolean;
     from: { lon: number; lat: number };
     to: { lon: number; lat: number };
   } | null>(null);
@@ -1450,8 +1464,8 @@ export default function MapView({
       const at = (lon: number, lat: number) => toScreen(camera, view, { lon, lat });
 
       context.save();
-      context.strokeStyle = "rgba(160, 232, 255, 0.95)";
-      context.fillStyle = "rgba(160, 232, 255, 0.95)";
+      context.strokeStyle = mapColour("selection", 0.95);
+      context.fillStyle = mapColour("selection", 0.95);
       context.lineWidth = Math.max(1, dpr);
 
       const nodes =
@@ -1591,6 +1605,7 @@ export default function MapView({
     const mapPoint = alignment.layer !== null && alignment.expecting === "map";
     if (!mapPoint) alignBasemap.current = null;
     const state: RenderState = {
+      theme: themeRef.current,
       camera: cameraRef.current,
       view: viewRef.current,
       hiddenImageLayer: mapPoint ? alignment.layer : null,
@@ -2179,6 +2194,8 @@ export default function MapView({
       setHint(
         "Scrub the ruler and drag the region into place at each step; every step visited is a key.",
       );
+    } else if (tool === "liquify") {
+      setHint(liquifyPending ? "Drag the selected area to its new position. Escape cancels." : "Brush to select, then drag the selection to move it. Shift-drag an existing selection to re-aim its displacement.");
     } else if (tool === ERASE) {
       setHint(
         "Drag to erase what the brush covers in the active layer. Hold Shift to erase from this frame only.",
@@ -2192,7 +2209,7 @@ export default function MapView({
     } else {
       setHint(null);
     }
-  }, [library, recording, region, tool]);
+  }, [library, recording, region, tool, liquifyPending]);
 
   /** The macro library, for the insert tool's bar. */
   const readLibrary = useCallback(() => {
@@ -2445,7 +2462,7 @@ export default function MapView({
       // as well would be two steps at once.
       if (event.key === "Escape") {
         if (shapeModeRef.current !== null) { onExitShapeEditing?.(); return; }
-        if (gestureRef.current) {
+        if (gestureRef.current || liquifySelection.current) {
           gestureRef.current = null;
           nodeDrag.current = false;
           abandonRef.current();
@@ -2617,7 +2634,7 @@ export default function MapView({
     setToolPick(null);
     gestureRef.current = null;
     abandonRef.current();
-  }, [tool]);
+  }, [tool, step, activeLayer]);
 
   /**
    * The viewport's unique tiles, rebuilt only when the camera or the view
@@ -2844,6 +2861,12 @@ export default function MapView({
     requestDraw();
   }, [requestDraw, settings?.glyphs]);
 
+  useEffect(() => {
+    themeRef.current = themeOf(settings?.theme, settings?.custom_theme);
+    requestDraw();
+    requestOverlay();
+  }, [requestDraw, requestOverlay, settings?.theme, settings?.custom_theme]);
+
   // Mirror display state into the refs `draw` reads, then redraw.
   useEffect(() => {
     const changed = stepRef.current !== step || showGlyphsRef.current !== showGlyphs
@@ -3036,6 +3059,27 @@ export default function MapView({
     return path;
   }, []);
 
+  /** Union rim on a scratch canvas, so knockout preserves other overlays. */
+  const drawFootprintBoundary = useCallback((context: CanvasRenderingContext2D, footprint: Footprint, colour: string, width: number) => {
+    const scratch = boundaryCanvas.current ??= document.createElement("canvas");
+    if (scratch.width !== context.canvas.width) scratch.width = context.canvas.width;
+    if (scratch.height !== context.canvas.height) scratch.height = context.canvas.height;
+    const edge = scratch.getContext("2d");
+    if (!edge) return;
+    edge.clearRect(0, 0, scratch.width, scratch.height);
+    const path = new Path2D();
+    buildFootprintPath(path, cameraRef.current, viewRef.current, footprint, -width / 2);
+    edge.fillStyle = colour;
+    edge.fill(path);
+    const inset = new Path2D();
+    buildFootprintPath(inset, cameraRef.current, viewRef.current, footprint, width / 2);
+    edge.globalCompositeOperation = "destination-out";
+    edge.fillStyle = "#000";
+    edge.fill(inset);
+    edge.globalCompositeOperation = "source-over";
+    context.drawImage(scratch, 0, 0);
+  }, []);
+
   /**
    * Draws a band along the *outline of a footprint's union*, `widthCss` wide.
    *
@@ -3131,10 +3175,10 @@ export default function MapView({
       // boundary, and nothing inside it. Bands use `destination-out`, so they
       // are drawn before the faint fill that says which side is the object.
       for (const outline of outlines) {
-        drawEdgeBand(context, outline, "rgba(255, 214, 102, 0.85)", 1.5, dpr);
+        drawEdgeBand(context, outline, mapColour("selection", 0.85), 1.5, dpr);
       }
       context.save();
-      context.fillStyle = "rgba(255, 214, 102, 0.14)";
+      context.fillStyle = mapColour("selection", 0.14);
       for (const outline of outlines) {
         context.fill(maskPath(outline, Math.max(1, 1.5 * dpr) / 2), outline.kind === "contours" ? "evenodd" : "nonzero");
       }
@@ -3187,16 +3231,9 @@ export default function MapView({
       const camera = cameraRef.current;
       const view = viewRef.current;
       const outlineAt = (dx: number, dy: number, stroke: string, fill: string | null) => {
-        const outline = ring.map((p) =>
-          toScreen(camera, view, { lon: p[0] + dx, lat: p[1] + dy }),
-        );
-        const first = outline[0];
-        if (!first) return;
         context.beginPath();
-        context.moveTo(first.x, first.y);
-        for (const point of outline.slice(1)) context.lineTo(point.x, point.y);
-        context.closePath();
-        if (fill !== null) {
+        const complete = projectedRing(context, camera, view, ring.map(([lon, lat]) => [lon + dx, lat + dy]));
+        if (fill !== null && complete) {
           context.fillStyle = fill;
           context.fill();
         }
@@ -3211,10 +3248,10 @@ export default function MapView({
         const keys = trackKeyframes(track);
         for (const index of keys.slice(1).reverse()) {
           const [dx, dy] = track[index] as [number, number];
-          outlineAt(dx, dy, "rgba(150, 255, 200, 0.55)", null);
+          outlineAt(dx, dy, mapColour("source", 0.55), null);
         }
       }
-      outlineAt(0, 0, "rgba(150, 255, 200, 0.95)", "rgba(140, 255, 190, 0.08)");
+      outlineAt(0, 0, mapColour("source", 0.95), mapColour("source", 0.08));
       context.setLineDash([]);
       if (track && track.length > 1) {
         // The path the centre follows, through every frame, so a curve reads
@@ -3227,7 +3264,7 @@ export default function MapView({
           context.beginPath();
           context.moveTo(start.x, start.y);
           for (const point of path.slice(1)) context.lineTo(point.x, point.y);
-          context.strokeStyle = "rgba(150, 255, 200, 0.75)";
+          context.strokeStyle = mapColour("source", 0.75);
           context.stroke();
         }
       }
@@ -3259,7 +3296,7 @@ export default function MapView({
         const geo = unproject(camera, view, at);
         drawMacroFootprint(
           context,
-          regionRing(recentred(region, geo.lon, geo.lat)),
+          regionOutline(recentred(region, geo.lon, geo.lat)),
           stamped.track.length > 1 ? stamped.track : null,
           geo,
           dpr,
@@ -3273,15 +3310,15 @@ export default function MapView({
       if (controls && controls.object === shapeEditing && controls.step === step) {
         const outline: ObjectOutline = { kind: "contours", rings: controls.rings };
         const cuts = outlineList.find((o) => o.object === shapeEditing)?.erased ?? [];
-        drawEdgeBand(context, outline, "#ffd666", 1.5, dpr, cuts);
+        drawEdgeBand(context, outline, mapColour("selection"), 1.5, dpr, cuts);
         for (let r = 0; r < controls.rings.length; r++) {
           for (let p = 0; p < controls.rings[r]!.length; p++) {
             const [lon, lat] = controls.rings[r]![p]!;
             const at = toScreen(camera, view, { lon, lat });
             context.beginPath();
             context.arc(at.x, at.y, 4 * dpr, 0, Math.PI * 2);
-            context.fillStyle = controls.keyed[r]?.[p] ? "#ffd666" : "#1c2638";
-            context.strokeStyle = "#ffd666";
+            context.fillStyle = controls.keyed[r]?.[p] ? mapColour("selection") : mapColour("ink");
+            context.strokeStyle = mapColour("selection");
             context.lineWidth = 1.5 * dpr;
             context.fill(); context.stroke();
           }
@@ -3315,23 +3352,46 @@ export default function MapView({
       drawEdgeBand(
         context,
         outlined.outline,
-        hovered ? "rgba(255, 110, 190, 0.95)" : "rgba(255, 214, 102, 0.85)",
+        hovered ? mapColour("hover", 0.95) : mapColour("selection", 0.85),
         hovered ? 2.5 : 1.5,
         dpr,
         outlined.erased,
       );
+      if (outlined.relocation) drawEdgeBand(context, outlined.relocation.destination,
+        DISPLACE_OUTLINE,
+        hovered ? 2.5 : 1.5, dpr, outlined.erased);
       // An inverted mask covers everything *but* this, so a wide faint band
       // goes with it: an edge alone cannot say which side is covered.
       if (outlined.inverted) {
         drawEdgeBand(
           context,
           outlined.outline,
-          "rgba(255, 110, 190, 0.16)",
+          mapColour("hover", 0.16),
           9,
           dpr,
           outlined.erased,
         );
       }
+    }
+
+    // Connections come after all knockout bands, so overlapping objects cannot
+    // erase the line. Sampled geographic points follow the globe's surface.
+    for (const outlined of outlineList) {
+      if (!outlined.relocation || dragLive || (!selection.includes(outlined.object) && hoveredOperator.current !== outlined.object)) continue;
+      context.save();
+      context.strokeStyle = DISPLACE_OUTLINE;
+      context.lineWidth = dpr;
+      context.beginPath();
+      let previous: {x: number; y: number} | null = null;
+      for (const [lon, lat] of outlined.relocation.connection) {
+        const p = toScreen(camera, view, {lon, lat});
+        if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) { previous = null; continue; }
+        if (previous && Math.hypot(p.x - previous.x, p.y - previous.y) < Math.hypot(view.width, view.height) / 2) context.lineTo(p.x, p.y);
+        else context.moveTo(p.x, p.y);
+        previous = p;
+      }
+      context.stroke();
+      context.restore();
     }
 
     // The field the drag is carrying (M84).
@@ -3353,7 +3413,7 @@ export default function MapView({
       context.save();
       const vacated = new Path2D();
       for (const outlined of ghostSource.current) vacated.addPath(maskPath(outlined.outline));
-      context.fillStyle = "rgba(9, 14, 24, 0.55)";
+      context.fillStyle = mapColour("ink", 0.55);
       context.fill(vacated);
       context.restore();
 
@@ -3383,7 +3443,7 @@ export default function MapView({
       const from = toScreen(camera, view, pull.from);
       const to = toScreen(camera, view, pull.to);
       context.save();
-      context.strokeStyle = "rgba(255, 110, 190, 0.95)";
+      context.strokeStyle = mapColour("hover", 0.95);
       context.lineWidth = Math.max(1, dpr) * 2;
       context.beginPath();
       context.moveTo(from.x, from.y);
@@ -3396,7 +3456,7 @@ export default function MapView({
       context.stroke();
       context.beginPath();
       context.arc(to.x, to.y, 5 * dpr, 0, Math.PI * 2);
-      context.fillStyle = "rgba(255, 110, 190, 0.95)";
+      context.fillStyle = mapColour("hover", 0.95);
       context.fill();
       // How far the pull is, beside its head (spec.md 6.3, M17): a push is
       // aimed by eye, and the number says what the eye chose.
@@ -3436,7 +3496,7 @@ export default function MapView({
       // The object's reach, as an ellipse — a ground circle is not a screen
       // circle away from the equator.
       const { rx, ry } = footprintRadii(camera, transform.lat, transform.radius_m / 1000);
-      context.strokeStyle = "rgba(255, 214, 102, 0.45)";
+      context.strokeStyle = mapColour("selection", 0.45);
       context.lineWidth = Math.max(1, dpr);
       context.setLineDash([6 * dpr, 5 * dpr]);
       context.beginPath();
@@ -3445,7 +3505,7 @@ export default function MapView({
       context.setLineDash([]);
 
       // Spokes to the handles, so it is clear what they turn about.
-      context.strokeStyle = "rgba(255, 214, 102, 0.55)";
+      context.strokeStyle = mapColour("selection", 0.55);
       context.beginPath();
       context.moveTo(at.x, at.y);
       context.lineTo(rotateAt.x, rotateAt.y);
@@ -3454,7 +3514,7 @@ export default function MapView({
       context.stroke();
 
       const arm = 9 * dpr;
-      context.strokeStyle = "rgba(255, 214, 102, 0.95)";
+      context.strokeStyle = mapColour("selection", 0.95);
       context.lineWidth = Math.max(1.5, dpr * 1.5);
       context.beginPath();
       context.moveTo(at.x - arm, at.y);
@@ -3468,12 +3528,12 @@ export default function MapView({
         context.arc(point.x, point.y, HANDLE_RADIUS_CSS * dpr, 0, Math.PI * 2);
         context.fillStyle = fill;
         context.fill();
-        context.strokeStyle = "rgba(20, 28, 44, 0.9)";
+        context.strokeStyle = mapColour("ink", 0.9);
         context.lineWidth = Math.max(1, dpr);
         context.stroke();
       };
-      knob(rotateAt, "rgba(255, 214, 102, 0.95)");
-      knob(scaleAt, "rgba(111, 217, 255, 0.95)");
+      knob(rotateAt, mapColour("selection", 0.95));
+      knob(scaleAt, mapColour("source", 0.95));
 
       // A ring on the centre says the anchor itself can be dragged, which is
       // the only way to tell it apart from a plain crosshair. A group has no
@@ -3481,11 +3541,11 @@ export default function MapView({
       if (transform.count === 1) {
         context.beginPath();
         context.arc(at.x, at.y, HANDLE_RADIUS_CSS * dpr, 0, Math.PI * 2);
-        context.strokeStyle = "rgba(255, 214, 102, 0.85)";
+        context.strokeStyle = mapColour("selection", 0.85);
         context.lineWidth = Math.max(1, dpr);
         context.stroke();
       } else {
-        context.fillStyle = "rgba(255, 214, 102, 0.95)";
+        context.fillStyle = mapColour("selection", 0.95);
         context.font = `${11 * dpr}px system-ui, sans-serif`;
         context.textAlign = "left";
         context.textBaseline = "bottom";
@@ -3510,25 +3570,19 @@ export default function MapView({
           )
       : region;
     if (shown) {
-      const ring = regionRing(shown).map((p) =>
-        toScreen(camera, view, { lon: p[0], lat: p[1] }),
-      );
-      const first = ring[0];
-      if (first) {
-        context.save();
-        context.beginPath();
-        context.moveTo(first.x, first.y);
-        for (const at of ring.slice(1)) context.lineTo(at.x, at.y);
-        context.closePath();
-        context.fillStyle = "rgba(140, 255, 190, 0.08)";
+      context.save();
+      context.beginPath();
+      const complete = projectedRing(context, camera, view, regionOutline(shown));
+      // Filling a clipped path would join its horizon endpoints with a chord.
+      if (complete) {
+        context.fillStyle = mapColour("source", 0.08);
         context.fill();
-        context.strokeStyle = "rgba(150, 255, 200, 0.95)";
-        context.lineWidth = Math.max(1, dpr);
-        context.setLineDash([6 * dpr, 4 * dpr]);
-        context.stroke();
-        context.setLineDash([]);
-        context.restore();
       }
+      context.strokeStyle = mapColour("source", 0.95);
+      context.lineWidth = Math.max(1, dpr);
+      context.setLineDash([6 * dpr, 4 * dpr]);
+      context.stroke();
+      context.restore();
     }
 
     // The rubber band, drawn as it is dragged.
@@ -3539,9 +3593,9 @@ export default function MapView({
       const y = Math.min(band.from.y, band.to.y);
       const w = Math.abs(band.to.x - band.from.x);
       const h = Math.abs(band.to.y - band.from.y);
-      context.fillStyle = "rgba(111, 217, 255, 0.10)";
+      context.fillStyle = mapColour("source", 0.10);
       context.fillRect(x, y, w, h);
-      context.strokeStyle = "rgba(160, 232, 255, 0.9)";
+      context.strokeStyle = mapColour("selection", 0.9);
       context.lineWidth = Math.max(1, dpr);
       context.setLineDash([5 * dpr, 4 * dpr]);
       context.strokeRect(x, y, w, h);
@@ -3578,7 +3632,7 @@ export default function MapView({
           else context.moveTo(at.x, at.y);
           drawing = true;
         }
-        context.strokeStyle = "rgba(120, 200, 255, 0.85)";
+        context.strokeStyle = mapColour("source", 0.85);
         context.lineWidth = Math.max(1, dpr);
         context.lineJoin = "round";
         context.setLineDash([5 * dpr, 4 * dpr]);
@@ -3590,8 +3644,8 @@ export default function MapView({
 
     if (placing?.loaded && tool === HAND && aligning.layer === null) {
       context.save();
-      context.fillStyle = "#d8f3ff";
-      context.strokeStyle = "#163c57";
+      context.fillStyle = mapColour("selection");
+      context.strokeStyle = mapColour("ink");
       context.lineWidth = Math.max(1, dpr);
       for (const handle of imageResizeHandles(placing, camera, view)) {
         const size = (handle.index < 4 ? 8 : 6) * dpr;
@@ -3621,14 +3675,14 @@ export default function MapView({
         const dot = (at: { x: number; y: number }) => {
           context.beginPath();
           context.arc(at.x, at.y, 4 * dpr, 0, Math.PI * 2);
-          context.fillStyle = "rgba(255, 214, 102, 0.95)";
+          context.fillStyle = mapColour("selection", 0.95);
           context.fill();
         };
         aligning.pairs.forEach((pair, index) => {
           const pictureGeo = pictureToMap(alignedView, pair.u, pair.v);
           const from = toScreen(camera, view, pictureGeo);
           const to = toScreen(camera, view, { lon: pair.lon, lat: pair.lat });
-          context.strokeStyle = "rgba(255, 214, 102, 0.9)";
+          context.strokeStyle = mapColour("selection", 0.9);
           context.lineWidth = Math.max(1, dpr);
           context.beginPath();
           context.moveTo(from.x, from.y);
@@ -3636,7 +3690,7 @@ export default function MapView({
           context.stroke();
           dot(from);
           dot(to);
-          context.fillStyle = "rgba(255, 214, 102, 0.95)";
+          context.fillStyle = mapColour("selection", 0.95);
           const label = String(index + 1);
           context.fillText(label, from.x + 6 * dpr, from.y - 6 * dpr);
           context.fillText(label, to.x + 6 * dpr, to.y - 6 * dpr);
@@ -3644,7 +3698,7 @@ export default function MapView({
         if (aligning.pending && cursor) {
           const pictureGeo = pictureToMap(alignedView, aligning.pending.u, aligning.pending.v);
           const from = toScreen(camera, view, pictureGeo);
-          context.strokeStyle = "rgba(255, 214, 102, 0.6)";
+          context.strokeStyle = mapColour("selection", 0.6);
           context.lineWidth = Math.max(1, dpr);
           context.setLineDash([4 * dpr, 4 * dpr]);
           context.beginPath();
@@ -3687,7 +3741,7 @@ export default function MapView({
       const from = toScreen(camera, view, { lon: picking.lon, lat: picking.lat });
       const arm = 9 * dpr;
       context.save();
-      context.strokeStyle = "rgba(255, 168, 96, 0.55)";
+      context.strokeStyle = "rgba(223, 120, 47, 0.55)";
       context.lineWidth = Math.max(1, dpr);
       context.setLineDash([4 * dpr, 4 * dpr]);
       context.beginPath();
@@ -3698,7 +3752,7 @@ export default function MapView({
       if (cursor) {
         // A line from the old place to the new one, so the move reads as a move
         // rather than as two unrelated marks.
-        context.strokeStyle = "rgba(255, 214, 120, 0.95)";
+        context.strokeStyle = mapColour("selection", 0.95);
         context.beginPath();
         context.moveTo(from.x, from.y);
         context.lineTo(cursor.x, cursor.y);
@@ -3708,7 +3762,7 @@ export default function MapView({
         context.lineTo(cursor.x, cursor.y + arm);
         context.stroke();
 
-        context.fillStyle = "rgba(255, 214, 120, 0.95)";
+        context.fillStyle = mapColour("selection", 0.95);
         context.font = `${11 * dpr}px system-ui, sans-serif`;
         context.textAlign = "left";
         context.textBaseline = "bottom";
@@ -3734,7 +3788,7 @@ export default function MapView({
       const at = unproject(camera, view, cursor);
       drawMacroFootprint(
         context,
-        regionRing(macroRegion(macro.outline, at.lon, at.lat)),
+        regionOutline(macroRegion(macro.outline, at.lon, at.lat)),
         macro.moves ? macro.track : null,
         at,
         dpr,
@@ -3780,7 +3834,7 @@ export default function MapView({
         const nib = at ?? { lon: first[0], lat: first[1] };
         const stamp = new Path2D();
         addFootprint(stamp, camera, view, nib.lon, nib.lat, radiusKm, brush.shape, space);
-        context.strokeStyle = "rgba(255, 110, 190, 0.95)";
+        context.strokeStyle = mapColour("hover", 0.95);
         context.lineWidth = Math.max(1, dpr);
         context.setLineDash([5 * dpr, 4 * dpr]);
         context.stroke(stamp);
@@ -3808,7 +3862,7 @@ export default function MapView({
       const at = toScreen(camera, view, aim);
       const arm = 9 * dpr;
       context.strokeStyle =
-        armed || held ? "rgba(255, 214, 120, 0.95)" : "rgba(255, 168, 96, 0.9)";
+        armed || held ? mapColour("selection", 0.95) : "rgba(223, 120, 47, 0.9)";
       context.lineWidth = Math.max(1, dpr);
       context.beginPath();
       context.moveTo(at.x - arm, at.y);
@@ -3823,7 +3877,7 @@ export default function MapView({
       context.beginPath();
       context.arc(at.x, at.y, reach, 0, Math.PI * 2);
       if (held || (!armed && cursor && near(cursor, at))) {
-        context.fillStyle = "rgba(255, 168, 96, 0.22)";
+        context.fillStyle = "rgba(223, 120, 47, 0.22)";
         context.fill();
       }
       context.stroke();
@@ -3833,6 +3887,24 @@ export default function MapView({
     // ramp the map paints with. A floor under the alpha keeps a calm gesture
     // visible: the field fades calm out entirely, but a preview the user cannot
     // see is not a preview.
+    const pending = liquifySelection.current;
+    if (pending) {
+      const drawSelection = (gesture: Gesture, color: string) => {
+        const footprint = footprintOf("liquify", pending.state, gesture, pending.camera);
+        if (!footprint) return;
+        const path = new Path2D();
+        buildFootprintPath(path, camera, view, footprint);
+        context.save();
+        context.strokeStyle = color;
+        context.fillStyle = mapColour("source", 0.10);
+        context.lineWidth = 1.5*dpr;
+        context.fill(path);
+        drawFootprintBoundary(context, footprint, color, 1.5*dpr);
+        context.restore();
+      };
+      drawSelection({kind: "stroke", points: pending.points}, mapColour("source"));
+      if (pending.drag) drawSelection({kind: "relocate", points: pending.points, ...pending.drag}, DISPLACE_OUTLINE);
+    }
     const drawing = gestureRef.current;
     const inProgress =
       drawing === null || schemaTool === null
@@ -3851,13 +3923,16 @@ export default function MapView({
     // (`overlayPlan`): the field for a tool that paints one, an outline for the
     // clone stamp, and — for the mask — nothing but the nib below, since the
     // map is already drawing the erasure through a mask.
-    const plan = overlayPlan(schema.preview, drawing !== null);
+    const plan = tool === "liquify" ? {sweep: "outline", nib: !liquifyPending && drawing === null} : overlayPlan(schema.preview, drawing !== null);
     if (inProgress && plan.sweep === "outline") {
       const region = new Path2D();
       buildFootprintPath(region, camera, view, inProgress);
-      context.strokeStyle = "rgba(160, 232, 255, 0.95)";
+      context.strokeStyle = mapColour("selection", 0.95);
       context.lineWidth = Math.max(1, dpr);
-      context.stroke(region);
+      if (tool === "liquify") {
+        context.fillStyle = mapColour("source", 0.10); context.fill(region);
+        drawFootprintBoundary(context, inProgress, mapColour("selection", 0.95), Math.max(1, dpr));
+      } else context.stroke(region);
     } else if (inProgress && plan.sweep === "field") {
       drawFieldPreview(context, { footprint: inProgress, paint, ...field }, dpr);
     }
@@ -3910,7 +3985,7 @@ export default function MapView({
           const head = footprintHead(hovered);
           if (head) drawGlyphs(context, [head], hoverField.knots, hoverField.azimuthAt, dpr);
         }
-        context.strokeStyle = "rgba(160, 232, 255, 0.95)";
+        context.strokeStyle = mapColour("selection", 0.95);
         context.lineWidth = Math.max(1, dpr);
         context.stroke(tip);
       }
@@ -3944,21 +4019,23 @@ export default function MapView({
         const x = cursor.x + radius + 6 * dpr;
         const y = cursor.y - 7 * dpr;
         const width = context.measureText(text).width;
-        context.fillStyle = "rgba(20, 28, 44, 0.85)";
+        context.fillStyle = mapColour("ink", 0.85);
         context.fillRect(x - 3 * dpr, y - 2 * dpr, width + 6 * dpr, 15 * dpr);
-        context.fillStyle = "rgba(255, 255, 255, 0.95)";
+        context.fillStyle = mapColour("text", 0.95);
         context.fillText(text, x, y);
       }
       context.restore();
     }
   }, [
     shapeEditing,
+    liquifyPending,
     step,
     canInsertMacro,
     drawDragOutlines,
     drawMacroFootprint,
     drawGlyphs,
     drawFieldPreview,
+    drawFootprintBoundary,
     drawPlacedPoints,
     eyedropper,
     previewing,
@@ -4253,12 +4330,12 @@ export default function MapView({
   const warpUnder = (point: {
     x: number;
     y: number;
-  }): { object: number; anchor: { lon: number; lat: number } } | null => {
+  }, kind: "warp" | "liquify"): { object: number; anchor: { lon: number; lat: number } } | null => {
     const context = overlayRef.current?.getContext("2d");
     if (!context) return null;
     for (let i = operatorOutlinesRef.current.length - 1; i >= 0; i -= 1) {
       const entry = operatorOutlinesRef.current[i];
-      if (entry === undefined || entry.tool !== "warp") continue;
+      if (entry === undefined || entry.tool !== kind) continue;
       if (!context.isPointInPath(maskPath(entry.outline), point.x, point.y, entry.outline.kind === "contours" ? "evenodd" : "nonzero")) continue;
       return { object: entry.object, anchor: { lon: entry.anchor[0], lat: entry.anchor[1] } };
     }
@@ -4277,6 +4354,7 @@ export default function MapView({
     (insideRegion: boolean, panning: boolean, onImage = false, imageCursor: string | null = null) => {
       const canvas = canvasRef.current;
       if (!canvas) return;
+      if (liquifySelection.current) {canvas.style.cursor = liquifySelection.current.drag ? "grabbing" : "grab"; return;}
       if (shapeModeRef.current !== null) {
         canvas.style.cursor = shapeDrag.current ? "grabbing" : panning ? "grab" : "crosshair";
         return;
@@ -4325,7 +4403,7 @@ export default function MapView({
   );
   useEffect(() => {
     applyCursor(false, dragging.current !== null);
-  }, [applyCursor]);
+  }, [applyCursor, settings?.theme, settings?.custom_theme]);
   // Either end of the ramp moving is a new frame: the tiles are the same,
   // the colours are not.
   useEffect(() => {
@@ -4417,6 +4495,7 @@ export default function MapView({
         // meant a drag could never pan: the preview is a map to look around
         // before it is a surface to stamp on.
         previewPress.current = true;
+        if (liquifySelection.current) abandonRef.current();
         dragging.current = point;
         pressOrigin.current = point;
         applyCursor(false, true);
@@ -4659,6 +4738,19 @@ export default function MapView({
     if (drawsObjects(tool) && schema) {
       const geo = unproject(cameraRef.current, viewRef.current, point);
 
+      const pending = liquifySelection.current;
+      if (tool === "liquify" && pending) {
+        const source = footprintOf("liquify", pending.state, {kind: "stroke", points: pending.points}, pending.camera);
+        const path = new Path2D();
+        if (source) buildFootprintPath(path, cameraRef.current, viewRef.current, source);
+        const ctx = overlayRef.current?.getContext("2d");
+        if (source && ctx?.isPointInPath(path, point.x, point.y)) {
+          pending.drag = {from: [geo.lon,geo.lat], to: [geo.lon,geo.lat]};
+          requestOverlay();
+        }
+        return;
+      }
+
       // While a pick is armed the click places that option rather than drawing
       // — one click, one position, and the mode ends itself so the next
       // gesture is an ordinary one.
@@ -4710,11 +4802,11 @@ export default function MapView({
       // through to painting. Shift says "act on the warp that is there", and a
       // modifier key that paints a new object when it misses is a way to draw
       // one by accident, in the middle of aiming another.
-      if (tool === "warp" && event.shiftKey) {
-        const grabbed = warpUnder(point);
+      if ((tool === "warp" || tool === "liquify") && event.shiftKey) {
+        const grabbed = warpUnder(point, tool);
         if (grabbed === null) return;
         onSelect([grabbed.object]);
-        pushDrag.current = { object: grabbed.object, from: grabbed.anchor, to: geo };
+        pushDrag.current = { object: grabbed.object, liquify: tool === "liquify", from: grabbed.anchor, to: geo };
         requestOverlay();
         return;
       }
@@ -4784,6 +4876,7 @@ export default function MapView({
       return;
     }
 
+    if (liquifySelection.current) abandonRef.current();
     dragging.current = point;
     pressOrigin.current = point;
     applyCursor(false, true);
@@ -4952,6 +5045,14 @@ export default function MapView({
         if (!validGeo(geo)) continue;
         shaping.points.push([geo.lon, geo.lat]);
       }
+      requestOverlay();
+      return;
+    }
+
+    const relocating = liquifySelection.current?.drag;
+    if (relocating) {
+      const geo = unproject(cameraRef.current, viewRef.current, point);
+      if (validGeo(geo)) relocating.to = [geo.lon, geo.lat];
       requestOverlay();
       return;
     }
@@ -5210,6 +5311,7 @@ export default function MapView({
     if (dragging.current) {
       const dx = point.x - dragging.current.x;
       const dy = point.y - dragging.current.y;
+      if (liquifySelection.current) abandonRef.current();
       dragging.current = point;
       // The camera moves against the pointer: the map follows the hand.
       cameraRef.current = panBy(cameraRef.current, viewRef.current, -dx, -dy);
@@ -5312,8 +5414,7 @@ export default function MapView({
    * tool arriving without one of them (spec.md 6.1).
    */
   const commitGesture = useCallback(
-    async (gesture: Gesture, state: ToolState, schema: ToolSchema, tool: Tool) => {
-      const camera = cameraRef.current;
+    async (gesture: Gesture, state: ToolState, schema: ToolSchema, tool: Tool, camera = cameraRef.current, layer = activeLayer) => {
       const footprint = footprintOf(tool, state, gesture, camera);
       if (!footprint) return;
 
@@ -5343,13 +5444,14 @@ export default function MapView({
         // arrives, and the overlay draws nothing for it; one that adds a field
         // keeps showing the field it added.
         ...(operator ? { operator, silent: true } : {}),
+        ...(tool === "liquify" ? {silent: true} : {}),
       };
       settling.current = [...settling.current, settled];
 
       setBusy(true);
       try {
         const created = await api.createObject(
-          newObject(tool, gesture, state, schema, camera, lat, activeLayer),
+          newObject(tool, gesture, state, schema, camera, lat, layer),
         );
         settled.revision = created.project.revision;
         onProjectChanged(created.project);
@@ -5380,6 +5482,16 @@ export default function MapView({
     nodeDrag.current = false;
 
     if (!drawing || !schema || tool === HAND) return;
+    if (tool === "liquify" && drawing.kind === "stroke" && drawing.points.length > 0) {
+      liquifySelection.current = {points: drawing.points, state: toolState, schema,
+        camera: cameraRef.current, layer: activeLayer, drag: null};
+      setLiquifyPending(true);
+      setHint("Drag the selected area to its new position. Escape cancels.");
+      refreshOperator(null);
+      requestDraw();
+      return;
+    }
+
     // The commit picks the preview up synchronously, so the overlay redraw
     // never sees a moment with neither the gesture nor its field.
     // A press and release at one point describes a shape of no size, and one
@@ -5393,7 +5505,7 @@ export default function MapView({
     // ...and once it has, the live one is done with either way.
     if (refreshOperator(null)) requestDraw();
     drawOverlayRef.current();
-  }, [commitGesture, refreshOperator, requestDraw, schema, tool, toolState]);
+  }, [activeLayer, commitGesture, refreshOperator, requestDraw, schema, tool, toolState]);
 
   useEffect(() => {
     finishGestureRef.current = finishGesture;
@@ -5401,6 +5513,8 @@ export default function MapView({
 
   useEffect(() => {
     abandonRef.current = () => {
+      liquifySelection.current = null;
+      setLiquifyPending(false);
       if (refreshOperator(null)) requestDraw();
       drawOverlayRef.current();
     };
@@ -5568,6 +5682,9 @@ export default function MapView({
       operatorRef.current = null;
       void api
         .eraseStroke({
+          ...(spaceFor(brush.unit, cameraRef.current) === "orthographic" ? {
+            projection_origin: [cameraRef.current.centerLon, cameraRef.current.centerLat] as [number, number],
+          } : {}),
           points: drag.points,
           radius_km: drag.radiusKm,
           square: brush.shape === "square",
@@ -5626,6 +5743,21 @@ export default function MapView({
       requestOverlay();
       return;
     }
+    const pending = liquifySelection.current;
+    if (pending?.drag) {
+      const {from, to} = pending.drag;
+      pending.drag = null;
+      const a = toScreen(pending.camera, viewRef.current, {lon: from[0], lat: from[1]});
+      const b = toScreen(pending.camera, viewRef.current, {lon: to[0], lat: to[1]});
+      if (Math.hypot(b.x-a.x, b.y-a.y) >= 2) {
+        liquifySelection.current = null;
+        setLiquifyPending(false);
+        void commitGesture({kind: "relocate", points: pending.points, from, to}, pending.state, pending.schema, "liquify", pending.camera, pending.layer);
+      }
+      requestOverlay();
+      return;
+    }
+
     // Finish a warp's pull: one write, at the step being viewed and through the
     // same path every other property edit takes — so it keys the current step
     // when the property is animated or auto-key is on, and both ends of the
@@ -5633,14 +5765,14 @@ export default function MapView({
     const pull = pushDrag.current;
     if (pull) {
       pushDrag.current = null;
-      void api
+      void (pull.liquify ? api.setLiquifyDestination(pull.object, [pull.to.lon, pull.to.lat], step, autoKey) : api
         .setObjectProperty(
           pull.object,
           "PushTo",
           { kind: "position", lon: pull.to.lon, lat: pull.to.lat },
           step,
           autoKey,
-        )
+        ))
         .then(onProjectChanged)
         .catch((err: unknown) =>
           void api.frontendLog("error", `pulling the warp failed: ${String(err)}`),
@@ -5754,6 +5886,7 @@ export default function MapView({
   };
 
   const onWheel = (event: React.WheelEvent<HTMLCanvasElement>) => {
+    if (liquifySelection.current) abandonRef.current();
     const factor = Math.pow(2, -event.deltaY / 350);
     cameraRef.current = zoomAbout(
       cameraRef.current,
@@ -6132,7 +6265,11 @@ export default function MapView({
           }
         }}
         onPointerUp={endDrag}
-        onPointerCancel={endDrag}
+        onPointerCancel={(event) => {
+          if (liquifySelection.current || (tool === "liquify" && gestureRef.current)) {
+            gestureRef.current = null; abandonRef.current();
+          } else endDrag(event);
+        }}
         onLostPointerCapture={(event) => {
           const drag = shapeDrag.current;
           if (drag?.pointer !== event.pointerId) return;
@@ -6148,6 +6285,9 @@ export default function MapView({
       {error === null && !ready && <div className="map-status">Loading basemap…</div>}
       {previewing && <div className="map-preview-frame" aria-hidden="true" />}
       {previewing && <div className="map-preview-badge">Macro Preview</div>}
+      {liquifyPending && <div className="shape-edit-hint" role="status">
+        Displace · Drag the selected area to its new position. Escape cancels.
+      </div>}
       {shapeEditing !== null && <div className="shape-edit-hint" role="status">
         Shape animation · Drag a dot to key frame {step}. Choose a tool or press Escape to finish.
       </div>}
@@ -6722,14 +6862,6 @@ export default function MapView({
           />
           Auto scale
         </label>
-        <label title="The colour legend over the map: the ramp each kind of field is painted with, and the speeds at its ends. A view setting: it changes nothing stored or exported.">
-          <input
-            type="checkbox"
-            checked={showLegend}
-            onChange={(e) => setShowLegend(e.target.checked)}
-          />
-          Legend
-        </label>
         <label title={chartStatus?.directory
           ? `Electronic charts from ${chartStatus.directory}${chartStatus.cells ? ` (${chartStatus.cells} cells)` : ""}. Drawn under everything; not a layer, and not part of the project.`
           : "Electronic charts (S-57). Choose the chart directory in Settings first."}>
@@ -6756,6 +6888,14 @@ export default function MapView({
             onChange={(e) => setShowReadout(e.target.checked)}
           />
           Readout
+        </label>
+        <label title="The colour legend over the map: the ramp each kind of field is painted with, and the speeds at its ends. A view setting: it changes nothing stored or exported.">
+          <input
+            type="checkbox"
+            checked={showLegend}
+            onChange={(e) => setShowLegend(e.target.checked)}
+          />
+          Legend
         </label>
           </div>,
           viewSlot,

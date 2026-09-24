@@ -2,7 +2,7 @@
 //! (spec.md 8.5, M14).
 //!
 //! `Cmd`-`C` over a region takes the **visible composite** inside it — what
-//! the map is showing, evaluated the way an export is — onto the project's own
+//! the map is showing, evaluated the way an export is — onto a finer capture
 //! lattice. `Cmd`-`V` puts it down as a patch: an object like any other, whose
 //! field is those samples instead of a formula, and which moves, turns,
 //! scales, keys and feathers accordingly.
@@ -21,6 +21,7 @@
 
 use std::sync::Arc;
 
+use rayon::prelude::*;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -32,7 +33,7 @@ use ve_core::{Command, LonLat, PropValue};
 use ve_render::aeqd::M_PER_DEGREE;
 use ve_render::cache::scene_hash;
 use ve_render::cpu::sample_scene_covered;
-use ve_render::scene::flatten_kind;
+use ve_render::scene::{Scene, flatten_kind};
 
 use crate::commands::AppState;
 use crate::error::{AppError, Result};
@@ -225,17 +226,10 @@ pub fn region_capture(
         };
         let anchor = region.anchor().ok_or_else(|| bad("is nowhere"))?;
         let (half_w, half_h) = region.half_extents();
-        // The project's own lattice, so a captured field lines up with what
-        // the project exports and a patch pasted back where it came from
-        // reads its own samples node for node.
-        let spacing = project.settings.resolution.degrees();
         if !(half_w > 0.0 && half_h > 0.0) {
             return Err(bad("has no extent"));
         }
-        let ni = ((half_w * 2.0 / spacing).ceil() as u32 + 1).min(MAX_SIDE);
-        let nj = ((half_h * 2.0 / spacing).ceil() as u32 + 1).min(MAX_SIDE);
-        let x0 = -f64::from(ni - 1) * spacing / 2.0;
-        let y0 = f64::from(nj - 1) * spacing / 2.0;
+        let lattice = capture_lattice(half_w, half_h, project.settings.resolution.degrees());
 
         // Evaluated through the CPU, like an export: this is a value the user
         // keeps, not a frame they are looking at (invariant 3).
@@ -261,25 +255,11 @@ pub fn region_capture(
                 continue;
             }
             previous_hash = Some(hash);
-            let mut uv = Vec::with_capacity(ni as usize * nj as usize * kinds.len());
+            let mut uv =
+                Vec::with_capacity(lattice.ni as usize * lattice.nj as usize * kinds.len());
             // A plane per kind, in the kinds' own order (M34).
             for scene in &scenes {
-                for j in 0..nj {
-                    let lat = anchor.lat + y0 - f64::from(j) * spacing;
-                    for i in 0..ni {
-                        let lon = anchor.lon + x0 + f64::from(i) * spacing;
-                        let Ok(at) = LonLat::new(wrap180(lon), lat.clamp(-90.0, 90.0)) else {
-                            uv.push(UNDEFINED);
-                            continue;
-                        };
-                        // Undefined where nothing wrote, which is what makes a
-                        // paste transparent exactly where its source was (D58).
-                        uv.push(match sample_scene_covered(scene, at) {
-                            Some(sample) => [sample.u, sample.v],
-                            None => UNDEFINED,
-                        });
-                    }
-                }
+                uv.extend(capture_plane(scene, lattice, anchor));
             }
             frames.push(CaptureFrame::still(
                 f64::from(at_step - step) * hours_per_step,
@@ -294,13 +274,7 @@ pub fn region_capture(
 
         let capture = Capture::new(
             kinds,
-            CaptureLattice {
-                ni,
-                nj,
-                spacing_deg: spacing,
-                x0_deg: x0,
-                y0_deg: y0,
-            },
+            lattice,
             seconds_per_frame,
             region.geometry(anchor),
             frames,
@@ -323,13 +297,49 @@ pub fn region_capture(
     })
 }
 
-/// The largest lattice a capture may have on a side.
-///
-/// A whole-map region at 0.1° would be 3,601 by 1,801, which is 52 MB of
-/// samples for one patch. The cap is generous enough for any region anyone
-/// draws by hand and small enough that a stray `Cmd`-`Shift`-`A` cannot make
-/// the project unopenable.
-const MAX_SIDE: u32 = 2_048;
+/// Copies and macros use the same detail budget, independent of a coarse
+/// export grid. Local selections get at least 512 intervals across their
+/// longest side; larger selections aim for 0.05°. When the 2048-node cap is
+/// reached, widen the spacing rather than cropping the captured region.
+pub(crate) fn capture_lattice(half_w: f64, half_h: f64, project_spacing: f64) -> CaptureLattice {
+    const MAX_INTERVALS: f64 = 2047.0;
+    let longest = 2.0 * half_w.max(half_h);
+    let spacing = project_spacing
+        .min(0.05)
+        .min(longest / 512.0)
+        .max(longest / MAX_INTERVALS);
+    let ni = ((half_w * 2.0 / spacing).ceil() as u32).min(2047) + 1;
+    let nj = ((half_h * 2.0 / spacing).ceil() as u32).min(2047) + 1;
+    CaptureLattice {
+        ni,
+        nj,
+        spacing_deg: spacing,
+        x0_deg: -f64::from(ni - 1) * spacing / 2.0,
+        y0_deg: f64::from(nj - 1) * spacing / 2.0,
+    }
+}
+
+/// Bake authoritative CPU values into fixed row slots. Parallel rows reduce
+/// the cost of the finer capture grid without changing sample order or bytes.
+pub(crate) fn capture_plane(
+    scene: &Scene,
+    lattice: CaptureLattice,
+    anchor: LonLat,
+) -> Vec<[f32; 2]> {
+    let mut uv = vec![UNDEFINED; lattice.ni as usize * lattice.nj as usize];
+    uv.par_chunks_mut(lattice.ni as usize)
+        .enumerate()
+        .for_each(|(j, row)| {
+            let lat = anchor.lat + lattice.y0_deg - j as f64 * lattice.spacing_deg;
+            for (i, sample) in row.iter_mut().enumerate() {
+                let lon = anchor.lon + lattice.x0_deg + i as f64 * lattice.spacing_deg;
+                if let Ok(at) = LonLat::new(wrap180(lon), lat.clamp(-90.0, 90.0)) {
+                    *sample = sample_scene_covered(scene, at).map_or(UNDEFINED, |uv| [uv.u, uv.v]);
+                }
+            }
+        });
+    uv
+}
 
 /// Pastes the captured field as a patch, centred at `lon`/`lat`.
 #[tauri::command(async)]
@@ -494,4 +504,26 @@ pub(crate) fn region_half_extents(region: &RegionShape) -> (f64, f64) {
 /// Its object geometry, in the local metres a projected frame measures in.
 pub(crate) fn region_geometry(region: &RegionShape, anchor: LonLat) -> Geometry {
     region.geometry(anchor)
+}
+
+#[cfg(test)]
+mod lattice_tests {
+    use super::capture_lattice;
+
+    #[test]
+    fn bounded_lattices_keep_the_whole_region_including_world_edges() {
+        for (half_w, half_h, project_spacing) in [
+            (180.0, 90.0, 0.1),
+            (175.0, 4.0, 1.0),
+            (4.0, 80.0, 0.25),
+            (0.1, 0.2, 0.1),
+        ] {
+            let grid = capture_lattice(half_w, half_h, project_spacing);
+            assert!(grid.ni <= 2048 && grid.nj <= 2048);
+            assert!(grid.x0_deg <= -half_w + 1e-9);
+            assert!(grid.y0_deg >= half_h - 1e-9);
+            assert!(grid.x0_deg + f64::from(grid.ni - 1) * grid.spacing_deg >= half_w - 1e-9);
+            assert!(grid.y0_deg - f64::from(grid.nj - 1) * grid.spacing_deg <= -half_h + 1e-9);
+        }
+    }
 }

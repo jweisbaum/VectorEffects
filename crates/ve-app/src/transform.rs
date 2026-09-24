@@ -112,6 +112,15 @@ const PREVIEW_POINTS: usize = 192;
 const RING_SEGMENTS: usize = 48;
 
 impl BaselineOutline {
+    /// Globe perimeters must be lifted in their creation frame, rather than
+    /// redrawn as screen stamps in whichever view is now open.
+    fn in_frame(shape: &Shape, frame: &Frame) -> Self {
+        if frame.space == Space::Orthographic {
+            Self::Contours(ve_render::perimeter::rings(shape))
+        } else {
+            Self::of(shape)
+        }
+    }
     /// Reads an object's footprint off its flattened shape.
     fn of(shape: &Shape) -> Self {
         match shape {
@@ -348,7 +357,8 @@ pub fn peek_transform(state: &AppState, lon: f64, lat: f64) -> Result<Option<Tra
                 Frame::in_space(item.anchor, item.rotation_deg, item.scale_pct, item.space)
             } else {
                 Frame::in_space(to.anchor, to.rotation_deg, to.scale_pct, item.space)
-            };
+            }
+            .with_projection_origin(item.projection_origin);
             outlines.push(outline_of(&item.outline, &frame));
             // The reach as it would be at 100%, so that `handles_for` can apply
             // the *placed* scale to it. `reach_m` was captured from the flat
@@ -363,6 +373,16 @@ pub fn peek_transform(state: &AppState, lon: f64, lat: f64) -> Result<Option<Tra
             outlines,
         }))
     })
+}
+
+/// Liquify's moved boundary and a surface-following line joining the centres.
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export, export_to = "RelocationOutline.ts")]
+pub struct RelocationOutline {
+    /// The translated source perimeter.
+    pub destination: ObjectOutline,
+    /// Sampled in the object's own frame, then lifted onto the globe.
+    pub connection: Vec<[f64; 2]>,
 }
 
 /// One object's footprint, for the map to draw (spec.md 6.1, 6.2, 6.3).
@@ -391,6 +411,10 @@ pub struct OperatorOutline {
     /// all there. The map knocks these out of the edge it draws and follows
     /// their own rims inside it.
     pub erased: Vec<ObjectOutline>,
+    /// Present for selection-and-move Liquify objects.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub relocation: Option<RelocationOutline>,
 }
 
 /// The footprints the map may need to draw at `step`.
@@ -465,17 +489,67 @@ pub fn outlines_at(
                 let Some(flat) = flatten_object_at(object, step, placed.derived) else {
                     continue;
                 };
+                let mut source = BaselineOutline::in_frame(&flat.shape, &flat.frame);
+                let relocation =
+                    if let Some(ve_render::scene::Modifier::Relocate { displacement, .. }) =
+                        flat.modifier
+                    {
+                        let rings = ve_render::perimeter::rings(&flat.shape);
+                        let mut lo = [f64::INFINITY; 2];
+                        let mut hi = [f64::NEG_INFINITY; 2];
+                        for p in rings.iter().flatten() {
+                            for i in 0..2 {
+                                lo[i] = lo[i].min(p[i]);
+                                hi[i] = hi[i].max(p[i]);
+                            }
+                        }
+                        let centre = std::array::from_fn::<_, 2, _>(|i| {
+                            if lo[i].is_finite() {
+                                (lo[i] + hi[i]) * 0.5
+                            } else {
+                                0.0
+                            }
+                        });
+                        let moved = rings
+                            .iter()
+                            .map(|ring| {
+                                ring.iter()
+                                    .map(|p| [p[0] + displacement[0], p[1] + displacement[1]])
+                                    .collect()
+                            })
+                            .collect();
+                        source = BaselineOutline::Contours(rings);
+                        Some(RelocationOutline {
+                            destination: outline_of(&BaselineOutline::Contours(moved), &flat.frame),
+                            connection: (0..=64)
+                                .map(|i| {
+                                    let t = f64::from(i) / 64.0;
+                                    let p = flat.frame.to_global([
+                                        centre[0] + t * displacement[0],
+                                        centre[1] + t * displacement[1],
+                                    ]);
+                                    [p.lon, p.lat]
+                                })
+                                .collect(),
+                        })
+                    } else {
+                        None
+                    };
                 out.push(OperatorOutline {
                     object: object.id.raw(),
                     tool: Tool::of(object.tool),
                     inverted: flat.invert,
                     anchor: [flat.frame.anchor.lon, flat.frame.anchor.lat],
-                    outline: outline_of(&BaselineOutline::of(&flat.shape), &flat.frame),
+                    outline: outline_of(&source, &flat.frame),
+                    relocation,
                     erased: flat
                         .erased
                         .iter()
                         .map(|erasure| {
-                            outline_of(&BaselineOutline::of(&erasure.shape), &flat.frame)
+                            outline_of(
+                                &BaselineOutline::in_frame(&erasure.shape, &flat.frame),
+                                &flat.frame,
+                            )
                         })
                         .collect(),
                 });
@@ -525,6 +599,7 @@ fn outline_of(outline: &BaselineOutline, frame: &Frame) -> ObjectOutline {
                 Space::CompactMiller => StampSpace::CompactMiller,
                 Space::Equidistant30 => StampSpace::Equidistant30,
                 Space::Equidistant45 => StampSpace::Equidistant45,
+                Space::Orthographic => StampSpace::Orthographic,
             },
         },
         BaselineOutline::Ring(ring) => ObjectOutline::Ring { points: lift(ring) },
@@ -679,11 +754,12 @@ fn baseline_of(
         };
         items.push(TransformBaseline {
             object: object.id,
-            outline: BaselineOutline::of(&flat.shape),
+            outline: BaselineOutline::in_frame(&flat.shape, &flat.frame),
             anchor: flat.frame.anchor,
             rotation_deg: flat.frame.rotation_deg,
             scale_pct: flat.frame.scale * 100.0,
             space: flat.frame.space,
+            projection_origin: flat.frame.projection_origin,
             reach_m: flat.cap_radius_m,
             geometry: object.geometry.clone(),
             shape_animation: object.shape_animation.clone(),
@@ -968,8 +1044,10 @@ fn set_scale(gesture: &TransformGesture, item: &TransformBaseline, percent: f64)
 fn anchor_commands(gesture: &TransformGesture, pointer: LonLat) -> Vec<Command> {
     let mut commands = Vec::new();
     for item in &gesture.items {
-        let before = Frame::in_space(item.anchor, item.rotation_deg, item.scale_pct, item.space);
-        let after = Frame::in_space(pointer, item.rotation_deg, item.scale_pct, item.space);
+        let before = Frame::in_space(item.anchor, item.rotation_deg, item.scale_pct, item.space)
+            .with_projection_origin(item.projection_origin);
+        let after = Frame::in_space(pointer, item.rotation_deg, item.scale_pct, item.space)
+            .with_projection_origin(item.projection_origin);
         let reframe = |p: LocalPoint| {
             let global = before.to_global([p.x, p.y]);
             let local = after.to_local(global);

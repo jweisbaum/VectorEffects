@@ -1,6 +1,7 @@
 import { UnitsProvider } from "./settings/units";
 import { useSelectionLifecycle } from "./selectionLifecycle";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { applyTheme } from "./settings/themes";
 
 import ExportDialog from "./project/ExportDialog";
 import ExportZarrDialog from "./project/ExportZarrDialog";
@@ -10,6 +11,7 @@ import LayerPanel from "./panels/LayerPanel";
 import MapView, { type MapHandle } from "./map/MapView";
 import Timeline from "./timeline/Timeline";
 import NewProjectDialog from "./project/NewProjectDialog";
+import ProjectMenu from "./project/ProjectMenu";
 import StartScreen from "./project/StartScreen";
 import LoadingScreen from "./project/LoadingScreen";
 import { finishOpening, unreadLayers, useOpening } from "./project/opening";
@@ -107,6 +109,7 @@ function EditorApp() {
    * bindings from here, so a rebind changes the key everywhere (M15).
    */
   const [settings, setSettings] = useState<AppSettings | null>(null);
+  useLayoutEffect(() => applyTheme(settings?.theme, settings?.custom_theme), [settings?.theme, settings?.custom_theme]);
   /**
    * Whether a picture can be aligned by pointing in the projection on show.
    *
@@ -567,8 +570,15 @@ function EditorApp() {
     return () => window.removeEventListener("keydown", onKey);
   }, [activeLayer, modal, openProject, save, saveAs, selection, startNewProject, step]);
 
+  const settingsDialog = showSettings && settings !== null && <SettingsDialog
+    settings={settings} project={project} onSettings={setSettings} onProject={setProject}
+    onLibrary={() => setLibraryRevision((at) => at + 1)} onClose={() => setShowSettings(false)} />;
+
   if (!project) {
-    return <StartScreen onOpened={setProject} />;
+    return <UnitsProvider settings={settings}>
+      <StartScreen onOpened={setProject} onSettings={() => setShowSettings(true)} />
+      {settingsDialog}
+    </UnitsProvider>;
   }
 
   return (
@@ -616,17 +626,13 @@ function EditorApp() {
         {/* The map's view controls and the capture tool land here (D68). */}
         <div className="titlebar-centre" ref={setViewSlot} />
         <span className="spacer" />
-        <button onClick={() => void startNewProject()}>New…</button>
-        <button onClick={() => void openProject()}>Open…</button>
-        <button onClick={() => void save()}>Save</button>
-        <button onClick={() => void saveAs()}>Save As…</button>
-        {/*
-          A project could be opened but never put down: the start screen — and
-          with it the recent list and the templates — was reachable only at
-          launch. Closing goes through the same guard every other discard does,
-          so unsaved work is asked about rather than dropped.
-        */}
-        <button onClick={() => void closeProject()}>Close</button>
+        <ProjectMenu
+          onNew={() => void startNewProject()}
+          onOpen={() => void openProject()}
+          onSave={() => void save()}
+          onSaveAs={() => void saveAs()}
+          onClose={() => void closeProject()}
+        />
         {/*
           The shortcut alone is not a way to find something. `Cmd`-`,` is where
           every Mac application keeps its preferences and is worth binding, but
@@ -806,16 +812,7 @@ function EditorApp() {
       />
       </div>
 
-      {showSettings && settings !== null && (
-        <SettingsDialog
-          settings={settings}
-          project={project}
-          onSettings={setSettings}
-          onProject={setProject}
-          onLibrary={() => setLibraryRevision((at) => at + 1)}
-          onClose={() => setShowSettings(false)}
-        />
-      )}
+      {settingsDialog}
 
       {exporting && (
         <ExportDialog project={project} onClose={() => setExporting(false)} />

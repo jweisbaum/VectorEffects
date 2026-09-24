@@ -11,6 +11,7 @@
  * Pure and free of React, so the geometry can be tested rather than looked at.
  */
 
+import { mapColour } from "../settings/themes";
 import type { MeasurementView } from "../generated/MeasurementView";
 import type { MeasurementKind } from "../generated/MeasurementKind";
 import {
@@ -21,15 +22,6 @@ import {
   project,
   projectionFor,
 } from "./camera";
-
-/**
- * Violet, used for nothing else on this map.
- *
- * A measurement has to be unmistakable for a selection (yellow), an operator's
- * edge (pink), a region (green) or a transform handle (cyan): it is not part of
- * the field and must never be read as part of it.
- */
-export const MEASURE_COLOUR = "198, 170, 255";
 
 /** How near a handle the pointer counts as being on it, in CSS pixels. */
 export const HANDLE_REACH_CSS = 8;
@@ -172,7 +164,7 @@ export function drawMeasurements(
           else context.moveTo(point.x + offset, point.y);
           drawing = true;
         }
-        context.strokeStyle = `rgba(${MEASURE_COLOUR}, ${dashed ? 0.75 : 0.95})`;
+        context.strokeStyle = mapColour("measure", dashed ? 0.75 : 0.95);
         context.lineWidth = Math.max(1, dpr) * (dashed ? 1.4 : 1.8);
         context.setLineDash(dashed ? [7 * dpr, 5 * dpr] : []);
         context.stroke();
@@ -206,10 +198,10 @@ export function drawMeasurements(
         context.beginPath();
         context.arc(at.x + offset, at.y, 4.5 * dpr, 0, Math.PI * 2);
         context.fillStyle = active
-          ? `rgba(${MEASURE_COLOUR}, 0.95)`
-          : "rgba(20, 28, 44, 0.85)";
+          ? mapColour("measure", 0.95)
+          : mapColour("ink", 0.85);
         context.fill();
-        context.strokeStyle = `rgba(${MEASURE_COLOUR}, 0.95)`;
+        context.strokeStyle = mapColour("measure", 0.95);
         context.lineWidth = Math.max(1, dpr) * 1.4;
         context.stroke();
       }
@@ -230,14 +222,14 @@ export function drawMeasurements(
       context.beginPath();
       context.moveTo(at.x, at.y);
       context.lineTo(overlay.cursor.x, overlay.cursor.y);
-      context.strokeStyle = `rgba(${MEASURE_COLOUR}, 0.65)`;
+      context.strokeStyle = mapColour("measure", 0.65);
       context.lineWidth = Math.max(1, dpr) * 1.4;
       context.stroke();
     }
     context.setLineDash([]);
     context.beginPath();
     context.arc(at.x, at.y, 4.5 * dpr, 0, Math.PI * 2);
-    context.strokeStyle = `rgba(${MEASURE_COLOUR}, 0.95)`;
+    context.strokeStyle = mapColour("measure", 0.95);
     context.lineWidth = Math.max(1, dpr) * 1.4;
     context.stroke();
   }
@@ -267,11 +259,11 @@ function writeLabel(
   context.textBaseline = "middle";
   for (const offset of copies) {
     const x = at.x + offset + 7 * dpr;
-    context.fillStyle = "rgba(12, 18, 30, 0.78)";
+    context.fillStyle = mapColour("ink", 0.78);
     context.fillRect(x - padding, at.y - height / 2 - padding, width + padding * 2, height + padding * 2);
     context.fillStyle = muted
-      ? `rgba(${MEASURE_COLOUR}, 0.8)`
-      : `rgba(${MEASURE_COLOUR}, 1)`;
+      ? mapColour("measure", 0.8)
+      : mapColour("measure", 1);
     context.fillText(text, x, at.y);
   }
 }

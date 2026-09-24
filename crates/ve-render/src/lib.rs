@@ -15,6 +15,7 @@ pub mod evaluator;
 pub mod gpu;
 pub mod perimeter;
 pub mod preview;
+pub mod relocate;
 pub mod scene;
 pub mod sdf;
 pub mod synthetic;

@@ -236,7 +236,7 @@ export default function Inspector({
               // Two coordinates and a picker do not fit beside a label in this
               // panel's width, so a position takes the next line for itself.
               className={
-                property.value.kind === "position" || property.slider ? "property stacked" : "property"
+                property.value.kind === "position" || property.value.kind === "offset" || property.slider ? "property stacked" : "property"
               }
             >
               <span className="property-label">
@@ -372,6 +372,19 @@ export default function Inspector({
                 </span>
               )}
 
+              {property.value.kind === "offset" && (
+                <span className="property-editor position">
+                  {(["x", "y"] as const).map((axis) => <NumberField key={axis}
+                    step="any"
+                    value={toDisplay("kilometres", property.value.kind === "offset" ? property.value[axis] : 0)}
+                    format={(v) => v.toFixed(3)} title={`${axis.toUpperCase()} displacement (${unitLabel("kilometres")})`}
+                    commitWhileTyping={false}
+                    onCommit={(v) => {
+                      if (property.value.kind === "offset") write(property.id, {...property.value, [axis]: toStored("kilometres", v)});
+                    }} />)}
+                  <span>{unitLabel("kilometres")}</span>
+                </span>
+              )}
               {property.value.kind === "position" && (
                 <span className="property-editor position">
                   <NumberField

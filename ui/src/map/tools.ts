@@ -19,9 +19,10 @@ import type { ToolOption } from "../generated/ToolOption";
 import type { ToolOptionSpec } from "../generated/ToolOptionSpec";
 import type { ToolSchema } from "../generated/ToolSchema";
 import type { StampSpace } from "../generated/StampSpace";
+import { destination, distanceM, initialBearing } from "./geo";
 import { STAMP_SPACES } from "./projection";
 import { displayDirection } from "../project/format";
-import { type Camera, type Viewport, normalizeLon, project, projectionFor, cameraWithAnchor } from "./camera";
+import { type Camera, type Viewport, normalizeLon, project, unproject, projectionFor, cameraWithAnchor } from "./camera";
 import { OP_POINTS, type OperatorPreview } from "./renderer";
 import {
   cosLat,
@@ -248,6 +249,7 @@ export function sampled(
 export function spaceFor(unit: SizeUnit, camera?: Camera): StampSpace {
   if (unit !== "px") return "geodesic";
   const projection = camera ? projectionFor(camera).id : "equirectangular";
+  if (projection === "orthographic") return "orthographic";
   if (camera && projectionFor(camera).general) return "projected";
   return projection === "equirectangular" ? "projected" : projection as StampSpace;
 }
@@ -327,7 +329,7 @@ export function convertSizes(
       next === "px"
         ? pixelsFromKm(camera, lat, amount, "projected")
         : kmFromPixels(camera, lat, amount, "projected");
-    values[spec.property] = { kind: "number", value: Math.max(1, Math.round(converted)) };
+    values[spec.property] = { kind: "number", value: Math.max(spec.property === "InterpolationDistanceKm" ? 0 : 1, Math.round(converted)) };
   }
   return { values, unit: next };
 }
@@ -345,11 +347,11 @@ export function shownAngle(unit: string, convention: string, degrees: number): n
 }
 
 /** Which gesture drives the tool, given the modes it is in. */
-export function gestureKind(schema: ToolSchema, values: ToolValues): Gesture["kind"] {
+export function gestureKind(schema: ToolSchema, values: ToolValues): Exclude<Gesture["kind"], "relocate"> {
   const selector = schema.gesture;
-  if (selector.kind === "always") return selector.gesture as Gesture["kind"];
+  if (selector.kind === "always") return selector.gesture as Exclude<Gesture["kind"], "relocate">;
   const index = choiceOf(values, selector.on);
-  return (selector.gestures[index] ?? selector.gestures[0] ?? "stroke") as Gesture["kind"];
+  return (selector.gestures[index] ?? selector.gestures[0] ?? "stroke") as Exclude<Gesture["kind"], "relocate">;
 }
 
 /**
@@ -374,7 +376,7 @@ export function frozenOptions(
         property: spec.property,
         value: {
           kind: "number",
-          value: Math.max(0.001, sizeKm(state, spec.property, camera, lat, lon)),
+          value: Math.max(spec.property === "InterpolationDistanceKm" ? 0 : 0.001, sizeKm(state, spec.property, camera, lat, lon)),
         },
       });
       continue;
@@ -396,6 +398,9 @@ export function frozenOptions(
       property: "StampSpace",
       value: { kind: "choice", index: STAMP_SPACES.indexOf(space) },
     });
+    if (space === "orthographic") {
+      options.push({property: "StampOrigin", value: {kind: "position", lon: camera.centerLon, lat: camera.centerLat}});
+    }
   }
   return options;
 }
@@ -440,6 +445,13 @@ export function footprintOf(
   const size = (property: string, lat: number) => sizeKm(state, property, camera, lat, gestureAnchor(gesture)?.[0]);
 
   switch (gesture.kind) {
+    case "relocate": {
+      const first = gesture.points[0];
+      if (!first) return null;
+      return {kind: "swept", points: relocationPoints(gesture, state, camera),
+        radiusKm: size("SizeKm", first[1]) / 2,
+        shape: choiceOf(state.values, "BrushShape") === 1 ? "square" : "circle", space};
+    }
     case "stroke": {
       const first = gesture.points[0];
       if (first === undefined) return null;
@@ -482,6 +494,7 @@ export function footprintOf(
         [lon, lat],
         [rimLon, rimLat],
         space,
+        camera,
       );
       if (halfWidthKm <= 0 && halfHeightKm <= 0) return null;
 
@@ -507,6 +520,7 @@ export function footprintOf(
         gesture.rim,
         source === 1 ? "square" : source === 3 ? "circle" : "rect",
         space,
+        camera,
       );
       if (source === 3) {
         return {
@@ -529,7 +543,7 @@ export function footprintOf(
       // A polygon needs three vertices to have an inside; below that the
       // gesture draws its edges and nothing is filled.
       return gesture.points.length >= 3
-        ? { kind: "polygon", points: gesture.points }
+        ? { kind: "polygon", points: gesture.points, ...(space === "orthographic" ? {space} : {}) }
         : null;
 
     case "path": {
@@ -537,7 +551,7 @@ export function footprintOf(
       if (first === undefined || gesture.nodes.length < 2) return null;
       return {
         kind: "swept",
-        points: flattenPath(gesture.nodes),
+        points: flattenPath(gesture.nodes, space === "orthographic" ? camera : undefined),
         radiusKm: size("WidthKm", first.at[1]) / 2,
         shape: "circle",
         space,
@@ -558,7 +572,15 @@ export function extentOf(
   centre: readonly [number, number],
   rim: readonly [number, number],
   space: StampSpace,
+  camera?: Camera,
 ): { halfWidthKm: number; halfHeightKm: number } {
+  if (space === "orthographic" && camera) {
+    const view = {width: 0, height: 0};
+    const a = project(camera, view, {lon: centre[0], lat: centre[1]});
+    const b = project(camera, view, {lon: rim[0], lat: rim[1]});
+    const scale = KM_PER_DEGREE / camera.pxPerDeg;
+    return {halfWidthKm: Math.abs(b.x-a.x)*scale, halfHeightKm: Math.abs(b.y-a.y)*scale};
+  }
   const projection = stampProjection(space);
   const dLat = projection.yOf(rim[1]) - projection.yOf(centre[1]);
   let dLon = rim[0] - centre[0];
@@ -593,7 +615,21 @@ export function perimeterExtent(
   release: readonly [number, number],
   source: "square" | "rect" | "circle",
   space: StampSpace,
+  camera?: Camera,
 ): { centre: [number, number]; halfWidthKm: number; halfHeightKm: number } {
+  if (space === "orthographic" && camera) {
+    const view = {width: 0, height: 0};
+    const a = project(camera, view, {lon: press[0], lat: press[1]});
+    const b = project(camera, view, {lon: release[0], lat: release[1]});
+    let dx = b.x-a.x, dy = b.y-a.y;
+    if (source === "square") {
+      const side = Math.max(Math.abs(dx), Math.abs(dy));
+      dx = (Math.sign(dx)||1)*side; dy = (Math.sign(dy)||1)*side;
+    }
+    const centre = unproject(camera, view, {x: a.x+dx/2, y: a.y+dy/2});
+    const scale = KM_PER_DEGREE / camera.pxPerDeg / 2;
+    return {centre: [centre.lon, centre.lat], halfWidthKm: Math.abs(dx)*scale, halfHeightKm: Math.abs(dy)*scale};
+  }
   const projection = stampProjection(space);
   const y = projection.yOf(press[1]);
   const dLat = projection.yOf(release[1]) - y;
@@ -639,7 +675,22 @@ export function flattenPath(
     in_handle?: [number, number] | null;
     out_handle?: [number, number] | null;
   }>,
+  camera?: Camera,
 ): Array<[number, number]> {
+  if (camera) {
+    const view = {width: 0, height: 0};
+    const projected = (p: [number, number]): [number, number] => {
+      const at = project(camera, view, {lon: p[0], lat: p[1]});
+      return [at.x, at.y];
+    };
+    return flattenPath(nodes.map(n => ({at: projected(n.at),
+      in_handle: n.in_handle ? projected(n.in_handle) : null,
+      out_handle: n.out_handle ? projected(n.out_handle) : null,
+    }))).map(p => {
+      const at = unproject(camera, view, {x: p[0], y: p[1]});
+      return [at.lon, at.lat];
+    });
+  }
   const out: Array<[number, number]> = [];
   const first = nodes[0];
   if (first === undefined) return out;
@@ -932,8 +983,8 @@ function shiftedCamera(
  *
  * The mask and the eraser remove; the clone stamp and a warp's push bring
  * the field in from elsewhere through a shifted camera; the intensity, the
- * turn and the divergence carry their amount; the liquify carries each
- * stamp's movement, in pixels, scaled by its strength.
+ * turn and the divergence carry their amount. Liquify selects without
+ * changing the field and receives its interpolation on commit.
  */
 export function operatorOf(
   tool: Tool,
@@ -973,33 +1024,9 @@ export function operatorOf(
       if (!start || !end || (start[0] === end[0] && start[1] === end[1])) return null;
       return { kind: "clone", source: shiftedCamera(camera, start, end) };
     }
-    case "liquify": {
-      if (gesture.kind !== "stroke") return null;
-      const first = gesture.points[0];
-      if (!first) return null;
-      const strength = numberOf(values, "Strength") / 100;
-      const { at, kept } = screenPoints(gesture.points, camera, view);
-      // Each kept stamp carries the movement since the one before it, so a
-      // thinned stroke moves the field as far as the whole one does.
-      const raw = gesture.points.map(([lon, lat]) => {
-        const screen = project(camera, view, { lon, lat });
-        return [screen.x, view.height - screen.y] as const;
-      });
-      const deltas = kept.map((index, k) => {
-        const previous = k === 0 ? index : (kept[k - 1] as number);
-        const from = raw[previous] as readonly [number, number];
-        const to = raw[index] as readonly [number, number];
-        return [(to[0] - from[0]) * strength, (to[1] - from[1]) * strength] as [number, number];
-      });
-      const radiusKm = sizeKm(state, "SizeKm", camera, first[1]) / 2;
-      return {
-        kind: "smear",
-        points: at,
-        deltas,
-        radiusPx: pixelsFromKm(camera, first[1], radiusKm, spaceFor(state.unit, camera)),
-        feather: Math.min(1, Math.max(0, numberOf(values, "Feather"))),
-      };
-    }
+    // The first gesture only selects. The second draws the moved outline;
+    // the CPU supplies the interpolated field when the move is committed.
+    case "liquify": return null;
     default:
       return null;
   }
@@ -1009,7 +1036,29 @@ function gestureAnchor(gesture: Gesture): readonly [number,number] | undefined {
   switch(gesture.kind) {
     case "point": return gesture.at;
     case "extent": return gesture.centre;
-    case "stroke": case "ring": return gesture.points[0];
+    case "stroke": case "ring": case "relocate": return gesture.points[0];
     case "path": return gesture.nodes[0]?.at;
   }
+}
+
+/** Preview of a rigid translation in the same frozen frame as the document. */
+export function relocationPoints(gesture: Extract<Gesture, {kind: "relocate"}>, state: ToolState, camera: Camera): Array<[number, number]> {
+  const anchor = gesture.points[0];
+  if (!anchor) return [];
+  const origin = {lon: anchor[0], lat: anchor[1]};
+  const space = spaceFor(state.unit, camera);
+  const view = {width: 0, height: 0};
+  const local = (p: readonly [number, number]): [number, number] => {
+    if (space === "orthographic") { const q = project(camera, view, {lon:p[0], lat:p[1]}); return [q.x, q.y]; }
+    if (space !== "geodesic") return [normalizeLon(p[0]-anchor[0]), stampProjection(space).yOf(p[1])];
+    const q = {lon:p[0], lat:p[1]}, d = distanceM(origin, q), a = initialBearing(origin, q)*Math.PI/180;
+    return [Math.sin(a)*d, Math.cos(a)*d];
+  };
+  const from = local(gesture.from), to = local(gesture.to);
+  return gesture.points.map(p => {
+    const q = local(p), x=q[0]+to[0]-from[0], y=q[1]+to[1]-from[1];
+    if (space === "orthographic") { const g=unproject(camera, view, {x,y}); return [g.lon,g.lat]; }
+    if (space !== "geodesic") return [normalizeLon(anchor[0]+x), stampProjection(space).latOf(y)];
+    const g=destination(origin, Math.atan2(x,y)*180/Math.PI, Math.hypot(x,y)); return [g.lon,g.lat];
+  });
 }

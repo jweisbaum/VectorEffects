@@ -34,6 +34,7 @@ pub mod selection_preview;
 pub mod session;
 pub mod settings;
 pub mod shape_animation;
+pub mod theme;
 pub mod transform;
 pub mod zarr;
 
@@ -187,6 +188,7 @@ pub fn run() -> anyhow::Result<()> {
                 document::document_tree,
                 document::object_properties,
                 document::set_object_property,
+                document::set_liquify_destination,
                 document::rename_project,
                 document::add_layer,
                 document::remove_layer,
@@ -216,6 +218,8 @@ pub fn run() -> anyhow::Result<()> {
                 document::clipboard_state,
                 document::clipboard_kind,
                 settings::app_settings,
+                settings::set_theme,
+                settings::set_custom_theme,
                 settings::set_shortcut,
                 settings::reset_shortcuts,
                 settings::set_default_scales,

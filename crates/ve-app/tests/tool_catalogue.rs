@@ -67,6 +67,269 @@ fn ll(lon: f64, lat: f64) -> LonLat {
     LonLat::new(lon, lat).expect("position")
 }
 
+/// Independent screen reference: on an orthographic sphere the projected
+/// radius is sin(angular distance). Bearings then locate the ground point.
+fn globe_point(origin: LonLat, x: f64, y: f64) -> LonLat {
+    use ve_core::{angle::Angle, geo::EARTH_RADIUS_M};
+    origin.destination(
+        Angle::new(x.atan2(y).to_degrees()),
+        x.hypot(y).asin() * EARTH_RADIUS_M,
+    )
+}
+
+#[test]
+fn globe_pixel_tools_cover_the_screen_footprint_at_the_limb() {
+    use ve_core::geo::EARTH_RADIUS_M;
+    use ve_render::{aeqd::Space, scene::flatten_object};
+    let radius = 0.13;
+    for origin in [ll(-30.0, 55.0), ll(179.0, 82.0), ll(-150.0, -80.0)] {
+        for (tool, size) in [
+            (Tool::Brush, PropId::SizeKm),
+            (Tool::Circle, PropId::DiameterKm),
+            (Tool::Mask, PropId::SizeKm),
+            (Tool::CloneStamp, PropId::SizeKm),
+            (Tool::Intensity, PropId::SizeKm),
+            (Tool::Divergence, PropId::SizeKm),
+            (Tool::Turn, PropId::SizeKm),
+            (Tool::Warp, PropId::SizeKm),
+            (Tool::Liquify, PropId::SizeKm),
+            (Tool::Curve, PropId::WidthKm),
+        ] {
+            let (root, state) = project("globe-pixels");
+            let p = globe_point(origin, 0.86, 0.16);
+            let at = [p.lon, p.lat];
+            let gesture = match tool {
+                Tool::Circle => Gesture::Point { at },
+                Tool::Curve => Gesture::Path {
+                    nodes: vec![
+                        PathPoint {
+                            at,
+                            in_handle: None,
+                            out_handle: None,
+                        },
+                        PathPoint {
+                            at,
+                            in_handle: None,
+                            out_handle: None,
+                        },
+                    ],
+                },
+                _ => Gesture::Stroke { points: vec![at] },
+            };
+            let mut options = vec![
+                number(size, 2.0 * radius * EARTH_RADIUS_M / 1000.0),
+                pick(PropId::StampSpace, Space::Orthographic.choice()),
+                at_option(PropId::StampOrigin, origin),
+            ];
+            if tool != Tool::Liquify {
+                options.push(number(PropId::Feather, 0.0));
+            }
+            if tool == Tool::CloneStamp {
+                options.push(at_option(PropId::SourcePoint, origin));
+            }
+            draw(&state, tool, gesture, options);
+            let doc = document(&state);
+            let flat = flatten_object(&doc.layers[0].objects[0], 0).unwrap();
+            for iy in -9..=9 {
+                for ix in -9..=9 {
+                    let dx = f64::from(ix) * 0.021;
+                    let dy = f64::from(iy) * 0.021;
+                    let (x, y) = (0.86 + dx, 0.16 + dy);
+                    if x.hypot(y) >= 1.0 || (dx.hypot(dy) - radius).abs() < 0.001 {
+                        continue;
+                    }
+                    let point = globe_point(origin, x, y);
+                    let inside = flat.shape.distance(flat.frame.to_local(point)) <= 0.0;
+                    assert_eq!(
+                        inside,
+                        dx.hypot(dy) < radius,
+                        "{tool:?} at {origin:?}: {dx},{dy}"
+                    );
+                    if inside {
+                        assert!(flat.frame.anchor.distance_m(point) <= flat.cap_radius_m + 1.0);
+                    }
+                }
+            }
+            let back = origin.destination(
+                ve_core::angle::Angle::new(90.0),
+                EARTH_RADIUS_M * std::f64::consts::PI,
+            );
+            assert!(flat.shape.distance(flat.frame.to_local(back)) > 0.0);
+            let path = root.0.join("globe.veproj");
+            ve_core::io::save(&doc, &path).unwrap();
+            let loaded = ve_core::io::load(&path).unwrap();
+            assert_eq!(doc, loaded);
+            ve_app::edit::undo_for_test(&state).unwrap();
+            assert!(document(&state).layers[0].objects.is_empty());
+            ve_app::edit::redo_for_test(&state).unwrap();
+            assert_eq!(document(&state), doc);
+        }
+    }
+}
+
+fn at_option(id: PropId, p: LonLat) -> ToolOption {
+    at(id, p.lon, p.lat)
+}
+
+#[test]
+fn globe_pixel_shape_fill_presets_and_polygons_keep_their_screen_edges() {
+    use ve_render::{aeqd::Space, scene::flatten_object};
+    let origin = ll(175.0, 65.0);
+    let pair = |x, y| {
+        let p = globe_point(origin, x, y);
+        [p.lon, p.lat]
+    };
+    for source in 0..=3 {
+        let (_root, state) = project("globe-shape");
+        let gesture = if source == 0 {
+            Gesture::Ring {
+                points: vec![
+                    pair(0.55, 0.05),
+                    pair(0.85, 0.05),
+                    pair(0.85, 0.25),
+                    pair(0.55, 0.25),
+                ],
+            }
+        } else {
+            Gesture::Extent {
+                centre: pair(0.55, 0.05),
+                rim: pair(0.85, 0.25),
+            }
+        };
+        draw(
+            &state,
+            Tool::ShapeFill,
+            gesture,
+            vec![
+                pick(PropId::ShapeSource, source),
+                pick(PropId::StampSpace, Space::Orthographic.choice()),
+                at_option(PropId::StampOrigin, origin),
+                number(PropId::Feather, 0.0),
+            ],
+        );
+        let doc = document(&state);
+        let flat = flatten_object(&doc.layers[0].objects[0], 0).unwrap();
+        for iy in 0..21 {
+            for ix in 0..25 {
+                let x = 0.45 + f64::from(ix) * 0.022;
+                let y = -0.05 + f64::from(iy) * 0.023;
+                if x.hypot(y) >= 1.0 {
+                    continue;
+                }
+                let expected = match source {
+                    1 => (x - 0.7).abs() < 0.15 && (y - 0.20).abs() < 0.15,
+                    3 => (x - 0.7).hypot(y - 0.15) < 0.15_f64.hypot(0.1),
+                    _ => (x - 0.7).abs() < 0.15 && (y - 0.15).abs() < 0.1,
+                };
+                let p = globe_point(origin, x, y);
+                assert_eq!(
+                    flat.shape.distance(flat.frame.to_local(p)) < 0.0,
+                    expected,
+                    "shape {source}, {x},{y}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn globe_pixel_intensity_commits_the_full_preview_area() {
+    use ve_core::geo::EARTH_RADIUS_M;
+    let (_root, state) = project("globe-intensity");
+    let origin = ll(-30.0, 55.0);
+    draw(
+        &state,
+        Tool::Circle,
+        Gesture::Point {
+            at: [origin.lon, origin.lat],
+        },
+        vec![
+            number(PropId::DiameterKm, 30_000.0),
+            number(PropId::Speed, 10.0),
+            number(PropId::Feather, 0.0),
+        ],
+    );
+    let p = globe_point(origin, 0.85, 0.15);
+    draw(
+        &state,
+        Tool::Intensity,
+        Gesture::Stroke {
+            points: vec![[p.lon, p.lat]],
+        },
+        vec![
+            number(PropId::SizeKm, 0.24 * EARTH_RADIUS_M / 1000.0),
+            number(PropId::Gain, 200.0),
+            number(PropId::Feather, 0.0),
+            pick(PropId::StampSpace, 15),
+            at_option(PropId::StampOrigin, origin),
+        ],
+    );
+    for (dx, dy, speed) in [
+        (0.11, 0.0, 30.0),
+        (-0.11, 0.0, 30.0),
+        (0.0, 0.11, 30.0),
+        (0.0, -0.11, 30.0),
+        (-0.14, 0.0, 10.0),
+    ] {
+        let actual = sample(&state, globe_point(origin, 0.85 + dx, 0.15 + dy)).0;
+        assert!(
+            (actual - speed).abs() < 0.01,
+            "offset {dx},{dy}: {actual}, expected {speed}"
+        );
+    }
+}
+
+#[test]
+fn globe_pixel_eraser_cuts_the_same_circle_out_of_ground_geometry() {
+    use ve_core::geo::EARTH_RADIUS_M;
+    let (_root, state) = project("globe-eraser");
+    let origin = ll(179.0, 75.0);
+    draw(
+        &state,
+        Tool::Circle,
+        Gesture::Point {
+            at: [origin.lon, origin.lat],
+        },
+        vec![
+            number(PropId::DiameterKm, 30_000.0),
+            number(PropId::Speed, 10.0),
+            number(PropId::Feather, 0.0),
+        ],
+    );
+    let before = document(&state);
+    let p = globe_point(origin, 0.85, 0.15);
+    ve_app::document::stroke_erase(
+        &state,
+        ve_app::document::EraseStroke {
+            points: vec![[p.lon, p.lat]],
+            radius_km: 0.12 * EARTH_RADIUS_M / 1000.0,
+            square: false,
+            space: ve_app::edit::StampSpace::Orthographic,
+            projection_origin: Some([origin.lon, origin.lat]),
+            feather: 0.0,
+            step: None,
+            at_step: 0,
+            layer: None,
+        },
+    )
+    .unwrap();
+    for (dx, dy, expected) in [
+        (0.11, 0.0, 0.0),
+        (-0.11, 0.0, 0.0),
+        (0.0, 0.11, 0.0),
+        (0.0, -0.11, 0.0),
+        (-0.14, 0.0, 10.0),
+    ] {
+        let actual = sample(&state, globe_point(origin, 0.85 + dx, 0.15 + dy)).0;
+        assert!(
+            (actual - expected).abs() < 0.01,
+            "eraser {dx},{dy}: {actual}"
+        );
+    }
+    ve_app::edit::undo_for_test(&state).unwrap();
+    assert_eq!(document(&state), before);
+}
+
 /// Speed and azimuth-toward at a position, from the authoritative evaluator.
 fn sample(state: &AppState, position: LonLat) -> (f64, f64) {
     let project = {
@@ -227,7 +490,10 @@ fn catalogue() -> Vec<(Tool, Gesture, Vec<ToolOption>)> {
             },
             vec![
                 number(PropId::SizeKm, 800.0),
-                number(PropId::Strength, 100.0),
+                ToolOption {
+                    property: "DisplacementPosition".into(),
+                    value: PropertyValue::Offset { x: 200.0, y: 0.0 },
+                },
             ],
         ),
     ]
@@ -1897,4 +2163,148 @@ fn all_target_tools_apply_route_choice_and_clockwise_offset() {
             }
         }
     }
+}
+
+#[test]
+fn liquify_selection_and_displacement_animate_independently_and_round_trip() {
+    use ve_core::PropValue;
+    use ve_render::scene::{Modifier, flatten_object};
+    let (root, state) = project("liquify-move");
+    let original = document(&state);
+    let made = create::create(
+        &state,
+        NewObject {
+            tool: Tool::Liquify,
+            gesture: Gesture::Relocate {
+                points: vec![[179.0, 70.0], [179.5, 70.0]],
+                from: [179.0, 70.0],
+                to: [-179.0, 70.0],
+            },
+            options: vec![
+                number(PropId::SizeKm, 100.0),
+                number(PropId::InterpolationDistanceKm, 0.0),
+            ],
+            layer: None,
+        },
+    )
+    .unwrap();
+    let created = document(&state);
+    let id = ve_core::Id::from_raw(made.object);
+    let o = created.object(id).unwrap();
+    assert!(matches!(
+        o.geometry,
+        ve_core::document::Geometry::Stroke { .. }
+    ));
+    let flat = flatten_object(o, 0).unwrap();
+    let expected = flat.frame.to_local(ll(-179.0, 70.0));
+    let Modifier::Relocate {
+        displacement,
+        distance,
+    } = flat.modifier.unwrap()
+    else {
+        panic!("relocate")
+    };
+    assert!((displacement[0] - expected[0]).abs() < 0.02);
+    assert!((displacement[1] - expected[1]).abs() < 0.02);
+    assert_eq!(distance, 0.0);
+    ve_app::edit::undo_for_test(&state).unwrap();
+    assert_eq!(document(&state), original);
+    ve_app::edit::redo_for_test(&state).unwrap();
+    assert_eq!(document(&state), created);
+
+    // Re-aim keys both relative components as one undo; source stays unkeyed.
+    ve_app::document::liquify_destination(&state, made.object, [-177.0, 71.0], 3, true).unwrap();
+    let moved = document(&state);
+    let o = moved.object(id).unwrap();
+    assert!(
+        o.props
+            .get(PropId::DisplacementPosition)
+            .unwrap()
+            .is_animated()
+    );
+    assert!(!o.props.get(PropId::Position).unwrap().is_animated());
+    ve_app::edit::undo_for_test(&state).unwrap();
+    assert_eq!(document(&state), created);
+    ve_app::edit::redo_for_test(&state).unwrap();
+    assert_eq!(document(&state), moved);
+
+    for (property, value) in [
+        (
+            "Position",
+            PropertyValue::Position {
+                lon: 160.0,
+                lat: 65.0,
+            },
+        ),
+        (
+            "InterpolationDistanceKm",
+            PropertyValue::Number { value: 200.0 },
+        ),
+    ] {
+        ve_app::document::set_property_with(&state, made.object, property, value, None, 3, true)
+            .unwrap();
+    }
+    let keyed = document(&state);
+    let o = keyed.object(id).unwrap();
+    for id in [
+        PropId::Position,
+        PropId::DisplacementPosition,
+        PropId::InterpolationDistanceKm,
+    ] {
+        assert!(ve_core::schema::animatable(o.tool, id));
+        assert!(o.props.get(id).unwrap().is_animated());
+    }
+    assert_eq!(
+        o.props.value_at(o.tool, PropId::InterpolationDistanceKm, 3),
+        Some(PropValue::F32(200.0))
+    );
+    assert!(ve_app::shape_animation::controls_of(&state, made.object, 3).is_err());
+    assert_eq!(o.geometry, created.object(id).unwrap().geometry);
+    assert_eq!(
+        o.props.get(PropId::DisplacementPosition),
+        moved
+            .object(id)
+            .unwrap()
+            .props
+            .get(PropId::DisplacementPosition)
+    );
+    let path = root.0.join("liquify.veproj");
+    ve_core::io::save(&keyed, &path).unwrap();
+    assert_eq!(ve_core::io::load(&path).unwrap(), keyed);
+}
+
+#[test]
+fn liquify_globe_relative_destination_uses_the_frozen_pixel_plane() {
+    use ve_core::geo::EARTH_RADIUS_M;
+    use ve_render::{
+        aeqd::Space,
+        scene::{Modifier, flatten_object},
+    };
+    let (_root, state) = project("liquify-globe");
+    let origin = ll(179.0, 72.0);
+    let pair = |x, y| {
+        let p = globe_point(origin, x, y);
+        [p.lon, p.lat]
+    };
+    draw(
+        &state,
+        Tool::Liquify,
+        Gesture::Relocate {
+            points: vec![pair(0.8, 0.1), pair(0.83, 0.11)],
+            from: pair(0.8, 0.1),
+            to: pair(0.7, 0.15),
+        },
+        vec![
+            pick(PropId::StampSpace, Space::Orthographic.choice()),
+            at_option(PropId::StampOrigin, origin),
+            number(PropId::SizeKm, 100.0),
+        ],
+    );
+    let project = document(&state);
+    let flat = flatten_object(&project.layers[0].objects[0], 0).unwrap();
+    let Some(Modifier::Relocate { displacement, .. }) = flat.modifier else {
+        panic!("relocate")
+    };
+    assert!((displacement[0] + 0.1 * EARTH_RADIUS_M).abs() < 0.1);
+    assert!((displacement[1] - 0.05 * EARTH_RADIUS_M).abs() < 0.1);
 }

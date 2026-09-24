@@ -120,6 +120,90 @@ fn rect(lon: f64, lat: f64, half_w: f64, half_h: f64) -> RegionShape {
     }
 }
 
+/// Both ways of keeping the composite must preserve a circular boundary far
+/// more accurately than the project's 1° export grid (about 111 km here).
+#[test]
+fn copied_regions_and_saved_macros_keep_curved_boundaries() {
+    let (root, app) = project("curved-boundaries");
+    stroke(&app, 0.0, 0.0, 600.0, 18.0);
+    let started = std::time::Instant::now();
+    capture::region_capture(&app, rect(0.0, 0.0, 4.0, 4.0), 0, None).expect("copy");
+    println!("8° circular-field copy: {:?}", started.elapsed());
+    capture::capture_paste(&app, Some(80.0), Some(0.0), 0, None, false).expect("paste");
+    ve_app::settings::macro_directory_set(
+        &app,
+        root.0.join("library").to_string_lossy().into_owned(),
+    )
+    .expect("library");
+    ve_app::macros::capture_start(&app, rect(0.0, 0.0, 4.0, 4.0), 0, false, None).expect("record");
+    let library = ve_app::macros::capture_finish(&app, "Circle".to_owned(), 0).expect("save macro");
+    ve_app::macros::macro_insert(&app, &library.entries[0].id, 120.0, 0.0, 0, None)
+        .expect("insert macro");
+    for bearing in (0..360).step_by(5) {
+        for (radius, inside) in [(290_000.0, true), (310_000.0, false)] {
+            let p = LonLat::new(0.0, 0.0)
+                .unwrap()
+                .destination(ve_core::Angle::new(f64::from(bearing)), radius);
+            for offset in [0.0, 80.0, 120.0] {
+                let (u, v) = field(&app, p.lon + offset, p.lat);
+                let speed = u.hypot(v);
+                assert!(
+                    if inside { speed > 17.9 } else { speed < 0.01 },
+                    "radius {radius}, bearing {bearing}, offset {offset}: {speed}"
+                );
+            }
+        }
+    }
+}
+
+/// Existing coarse captures get continuous edges too, and true calm remains
+/// distinct from transparent water when placed over another field.
+#[test]
+fn legacy_capture_edges_blend_coverage_over_the_field_below() {
+    use std::sync::Arc;
+    use ve_core::capture::{Capture, CaptureFrame, CaptureLattice, UNDEFINED};
+    use ve_core::document::Geometry;
+    use ve_core::project::FieldKind;
+    let (_root, app) = project("capture-coverage");
+    stroke(&app, 100.0, 0.0, 2_000.0, 20.0);
+    let capture = Capture::new(
+        vec![FieldKind::Wind],
+        CaptureLattice {
+            ni: 2,
+            nj: 2,
+            spacing_deg: 1.0,
+            x0_deg: 0.0,
+            y0_deg: 0.0,
+        },
+        0.0,
+        Geometry::Rect {
+            half_width_m: 300_000.0,
+            half_height_m: 300_000.0,
+        },
+        vec![CaptureFrame::still(
+            0.0,
+            vec![[0.0, 0.0], [0.0, 0.0], UNDEFINED, UNDEFINED],
+        )],
+    )
+    .expect("legacy capture");
+    app.session.lock().expect("lock").capture.held =
+        Some((Arc::new(capture), rect(0.0, 0.0, 3.0, 3.0)));
+    capture::capture_paste(&app, Some(100.0), Some(0.0), 0, None, false).expect("paste calm");
+    for (lat, expected) in [
+        (0.0, 0.0),
+        (-0.25, 5.0),
+        (-0.5, 10.0),
+        (-0.75, 15.0),
+        (-1.0, 20.0),
+    ] {
+        let (u, v) = field(&app, 100.5, lat);
+        assert!(
+            (u - expected).abs() < 0.01 && v.abs() < 0.01,
+            "at {lat}: ({u},{v}), expected ({expected},0)"
+        );
+    }
+}
+
 /// A region copy carries the animation (D65, M23).
 ///
 /// A stroke travels east through a fixed region — at 10° on step 1, 20° on
@@ -524,6 +608,7 @@ fn the_eraser_sets_a_patch_undefined_where_it_falls() {
     document::stroke_erase(
         &app,
         document::EraseStroke {
+            projection_origin: None,
             points: vec![[100.0, 0.0]],
             radius_km: 200.0,
             square: false,

@@ -39,6 +39,7 @@ import type { EraseStroke } from "./generated/EraseStroke";
 import type { ClipboardKind } from "./generated/ClipboardKind";
 import type { AutosaveMode } from "./generated/AutosaveMode";
 import type { AppSettings } from "./generated/AppSettings";
+import type { CustomTheme } from "./generated/CustomTheme";
 import type { McpClient } from "./generated/McpClient";
 import type { McpRegistered } from "./generated/McpRegistered";
 import type { McpStatus } from "./generated/McpStatus";
@@ -320,6 +321,9 @@ export const api = {
       autoKey,
       gesture: gesture ?? null,
     }),
+
+  setLiquifyDestination: (object: number, to: [number, number], step: number, autoKey: boolean) =>
+    call<ProjectSummary>("set_liquify_destination", {object, to, step, autoKey}),
 
   // --- Animation (spec.md 9) ---
 
@@ -622,6 +626,8 @@ export const api = {
   clipboardKind: () => call<ClipboardKind>("clipboard_kind"),
   /** The application's settings: shortcuts, display defaults, macros (M15). */
   appSettings: () => call<AppSettings>("app_settings", {}),
+  setTheme: (theme: string) => call<AppSettings>("set_theme", { theme }),
+  setCustomTheme: (custom: CustomTheme) => call<AppSettings>("set_custom_theme", { custom }),
   setGlyphAppearance: (style: GlyphStyle, setting: GlyphSetting) =>
     call<AppSettings>("set_glyph_appearance", { style, setting }),
   /** Rebinds one shortcut. A collision or a reserved key is refused. */

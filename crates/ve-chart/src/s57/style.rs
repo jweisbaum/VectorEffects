@@ -43,27 +43,27 @@ pub struct Palette {
 
 impl Default for Palette {
     /// Dimmed to sit under a painted field: the map's own sea is a dark
-    /// blue-grey, and these sit within a few steps of it.
+    /// slate, and these sit within a few steps of it.
     ///
-    /// **`land` is the basemap's own land, to the byte** (`LAND` in
-    /// `renderer.ts`, `0.20, 0.25, 0.23`). A chart covers the stretch of
+    /// **`land` is the default basemap's own land, to the byte** (Sage in
+    /// `settings/themes.json`, `#3b6064`). A chart covers the stretch of
     /// coast it was published for and nothing else, so a land fill of its
     /// own drew every cell's rectangle across the continent behind it. The
     /// same colour makes the seam invisible and still lets the chart's own
     /// coastline and its dredged areas sit on top.
     fn default() -> Self {
         Self {
-            shallow: [58, 86, 116, 255],
-            middle: [40, 62, 90, 255],
-            deep: [28, 44, 68, 255],
-            land: [51, 64, 59, 255],
-            coast: [150, 160, 150, 255],
-            contour: [92, 116, 140, 200],
+            shallow: [85, 130, 139, 255],
+            middle: [65, 101, 115, 255],
+            deep: [54, 73, 88, 255],
+            land: [59, 96, 100, 255],
+            coast: [135, 187, 162, 255],
+            contour: [135, 187, 162, 180],
             aid: [190, 170, 90, 230],
             hazard: [200, 110, 100, 235],
-            text: [170, 185, 200, 220],
+            text: [201, 228, 202, 220],
             caution: [150, 130, 175, 190],
-            built: [96, 96, 88, 255],
+            built: [105, 148, 143, 255],
         }
     }
 }
@@ -239,10 +239,10 @@ mod tests {
 
     /// A chart's land has to be the basemap's, or every cell's rectangle
     /// shows as a block of a slightly different colour over the continent.
-    /// `LAND` in `ui/src/map/renderer.ts`, rounded to bytes.
+    /// The default Sage land in `ui/src/settings/themes.json`, rounded to bytes.
     #[test]
     fn chart_land_is_the_basemaps_own_land() {
-        let basemap = [0.20_f32, 0.25, 0.23];
+        let basemap = [59.0_f32 / 255.0, 96.0 / 255.0, 100.0 / 255.0];
         let land = Palette::default().land;
         for (channel, expected) in land[..3].iter().zip(basemap) {
             let got = f32::from(*channel) / 255.0;

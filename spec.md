@@ -230,7 +230,7 @@ stamp is a shape in.
 | Unit | Stamp space | Footprint |
 |---|---|---|
 | km | `geodesic` | A shape on the **ground**: a disc of `size_km` at any latitude, drawn as an ellipse that widens with latitude. |
-| px | the active cylindrical projection | A shape in the projection active when it is created: the requested pixels across and tall, independent of latitude. |
+| px | the active cylindrical projection, or frozen globe view | A shape in the projection active when it is created: the requested screen footprint, including away from the globe's centre. |
 
 Pixel distances use `KM_PER_DEGREE / pxPerDeg` on both projected axes. The
 frozen space selects the corresponding northing function: latitude for
@@ -238,6 +238,16 @@ Equirectangular, Mercator northing for Mercator, and Miller northing for Miller.
 The internal kilometre value measures projected coordinates, not ground distance.
 The brush, its preview, filled glyph placement, and destructive eraser all use
 this same frame. Sub-kilometre pixel sizes must not be rounded up to a kilometre.
+
+On the orthographic globe, `StampSpace=orthographic` also freezes `StampOrigin`,
+the view's longitude/latitude centre. Geometry is measured in that projection's
+metre plane about the object's projected anchor. Circles, brush sweeps, preset
+shapes, polygon edges, and curve controls use the same screen axes for preview
+and commit. Releasing the pointer preserves the full visible area under the
+tool; the far hemisphere is excluded. The eraser records the same origin for
+imported data and freezes cuts through it for objects. CPU and GPU evaluation
+share these semantics. Changing the view or zoom later never rewrites the
+geometry. The original projected spaces and old documents keep their meaning.
 
 The space is a property of the object, frozen at creation like every other tool
 option (§6.1), and it survives in the file. It is not a display setting: a
@@ -377,7 +387,7 @@ and booleans. These editable choices apply to the object's entire lifetime and
 cannot be keyed: Brush Direction mode; Circle Fill; Shape fill Vector mode and
 Direction mode; Clone stamp Offset; Path Direction mode; Mask Invert; Warp Warp
 and Push to; Macro Scale and Interpolation strategy. Auto-key does not override
-these restrictions. Liquify retains its existing keyframe behavior.
+these restrictions. Displace independently animates selection position, relative Displacement position, Feather, and interpolation distance; it does not support shape animation.
 
 ```rust
 Animatable<T> {
@@ -1284,7 +1294,7 @@ that care expose an explicit choice (§6.2, circle tool) between a shape that is
 circular *on screen* and one that is circular *on the globe*.
 
 **A projection is a view setting and nothing else.** Object geometry is stored
-in geodesic frames, the evaluator works in lat/lon and true bearings, and the
+in object-local frames, the evaluator works in lat/lon and true bearings, and the
 export has its own grid, so a projection cannot affect a saved project or an
 exported file (invariant 3). It lives in the *application's* settings, not the
 project's: it says how this person likes to look at a map, not what the map is.
@@ -1374,8 +1384,9 @@ extent**: a national grid's catalogued extent is its area of use, not where
 it stops projecting, and a view of British National Grid shows Iceland. Glyphs use a screen lattice with geographic east/north
 Jacobians for grid convergence. Graticules are curved and horizon-clipped.
 Pointer inverses outside the map are invalid and cannot initiate edits.
-Ground tools retain their geodesic geometry; in these views px resolves to a
-local ground size at creation, stored in the existing geodesic frame. Stored
+Ground tools retain their geodesic geometry. Globe px tools freeze their screen
+geometry and view centre as described in §3.5; other general projections retain
+their existing px conversion. Stored
 cylindrical pixel objects retain their original frame when viewed here.
 Transform drags use projected geographic outlines; their optional raster ghost
 is available in cylindrical views.
@@ -1398,6 +1409,17 @@ Bundled **Natural Earth** (public domain) land polygons and coastlines at 1:110m
 and 1:50m, converted at build time into a compact binary of pre-tessellated
 triangles plus coastline line strings. Rendered as WebGL geometry, LOD switched
 by zoom. Graticule drawn procedurally.
+
+The application's default chrome and basemap use the sage/teal palette
+`#c9e4ca`, `#87bba2`, `#55828b`, `#3b6064`, and `#364958`.
+Dark slate surfaces carry pale green text, sage active controls, and teal
+borders. Displace destination outlines and their centre connectors use a
+contrasting burnt orange (`#df782f`), during placement and after release.
+Charts share the basemap's land colour exactly. Project field gradients retain
+their own speed scales and colours (§5.3).
+The application theme selector (§8.6) changes chrome, basemap, chart palette
+and interaction colours together. Switching themes refreshes projected
+basemap textures and chart URLs without rebuilding field tiles.
 
 The basemap is **not a layer** and does not appear in the layer panel. It is
 always beneath all layers and cannot be reordered, hidden, or edited.
@@ -1584,9 +1606,10 @@ eye).
 
 ### 5.6 Map chrome
 
-The main application window starts in native full-screen mode on every launch
-on macOS, Windows and Linux. Leaving full screen during a session does not
-change the next launch's initial mode.
+The main application window starts maximized in the available desktop work
+area on every launch on macOS, Windows and Linux, with normal window chrome.
+Resizing the window during a session does not change the next launch's initial
+mode.
 
 Everything drawn over the map — the active tool's options, the colour legend,
 the cursor readout, selection handles, gesture previews — obeys three rules.
@@ -1604,6 +1627,9 @@ the panel and the map** — centred top to bottom for the side panels, left
 to right for the timeline — and it stays there whether the panel is open or
 closed; a closed panel is gone, not a strip.
 
+The map canvas accepts keyboard focus without drawing a native focus ring
+around the workspace, so focus does not add blue bars above or below the panels.
+
 **What the map is showing lives in the title bar; what is being painted lives
 over the map** (M25, D68). The title bar's centre holds the view controls —
 the capture and measure tools, the glyph switch, the projection menu, the
@@ -1613,6 +1639,17 @@ which is edited in place by clicking it. The option bar over the map holds the
 palette and the tool in hand's options and nothing about the view; the step is
 the timeline's to say. The controls are rendered by the map through a portal,
 so the tool, the glyphs, the graticule and the two boxes stay the map's state.
+Legend is the last view option, after Readout.
+
+A **Project** dropdown in the title bar contains **New**, **Open**, **Save**,
+**Save As**, and **Close**, in that order. These use the same keyboard shortcuts
+and unsaved-change guards as the individual commands. The menu supports arrow
+navigation and closes after a choice, on Escape, or when focus moves outside it.
+
+The tool buttons form a row centred over the visible map, with a fixed width
+for a given window and dock layout. The selected tool's options always appear
+below it. The panel can widen symmetrically to fit those options without moving
+the tool buttons. On narrow windows both rows wrap within the visible map.
 
 Everything drawn over the map can be put away, for the same reason the panels
 can (§5.6): what is over the map is how one person is looking at it, not a
@@ -2125,15 +2162,9 @@ cannot see the result of, and would find later without knowing what made it.
 The gesture is refused, and the refusal says so, rather than being silently
 dropped: the pointer went down on purpose.
 
-The eraser had this rule first, for the plainest case — a hole taken out of
-something invisible — and it holds for every tool that draws. **The liquify is
-why it had to be general.** Its preview displaces the *rendered* field itself,
-so it has no layer of its own to displace: aimed at a hidden layer it showed
-the field being liquified for the whole of the drag, on the layers that *are*
-visible, and then snapped back on release. Scoping that preview to one layer
-is not possible — there is no second frame to compare against, which is how
-every other tool's preview is scoped (§6.2) — but the case that made it
-visible is a gesture that should never have started.
+The rule includes Displace's selection phase: a selection cannot be started
+on a hidden layer. It previews the selected source and destination outlines;
+its interpolated result arrives through the committed layer's tiles.
 
 So it does not start. The map refuses the press rather than waiting for the
 backend's refusal on release, and the cursor says so on **hover**, with the
@@ -2287,17 +2318,16 @@ modifier cannot invent a wind, only change one.
 | **Diverge / converge** | `D` | Adds a radial component of `amount × local speed`: outward when positive and inward when negative — from the **stroke's own centreline** for a swept footprint (M29), fading to nothing within 100 m of the line, where there is no outward; from the anchor for a stamp. |
 | **Rotate flow** | `R` | Turns every vector by an amount of 0–180°, clockwise or counter-clockwise as the tool says (M29). The speed is untouched. |
 | **Warp** | `W` | Reads the field from a displaced position: `push` drags the field under the anchor to a place, `twist` rotates it about the anchor. A *placed* region's field, moved as one block. Nothing about the vectors changes, only where they are read from. **The push is the stroke** (M29): the field under where the drag began is dragged to where it ended, so a plain drag does something the moment it is released; a click with no travel pushes nowhere, and Shift-dragging an existing warp re-aims it. |
-| **Liquify** | `L` | The painted smear — a paint program's forward warp. Each stamp of the stroke carries the pointer's own movement into it, scaled by `strength`; at a cell the displacement is the feathered sum of the deltas of the stamps that cover it, and the field is read from the cell minus that. The field is dragged *along the hand* rather than moved as a block (M17, D56). |
+| **Displace** | `L` | Brush a source selection, release, then drag that selection to a destination. The interior is copied unchanged; the vacated source and an adjustable band outside the destination are interpolated. |
 
 All five are **painted**, like the brush and the mask: a stamp swept along a
 polyline, sized in px or km (§3.5), with the common `position`, `scale_pct`,
-`rotation_deg` and `enabled` (§4.4). **Every one of them, the mask and the
+`rotation_deg` and `enabled` (§4.4). **The other modifiers, the mask and the
 eraser show their effect while the pointer is down** (M32): the map applies
 the gesture to the field it is drawing, per pixel and per glyph, from the
 tool's own settings — the intensity scales the speed under the stroke, the
 turn turns it, the divergence radiates it from the stroke's centreline, the
-push moves the field under the start of the drag to its end, the liquify
-drags it along the stroke, and the mask and the eraser take it away — and
+push moves the field under the start of the drag to its end, and the mask and the eraser take it away — and
 keeps applying it after the release until the committed tiles land. It is a
 screen-space proxy of the kernels' answer, the way every preview is (§7.9):
 a twist has none, and a push is previewed as a clone of the field under the
@@ -2362,9 +2392,8 @@ Both extra scenes are addressed as ordinary frames of tiles and warmed while
 the tool is merely in hand, so the stroke does not wait for them; until they
 land the preview acts unscoped, which is a smaller wrong than acting nowhere.
 The layer alone is fetched only for the tools that read a source, since only
-those need it. **The liquify is the exception**: it displaces a field
-already rendered to a texture rather than reading tiles, so it has nothing
-to compare against and is still previewed over the whole stack.
+those need it. Displace previews source and destination outlines without changing the field
+during selection. The interpolation is evaluated from its own layer on commit.
 
 A swathe of field is therefore intensified
 or turned in one gesture, and **two strokes of one modifier with identical
@@ -2378,10 +2407,9 @@ re-expresses the new chain in the target's frame, and therefore under the
 target's anchor; a tool whose field is measured from that anchor would paint
 something different afterwards, which is the one thing a merge may never do
 (§6.1). That is the warp, which both twists about its anchor and pushes from
-it — the same rule that keeps two clone strokes apart. **A liquify never
-merges either**, for its own reason: its deltas are its geometry, and
-re-expressing two smears under one frame would add the second's movement to
-the first's stamps. Intensify and rotate refer to no anchor at all and merge
+it — the same rule that keeps two clone strokes apart. **A displace never
+merges either**: each source selection has its own relative displacement and
+interpolation boundary. Intensify and rotate refer to no anchor at all and merge
 freely, and so does **diverge/converge** since M29: it radiates from the
 stroke's own centreline, which travels with the geometry, so two strokes with
 the same settings become one object and neither paints differently for it.
@@ -2397,7 +2425,8 @@ the same settings become one object and neither paints differently for it.
 | `warp_mode` | enum `Push` \| `Twist` | warp |
 | `push_to` | LonLat | warp, `Push`: where the field under the anchor is dragged to |
 | `twist_deg` | f32 ° (−360…360) | warp, `Twist` |
-| `strength` | f32 % (0…100) | liquify: how much of the pointer's movement each stamp applies. Frozen into the geometry at creation — the deltas are stored scaled — so it is a creation option, not an animatable one. |
+| `interpolation_distance_km` | f32 ≥ 0 | Displace: transition distance outside the destination; uses the brush's px/geographic unit, frozen to the same stamp frame. Animatable. |
+| `displacement_position` | pair of f32, km | Displace: relative destination in the selection's local frame. One track keys both coordinates together, independently of `position`; Shift-drag re-aims it in one undo. |
 
 **The feather is the whole of the edge.** A modifier fades from what was there
 to what it makes of it, by the same coverage weight every tool uses (§7.4), so
@@ -2412,17 +2441,38 @@ one the circle's rotation is a quarter turn off (§7.5). At the anchor itself
 that bearing is undefined, exactly as a circle's tangent is; the value stays
 finite and the cell is one cell.
 
-**A liquify is a stroke that remembers how it was drawn.** Its geometry is the
-stroke's stamps, each with the delta of the pointer's movement into it in the
-object's local frame, already scaled by `strength`: the geometry *is* the
-displacement, and the evaluator sums the deltas of the stamps covering a cell,
-each faded by that stamp's own feather ramp, and reads from behind the sum — as
-a push reads from behind its push. A plain sum, not a mean: a hand that lingers
-over a spot piles the field up there, which is what a smear does. Its footprint
-is the same capsule every swept tool has, so coverage, outlines and culling
-know nothing new; the deltas ride beside it. It re-reads the scene like a warp
-and is declined by the GPU with it (§7.8). The pull line of a warp reads out its
-length in km beside its head.
+**Displace selects, then moves.** (The saved tool ID remains `liquify` for compatibility.) The first release retains a highlighted brushed
+region and prompts the user to drag it. The second release creates one object
+and one undo entry. Escape, tool/frame/layer changes, and cancelled pointers
+abandon pending selections. Pixel selections retain their frozen projected
+frame, including the globe view centre; geographic selections use the local
+geodesic frame.
+
+With Feather at zero, the destination interior reads the original source field
+directly, preserving both vector values and coverage. Feather softens an inner
+band measured as a fraction of the brush radius. Within this band, a smooth
+constraint blends the moved values into the harmonic transition; the core
+remains exact. Feather never reduces the area healed at the source. Destination wins in an overlap. Outside the
+union of the vacated source and the destination dilated by interpolation
+distance, the original field is unchanged. Within that union, deterministic
+harmonic interpolation of u, v, and coverage connects the fixed destination to
+the unaffected exterior. **The vacated source is always interpolated**, including
+when the distance is zero. Zero displacement is an exact no-op.
+
+Only source geometry and animatable parameters are saved. Bounded transient
+interpolation lattices are shared by tile workers and rebuilt from the field
+beneath the object when the scene changes. Disconnected source and destination
+regions are solved separately so long moves retain transition detail. The GPU
+declines this operator, as it does warp, so preview tiles and export use the CPU
+implementation. Source position, relative Displacement position, Feather and
+Interpolation distance animate separately; Displace has no shape animation.
+Displacement position is one paired local-coordinate track with shared keys
+and easing, styled like Position. Older X/Y tracks migrate without changing
+any evaluated frame. Brush previews outline only the union boundary. Selected
+objects highlight both source and destination perimeters, joined by a line
+between their centres sampled on the globe surface. Saved legacy
+`Smear` geometries keep their previous evaluation so existing projects do not
+change appearance.
 
 **A warp is pulled, not typed.** Hold `Shift` with the warp tool and the
 pointer stops painting: it grabs the warp under it and drags the field where it
@@ -2859,7 +2909,7 @@ What still has to hold, and is tested:
   reach the tile** (M31), plus the quality, plus tile coordinates. Each object
   is digested once per frame; a tile's key combines the digests of the objects
   whose spherical cap touches its rectangle — an inverted mask reaches every
-  tile, and a clone stamp, a warp or a liquify brings its whole layer beneath
+  tile, and a clone stamp, a warp or a displace brings its whole layer beneath
   it — with the imported fields the tile can read, each culled to what
   reaches it (M33): a lattice the tile lies outside of is dropped outright, an
   erased stroke is kept only by the tiles it passes over, and the speed
@@ -2908,7 +2958,7 @@ Left-hand vertical palette, keyboard-shortcut per tool:
 | ✳ | Diverge / converge | `D` |
 | ↻ | Rotate flow | `R` |
 | ≈ | Warp | `W` |
-| 〽 | Liquify | `L` |
+| 〽 | Displace | `L` |
 | 📏 | Measure (dividers / great circle / range rings) | `T` |
 | ◩ | Erase — remove what it passes over in the active layer | `X` |
 
@@ -3112,6 +3162,10 @@ region takes `stamp_space: projected`, exactly as a px-sized stamp does
 It is **session state: not document, not history.** Pointing is not an edit.
 It is drawn as a marching-ants outline on the overlay, in a colour used for
 nothing else, so it cannot be mistaken for a selected object's edge.
+Selection and macro footprint edges are subdivided geographically before
+projection, so parallels and meridians follow a globe's surface rather than
+joining projected corners with straight chords. Outlines break at horizons
+and map seams; a clipped outline is not filled across the missing part.
 `Cmd`-`A` enters the select tool with the view selected, `Cmd`-`Shift`-`A`
 with the whole map, and `Cmd`-`D` or the bar's **Deselect** clears it. None of
 those three keys was bound before.
@@ -3230,11 +3284,18 @@ The clipboard holds fully serialised objects, including all keyframes.
 
 **Copying a region copies the field, not the objects.** With a region selected
 (§8.2), `Cmd`-`C` captures the **visible composite** inside it — what the map
-is showing — onto the project's own lattice, and `Cmd`-`V` puts it down as a
+is showing — onto a dedicated capture lattice, and `Cmd`-`V` puts it down as a
 **patch**: an object whose field is those samples instead of a formula. It
 lands under the pointer when the pointer is over the map, and otherwise back
 where it was taken with the small offset every pasted object gets. With no
 region, both keys mean the objects, exactly as above.
+
+Copies and macros retain finer detail than a coarse export grid: they target
+at most 0.05° spacing and at least 512 intervals across a local selection's
+longest side, retaining finer project spacing when it fits. The lattice is
+bounded to 2048 nodes per side; larger regions increase spacing to fit the
+whole selection rather than cropping its outer edges. Both paths use the
+same CPU sampling code, with rows evaluated in parallel in a fixed order.
 
 **One clipboard.** Copying objects drops a held capture and capturing a region
 drops the copied objects, so at most one is ever held and `Cmd`-`V` *asks*
@@ -3266,6 +3327,13 @@ its source was. A real zero is calm and overwrites. Coverage accumulates the
 way the field does, so the two agree at a feathered edge; the faded outer edge
 of a stroke is captured faded but *present*, and the patch's own feather is how
 it is softened again.
+
+Spatial sampling interpolates coverage as well as the vector: undefined
+corners fade an edge rather than extending an opaque square to the next grid
+node. Defined vectors are normalized by their available weights, so a gap is
+never treated as a zero-speed measurement. This edge reconstruction applies
+to existing captures too; additional captured detail requires a new copy or
+recording. The container format is unchanged.
 
 The capture is evaluated with `CpuEvaluator`, the way an export is: a capture
 is a value the user keeps rather than a frame they are looking at, and
@@ -3299,6 +3367,28 @@ because the GPU never evaluates one.
 ### 8.6 Settings and shortcuts
 
 `Cmd`-`,` opens the Settings dialog.
+
+**Appearance.** A Theme dropdown offers Original (Midnight), Sage & Teal,
+Ocean, Plum, Ember, and Paper (light). Each option shows five palette swatches
+beside its name; the closed control also previews the selected theme. Arrow
+keys browse the options, Enter selects, and Escape dismisses without changing
+the theme. Sage & Teal is the default for both new
+and older preference files. The choice applies immediately throughout the app,
+including the start page and dialogs, and is saved in application preferences.
+Opening, creating or closing a project does not change it; it never enters a
+project file, its undo history, field evaluation or export. Settings is also
+available on the start page. User-chosen glyph colours and project data ramps
+remain independent; Displace destinations retain their burnt-orange outline.
+
+**Custom colours.** Customize starts from the selected preset, with colour
+pickers, six-digit hex inputs and a local preview. Additional interface, map
+and chart colours are grouped in expandable sections. Save custom theme
+persists and selects a Custom entry (with palette swatches); Cancel discards
+the draft, and Reset colors restores the chosen base. The base determines
+light/dark native controls. Custom colours are retained when switching to a
+preset, persist across restarts, and never enter project data. Failed or
+invalid saves leave the current appearance unchanged. Re-editing Custom
+refreshes canvas overlays, globe basemap textures and chart tile palettes.
 
 **Arrows and wind barbs.** Separate controls, each with a visual sample, set
 size (25–300% of the standard glyph), line width (0.5–6 CSS px), color,

@@ -143,6 +143,13 @@ pub enum Modifier {
     /// the feathered sum of the deltas of the stamps that cover it. A warp with
     /// a displacement that varies along the stroke instead of across a region.
     Smear,
+    /// Rigidly relocate a brushed selection and interpolate its surroundings.
+    Relocate {
+        /// Relative destination in the selection's local metres.
+        displacement: Local,
+        /// Transition width outside the destination, in local metres.
+        distance: f64,
+    },
 }
 
 /// Whether a feathered edge blends with what is beneath it (decision D12).
@@ -284,6 +291,8 @@ pub struct FlatRasterErasure {
     pub projected: bool,
     /// Frozen cylindrical projection, or zero for the legacy flag.
     pub projection: u8,
+    /// Globe view centre frozen with the eraser.
+    pub projection_origin: Option<LonLat>,
     /// Edge falloff, 0 to 1.
     pub feather: f64,
 }
@@ -358,6 +367,8 @@ pub struct FlatObject {
     /// every swept tool shares — coverage, outlines and culling know nothing
     /// about the smear.
     pub smear: Vec<Vec<Local>>,
+    /// Transient interpolation, shared across tile workers, never persisted.
+    pub transition: crate::relocate::TransitionCache,
     /// The captured field this object replays, if it is a patch
     /// (spec.md 8.5, M14).
     ///
@@ -709,7 +720,11 @@ fn modifier_of(object: &Object, step: u32) -> Option<Modifier> {
         let rotation = bearing(object, PropId::RotationDeg, step).map_or(0.0, |a| a.degrees());
         let scale_pct = number(object, PropId::ScalePct, step).unwrap_or(100.0);
         let space = Space::from_choice(choice(object, PropId::StampSpace, step));
-        Some(Frame::in_space(anchor, rotation, scale_pct, space))
+        Some(
+            Frame::in_space(anchor, rotation, scale_pct, space).with_projection_origin(
+                position(object, PropId::StampOrigin, step).unwrap_or(anchor),
+            ),
+        )
     }
 
     let get = |id: PropId| number(object, id, step).unwrap_or(0.0);
@@ -723,7 +738,18 @@ fn modifier_of(object: &Object, step: u32) -> Option<Modifier> {
             let clockwise = choice(object, PropId::TurnSense, step) == 0;
             Some(Modifier::Turn(if clockwise { amount } else { -amount }))
         }
-        ToolKind::Liquify => Some(Modifier::Smear),
+        ToolKind::Liquify if matches!(object.geometry, Geometry::Smear { .. }) => {
+            Some(Modifier::Smear)
+        }
+        ToolKind::Liquify => Some(Modifier::Relocate {
+            displacement: object
+                .props
+                .value_at(ToolKind::Liquify, PropId::DisplacementPosition, step)
+                .and_then(PropValue::as_offset)
+                .unwrap_or([0.0; 2])
+                .map(|v| f64::from(v) * 1000.0),
+            distance: get(PropId::InterpolationDistanceKm).max(0.0) * 1000.0,
+        }),
         ToolKind::Warp => {
             // Mode 1 twists about the anchor; 0 pushes along a bearing.
             if choice(object, PropId::WarpMode, step) == 1 {
@@ -789,7 +815,8 @@ pub fn flatten_object_at(object: &Object, step: u32, derived: Derived) -> Option
     // 0 and stay on the ground, which is what every object was before the
     // property existed (spec.md 3.5).
     let space = Space::from_choice(choice(object, PropId::StampSpace, step));
-    let frame = Frame::in_space(anchor, rotation, scale_pct, space);
+    let frame = Frame::in_space(anchor, rotation, scale_pct, space)
+        .with_projection_origin(position(object, PropId::StampOrigin, step).unwrap_or(anchor));
 
     let (mut shape, path) = shape_of(object, step)?;
     if let Some(animation) = &object.shape_animation {
@@ -812,7 +839,14 @@ pub fn flatten_object_at(object: &Object, step: u32, derived: Derived) -> Option
         return None;
     }
 
-    let extent = shape.bounding_radius_m();
+    let mut extent = shape.bounding_radius_m();
+    if let Some(Modifier::Relocate {
+        displacement,
+        distance,
+    }) = modifier_of(object, step)
+    {
+        extent += displacement[0].hypot(displacement[1]) + distance;
+    }
 
     Some(FlatObject {
         erased: object
@@ -878,6 +912,7 @@ pub fn flatten_object_at(object: &Object, step: u32, derived: Derived) -> Option
         },
         modifier: modifier_of(object, step),
         smear: smear_of(object),
+        transition: Default::default(),
         capture: None,
         erases: object.tool == ToolKind::Mask,
         motion: Motion::default(),
@@ -904,7 +939,14 @@ pub fn covers(object: &FlatObject, position: LonLat) -> bool {
         return false;
     }
     let local = object.frame.to_local(position);
-    object.shape.distance(local) <= 0.0 && crate::cpu::erased_factor(&object.erased, local) > 0.02
+    let inside = match object.modifier {
+        Some(Modifier::Relocate {
+            displacement,
+            distance,
+        }) => crate::relocate::affected(&object.shape, local, displacement, distance),
+        _ => object.shape.distance(local) <= 0.0,
+    };
+    inside && crate::cpu::erased_factor(&object.erased, local) > 0.02
 }
 
 /// The object's own movement at a step, for the tracks it was told to use
@@ -1255,6 +1297,7 @@ fn flatten_where(project: &Project, step: u32, wanted: impl Fn(&Layer) -> bool) 
                         square: erasure.square,
                         projected: erasure.projected,
                         projection: erasure.projection,
+                        projection_origin: erasure.projection_origin,
                         feather: f64::from(erasure.feather).clamp(0.0, 1.0),
                     })
                     .collect(),

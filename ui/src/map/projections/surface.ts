@@ -5,6 +5,7 @@
  * and a pan or a zoom only moves `uMesh`. */
 import { meshPlacement, projectedMesh, tileBounds, type Camera, type PlaneMesh, type Viewport, type VisibleTile } from "../camera";
 import type { ImageDraw } from "../renderer";
+import { themeOf, rgba, type Theme } from "../../settings/themes";
 import { clipPolygon, type MeshVertex } from "./mesh";
 
 const vertex=`#version 300 es
@@ -35,6 +36,16 @@ interface BufferMesh {vao:WebGLVertexArrayObject;buffer:WebGLBuffer;count:number
 interface BaseTile {texture:WebGLTexture;}
 const keyOf=(tile:VisibleTile)=>`${tile.z}/${tile.x}/${tile.y}/${tile.lonOffset}`;
 export class ProjectedSurface {
+  private theme = themeOf(undefined);
+  /** Only display textures depend on the palette; geometry stays reusable. */
+  setTheme(theme: Theme): void {
+    if (this.theme === theme) return;
+    const changed = JSON.stringify(this.theme.map) !== JSON.stringify(theme.map);
+    this.theme = theme;
+    if (!changed) return;
+    for (const tile of this.baseTiles.values()) this.gl.deleteTexture(tile.texture);
+    this.baseTiles.clear();
+  }
   private readonly program:WebGLProgram;
   private readonly viewport:WebGLUniformLocation|null;
   private readonly sampler:WebGLUniformLocation|null;
@@ -113,7 +124,7 @@ export class ProjectedSurface {
         gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
         gl.bindFramebuffer(gl.FRAMEBUFFER,this.framebuffer);gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,texture,0);
         if(gl.checkFramebufferStatus(gl.FRAMEBUFFER)!==gl.FRAMEBUFFER_COMPLETE)throw new Error("Projection basemap target is incomplete");
-        gl.viewport(0,0,388,388);gl.clearColor(...(kind==='land'?[0.043,0.078,0.133,1]:[0,0,0,0]) as [number,number,number,number]);gl.clear(gl.COLOR_BUFFER_BIT);
+        gl.viewport(0,0,388,388);gl.clearColor(...(kind==='land'?rgba(this.theme.map.sea):[0,0,0,0]) as [number,number,number,number]);gl.clear(gl.COLOR_BUFFER_BIT);
         const b=tileBounds(tile.z,tile.x,tile.y);
         gl.blendFuncSeparate(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA,gl.ONE,gl.ONE_MINUS_SRC_ALPHA);
         draw({projection:"equirectangular",centerLon:(b.west+b.east)/2,centerLat:(b.north+b.south)/2,pxPerDeg:384/(b.east-b.west)}, {width:388,height:388},kind);

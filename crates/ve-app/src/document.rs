@@ -295,6 +295,13 @@ pub enum PropertyValue {
         /// Latitude.
         lat: f64,
     },
+    /// A position relative to the selection frame, in kilometres.
+    Offset {
+        /// Horizontal displacement.
+        x: f64,
+        /// Vertical displacement.
+        y: f64,
+    },
     /// An index into the property's variants.
     Choice {
         /// Selected variant.
@@ -318,6 +325,10 @@ impl PropertyValue {
                 lat: p.lat,
             },
             PropValue::Enum(v) => Self::Choice { index: v },
+            PropValue::Offset([x, y]) => Self::Offset {
+                x: f64::from(x),
+                y: f64::from(y),
+            },
         }
     }
 
@@ -334,6 +345,10 @@ impl PropertyValue {
             (Self::Position { lon, lat }, PropKind::LonLat) => {
                 Ok(PropValue::LonLat(LonLat::new(lon, lat)?))
             }
+            (Self::Offset { x, y }, PropKind::Offset) => {
+                Ok(PropValue::Offset([x as f32, y as f32]))
+            }
+            (Self::Offset { .. }, _) => Err(bad("a relative position")),
             (Self::Choice { index }, PropKind::Enum) => Ok(PropValue::Enum(index)),
             (Self::Number { .. }, _) => Err(bad("a number")),
             (Self::Bool { .. }, _) => Err(bad("a boolean")),
@@ -609,7 +624,12 @@ pub fn properties(state: &AppState, object: u64, step: u32) -> Result<Vec<Proper
                 let animatable = object.props.get(spec.id)?;
                 Some(PropertyView {
                     id: format!("{:?}", spec.id),
-                    label: spec.label.to_owned(),
+                    label: if object.tool == ToolKind::Liquify && spec.id == PropId::Position {
+                        "Selection position"
+                    } else {
+                        spec.label
+                    }
+                    .to_owned(),
                     value: PropertyValue::of(animatable.value_at(step)),
                     unit: unit_name(spec.unit).to_owned(),
                     min: spec.range.map(|(low, _)| low),
@@ -746,6 +766,71 @@ pub fn set_property_with(
         }
         open.touch();
         Ok(ProjectSummary::of(session.require_open()?))
+    })
+}
+
+/// Re-aim a Liquify selection while keying its relative displacement independently.
+#[tauri::command]
+pub fn set_liquify_destination(
+    state: tauri::State<'_, AppState>,
+    object: u64,
+    to: [f64; 2],
+    step: u32,
+    auto_key: bool,
+) -> Result<ProjectSummary> {
+    liquify_destination(&state, object, to, step, auto_key)
+}
+
+/// Both displacement components form one undoable edit.
+pub fn liquify_destination(
+    state: &AppState,
+    object: u64,
+    to: [f64; 2],
+    step: u32,
+    auto_key: bool,
+) -> Result<ProjectSummary> {
+    let to = LonLat::new(to[0], to[1])?;
+    apply(state, |project| {
+        let target = project
+            .object(object_id(object))
+            .ok_or_else(|| missing_object(object))?;
+        if target.tool != ToolKind::Liquify
+            || matches!(target.geometry, ve_core::document::Geometry::Smear { .. })
+            || step >= project.settings.step_count
+        {
+            return Err(AppError::BadOption {
+                field: "object",
+                value: "an active Displace selection is required".into(),
+            });
+        }
+        let links = ve_core::follow::resolve(project, step);
+        let flat = ve_render::scene::flatten_object_at(target, step, links.of(target.id))
+            .ok_or_else(|| AppError::BadOption {
+                field: "object",
+                value: "the selection is inactive".into(),
+            })?;
+        let delta = flat.frame.to_local(to);
+        let prop = PropId::DisplacementPosition;
+        let before = target
+            .props
+            .get(prop)
+            .ok_or_else(|| AppError::BadOption {
+                field: "property",
+                value: "missing displacement".into(),
+            })?
+            .clone();
+        let after = crate::animation::written(
+            &before,
+            step,
+            auto_key,
+            PropValue::Offset(delta.map(|v| (v / 1000.0) as f32)),
+        );
+        Ok(Command::SetProperty {
+            object: target.id,
+            prop,
+            before: Box::new(before),
+            after: Box::new(after),
+        })
     })
 }
 
@@ -1285,6 +1370,10 @@ pub fn objects_remove(state: &AppState, objects: &[u64]) -> Result<ProjectSummar
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "EraseStroke.ts")]
 pub struct EraseStroke {
+    /// Globe view centre frozen when a px stroke begins.
+    #[serde(default)]
+    #[ts(optional)]
+    pub projection_origin: Option<[f64; 2]>,
     /// Pointer positions as `[lon, lat]`, in the order they were drawn.
     pub points: Vec<[f64; 2]>,
     /// The stamp's radius in kilometres, **measured north-south**, as every
@@ -1356,6 +1445,10 @@ pub fn stroke_erase(state: &AppState, stroke: EraseStroke) -> Result<ProjectSumm
         });
     }
     let feather = stroke.feather.clamp(0.0, 1.0);
+    let projection_origin = stroke
+        .projection_origin
+        .map(|p| LonLat::new(p[0], p[1]))
+        .transpose()?;
     // The eraser's own space, which its px/km choice made (M67).
     let projected = stroke.space != StampSpace::Geodesic;
 
@@ -1421,6 +1514,7 @@ pub fn stroke_erase(state: &AppState, stroke: EraseStroke) -> Result<ProjectSumm
             if layer.source.raster_file().is_some() {
                 let mut after = layer.erased.clone();
                 after.push(RasterErasure {
+                    projection_origin,
                     projection: stroke.space.variant(),
                     chains: vec![points.clone()],
                     radius_m,
@@ -1436,6 +1530,7 @@ pub fn stroke_erase(state: &AppState, stroke: EraseStroke) -> Result<ProjectSumm
                 });
             } else if !matches!(layer.source, LayerSource::Image { .. }) {
                 let stamp = FlatRasterErasure {
+                    projection_origin,
                     projection: stroke.space.variant(),
                     chains: vec![points.clone()],
                     radius_m,
@@ -1544,6 +1639,7 @@ pub fn stroke_erase(state: &AppState, stroke: EraseStroke) -> Result<ProjectSumm
                             radius_m,
                             stroke.square,
                             ve_render::aeqd::Space::from_choice(stroke.space.variant()),
+                            projection_origin,
                             flat.frame,
                         );
                         let bound = flat.shape.bounding_radius_m();

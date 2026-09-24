@@ -179,7 +179,7 @@ impl Geometry {
             | ToolKind::Divergence
             | ToolKind::Turn
             | ToolKind::Warp => Self::Stroke { chains: Vec::new() },
-            ToolKind::Liquify => Self::Smear { chains: Vec::new() },
+            ToolKind::Liquify => Self::Stroke { chains: Vec::new() },
             ToolKind::Circle => Self::Disc { radius_m: None },
             // A patch is pasted with the shape it was captured over, which is
             // one of the region's three; an empty polygon is what it has
@@ -432,6 +432,9 @@ pub struct RasterErasure {
     /// Frozen cylindrical projection: a STAMP_SPACES index (0 is legacy).
     #[serde(default)]
     pub projection: u8,
+    /// Globe view centre frozen with a pixel eraser stroke.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub projection_origin: Option<crate::LonLat>,
     /// Edge falloff, 0 to 1, as a fraction of the radius.
     #[serde(default)]
     pub feather: f32,

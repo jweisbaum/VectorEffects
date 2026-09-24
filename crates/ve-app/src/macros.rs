@@ -25,15 +25,14 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use ve_core::capture::{Capture, CaptureFrame, CaptureLattice, UNDEFINED};
+use ve_core::capture::{Capture, CaptureFrame};
 use ve_core::document::Object;
 use ve_core::project::FieldKind;
 use ve_core::schema::{PropId, ToolKind};
 use ve_core::{Command, LonLat, PropValue};
-use ve_render::cpu::sample_scene_covered;
 use ve_render::scene::flatten_kind;
 
-use crate::capture::RegionShape;
+use crate::capture::{RegionShape, capture_lattice, capture_plane};
 use crate::commands::AppState;
 use crate::error::{AppError, Context, Result};
 use crate::projects::{ProjectSummary, with_session};
@@ -961,7 +960,7 @@ pub fn capture_finish(state: &AppState, name: String, last_step: u32) -> Result<
 
 /// Bakes a capture: for each step of the run, the visible composite inside
 /// the region **where the region is at that step** (spec.md 8.7), evaluated
-/// with `CpuEvaluator` at the project's grid spacing, undefined kept distinct
+/// with `CpuEvaluator` on the capture lattice, undefined kept distinct
 /// from calm. Shared by the preview and the finish, so what is looked at is
 /// what is kept.
 fn bake(
@@ -970,7 +969,6 @@ fn bake(
     last_step: u32,
 ) -> Result<Capture> {
     let settings = project.settings.clone();
-    let spacing = settings.resolution.degrees();
     let (half_w, half_h) = half_extents(&active.shape);
     if !(half_w > 0.0 && half_h > 0.0) {
         return Err(AppError::BadOption {
@@ -978,33 +976,22 @@ fn bake(
             value: "the region has no extent".to_owned(),
         });
     }
-    let ni = ((half_w * 2.0 / spacing).ceil() as u32 + 1).min(2_048);
-    let nj = ((half_h * 2.0 / spacing).ceil() as u32 + 1).min(2_048);
-    let x0 = -f64::from(ni - 1) * spacing / 2.0;
-    let y0 = f64::from(nj - 1) * spacing / 2.0;
+    let lattice = capture_lattice(half_w, half_h, settings.resolution.degrees());
 
     let mut frames = Vec::new();
     for step in active.first_step..=last_step {
         // The key at this step, or the great circle between keys (D72).
         let held = active.position_at(step);
-        let mut uv = Vec::with_capacity(ni as usize * nj as usize * active.kinds.len());
+        let mut uv =
+            Vec::with_capacity(lattice.ni as usize * lattice.nj as usize * active.kinds.len());
         // A plane per kind, in the kinds' own order (M34).
         for kind in &active.kinds {
             let scene = flatten_kind(project, step, *kind);
-            for j in 0..nj {
-                let lat = held[1] + y0 - f64::from(j) * spacing;
-                for i in 0..ni {
-                    let lon = held[0] + x0 + f64::from(i) * spacing;
-                    let Ok(at) = LonLat::new(wrap180(lon), lat.clamp(-90.0, 90.0)) else {
-                        uv.push(UNDEFINED);
-                        continue;
-                    };
-                    uv.push(match sample_scene_covered(&scene, at) {
-                        Some(sample) => [sample.u, sample.v],
-                        None => UNDEFINED,
-                    });
-                }
-            }
+            uv.extend(capture_plane(
+                &scene,
+                lattice,
+                LonLat::new(held[0], held[1])?,
+            ));
         }
         let elapsed = f64::from(step - active.first_step) * f64::from(settings.step_hours.hours());
         // Static stores no displacement at all.
@@ -1026,13 +1013,7 @@ fn bake(
 
     Capture::new(
         active.kinds.clone(),
-        CaptureLattice {
-            ni,
-            nj,
-            spacing_deg: spacing,
-            x0_deg: x0,
-            y0_deg: y0,
-        },
+        lattice,
         f64::from(settings.step_hours.hours()) * 3600.0,
         geometry_of(&active.shape, active.origin),
         frames,

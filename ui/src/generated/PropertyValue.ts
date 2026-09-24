@@ -23,7 +23,15 @@ lon: number,
 /**
  * Latitude.
  */
-lat: number, } | { "kind": "choice",
+lat: number, } | { "kind": "offset",
+/**
+ * Horizontal displacement.
+ */
+x: number,
+/**
+ * Vertical displacement.
+ */
+y: number, } | { "kind": "choice",
 /**
  * Selected variant.
  */

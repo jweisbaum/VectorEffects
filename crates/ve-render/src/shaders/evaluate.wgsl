@@ -84,7 +84,7 @@ struct Object {
     target_offset: f32,
     speed_min: f32,
     speed_max: f32,
-    padding: vec2<u32>,
+    projection_origin: vec2<f32>,
 };
 
 // An imported field's time slice: a regular lat/lon lattice in canonical
@@ -276,7 +276,25 @@ fn projected_lat(space: u32, y: f32) -> f32 {
     return clamp(y, -90.0, 90.0);
 }
 
+fn globe_xy(origin: vec2<f32>, position: vec2<f32>) -> vec3<f32> {
+    let phi0 = origin.y * DEG;
+    let phi = position.y * DEG;
+    let delta = (position.x - origin.x) * DEG;
+    return vec3<f32>(cos(phi) * sin(delta),
+        cos(phi0) * sin(phi) - sin(phi0) * cos(phi) * cos(delta),
+        sin(phi0) * sin(phi) + cos(phi0) * cos(phi) * cos(delta));
+}
+
 fn to_local(object: Object, position: vec2<f32>) -> vec2<f32> {
+    if (object.space == 15u) {
+        let at = globe_xy(object.projection_origin, position);
+        if (at.z < -1e-7) { return vec2<f32>(1e15); }
+        let anchor = globe_xy(object.projection_origin, object.anchor);
+        let offset = (at.xy - anchor.xy) * EARTH_RADIUS_M / object.scale;
+        let theta = object.rotation_deg * DEG;
+        return vec2<f32>(offset.x * cos(theta) - offset.y * sin(theta),
+            offset.x * sin(theta) + offset.y * cos(theta));
+    }
     if (object.space != 0u) {
         // Map space: degrees scaled to metres, no cosine, so a circle in the
         // frame is a circle on the map at every latitude.
@@ -480,6 +498,18 @@ fn destination(origin: vec2<f32>, bearing_deg: f32, distance: f32) -> vec2<f32> 
 // compared: it put the segment endpoints tens of degrees from where the CPU had
 // them, and the tangent between them is what the flow follows.
 fn to_global(object: Object, local: vec2<f32>) -> vec2<f32> {
+    if (object.space == 15u) {
+        let theta = object.rotation_deg * DEG;
+        let offset = vec2<f32>(local.x * cos(theta) + local.y * sin(theta),
+            -local.x * sin(theta) + local.y * cos(theta));
+        let p = globe_xy(object.projection_origin, object.anchor).xy + offset * object.scale / EARTH_RADIUS_M;
+        let r = length(p);
+        if (r < 1e-12) { return object.projection_origin; }
+        let c = asin(min(r, 1.0));
+        let phi0 = object.projection_origin.y * DEG;
+        return vec2<f32>(object.projection_origin.x + atan2(p.x * sin(c), r * cos(phi0) * cos(c) - p.y * sin(phi0) * sin(c)) / DEG,
+            asin(clamp(cos(c) * sin(phi0) + p.y * sin(c) * cos(phi0) / r, -1.0, 1.0)) / DEG);
+    }
     if (object.space != 0u) {
         // Undo `to_local`'s rotation, then read the offset back as degrees.
         let theta = object.rotation_deg * DEG;

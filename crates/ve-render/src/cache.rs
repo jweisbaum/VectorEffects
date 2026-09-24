@@ -40,7 +40,8 @@ pub type SceneHash = [u8; 32];
 /// stroke's centreline (M29). 3: layers are composited on their own and
 /// stacked by coverage, and a tile carries the coverage and the kind (M31).
 /// 5: raster-only GPU tiles ignore object-buffer padding during compositing.
-pub const EVALUATOR_VERSION: u32 = 6;
+/// 7: captured fields interpolate coverage instead of filling boundary cells.
+pub const EVALUATOR_VERSION: u32 = 10;
 
 pub fn scene_hash(scene: &Scene) -> SceneHash {
     let mut hasher = blake3::Hasher::new();
@@ -86,6 +87,10 @@ pub fn raster_digest(raster: &FlatRaster) -> [u8; 32] {
     hasher.update(&(raster.erased.len() as u64).to_le_bytes());
     for erasure in &raster.erased {
         hasher.update(&[u8::from(erasure.projected), erasure.projection]);
+        if let Some(origin) = erasure.projection_origin {
+            hash_f64(&mut hasher, origin.lon);
+            hash_f64(&mut hasher, origin.lat);
+        }
         hash_f64(&mut hasher, erasure.radius_m);
         hash_f64(&mut hasher, erasure.feather);
         hasher.update(&[u8::from(erasure.square)]);
@@ -143,6 +148,10 @@ fn hash_object(hasher: &mut blake3::Hasher, object: &FlatObject) {
     // The space changes what the geometry means, so two objects that differ
     // only in it must not share a tile.
     hasher.update(&[object.frame.space.choice()]);
+    if object.frame.space == crate::aeqd::Space::Orthographic {
+        hash_f64(hasher, object.frame.projection_origin.lon);
+        hash_f64(hasher, object.frame.projection_origin.lat);
+    }
     hash_f64(hasher, object.cap_radius_m);
     hash_f64(hasher, object.feather);
     hash_f64(hasher, object.gradient_axis.degrees());
@@ -321,6 +330,16 @@ fn hash_object(hasher: &mut blake3::Hasher, object: &FlatObject) {
         // The deltas are what a liquify *does*, so they are hashed with the
         // modifier rather than with the footprint: two strokes over the same
         // chains that dragged different ways are two different fields.
+        Some(Modifier::Relocate {
+            displacement,
+            distance,
+        }) => {
+            hasher.update(&[7]);
+            hash_f64(hasher, displacement[0]);
+            hash_f64(hasher, displacement[1]);
+            hash_f64(hasher, distance);
+            hasher
+        }
         Some(Modifier::Smear) => {
             hasher.update(&[6]);
             hasher.update(&(object.smear.len() as u64).to_le_bytes());
@@ -751,6 +770,7 @@ mod tests {
             clone_offset: OffsetMode::Aligned,
             modifier: None,
             smear: Vec::new(),
+            transition: Default::default(),
             invert: false,
             capture: None,
             erases: false,

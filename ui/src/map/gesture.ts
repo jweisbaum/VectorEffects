@@ -100,6 +100,7 @@ export function dragPixels(
 export function gestureLatitude(gesture: Gesture): number {
   switch (gesture.kind) {
     case "stroke":
+    case "relocate":
       return gesture.points[0]?.[1] ?? 0;
     case "point":
       return gesture.at[1];
@@ -147,7 +148,7 @@ export type Press =
  * camera, and so the only thing passed in rather than computed.
  */
 export function press(
-  kind: Gesture["kind"],
+  kind: Exclude<Gesture["kind"], "relocate">,
   current: InProgress | null,
   at: [number, number],
   onFirstVertex: boolean,

@@ -33,12 +33,14 @@ pub fn cuts(
     radius: f64,
     square: bool,
     space: Space,
+    projection_origin: Option<LonLat>,
     target: Frame,
 ) -> Vec<Erasure> {
     let Some(&origin) = points.first() else {
         return Vec::new();
     };
-    let source = Frame::in_space(origin, 0.0, 100.0, space);
+    let source = Frame::in_space(origin, 0.0, 100.0, space)
+        .with_projection_origin(projection_origin.unwrap_or(origin));
     let centres: Vec<Local> = points.iter().map(|p| source.to_local(*p)).collect();
     centres
         .windows(2)

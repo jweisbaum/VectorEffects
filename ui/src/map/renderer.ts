@@ -27,6 +27,7 @@ import {
   visibleTiles,
 } from "./camera";
 import { destination } from "./geo";
+import { themeOf, rgba, type Theme } from "../settings/themes";
 import { ProjectedSurface } from "./projections/surface";
 import type { BackdropDraw } from "./backdrops";
 import { projectedOnGpu, shaderMode } from "./projection";
@@ -222,6 +223,8 @@ export interface RampSpan {
 }
 
 export interface RenderState {
+  /** Application appearance, independent of field tiles and project data. */
+  theme?: Theme;
   camera: Camera;
   view: Viewport;
   /** Opaque token naming the field's tiles, e.g. `<revision>/<step>`. */
@@ -305,11 +308,6 @@ export interface RenderState {
   /** Hide temporarily without releasing the image's texture or warp mesh. */
   hiddenImageLayer?: number | null;
 }
-
-const SEA: [number, number, number, number] = [0.043, 0.078, 0.133, 1];
-const LAND: [number, number, number, number] = [0.20, 0.25, 0.23, 1];
-const COAST: [number, number, number, number] = [0.86, 0.93, 1.0, 0.75];
-const GRATICULE: [number, number, number, number] = [0.55, 0.68, 0.85, 0.16];
 
 /**
  * How much a tile held over from the previous frame is dimmed (M73).
@@ -1574,12 +1572,16 @@ export class MapRenderer {
    */
   render(state: RenderState): SeenRanges {
     const gl = this.gl;
+    const theme = state.theme ?? themeOf(undefined);
+    const SEA = rgba(theme.map.sea), LAND = rgba(theme.map.land);
+    const COAST = rgba(theme.map.coast, 0.75), GRATICULE = rgba(theme.map.graticule, 0.20);
+    this.projectedSurface.setTheme(theme);
     const offsets = this.worldOffsets(state);
     this.seen = { wind: null, current: null };
     const lod = this.lodFor(state.camera.pxPerDeg);
 
     gl.viewport(0, 0, state.view.width, state.view.height);
-    if (projectionFor(state.camera).general) gl.clearColor(0.02, 0.03, 0.05, 1);
+    if (projectionFor(state.camera).general) gl.clearColor(...rgba(theme.map.void));
     else gl.clearColor(...SEA);
     gl.clear(gl.COLOR_BUFFER_BIT);
 

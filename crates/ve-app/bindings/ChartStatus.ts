@@ -3,25 +3,25 @@
 /**
  * What the frontend is told about the chart directory (spec.md 4.11).
  */
-export type ChartStatus = { 
+export type ChartStatus = {
 /**
  * The directory, as the user chose it. Empty when none is set.
  */
-directory: string, 
+directory: string,
 /**
  * How many cells were found in it.
  */
-cells: number, 
+cells: number,
 /**
  * What they cover: west, south, east, north. Absent for an empty set.
  */
-bounds: Array<number> | null, 
+bounds: Array<number> | null,
 /**
  * What went wrong, where something did.
  */
-error: string | null, 
+error: string | null,
 /**
- * A token that changes whenever the directory does, so the map's tile
- * addresses change with it.
+ * An exact JavaScript integer that changes with the directory or palette,
+ * so cached tile addresses follow the application theme.
  */
 token: bigint, };

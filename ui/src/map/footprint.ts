@@ -377,7 +377,7 @@ export function extendStrokePath(
   // A square stamp is joined to the one before it rather than relying on the
   // two overlapping (M58); a round one needs no join, its scallop being what
   // the spacing already bounds.
-  const joins = shape === "square" && !projectionFor(camera).general;
+  const joins = shape === "square" && (!projectionFor(camera).general || space === "orthographic");
   const stamp = (lon: number, lat: number, previous?: readonly [number, number]) => {
     if (progress.drawn >= MAX_FOOTPRINTS) return;
     if (joins && previous !== undefined) {
@@ -418,7 +418,7 @@ export function extendStrokePath(
     // (M58) — but it keeps the same walk, since the spacing also bounds how
     // far the interpolated polyline departs from the projected curve, which
     // both stamps care about.
-    const { ry } = footprintRadii(camera, from[1], radiusKm);
+    const { ry } = footprintRadii(camera, from[1], radiusKm, space, from[0]);
     const a = project(camera, view, {lon:from[0],lat:from[1]}), b = project(camera,view,{lon:to[0],lat:to[1]});
     const spanPx = projectionFor(camera).general && Number.isFinite(a.x) && Number.isFinite(b.x)
       ? Math.hypot(a.x-b.x,a.y-b.y) : Math.hypot(dLon * camera.pxPerDeg, dLat * camera.pxPerDeg);
@@ -428,10 +428,14 @@ export function extendStrokePath(
     let previous = from;
     for (let step = 1; step <= steps; step++) {
       const t = step / steps;
-      const at: readonly [number, number] = [
+      let at: readonly [number, number] = [
         normalizeLon(from[0] + dLon * t),
         from[1] + dLat * t,
       ];
+      if (space === "orthographic") {
+        const geo = unproject(camera, view, {x: a.x+(b.x-a.x)*t, y: a.y+(b.y-a.y)*t});
+        at = [geo.lon, geo.lat];
+      }
       stamp(at[0], at[1], previous);
       previous = at;
     }
@@ -488,6 +492,8 @@ export type Footprint =
     }
   | {
       kind: "polygon";
+      /** A newly drawn px polygon has straight edges in its creation view. */
+      space?: StampSpace;
       /** Vertices in order, as `[lon, lat]`. The closing edge is implied. */
       points: ReadonlyArray<readonly [number, number]>;
     };
@@ -618,7 +624,7 @@ export function buildFootprintPath(
     }
 
     case "polygon": {
-      if (projectionFor(camera).general) { projectedRing(sink,camera,view,footprint.points); return; }
+      if (projectionFor(camera).general && footprint.space !== "orthographic") { projectedRing(sink,camera,view,footprint.points); return; }
       const [first, ...rest] = footprint.points;
       if (first === undefined) return;
       const start = project(camera, view, { lon: first[0], lat: first[1] });
@@ -671,7 +677,7 @@ export function footprintHead(footprint: Footprint): readonly [number, number] |
 }
 
 /** Project an outline as short curved segments, breaking at horizons and seams. */
-export function projectedRing(sink: PathSink, camera: Camera, view: Viewport, points: ReadonlyArray<readonly [number,number]>): void {
+export function projectedRing(sink: Pick<PathSink, "moveTo" | "lineTo" | "closePath">, camera: Camera, view: Viewport, points: ReadonlyArray<readonly [number,number]>): boolean {
   let drawing = false, complete = true;
   let previous: {x:number;y:number} | null = null;
   for (let i=0;i<points.length;i++) {
@@ -687,6 +693,7 @@ export function projectedRing(sink: PathSink, camera: Camera, view: Viewport, po
     }
   }
   if(complete && drawing)sink.closePath();
+  return complete && drawing;
 }
 
 /** Stored footprint frames stay fixed when the viewing projection changes. */

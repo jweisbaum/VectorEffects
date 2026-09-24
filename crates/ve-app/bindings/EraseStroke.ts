@@ -4,21 +4,25 @@ import type { StampSpace } from "./StampSpace";
 /**
  * The eraser's stroke (spec.md 8.1, M29): a brush that takes away.
  */
-export type EraseStroke = { 
+export type EraseStroke = {
+/**
+ * Globe view centre frozen when a px stroke begins.
+ */
+projection_origin?: [number, number],
 /**
  * Pointer positions as `[lon, lat]`, in the order they were drawn.
  */
-points: Array<[number, number]>, 
+points: Array<[number, number]>,
 /**
  * The stamp's radius in kilometres, **measured north-south**, as every
  * size is (spec.md 3.5). A size in pixels has already become kilometres
  * at the latitude the stroke began, in the space below.
  */
-radius_km: number, 
+radius_km: number,
 /**
  * A square stamp rather than a disc.
  */
-square: boolean, 
+square: boolean,
 /**
  * Which space the stamp is a circle in (M67).
  *
@@ -27,20 +31,20 @@ square: boolean,
  * had none, which made px a bare unit conversion — the one thing
  * spec.md 3.5 says the unit is not.
  */
-space: StampSpace, 
+space: StampSpace,
 /**
  * Edge falloff, 0 to 1.
  */
-feather: number, 
+feather: number,
 /**
  * The one step to erase from, or every step.
  */
-step: number | null, 
+step: number | null,
 /**
  * The step the stroke was drawn at: the frame each object is measured
  * in, since an object that moves is somewhere else at every step.
  */
-at_step: number, 
+at_step: number,
 /**
  * The layer it acts on — the active one; the creation rule's when absent.
  */

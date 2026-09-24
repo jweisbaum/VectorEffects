@@ -117,6 +117,7 @@ fn erase(state: &AppState, points: Vec<[f64; 2]>, radius_km: f64, step: Option<u
     document::stroke_erase(
         state,
         document::EraseStroke {
+            projection_origin: None,
             points,
             radius_km,
             square: false,
@@ -287,6 +288,7 @@ fn erasing_from_a_hidden_layer_does_nothing() {
     let refused = document::stroke_erase(
         &state,
         document::EraseStroke {
+            projection_origin: None,
             points: vec![[0.0, 0.0]],
             radius_km: 400.0,
             square: false,

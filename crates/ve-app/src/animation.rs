@@ -666,6 +666,14 @@ pub fn samples_of(state: &AppState, object: u64, property: &str) -> Result<Track
                 component("Lon", "degrees", |v| v.as_lonlat().map(|p| p.lon)),
                 component("Lat", "degrees", |v| v.as_lonlat().map(|p| p.lat)),
             ],
+            PropKind::Offset => vec![
+                component("X", "kilometres", |v| {
+                    v.as_offset().map(|p| f64::from(p[0]))
+                }),
+                component("Y", "kilometres", |v| {
+                    v.as_offset().map(|p| f64::from(p[1]))
+                }),
+            ],
             PropKind::Bool | PropKind::Enum => Vec::new(),
         };
         Ok(TrackSamples {

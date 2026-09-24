@@ -199,7 +199,7 @@ export const PROJECTIONS: readonly (Projection & { id: CylindricalProjectionId }
 ];
 
 /** Index zero is geodesic; the original projected/mercator/miller indices stay fixed. */
-export const STAMP_SPACES = ["geodesic", "projected", ...PROJECTIONS.slice(1).map(p => p.id)] as const;
+export const STAMP_SPACES = ["geodesic", "projected", ...PROJECTIONS.slice(1).map(p => p.id), "orthographic"] as const;
 
 /** What a camera with no projection of its own is drawn in. */
 export const DEFAULT_PROJECTION: ProjectionId = "equirectangular";

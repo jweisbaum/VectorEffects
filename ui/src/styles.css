@@ -1,11 +1,29 @@
 /* System font stack only: no webfont is fetched, ever (invariant 5). */
 :root {
-  --bg: #0b1220;
-  --panel: rgba(18, 28, 46, 0.86);
-  --border: #24344f;
-  --text: #e8eef7;
-  --muted: #8fa4c0;
-  --accent: #6fd9ff;
+  /* Default theme while application preferences load. */
+  --bg: #364958;
+  --surface: #2b3a46;
+  --panel: rgba(43, 58, 70, 0.96);
+  --inset: #25323c;
+  --raised: #364958;
+  --hover: #3b6064;
+  --active: #3b6064;
+  --border: #55828b;
+  --text: #c9e4ca;
+  --muted: #bfdec4;
+  --accent: #87bba2;
+  --highlight: #c9e4ca;
+  --border-subtle: #3a5460;
+  --warning: #edbd8d;
+  --error: #e9a7a3;
+  --danger-border: #986c6b;
+  --danger-surface: #563f46;
+  --selected-bg: #87bba2;
+  --selected-ink: #25323c;
+  --selected-border: #c9e4ca;
+  --selected-hover: #c9e4ca;
+  --selection-ink: #25323c;
+  --accent-wash: color-mix(in srgb, var(--accent) 12%, transparent);
   /* The docked panels' widths, in one place.
      The map's chrome keeps clear of a panel by offsetting itself by the
      panel's width (`--dock-left`, set on the stage in App.tsx), so the two
@@ -18,6 +36,11 @@
 }
 
 * { box-sizing: border-box; }
+
+input[type="checkbox"], input[type="radio"], input[type="range"], progress { accent-color: var(--accent); }
+::selection { background: var(--accent); color: var(--selection-ink); }
+:focus-visible { outline-color: var(--highlight); }
+* { scrollbar-color: var(--border) var(--surface); }
 
 html, body, #root { height: 100%; }
 
@@ -68,7 +91,7 @@ body {
   flex: 0 0 var(--sidebar-right);
   min-height: 0;
   overflow-y: auto;
-  background: #0d1526;
+  background: var(--surface);
   display: flex;
   flex-direction: column;
 }
@@ -105,14 +128,14 @@ body {
   padding: 0;
   display: grid;
   place-items: center;
-  background: #16233a;
+  background: var(--raised);
   color: var(--muted);
   border: 1px solid var(--border);
   font-size: 9px;
   line-height: 1;
   cursor: pointer;
 }
-.dock-toggle:hover { color: var(--text); background: #1d2d49; }
+.dock-toggle:hover { color: var(--text); background: var(--hover); }
 .dock-toggle.left,
 .dock-toggle.right {
   top: 50%;
@@ -150,7 +173,7 @@ body {
   gap: 8px;
   padding: 8px 10px;
   border-bottom: 1px solid var(--border);
-  background: #0d1526;
+  background: var(--surface);
   cursor: pointer;
   user-select: none;
 }
@@ -176,6 +199,9 @@ body {
   width: 100%;
   height: 100%;
   touch-action: none;
+  /* The canvas takes keyboard focus; its native ring leaks above and below
+     the docked panels as blue bars. */
+  outline: none;
 }
 
 .map-status,
@@ -187,11 +213,12 @@ body {
   pointer-events: none;
   color: var(--muted);
 }
-.map-error { color: #ff9c8a; }
+.map-error { color: var(--error); }
 
 /*
- * Centre over the visible map, shrink to the tools, and wrap before reaching
- * either dock. Long option bars must still fit on narrow windows.
+ * Centre over the visible map. The options can widen the panel, but the tool
+ * row keeps its own width and centre so switching tools never moves a button.
+ * Both rows wrap before reaching either dock on narrow windows.
  */
 .map-toolbar {
   position: absolute;
@@ -203,7 +230,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 8px 14px;
-  align-items: flex-start;
+  align-items: center;
   padding: 8px 12px;
   background: var(--panel);
   border: 1px solid var(--border);
@@ -215,7 +242,7 @@ body {
 .map-toolbar select,
 .map-toolbar input[type="range"] { accent-color: var(--accent); }
 .map-toolbar select {
-  background: #0f1a2c;
+  background: var(--inset);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 5px;
@@ -231,7 +258,7 @@ body {
   padding: 3px;
   border: 1px solid var(--border);
   border-radius: 6px;
-  background: #0f1a2c;
+  background: var(--inset);
   box-shadow: 0 4px 16px #0008;
   -webkit-user-select: none;
   user-select: none;
@@ -248,8 +275,8 @@ body {
   font: inherit;
   cursor: pointer;
 }
-.tool-select-menu button.highlighted { background: #264360; }
-.tool-select-menu button[aria-selected="true"] { color: var(--accent); }
+.tool-select-menu button.highlighted { background: var(--hover); }
+.tool-select-menu button[aria-selected="true"] { color: var(--highlight); font-weight: 600; }
 .tool-select-menu button:disabled { opacity: .45; cursor: default; }
 
 /*
@@ -304,7 +331,7 @@ body {
  * product, not a file operation, and the title bar's row is for the latter.
  */
 .statusbar .export {
-  background: #16233a;
+  background: var(--raised);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 5px;
@@ -312,7 +339,7 @@ body {
   cursor: pointer;
   font: inherit;
 }
-.statusbar .export:hover { background: #1d2d49; }
+.statusbar .export:hover { background: var(--hover); }
 
 .statusbar {
   display: flex;
@@ -320,13 +347,13 @@ body {
   align-items: center;
   padding: 6px 12px;
   border-top: 1px solid var(--border);
-  background: #0d1526;
+  background: var(--surface);
   font-size: 12px;
 }
 .brand { font-weight: 600; letter-spacing: 0.02em; }
 .muted { color: var(--muted); }
 .accent { color: var(--accent); }
-.error { color: #ff9c8a; }
+.error { color: var(--error); }
 
 /* --- Title bar --------------------------------------------------------- */
 
@@ -336,18 +363,42 @@ body {
   align-items: center;
   padding: 7px 12px;
   border-bottom: 1px solid var(--border);
-  background: #0d1526;
+  background: var(--surface);
   font-size: 12px;
 }
 .titlebar button {
-  background: #16233a;
+  background: var(--raised);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 5px;
   padding: 3px 10px;
   cursor: pointer;
 }
-.titlebar button:hover { background: #1d2d49; }
+.titlebar button:hover { background: var(--hover); }
+.project-menu { position: relative; flex-shrink: 0; }
+.project-menu > button { display: flex; align-items: center; gap: 8px; }
+.project-menu-items {
+  position: absolute;
+  z-index: 50;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 160px;
+  padding: 5px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  box-shadow: 0 6px 20px #0006;
+}
+.project-menu-items button {
+  display: block;
+  width: 100%;
+  border: 0;
+  padding: 7px 10px;
+  background: transparent;
+  text-align: left;
+  font: inherit;
+}
+.project-menu-items button:focus { background: var(--hover); outline: none; }
 .project-name { font-weight: 600; }
 /* The name is a button that looks like the name, and a field while edited. */
 .titlebar button.project-name {
@@ -358,9 +409,9 @@ body {
   font-weight: 600;
   color: var(--text);
 }
-.titlebar button.project-name:hover { border-color: var(--border); background: #16233a; }
+.titlebar button.project-name:hover { border-color: var(--border); background: var(--raised); }
 .titlebar input.project-name {
-  background: #0f1a2c;
+  background: var(--inset);
   color: var(--text);
   border: 1px solid var(--accent);
   border-radius: 5px;
@@ -374,7 +425,7 @@ body {
 .view-controls { display: flex; align-items: center; gap: 8px; }
 .view-controls label { display: flex; gap: 6px; align-items: center; color: var(--muted); }
 .view-controls select {
-  background: #0f1a2c;
+  background: var(--inset);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 5px;
@@ -401,7 +452,7 @@ body {
 .view-controls button.icon .tool-icon { opacity: 0.75; }
 .view-controls button.icon:hover .tool-icon,
 .view-controls button.icon.active .tool-icon { opacity: 1; }
-.view-controls button.active { background: #1d5a7a; border-color: #2b7ba4; }
+.view-controls button.active { background: var(--active); border-color: var(--accent); }
 .view-controls button:disabled { opacity: 0.45; cursor: default; }
 /* The status bar's spinner: a ring with one bright arc, turning while a
    long task runs. Kept in the layout when idle so the version number does
@@ -417,7 +468,7 @@ body {
 }
 .busy-spinner.on {
   opacity: 1;
-  border-color: #24344f;
+  border-color: var(--border);
   border-top-color: var(--accent);
   animation: busy-turn 0.9s linear infinite;
 }
@@ -454,7 +505,7 @@ body {
   padding: 2rem;
   overflow: auto;
   background:
-    radial-gradient(1200px 600px at 50% -10%, #16273f 0%, var(--bg) 60%);
+    radial-gradient(1200px 600px at 50% -10%, var(--active) 0%, var(--bg) 60%);
 }
 
 .start-panel {
@@ -465,6 +516,7 @@ body {
   padding: 1.75rem 2rem 2rem;
 }
 .start-panel header { margin-bottom: 1.5rem; }
+.start-settings { float: right; margin-left: 1rem; }
 .start-panel h1 { margin: 0 0 0.25rem; font-size: 1.4rem; }
 .start-panel h2 { font-size: 0.95rem; margin: 0 0 0.9rem; }
 .start-panel h3 { font-size: 0.8rem; margin: 1rem 0 0.4rem; font-weight: 500; }
@@ -482,7 +534,7 @@ body {
   place-items: center;
   padding: 2rem;
   background:
-    radial-gradient(1200px 600px at 50% -10%, #16273f 0%, var(--bg) 60%);
+    radial-gradient(1200px 600px at 50% -10%, var(--active) 0%, var(--bg) 60%);
   animation: loading-arrives 160ms ease-out 140ms both;
 }
 @keyframes loading-arrives {
@@ -512,6 +564,8 @@ body {
   margin-top: 1.1rem;
 }
 .start-panel header + .start-new { border-top: 0; margin-top: 0; padding-top: 0; }
+.start-recover { padding-block: 1.25rem; }
+.start-recover > p { margin-bottom: 1rem; }
 
 .start-new label {
   display: grid;
@@ -523,7 +577,7 @@ body {
 }
 .start-new input,
 .start-new select {
-  background: #0f1a2c;
+  background: var(--inset);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -531,11 +585,11 @@ body {
   font: inherit;
 }
 .start-implications { margin: 0.9rem 0 1.1rem; font-size: 12px; line-height: 1.6; }
-.warn-note { color: #e8b45f; }
+.warn-note { color: var(--warning); }
 
 .start-panel button,
 .modal .start-new button {
-  background: #16233a;
+  background: var(--raised);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 7px;
@@ -544,17 +598,17 @@ body {
   font: inherit;
 }
 .start-panel button:hover:not(:disabled),
-.modal .start-new button:hover:not(:disabled) { background: #1d2d49; }
+.modal .start-new button:hover:not(:disabled) { background: var(--hover); }
 .start-panel button:disabled,
 .modal .start-new button:disabled { opacity: 0.5; cursor: default; }
 .start-panel button.primary,
 .modal .start-new button.primary {
-  background: #1d5a7a;
-  border-color: #2b7ba4;
+  background: var(--active);
+  border-color: var(--accent);
   font-weight: 600;
 }
 .start-panel button.primary:hover:not(:disabled),
-.modal .start-new button.primary:hover:not(:disabled) { background: #246d93; }
+.modal .start-new button.primary:hover:not(:disabled) { background: var(--hover); }
 /* The form carries its own separator on the start screen; in a modal the
    heading is separator enough. */
 .modal .start-new { border-top: 0; margin-top: 0; padding-top: 0; }
@@ -563,14 +617,15 @@ body {
    collapsed space. Give them room of their own rather than relying on it. */
 .start-open > button { margin: 0 10px 10px 0; }
 
-/* The heading and its Clear button share a row; the heading carries the
-   spacing, so the button must not add its own vertical margin. */
+/* Keep space above and below the whole heading/Clear row. */
 .recent-header {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: 12px;
+  padding-block: 0.75rem;
 }
+.recent-header h3 { margin: 0; }
 .recent-header button { padding: 5px 12px; font-size: 12px; }
 
 .recent { list-style: none; margin: 0; padding: 0; }
@@ -613,8 +668,13 @@ body {
   flex-wrap: wrap;
   gap: 4px;
 }
+.map-toolbar .tools {
+  width: max-content;
+  max-width: 100%;
+  justify-content: center;
+}
 .map-toolbar button {
-  background: #16233a;
+  background: var(--raised);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 5px;
@@ -622,17 +682,18 @@ body {
   cursor: pointer;
   font: inherit;
 }
-.map-toolbar button:hover:not(:disabled) { background: #1d2d49; }
+.map-toolbar button:hover:not(:disabled) { background: var(--hover); }
 .map-toolbar button:disabled { opacity: 0.45; cursor: default; }
 .map-toolbar button.active {
-  background: #1d5a7a;
-  border-color: #2b7ba4;
+  background: var(--active);
+  border-color: var(--accent);
 }
 
 /* An icon-only button is square and sized to its glyph. The name is not gone,
    only unwritten: it is on the button's `aria-label` and in its tooltip. */
 .map-toolbar button.icon {
   display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: center;
   width: 30px;
@@ -653,11 +714,13 @@ body {
 
 .tool-options {
   display: flex;
+  align-self: stretch;
   min-width: 0;
   max-width: 100%;
   flex-wrap: wrap;
   gap: 8px 10px;
   align-items: center;
+  justify-content: center;
   padding-top: 8px;
   border-top: 1px solid var(--border);
 }
@@ -665,7 +728,7 @@ body {
    the options take is a column the rest of the toolbar has to wrap around. */
 .tool-options input[type="number"] {
   width: 4.25rem;
-  background: #0f1a2c;
+  background: var(--inset);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 5px;
@@ -715,7 +778,7 @@ body {
 .tool-options .tool-position label { gap: 6px; }
 .tool-options .tool-position input[type="number"] { width: 4rem; }
 .tool-options .tool-position button {
-  background: #0f1a2c;
+  background: var(--inset);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 5px;
@@ -724,8 +787,8 @@ body {
   cursor: pointer;
 }
 .tool-options .tool-position button.active {
-  border-color: #ffa860;
-  color: #ffd678;
+  border-color: var(--accent);
+  color: var(--highlight);
 }
 
 /* --- Modal dialog ------------------------------------------------------ */
@@ -733,7 +796,7 @@ body {
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(4, 8, 16, 0.62);
+  background: color-mix(in srgb, var(--surface) 62%, transparent);
   display: grid;
   place-items: center;
   z-index: 10;
@@ -767,7 +830,7 @@ body {
 }
 .modal-centre { margin-top: 0.75rem; }
 .modal input {
-  background: #0f1a2c;
+  background: var(--inset);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 5px;
@@ -779,7 +842,7 @@ body {
 .progress { margin-bottom: 1rem; }
 .progress-bar {
   height: 6px;
-  background: #0f1a2c;
+  background: var(--inset);
   border-radius: 3px;
   overflow: hidden;
   margin-bottom: 6px;
@@ -806,7 +869,7 @@ body {
 
 .modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
 .modal-actions button {
-  background: #16233a;
+  background: var(--raised);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 7px;
@@ -814,15 +877,15 @@ body {
   cursor: pointer;
   font: inherit;
 }
-.modal-actions button:hover { background: #1d2d49; }
+.modal-actions button:hover { background: var(--hover); }
 .modal-actions button.primary {
-  background: #1d5a7a;
-  border-color: #2b7ba4;
+  background: var(--active);
+  border-color: var(--accent);
   font-weight: 600;
 }
 /* Discarding unsaved work is the one irreversible button in the app. */
-.modal-actions button.danger { color: #f0a0a0; border-color: #5c2b2b; }
-.modal-actions button.danger:hover { background: #3a1d1d; }
+.modal-actions button.danger { color: var(--error); border-color: var(--danger-border); }
+.modal-actions button.danger:hover { background: var(--danger-surface); }
 
 .modal-narrow { width: min(420px, 92vw); }
 
@@ -844,7 +907,7 @@ body {
   border-bottom: 1px solid var(--border);
   position: sticky;
   top: 0;
-  background: #0d1526;
+  background: var(--surface);
   z-index: 1;
 }
 .layer-panel h2,
@@ -878,7 +941,7 @@ body {
   line-height: 1.3;
 }
 .layer-panel button:hover:not(:disabled) {
-  background: #1d2d49;
+  background: var(--hover);
   color: var(--text);
 }
 .layer-panel button:disabled { opacity: 0.3; cursor: default; }
@@ -926,7 +989,7 @@ body {
   width: 100%;
   min-width: min-content;
   box-sizing: border-box;
-  background: #0d1526;
+  background: var(--surface);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -959,6 +1022,84 @@ body {
   overflow-y: auto;
 }
 
+/* Palette previews stay visible both in the theme list and its closed control. */
+.theme-picker { position: relative; width: 320px; max-width: 100%; margin: 6px 0; }
+.theme-picker > label { margin-bottom: 4px; }
+.theme-trigger, .theme-option {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 90px 12px;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+}
+.theme-trigger {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--inset);
+}
+.theme-trigger:hover { background: var(--raised); }
+.theme-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.theme-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.theme-palette {
+  display: flex;
+  height: 18px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+.theme-palette > span { flex: 1; }
+.theme-marker { text-align: center; color: var(--muted); }
+.theme-list {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 20;
+  box-sizing: border-box;
+  width: 100%;
+  max-height: 260px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+.theme-option { padding: 8px 5px; border-radius: 4px; }
+.theme-option.active { background: var(--active); outline: 1px solid var(--border); outline-offset: -1px; }
+.theme-customize, .theme-editor-actions button {
+  background: var(--inset); color: var(--text); border: 1px solid var(--border);
+  border-radius: 5px; padding: 5px 9px; font: inherit; cursor: pointer;
+}
+.theme-customize:hover, .theme-editor-actions button:hover:not(:disabled) { background: var(--hover); }
+.modal .theme-editor { margin: 12px 0 0; padding: 12px; }
+.theme-preview { border: 1px solid; border-radius: 6px; padding: 12px; margin: 12px 0; }
+.theme-preview > div { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; border: 1px solid; border-radius: 4px; padding: 10px; }
+.theme-preview strong { flex-basis: 100%; }
+.theme-preview-button { border-radius: 4px; padding: 4px 8px; }
+.theme-colours { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 16px; margin: 12px 0; }
+.theme-colour { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 4px 6px; }
+.theme-colour > label { grid-column: 1 / -1; }
+.modal .theme-colour input { box-sizing: border-box; width: 100%; min-width: 0; height: 29px; }
+.theme-colour-swatch { border: 1px solid var(--border); border-radius: 5px; overflow: hidden; }
+.theme-colour-swatch:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.modal .theme-colour input[type="color"] { display: block; height: 27px; padding: 0; opacity: 0; cursor: pointer; }
+.theme-colour input[aria-invalid="true"] { border-color: var(--error); }
+.theme-editor details { padding: 9px 0; border-top: 1px solid var(--border-subtle); }
+.theme-editor summary { cursor: pointer; color: var(--text); }
+.theme-editor-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.theme-editor-actions button:first-child { margin-right: auto; }
+.theme-editor-actions .primary { background: var(--selected-bg); color: var(--selected-ink); }
+.theme-editor-actions button:disabled { opacity: .5; cursor: default; }
+
 /* Choosing a gradient (M42). A dropdown of its own rather than a native
    select, which renders nothing but text in its options — and what is worth
    showing about a gradient is the gradient. */
@@ -978,7 +1119,7 @@ body {
   align-items: center;
   gap: 8px;
   width: 220px;
-  background: #0f1a2c;
+  background: var(--inset);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 5px;
@@ -987,7 +1128,7 @@ body {
   cursor: pointer;
   text-align: left;
 }
-.gradient-trigger:hover { background: #16233a; }
+.gradient-trigger:hover { background: var(--raised); }
 .gradient-caret { flex: none; color: var(--muted); font-size: 10px; }
 
 .gradient-list {
@@ -1001,7 +1142,7 @@ body {
   margin: 0;
   padding: 4px;
   list-style: none;
-  background: #16233a;
+  background: var(--raised);
   border: 1px solid var(--border);
   border-radius: 7px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
@@ -1016,8 +1157,8 @@ body {
   font-size: 12px;
   color: var(--text);
 }
-.gradient-option:hover { background: #1d2d49; }
-.gradient-option.on { background: #1d5a7a; }
+.gradient-option:hover { background: var(--hover); }
+.gradient-option.on { background: var(--active); }
 .gradient-option[aria-disabled="true"] { color: var(--muted); cursor: default; }
 
 /* Shared by the trigger and the rows, so the colours a row shows are the
@@ -1049,7 +1190,7 @@ body {
    already says what it is. */
 .layer-header .grib-missing {
   font-size: 10px;
-  color: #e0955a;
+  color: var(--warning);
   white-space: nowrap;
   cursor: help;
 }
@@ -1083,7 +1224,7 @@ body {
 .image-controls .muted { white-space: nowrap; }
 .image-controls .grib-missing {
   font-size: 10px;
-  color: #e0955a;
+  color: var(--warning);
   cursor: help;
 }
 
@@ -1097,7 +1238,7 @@ body {
 
 .layers, .objects { list-style: none; margin: 0; padding: 0; }
 
-.layer { border-bottom: 1px solid #16223a; }
+.layer { border-bottom: 1px solid var(--border-subtle); }
 .layer-header {
   display: flex;
   align-items: center;
@@ -1137,12 +1278,12 @@ body {
 .layer-header.drop-into { outline: 1px dashed var(--accent); outline-offset: -1px; }
 /* The active layer receives new objects and scopes a plain marquee, so it has
    to be visible at a glance rather than inferred from the selection. */
-.layer-header.active { background: #16263d; border-left: 2px solid var(--accent); }
+.layer-header.active { background: var(--active); border-left: 2px solid var(--accent); }
 .layer-header.active .name { color: var(--accent); }
 
 .layer-header input,
 .object input {
-  background: #0f1a2c;
+  background: var(--inset);
   color: var(--text);
   border: 1px solid var(--accent);
   border-radius: 4px;
@@ -1173,9 +1314,9 @@ body {
   cursor: grab;
   border-left: 2px solid transparent;
 }
-.object:hover { background: #141f34; }
+.object:hover { background: var(--hover); }
 .object.selected {
-  background: #17304a;
+  background: var(--active);
   border-left-color: var(--accent);
 }
 .object.inactive { opacity: 0.45; }
@@ -1208,18 +1349,18 @@ body {
 .key-here {
   background: none;
   border: none;
-  color: #4b5d7a;
+  color: var(--border);
   cursor: pointer;
   font-size: 10px;
   padding: 0 3px;
   margin-left: 4px;
 }
-.key-here.on { color: #ffd678; }
+.key-here.on { color: var(--highlight); }
 .key-here.between { color: var(--accent); opacity: 0.7; }
 .property-editor { display: flex; align-items: center; gap: 4px; }
 .property-editor input[type="number"] {
   width: 5.5rem;
-  background: #0f1a2c;
+  background: var(--inset);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 5px;
@@ -1228,7 +1369,7 @@ body {
 }
 .property-editor.position input[type="number"] { width: 4.2rem; }
 .property-editor select {
-  background: #0f1a2c;
+  background: var(--inset);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 5px;
@@ -1239,7 +1380,7 @@ body {
 .property-editor .suffix { font-size: 11px; }
 /* Matches the brush toolbar's picker, because it does the same job. */
 .property-editor button {
-  background: #0f1a2c;
+  background: var(--inset);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 5px;
@@ -1248,10 +1389,10 @@ body {
   cursor: pointer;
   white-space: nowrap;
 }
-.property-editor button:hover { background: #16233a; }
+.property-editor button:hover { background: var(--raised); }
 .property-editor button.active {
-  border-color: #ffa860;
-  color: #ffd678;
+  border-color: var(--accent);
+  color: var(--highlight);
 }
 
 /* What a layer holds, when the panel has no object to describe (M55). Facts,
@@ -1290,11 +1431,11 @@ body {
   cursor: pointer;
   border-left: 2px solid transparent;
 }
-.history .entry:hover { background: #141f34; }
+.history .entry:hover { background: var(--hover); }
 .history .entry.undone { opacity: 0.4; }
 .history .entry.current {
   border-left-color: var(--accent);
-  background: #17304a;
+  background: var(--active);
 }
 
 /* --- Timeline dock (spec.md 9) ------------------------------------------- */
@@ -1305,7 +1446,7 @@ body {
   height: 220px;
   min-height: 120px;
   border-top: 1px solid var(--border);
-  background: #0d1526;
+  background: var(--surface);
   position: relative;
 }
 .tl-transport {
@@ -1317,7 +1458,7 @@ body {
   color: var(--muted);
 }
 .tl-transport button {
-  background: #16233a;
+  background: var(--raised);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 5px;
@@ -1326,16 +1467,16 @@ body {
   font: inherit;
   min-width: 30px;
 }
-.tl-transport button:hover { background: #1d2d49; }
-.tl-transport button.active { background: #1d5a7a; border-color: #2b7ba4; }
-.tl-transport button.autokey.active { background: #6b3a12; border-color: #b9701f; color: #ffd678; }
+.tl-transport button:hover { background: var(--hover); }
+.tl-transport button.active { background: var(--active); border-color: var(--accent); }
+.tl-transport button.autokey.active { background: var(--active); border-color: var(--accent); color: var(--highlight); }
 .tl-transport label { display: flex; gap: 6px; align-items: center; }
 .tl-transport input[type="number"] { width: 4rem; }
 /* The loop button is drawn larger: it is the one the eye looks for during
    playback, and a glyph at text size was easy to miss (M25). */
 .tl-transport button.tl-loop { padding: 2px 6px; display: inline-flex; align-items: center; }
 .tl-transport input {
-  background: #0f1a2c;
+  background: var(--inset);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 5px;
@@ -1353,8 +1494,8 @@ body {
   opacity: 0.35;
   pointer-events: none;
 }
-.timeline.tl-capturing .tl-ruler { background: #16203a; }
-.tl-recording { color: #d9a0ff; font-weight: 600; }
+.timeline.tl-capturing .tl-ruler { background: var(--surface); }
+.tl-recording { color: var(--highlight); font-weight: 600; }
 /* A frame the capture has placed its region at: a bar along the bottom of the
    tick in the capture's own colour, so it reads as a different fact from the
    readiness strip above it. */
@@ -1365,19 +1506,19 @@ body {
   right: 1px;
   bottom: 0;
   height: 4px;
-  background: #c6aaff;
+  background: var(--accent);
 }
-.tl-tick.tl-capture-origin::after { background: #ffd678; }
+.tl-tick.tl-capture-origin::after { background: var(--highlight); }
 /* Steps outside a capture's run — before the one it began on, which the
    ruler will not scrub into, and after the frame the playhead is on, where
    the recording will end — are dimmed, so the ruler shows the macro's
    length (spec.md 8.7, M26). */
 .tl-tick.tl-outside { opacity: 0.3; }
 /* The capture's own track (D72): its keys as diamonds, in its colour. */
-.tl-row.tl-capture-track { background: #16203a; }
-.tl-row.tl-capture-track .tl-labels { color: #d9a0ff; }
-.tl-row.tl-capture-track .tl-key { background: #c6aaff; }
-.tl-row.tl-capture-track .tl-key.selected { background: #ffd678; }
+.tl-row.tl-capture-track { background: var(--surface); }
+.tl-row.tl-capture-track .tl-labels { color: var(--highlight); }
+.tl-row.tl-capture-track .tl-key { background: var(--accent); }
+.tl-row.tl-capture-track .tl-key.selected { background: var(--highlight); }
 .tl-row.tl-capture-track .tl-dot {
   position: absolute;
   top: 50%;
@@ -1385,10 +1526,10 @@ body {
   height: 3px;
   margin: -1.5px 0 0 -1.5px;
   border-radius: 50%;
-  background: #c6aaff;
+  background: var(--accent);
   opacity: 0.7;
 }
-.tl-preview-label { color: #8cffbe; font-weight: 600; }
+.tl-preview-label { color: var(--highlight); font-weight: 600; }
 /* The preview's frame: a green border round the visible map, inside the
    docked panels, saying the whole view is the preview (spec.md 8.7, M27). */
 .map-preview-frame {
@@ -1398,7 +1539,7 @@ body {
   right: var(--dock-right, 0px);
   bottom: var(--dock-bottom, 0px);
   box-sizing: border-box;
-  border: 3px solid rgba(63, 191, 127, 0.95);
+  border: 3px solid color-mix(in srgb, var(--accent) 95%, transparent);
   pointer-events: none;
 }
 /* The preview badge, bottom centre of the visible map, between the readout
@@ -1413,23 +1554,23 @@ body {
   transform: translateX(-50%);
   bottom: calc(var(--dock-bottom, 0px) + var(--map-chrome-gap) + var(--map-chrome-row));
   padding: 4px 10px;
-  border: 1px solid #3fbf7f;
+  border: 1px solid var(--accent);
   border-radius: 6px;
-  background: rgba(20, 60, 40, 0.75);
-  color: #8cffbe;
+  background: color-mix(in srgb, var(--bg) 75%, transparent);
+  color: var(--highlight);
   font-weight: 600;
   letter-spacing: 0.04em;
   pointer-events: none;
 }
-.tl-buffering { color: #ffd678; }
+.tl-buffering { color: var(--highlight); }
 /* A link armed by a click, waiting for the row that completes it (M29). */
-.tl-follow.armed { background: #6b3a12; border-color: #b9701f; color: #ffd678; }
+.tl-follow.armed { background: var(--active); border-color: var(--accent); color: var(--highlight); }
 .timeline[hidden] { display: none; }
 
 /* Rows share one horizontal scroll; the labels column is sticky. */
 .tl-scroll { flex: 1; overflow: auto; position: relative; -webkit-user-select: none; user-select: none; }
 .tl-scroll input { -webkit-user-select: text; user-select: text; }
-.tl-row { display: flex; height: 22px; align-items: stretch; border-bottom: 1px solid #16223a; }
+.tl-row { display: flex; height: 22px; align-items: stretch; border-bottom: 1px solid var(--border-subtle); }
 .tl-labels {
   position: sticky;
   left: 0;
@@ -1440,7 +1581,7 @@ body {
   align-items: center;
   gap: 6px;
   padding: 0 8px;
-  background: #0d1526;
+  background: var(--surface);
   border-right: 1px solid var(--border);
   overflow: hidden;
   white-space: nowrap;
@@ -1448,7 +1589,7 @@ body {
 }
 .tl-grid { position: relative; flex: 0 0 auto; height: 100%; }
 
-.tl-ruler { height: 30px; position: sticky; top: 0; z-index: 3; background: #0d1526; }
+.tl-ruler { height: 30px; position: sticky; top: 0; z-index: 3; background: var(--surface); }
 .tl-ruler-label { color: var(--muted); display: flex; align-items: center; gap: 6px; }
 /* The start-time control on the Time row and its inline editor (M29). */
 .tl-start { font-size: 10px; padding: 0 5px; line-height: 1.4; }
@@ -1461,7 +1602,7 @@ body {
   position: absolute;
   top: 0;
   height: 100%;
-  border-left: 1px solid #1c2a44;
+  border-left: 1px solid var(--border-subtle);
   font-size: 10px;
   color: var(--muted);
   overflow: visible;
@@ -1470,17 +1611,17 @@ body {
 /* Readiness (spec.md 9.5): empty, partial (with progress), solid, and the
    distinct stale state. */
 .tl-ready { position: absolute; bottom: 0; left: 0; height: 5px; background: transparent; }
-.tl-tick.partial .tl-ready { background: #3f6f9c; }
+.tl-tick.partial .tl-ready { background: var(--border); }
 .tl-tick.solid .tl-ready { background: var(--accent); width: 100% !important; }
-.tl-tick.stale .tl-ready { background: #c46a3a; width: 100% !important; }
-.tl-tick.stale { border-left-color: #6b3a12; }
+.tl-tick.stale .tl-ready { background: var(--warning); width: 100% !important; }
+.tl-tick.stale { border-left-color: var(--active); }
 .tl-playhead {
   position: absolute;
   top: 0;
   bottom: 0;
   width: 2px;
   margin-left: -1px;
-  background: #ffd678;
+  background: var(--highlight);
   pointer-events: none;
   z-index: 1;
 }
@@ -1499,7 +1640,7 @@ body {
    speed filter's. */
 .layer-parameter { padding: 2px 8px 4px 26px; font-size: 11px; color: var(--muted); }
 .layer-parameter label { display: flex; align-items: center; gap: 6px; }
-.layer-parameter select { font: inherit; background: #0f1a2c; color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 1px 4px; }
+.layer-parameter select { font: inherit; background: var(--inset); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 1px 4px; }
 /* A GIS layer's controls (spec.md 4.11). These carried no rules at all, so
    the labels were inline text and the Fill slider wrapped onto the next line.
    The metrics are the speed filter's, so an imported layer's controls sit in
@@ -1522,7 +1663,7 @@ body {
   width: 34px;
   height: 16px;
   padding: 0;
-  background: #0f1a2c;
+  background: var(--inset);
   border: 1px solid var(--border);
   border-radius: 4px;
 }
@@ -1535,7 +1676,7 @@ body {
 .grib-filter-row input[type="range"] { flex: 1; min-width: 60px; }
 .grib-filter-row input[type="number"] {
   width: 3.2rem;
-  background: #0f1a2c;
+  background: var(--inset);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 4px;
@@ -1551,8 +1692,8 @@ body {
   top: 6px;
   height: 10px;
   border-radius: 2px;
-  background: rgba(111, 217, 255, 0.45);
-  border: 1px solid rgba(111, 217, 255, 0.75);
+  background: color-mix(in srgb, var(--accent) 45%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 75%, transparent);
   cursor: pointer;
 }
 /*
@@ -1565,7 +1706,7 @@ body {
 .tl-grib.hidden {
   background: none;
   border-style: dashed;
-  border-color: rgba(111, 217, 255, 0.4);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
 }
 .tl-grib.selected {
   border-color: var(--accent);
@@ -1626,8 +1767,8 @@ body {
   position: absolute;
   top: 5px;
   height: 12px;
-  background: rgba(111, 217, 255, 0.28);
-  border: 1px solid rgba(111, 217, 255, 0.6);
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 60%, transparent);
   border-radius: 3px;
   cursor: grab;
 }
@@ -1646,10 +1787,10 @@ body {
   content: "";
   position: absolute;
   inset: 4px 5px;
-  background: rgba(111, 217, 255, 0.9);
+  background: color-mix(in srgb, var(--accent) 90%, transparent);
   border-radius: 2px;
 }
-.tl-range-end:hover::after { background: #fff; }
+.tl-range-end:hover::after { background: var(--text); }
 .tl-range-end.right { left: auto; right: -9px; }
 
 .tl-track { height: 20px; }
@@ -1662,12 +1803,12 @@ body {
 .tl-key-here {
   background: none;
   border: none;
-  color: #4b5d7a;
+  color: var(--border);
   cursor: pointer;
   font-size: 11px;
   padding: 0 2px;
 }
-.tl-key-here.on { color: #ffd678; }
+.tl-key-here.on { color: var(--highlight); }
 /* Keyframe diamonds (spec.md 9.3). A holding key is drawn hollow. */
 .tl-key {
   position: absolute;
@@ -1677,18 +1818,18 @@ body {
   margin: -4.5px 0 0 -4.5px;
   transform: rotate(45deg);
   background: var(--accent);
-  border: 1px solid #0d1526;
+  border: 1px solid var(--surface);
   cursor: grab;
   z-index: 1;
 }
 .tl-key.hold { background: transparent; border-color: var(--accent); }
-.tl-key.selected { background: #ffd678; border-color: #ffd678; }
+.tl-key.selected { background: var(--highlight); border-color: var(--highlight); }
 .tl-key.hold.selected { background: transparent; }
 /* A key borrowed from the object this track follows (M65). Dimmed and inert:
    it says the follower moves, and says where the key that moves it lives. */
 .tl-key.borrowed {
-  background: rgba(111, 217, 255, 0.3);
-  border-color: rgba(111, 217, 255, 0.5);
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
   cursor: default;
   pointer-events: none;
 }
@@ -1702,7 +1843,7 @@ body {
   height: 3px;
   margin: -1.5px 0 0 -1.5px;
   border-radius: 50%;
-  background: rgba(111, 217, 255, 0.55);
+  background: color-mix(in srgb, var(--accent) 55%, transparent);
   pointer-events: none;
 }
 
@@ -1718,20 +1859,20 @@ body {
 }
 .tl-graph-now-value { display: flex; gap: 8px; }
 .tl-graph-series.s0 { color: var(--accent); }
-.tl-graph-series.s1 { color: #ffd678; }
+.tl-graph-series.s1 { color: var(--highlight); }
 .tl-graph { display: block; overflow: visible; }
 .tl-graph .tl-graph-line { fill: none; stroke-width: 1.5; }
 .tl-graph .s0 .tl-graph-line, .tl-graph .s0 .tl-graph-key { stroke: var(--accent); }
-.tl-graph .s1 .tl-graph-line, .tl-graph .s1 .tl-graph-key { stroke: #ffd678; }
+.tl-graph .s1 .tl-graph-line, .tl-graph .s1 .tl-graph-key { stroke: var(--highlight); }
 .tl-graph .s0 .tl-graph-at { fill: var(--accent); }
-.tl-graph .s1 .tl-graph-at { fill: #ffd678; }
-.tl-graph .tl-graph-key { fill: #0d1526; stroke-width: 1.5; }
-.tl-graph .tl-graph-playhead { stroke: #ffd678; stroke-width: 1; opacity: 0.5; }
+.tl-graph .s1 .tl-graph-at { fill: var(--highlight); }
+.tl-graph .tl-graph-key { fill: var(--surface); stroke-width: 1.5; }
+.tl-graph .tl-graph-playhead { stroke: var(--highlight); stroke-width: 1; opacity: 0.5; }
 
 .tl-box {
   position: absolute;
-  border: 1px dashed rgba(160, 232, 255, 0.9);
-  background: rgba(111, 217, 255, 0.1);
+  border: 1px dashed color-mix(in srgb, var(--highlight) 90%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
   pointer-events: none;
   z-index: 4;
 }
@@ -1741,7 +1882,7 @@ body {
   display: flex;
   flex-direction: column;
   min-width: 160px;
-  background: #16233a;
+  background: var(--raised);
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 4px;
@@ -1758,8 +1899,8 @@ body {
   font: inherit;
   border-radius: 4px;
 }
-.tl-menu button:hover { background: #1d5a7a; }
-.tl-error { color: #ff9a8b; padding: 4px 10px; font-size: 12px; }
+.tl-menu button:hover { background: var(--active); }
+.tl-error { color: var(--error); padding: 4px 10px; font-size: 12px; }
 .tl-impact { max-height: 140px; overflow: auto; margin: 6px 0; padding-left: 20px; }
 
 /* --- Settings dialog (spec.md 8.6, M15) ------------------------------------ */
@@ -1787,7 +1928,7 @@ body {
   font: inherit;
   border: 1px solid var(--border);
   border-radius: 5px;
-  background: #0f1a2c;
+  background: var(--inset);
   color: var(--text);
   padding: 2px 8px;
 }
@@ -1824,29 +1965,31 @@ body {
   align-self: stretch;
   width: auto;
   font: inherit;
-  background: #0f1a2c;
+  background: var(--inset);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 5px;
   padding: 2px 6px;
 }
-.modal-error { color: #ff8fb0; margin: 0 0 8px; }
+.modal-error { color: var(--error); margin: 0 0 8px; }
 .settings-snippet { white-space: pre-wrap; word-break: break-all; font-size: 11px; padding: 6px; background: var(--panel-inset, rgba(0,0,0,0.2)); border-radius: 4px; }
-.settings-error { color: var(--error, #e66); }
+.settings-error { color: var(--error); }
 .mcp-badge { font-weight: 600; }
 
 /* Shape controls are an explicit timeline mode, separate from selection. */
 .tl-shape-toggle { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 24px; padding: 2px; border: 0; background: transparent; color: var(--muted); cursor: pointer; }
-.tl-shape-toggle:hover, .tl-shape-toggle.on { color: #ffd666; background: #ffd66618; }
+.tl-shape-toggle:hover, .tl-shape-toggle.on { color: var(--highlight); background: var(--accent-wash); }
 .tl-shape-toggle:disabled { opacity: .35; cursor: default; }
 
-.shape-edit-hint { position: absolute; bottom: 36px; left: 50%; transform: translateX(-50%); padding: 6px 10px; border-radius: 4px; background: #1c2638ed; color: #ffd666; font-size: 12px; pointer-events: none; white-space: nowrap; }
+.shape-edit-hint { position: absolute; z-index: 2; bottom: 36px; left: 50%; transform: translateX(-50%); padding: 6px 10px; border-radius: 4px; background: var(--panel); color: var(--highlight); font-size: 12px; pointer-events: none; white-space: nowrap; }
 
 /* Independent direction-glyph appearance preferences and their live samples. */
 .glyph-settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .modal .glyph-settings-card { min-width: 0; margin: 0; padding: 12px; border: 1px solid var(--border); border-radius: 6px; }
 .glyph-settings-card legend { padding: 0 6px; font-weight: 600; }
-.glyph-sample { display: block; width: 100%; margin-bottom: 10px; background: #0b1422; border-radius: 4px; }
+.glyph-sample { display: block; width: 100%; margin-bottom: 10px; background: var(--inset); border-radius: 4px; }
+/* Glyph ink is user-selected; keep pale samples visible in the light theme. */
+[data-theme-scheme="light"] .glyph-sample { background: #364958; }
 .modal .glyph-field { display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 8px; margin: 8px 0; font-size: 12px; }
 .glyph-field input { width: 70px; min-width: 0; }
 .glyph-field input[type="color"] { height: 28px; padding: 2px; cursor: pointer; }
@@ -1854,19 +1997,19 @@ body {
 .glyph-check input[type="checkbox"] { width: auto; }
 .glyph-shadow-settings { padding: 2px 0 4px; border-top: 1px solid var(--border); }
 @media (max-width: 560px) { .glyph-settings-grid { grid-template-columns: 1fr; } }
-.beta-gate { display: grid; place-items: center; min-height: 100vh; padding: 48px; background: #111820; color: #ecf0f4; }
+.beta-gate { display: grid; place-items: center; min-height: 100vh; padding: 48px; background: var(--bg); color: var(--text); }
 .beta-gate > div { max-width: 600px; font-size: 18px; line-height: 1.65; }
 .statusbar .hint.has-retry { display: flex; align-items: center; min-width: 145px; gap: 8px; }
 .hint-message { overflow: hidden; text-overflow: ellipsis; }
 .status-retry { flex: 0 0 auto; padding: 2px 8px; }
-.help-dialog { width: min(1180px, 94vw); height: 88vh; display: flex; flex-direction: column; background: #18212c; color: #e5eaf0; border: 1px solid #475361; border-radius: 10px; box-shadow: 0 18px 70px #0009; }
-.help-dialog header { display: flex; align-items: center; justify-content: space-between; padding: 12px 22px; border-bottom: 1px solid #374352; }
+.help-dialog { width: min(1180px, 94vw); height: 88vh; display: flex; flex-direction: column; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 18px 70px #0009; }
+.help-dialog header { display: flex; align-items: center; justify-content: space-between; padding: 12px 22px; border-bottom: 1px solid var(--border-subtle); }
 .help-dialog h2 { margin: 0; font-size: 20px; }
 .help-body { display: grid; grid-template-columns: 235px minmax(0, 1fr); min-height: 0; flex: 1; }
-.help-body nav { padding: 18px 12px; overflow-y: auto; border-right: 1px solid #374352; display: flex; flex-direction: column; gap: 7px; }
+.help-body nav { padding: 18px 12px; overflow-y: auto; border-right: 1px solid var(--border-subtle); display: flex; flex-direction: column; gap: 7px; }
 .help-body nav input { width: 100%; box-sizing: border-box; margin-bottom: 12px; }
 .help-body nav button { text-align: left; white-space: normal; padding: 10px; }
-.help-body nav button[aria-current] { border-color: #7fcdbd; color: #b0e8d8; }
+.help-body nav button[aria-current] { border-color: var(--accent); color: var(--text); }
 .help-body article { overflow: auto; padding: 12px 28px 28px; font-size: 15px; line-height: 1.65; user-select: text; }
 .help-body article h3 { font-size: 23px; margin-bottom: 16px; }
 .help-body li { margin-bottom: 10px; }
@@ -1874,16 +2017,16 @@ body {
 .help-screenshot { display: block; padding: 0; width: 100%; overflow: auto; cursor: zoom-in; }
 .help-screenshot img { display: block; width: 100%; height: auto; }
 .help-screenshot img.zoomed { width: auto; max-width: none; cursor: zoom-out; }
-.help-body figcaption { font-size: 12px; color: #aab8c7; margin-top: 8px; }
+.help-body figcaption { font-size: 12px; color: var(--muted); margin-top: 8px; }
 .help-body nav > div button { width: 100%; }
-.help-body nav h3 { margin: 16px 8px 6px; font-size: 12px; color: #aab8c7; text-transform: uppercase; letter-spacing: .06em; }
-.help-count { margin: 0 8px; font-size: 12px; color: #aab8c7; }
+.help-body nav h3 { margin: 16px 8px 6px; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+.help-count { margin: 0 8px; font-size: 12px; color: var(--muted); }
 .help-parameters { width: 100%; border-collapse: collapse; margin: 24px 0; font-size: 14px; }
-.help-parameters th, .help-parameters td { text-align: left; vertical-align: top; padding: 12px; border: 1px solid #374352; }
-.help-parameters thead { background: #111b28; }
-.help-parameters tbody th { width: 29%; font-weight: 600; color: #b0e8d8; }
+.help-parameters th, .help-parameters td { text-align: left; vertical-align: top; padding: 12px; border: 1px solid var(--border-subtle); }
+.help-parameters thead { background: var(--inset); }
+.help-parameters tbody th { width: 29%; font-weight: 600; color: var(--text); }
 .help-body article h4 { margin-top: 30px; font-size: 18px; }
-.help-related { border-top: 1px solid #374352; margin-top: 28px; }
+.help-related { border-top: 1px solid var(--border-subtle); margin-top: 28px; }
 .help-related button { margin: 0 8px 8px 0; white-space: normal; }
 .help-screenshot img { width: auto; max-width: 100%; }
 .help-screenshot[aria-expanded="true"] { max-height: 65vh; cursor: zoom-out; }
@@ -1900,9 +2043,27 @@ body {
 .projection-list { overflow-y: auto; min-height: 120px; flex: 1; }
 .projection-list h3 { color: var(--muted); font-size: 12px; margin: 14px 0 5px; }
 .projection-list button { display: flex; justify-content: space-between; text-align: left; gap: 12px; width: 100%; padding: 7px 9px; border: 0; border-radius: 4px; background: transparent; color: inherit; cursor: pointer; }
-.projection-list button:hover, .projection-list button[aria-pressed="true"] { background: #1d3651; }
+.projection-list button:hover, .projection-list button[aria-pressed="true"] { background: var(--hover); }
 .projection-list small { flex-shrink: 0; color: var(--muted); }
 .projection-picker summary { cursor: pointer; font-size: 12px; }
-.projection-picker textarea { width: 100%; box-sizing: border-box; resize: vertical; color: inherit; background: #101827; border: 1px solid var(--border); padding: 8px; }
+.projection-picker textarea { width: 100%; box-sizing: border-box; resize: vertical; color: inherit; background: var(--inset); border: 1px solid var(--border); padding: 8px; }
 .projection-picker details p { margin-top: 8px; }
 .projection-trigger { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Chosen tools and primary actions are filled sage, with readable dark ink. */
+.map-toolbar button.active,
+.view-controls button.active,
+.tl-transport button.active,
+.start-panel button.primary,
+.modal .start-new button.primary,
+.modal-actions button.primary {
+  background: var(--selected-bg);
+  border-color: var(--selected-border);
+  color: var(--selected-ink);
+}
+.map-toolbar button.active:hover:not(:disabled),
+.view-controls button.active:hover:not(:disabled),
+.tl-transport button.active:hover:not(:disabled),
+.start-panel button.primary:hover:not(:disabled),
+.modal .start-new button.primary:hover:not(:disabled),
+.modal-actions button.primary:hover:not(:disabled) { background: var(--selected-hover); }

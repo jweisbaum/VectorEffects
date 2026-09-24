@@ -267,6 +267,13 @@ function Option({
       );
     }
 
+    case "offset":
+      return <label>{spec.label}
+        {(["x", "y"] as const).map((axis) => <NumberField key={axis} step="any"
+          value={units.distanceFromKm(value[axis])} title={`${axis.toUpperCase()} displacement`}
+          onCommit={(next) => onValue({...value, [axis]: units.distanceToKm(next)})} />)}
+        {units.distanceUnit}
+      </label>;
     case "position": {
       const armed = picking?.property === spec.property;
       return (

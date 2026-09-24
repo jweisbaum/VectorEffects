@@ -18,8 +18,10 @@ import { pickGribToImport, pickProjectToOpen, pickZarrToImport } from "./dialogs
  */
 export default function StartScreen({
   onOpened,
+  onSettings,
 }: {
   onOpened: (project: ProjectSummary) => void;
+  onSettings?: () => void;
 }) {
   const [recent, setRecent] = useState<RecentProject[]>([]);
   /** Unsaved work an unclean shutdown left behind (spec.md 4.2, M10). */
@@ -84,6 +86,7 @@ export default function StartScreen({
     <div className="start">
       <div className="start-panel">
         <header>
+          {onSettings && <button className="start-settings" onClick={onSettings}>Settings</button>}
           <h1>VectorEffects</h1>
           <p className="muted">
             Paint global wind and current fields. Export GRIB2.

@@ -18,4 +18,4 @@
  * modifier, whose result is whatever was beneath it, changed. The map
  * applies the operation per pixel, live, as the pointer moves.
  */
-export type PreviewKind = "field" | "mask" | "clone" | "gain" | "turn" | "radial" | "warp" | "smear";
+export type PreviewKind = "field" | "mask" | "clone" | "gain" | "turn" | "radial" | "warp" | "smear" | "selection";

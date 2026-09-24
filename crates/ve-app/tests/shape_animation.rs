@@ -98,6 +98,7 @@ impl Fixture {
         document::stroke_erase(
             &self.state,
             document::EraseStroke {
+                projection_origin: None,
                 points: vec![[0.0, 0.0]],
                 radius_km: radius,
                 square: false,
@@ -363,6 +364,7 @@ fn a_mercator_pixel_eraser_cuts_a_ground_object_in_screen_space_and_survives_sav
     document::stroke_erase(
         &fixture.state,
         document::EraseStroke {
+            projection_origin: None,
             points: vec![[0.0, 75.0]],
             radius_km: ve_render::aeqd::M_PER_DEGREE / 1000.0,
             square: false,
@@ -388,7 +390,7 @@ fn a_mercator_pixel_eraser_cuts_a_ground_object_in_screen_space_and_survives_sav
 
 #[test]
 fn captured_objects_have_no_shape_controls_or_key_commands() {
-    for tool in [ToolKind::Macro, ToolKind::Patch] {
+    for tool in [ToolKind::Macro, ToolKind::Patch, ToolKind::Liquify] {
         let f = Fixture::new(tool);
         assert!(
             animation::tracks_of(&f.state, f.object, 0)

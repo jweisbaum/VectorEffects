@@ -129,6 +129,8 @@ pub enum PreviewKind {
     Warp,
     /// Drag the field along the stroke.
     Smear,
+    /// Highlight the source selection, then its rigidly translated destination.
+    Selection,
 }
 
 /// The km/px control a tool offers, and when it is live.
@@ -264,7 +266,7 @@ fn preview_for(tool: ToolKind) -> PreviewKind {
         ToolKind::Divergence => PreviewKind::Radial,
         ToolKind::Turn => PreviewKind::Turn,
         ToolKind::Warp => PreviewKind::Warp,
-        ToolKind::Liquify => PreviewKind::Smear,
+        ToolKind::Liquify => PreviewKind::Selection,
         // Everything else paints a field of its own, which is what its gesture
         // shows. The patch's is a captured one and it has no gesture at all,
         // but it is a field, and `operator_outlines` keys off this: anything
@@ -359,13 +361,13 @@ fn describe(tool: ToolKind) -> ToolSchema {
         // km one on the ground (spec.md 3.5) — and a bar that offered both
         // would have two controls for one property, one of which does nothing.
         // The unit is the control; [`ToolSchema::sized`] says the tool has one.
-        .filter(|spec| spec.id != PropId::StampSpace)
+        .filter(|spec| !matches!(spec.id, PropId::StampSpace | PropId::StampOrigin))
         // A warp's push is measured from its own anchor, which does not exist
         // until the gesture does — so there is nothing "push to" could mean on
         // the bar, before there is anything to push. It is set by pulling the
         // warp afterwards (spec.md 6.3) and edited in the inspector, like every
         // other property of an object that exists.
-        .filter(|spec| spec.id != PropId::PushTo)
+        .filter(|spec| !matches!(spec.id, PropId::PushTo | PropId::DisplacementPosition))
         .chain(
             // The one common property a tool bar owns. The rest of the common
             // set is the object's placement and lifetime, which a gesture
@@ -460,7 +462,7 @@ mod tests {
         for described in palette() {
             let tool = described.tool.kind();
             for spec in schema::tool_specs(tool) {
-                if spec.id == PropId::StampSpace {
+                if matches!(spec.id, PropId::StampSpace | PropId::StampOrigin) {
                     assert!(
                         described.sizing.is_some(),
                         "{tool:?} has a stamp space but no unit to select it with"
@@ -472,8 +474,15 @@ mod tests {
                 // before the object exists (spec.md 6.3). Named here so that a
                 // second such property has to be a decision rather than an
                 // omission.
-                if spec.id == PropId::PushTo {
-                    assert_eq!(tool, ToolKind::Warp);
+                if matches!(spec.id, PropId::PushTo | PropId::DisplacementPosition) {
+                    assert_eq!(
+                        tool,
+                        if spec.id == PropId::PushTo {
+                            ToolKind::Warp
+                        } else {
+                            ToolKind::Liquify
+                        }
+                    );
                     continue;
                 }
                 assert!(

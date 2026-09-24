@@ -50,7 +50,9 @@ fn target(project: &Project, object: u64) -> Result<&Object> {
         .object(object_id(object))
         .ok_or(AppError::Core(ve_core::CoreError::MissingObject(object)))?;
     if !target.tool.can_animate_shape() {
-        return Err(bad("macros and patches cannot have shape keyframes"));
+        return Err(bad(
+            "macros, patches and Displace selections cannot have shape keyframes",
+        ));
     }
     Ok(target)
 }

@@ -69,6 +69,7 @@ fn scene_of(id: tile::TileId, count: u32, reach_m: f64, square: bool) -> Scene {
                 clone_offset: ve_render::scene::OffsetMode::Aligned,
                 modifier: None,
                 smear: Vec::new(),
+                transition: Default::default(),
                 invert: false,
                 capture: None,
                 erases: false,

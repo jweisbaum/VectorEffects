@@ -494,6 +494,10 @@ impl Default for McpSettings {
 #[ts(export, export_to = "AppSettings.ts")]
 #[serde(default)]
 pub struct AppSettings {
+    /// Application-wide appearance; never part of a project or its history.
+    pub theme: String,
+    /// Saved custom colours, retained when switching to a bundled theme.
+    pub custom_theme: Option<crate::theme::CustomTheme>,
     /// Global arrow and wind-barb appearance preferences.
     pub glyphs: GlyphSettings,
     /// Global ground-distance display preference.
@@ -603,6 +607,8 @@ fn supported_projection(id: &str) -> bool {
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
+            theme: crate::theme::DEFAULT_THEME.to_owned(),
+            custom_theme: None,
             glyphs: GlyphSettings::default(),
             distance_unit: DistanceUnit::Km,
             speed_unit: SpeedUnit::Kt,
@@ -674,6 +680,12 @@ impl AppSettings {
     /// default rather than refused, so a bad line costs one preference and
     /// not the launch.
     pub fn normalised(mut self) -> Self {
+        self.custom_theme = self.custom_theme.filter(crate::theme::CustomTheme::valid);
+        if !crate::theme::known(&self.theme)
+            && !(self.theme == "custom" && self.custom_theme.is_some())
+        {
+            self.theme = crate::theme::DEFAULT_THEME.to_owned();
+        }
         for appearance in [&mut self.glyphs.arrow, &mut self.glyphs.barb] {
             if !appearance.valid() {
                 *appearance = GlyphAppearance::default();
@@ -775,6 +787,66 @@ pub fn app_settings(state: tauri::State<'_, AppState>) -> Result<AppSettings> {
 /// Implementation of [`app_settings`].
 pub fn settings_of(state: &AppState) -> Result<AppSettings> {
     with_session(state, |session| Ok(session.settings.clone()))
+}
+
+/// Changes the application theme independently of any open project.
+#[tauri::command]
+pub fn set_theme(state: tauri::State<'_, AppState>, theme: String) -> Result<AppSettings> {
+    theme_set(&state, theme)
+}
+
+/// Persists the theme before reporting success, restoring it if the write fails.
+pub fn theme_set(state: &AppState, theme: String) -> Result<AppSettings> {
+    let file = state.paths.settings_file();
+    with_session(state, |session| {
+        if !crate::theme::known(&theme)
+            && !(theme == "custom" && session.settings.custom_theme.is_some())
+        {
+            return Err(AppError::BadOption {
+                field: "theme",
+                value: theme,
+            });
+        }
+        let before = std::mem::replace(&mut session.settings.theme, theme);
+        if let Err(error) = session.save_settings(&file) {
+            session.settings.theme = before;
+            return Err(error);
+        }
+        Ok(session.settings.clone())
+    })
+}
+
+/// Saves and selects a custom appearance in one preference update.
+#[tauri::command]
+pub fn set_custom_theme(
+    state: tauri::State<'_, AppState>,
+    custom: crate::theme::CustomTheme,
+) -> Result<AppSettings> {
+    custom_theme_set(&state, custom)
+}
+
+/// A failed save leaves both the selected theme and the previous colours intact.
+pub fn custom_theme_set(
+    state: &AppState,
+    custom: crate::theme::CustomTheme,
+) -> Result<AppSettings> {
+    if !custom.valid() {
+        return Err(AppError::BadOption {
+            field: "custom_theme",
+            value: "Use a bundled base theme and #RRGGBB colours for known theme roles".to_owned(),
+        });
+    }
+    let file = state.paths.settings_file();
+    with_session(state, |session| {
+        let before = session.settings.clone();
+        session.settings.theme = "custom".to_owned();
+        session.settings.custom_theme = Some(custom);
+        if let Err(error) = session.save_settings(&file) {
+            session.settings = before;
+            return Err(error);
+        }
+        Ok(session.settings.clone())
+    })
 }
 
 /// Rebinds one shortcut, refusing a collision, and saves.
@@ -1087,14 +1159,18 @@ pub fn chart_directory_set(
         session.save_settings(&file)?;
         Ok(())
     })?;
-    Ok(state.backdrops.chart_status(&directory))
+    let settings = settings_of(state)?;
+    let palette = crate::theme::palette_for(&settings.theme, settings.custom_theme.as_ref());
+    Ok(state.backdrops.chart_status(&directory, palette))
 }
 
 /// What the chart directory currently holds.
 #[tauri::command(async)]
 pub fn chart_status(state: tauri::State<'_, AppState>) -> Result<crate::charts::ChartStatus> {
     let directory = state.chart_directory();
-    Ok(state.backdrops.chart_status(&directory))
+    let settings = settings_of(&state)?;
+    let palette = crate::theme::palette_for(&settings.theme, settings.custom_theme.as_ref());
+    Ok(state.backdrops.chart_status(&directory, palette))
 }
 
 #[cfg(test)]

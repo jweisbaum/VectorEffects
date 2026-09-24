@@ -67,7 +67,7 @@ pub fn supports(scene: &Scene) -> bool {
         object.clone_source.is_none()
             // A liquify re-reads the scene like a warp, and is declined with
             // it (spec.md 6.3, M17).
-            && !matches!(object.modifier, Some(Modifier::Warp(_) | Modifier::Smear))
+            && !matches!(object.modifier, Some(Modifier::Warp(_) | Modifier::Smear | Modifier::Relocate { .. }))
             // A patch replays a captured lattice in the object's *own* frame,
             // which is a second sampler and a second storage buffer beyond the
             // one the imported rasters use (spec.md 8.5, M14). Declined for
@@ -296,7 +296,7 @@ fn pack(scene: &Scene) -> Packed {
             Some(Modifier::Gain(gain)) => (1, gain as f32),
             Some(Modifier::Radial(fraction)) => (2, fraction as f32),
             Some(Modifier::Turn(degrees)) => (3, degrees as f32),
-            Some(Modifier::Warp(_) | Modifier::Smear) => (0, 0.0),
+            Some(Modifier::Warp(_) | Modifier::Smear | Modifier::Relocate { .. }) => (0, 0.0),
         };
 
         push_f32(&mut objects, dir_b);
@@ -343,8 +343,8 @@ fn pack(scene: &Scene) -> Packed {
             .map_or((0.0, f32::INFINITY), |band| (band.min_mps, band.max_mps));
         push_f32(&mut objects, low);
         push_f32(&mut objects, high);
-        push_u32(&mut objects, 0);
-        push_u32(&mut objects, 0);
+        push_f32(&mut objects, object.frame.projection_origin.lon as f32);
+        push_f32(&mut objects, object.frame.projection_origin.lat as f32);
 
         debug_assert_eq!(objects.len() % (OBJECT_WORDS * 4), 0);
     }

@@ -286,6 +286,7 @@ fn object(rng: &mut Rng) -> FlatObject {
         kind: ve_core::project::FieldKind::Wind,
         modifier,
         smear: Vec::new(),
+        transition: Default::default(),
         invert,
         // The mask is the one tool that erases, and `invert` is the one flag
         // the generator gives only to it (spec.md 6.2) — so a scene's erasing
@@ -749,6 +750,7 @@ fn painted_layer_thresholds_use_modified_speed_on_both_backends() {
         rotation_deg: 0.0,
         scale: 1.0,
         space: Space::Mercator,
+        projection_origin: LonLat { lon: 0.0, lat: 0.0 },
     };
     base.shape = Shape::Disc {
         radius_m: 100_000.0,
@@ -781,6 +783,73 @@ fn painted_layer_thresholds_use_modified_speed_on_both_backends() {
         let actual = gpu.evaluate(&scene, &[point]).expect("GPU");
         for samples in [cpu, actual] {
             assert!((f64::from(samples[0].u.hypot(samples[0].v)) - expected).abs() < 0.01);
+        }
+    }
+}
+
+#[test]
+fn globe_pixel_coverage_matches_screen_circles_on_both_backends() {
+    use ve_core::geo::EARTH_RADIUS_M;
+    let Ok(gpu) = GpuEvaluator::new() else {
+        println!("no GPU available; skipping globe comparison");
+        return;
+    };
+    for origin in [
+        LonLat::new(-30.0, 55.0).unwrap(),
+        LonLat::new(179.0, 85.0).unwrap(),
+        LonLat::new(150.0, -80.0).unwrap(),
+    ] {
+        let ground = |x: f64, y: f64| {
+            origin.destination(
+                Angle::new(x.atan2(y).to_degrees()),
+                x.hypot(y).asin() * EARTH_RADIUS_M,
+            )
+        };
+        let mut stamp = object(&mut Rng(19));
+        stamp.frame = Frame::in_space(ground(0.86, 0.16), 27.0, 100.0, Space::Orthographic)
+            .with_projection_origin(origin);
+        stamp.shape = Shape::Disc {
+            radius_m: 0.13 * EARTH_RADIUS_M,
+        };
+        stamp.cap_radius_m = stamp.frame.reach_m(0.13 * EARTH_RADIUS_M);
+        stamp.layer = 0;
+        stamp.modifier = None;
+        stamp.motion = Motion::default();
+        stamp.speed = SpeedMode::Constant(20.0);
+        stamp.direction = DirectionMode::Constant(Angle::new(90.0));
+        stamp.feather = 0.0;
+        stamp.invert = false;
+        stamp.erases = false;
+        let scene = Scene {
+            objects: vec![stamp],
+            ..Scene::default()
+        };
+        let mut points = Vec::new();
+        let mut expected = Vec::new();
+        for iy in -10..=10 {
+            for ix in -10..=10 {
+                let dx = f64::from(ix) * 0.019;
+                let dy = f64::from(iy) * 0.019;
+                let (x, y) = (0.86 + dx, 0.16 + dy);
+                if x.hypot(y) >= 1.0 || (dx.hypot(dy) - 0.13).abs() < 0.001 {
+                    continue;
+                }
+                points.push(ground(x, y));
+                expected.push(if dx.hypot(dy) < 0.13 { 20.0 } else { 0.0 });
+            }
+        }
+        points.push(origin.destination(Angle::new(90.0), EARTH_RADIUS_M * std::f64::consts::PI));
+        expected.push(0.0);
+        let cpu = CpuEvaluator.evaluate(&scene, &points).unwrap();
+        let gpu = gpu.evaluate(&scene, &points).unwrap();
+        for (i, want) in expected.iter().enumerate() {
+            for samples in [&cpu, &gpu] {
+                assert!(
+                    (f64::from(samples[i].u.hypot(samples[i].v)) - want).abs() < 0.01,
+                    "{origin:?} at {:?}",
+                    points[i]
+                );
+            }
         }
     }
 }

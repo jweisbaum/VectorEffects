@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import type { Region } from "./region";
-import { normalizeLon } from "./camera";
+import { normalizeLon, project, unproject, type Camera } from "./camera";
+import { projectedRing } from "./footprint";
 import {
   editsRegion,
   recentred,
@@ -12,8 +13,60 @@ import {
   regionFromLasso,
   regionOfView,
   regionRing,
+  regionOutline,
   wholeMap,
 } from "./region";
+
+describe("regions on the globe", () => {
+  const view = { width: 1000, height: 800 };
+  function path(camera: Camera, region: Region) {
+    const lines: Array<Array<{x:number;y:number}>> = [];
+    let closed = false;
+    const complete = projectedRing({
+      moveTo(x,y) { lines.push([{x,y}]); },
+      lineTo(x,y) { lines.at(-1)!.push({x,y}); },
+      closePath() { closed = true; },
+    }, camera, view, regionOutline(region));
+    return {lines,closed,complete};
+  }
+
+  it.each([-145, 180])("follows parallels and meridians near longitude %s", centerLon => {
+    const camera: Camera = {centerLon,centerLat:55,pxPerDeg:8,projection:"orthographic"};
+    const region: Region = {kind:"rect",centre:[centerLon,45],halfWidthDeg:30,halfHeightDeg:15};
+    const drawn = path(camera, region);
+    expect(drawn.complete).toBe(true);
+    expect(drawn.closed).toBe(true);
+    expect(drawn.lines).toHaveLength(1);
+    const points = drawn.lines[0]!;
+    expect(points.length).toBeGreaterThan(40);
+    // Midpoints of rendered segments must still lie on the geographic edge.
+    // A single chord between corners misses the parallel by several degrees.
+    for(let i=0;i<points.length;i++) {
+      const a=points[i]!,b=points[(i+1)%points.length]!;
+      const geo=unproject(camera,view,{x:(a.x+b.x)/2,y:(a.y+b.y)/2});
+      const distance=Math.min(Math.abs(geo.lat-30),Math.abs(geo.lat-60),Math.abs(Math.abs(normalizeLon(geo.lon-centerLon))-30));
+      expect(distance).toBeLessThan(.03);
+    }
+  });
+
+  it("breaks at the horizon instead of joining across the back of the globe", () => {
+    const camera: Camera={centerLon:0,centerLat:20,pxPerDeg:6,projection:"orthographic"};
+    const drawn=path(camera,{kind:"rect",centre:[80,20],halfWidthDeg:40,halfHeightDeg:30});
+    expect(drawn.complete).toBe(false);
+    expect(drawn.closed).toBe(false);
+    expect(drawn.lines.flat().length).toBeGreaterThan(10);
+    for(const line of drawn.lines) for(let i=1;i<line.length;i++) {
+      expect(Math.hypot(line[i]!.x-line[i-1]!.x,line[i]!.y-line[i-1]!.y)).toBeLessThan(12);
+    }
+  });
+
+  it("keeps the full longitude span of a whole-map selection", () => {
+    const camera: Camera={centerLon:0,centerLat:0,pxPerDeg:2};
+    const drawn=path(camera,wholeMap());
+    const top=project(camera,view,{lon:0,lat:90});
+    expect(drawn.lines.flat().some(p=>Math.abs(p.x-top.x)<1 && Math.abs(p.y-top.y)<1)).toBe(true);
+  });
+});
 
 const camera = (centerLon: number, centerLat: number, pxPerDeg: number) => ({
   centerLon,

@@ -1726,13 +1726,13 @@ fn static_tool_options_stay_editable_without_any_keyframe_entry_point() {
             serde_json::to_value(at(9)).unwrap()
         );
     }
-    // Liquify retains its editable amount/feather/transform animation.
+    // Liquify keys the selection, relative move and interpolation separately.
     for prop in [
         PropId::Position,
         PropId::RotationDeg,
         PropId::ScalePct,
-        PropId::Feather,
-        PropId::Strength,
+        PropId::DisplacementPosition,
+        PropId::InterpolationDistanceKm,
     ] {
         assert!(ve_core::schema::animatable(ToolKind::Liquify, prop));
     }

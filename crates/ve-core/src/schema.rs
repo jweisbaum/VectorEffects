@@ -43,11 +43,7 @@ pub enum ToolKind {
     Turn,
     /// Reads the field beneath it from a displaced position.
     Warp,
-    /// Drags the field beneath it along a stroke, each stamp carrying the
-    /// pointer's own movement (spec.md 6.3, M17).
-    ///
-    /// The forward warp of a paint program. A warp moves a *placed* region's
-    /// field as one block; a liquify smears it along the hand.
+    /// Brush a selection, move it intact, and interpolate its surroundings.
     Liquify,
     /// Replays a captured field from the macro library (spec.md 8.7, M16).
     ///
@@ -97,9 +93,9 @@ impl ToolKind {
         !matches!(self, Self::Patch | Self::Macro)
     }
 
-    /// Captured fields retain their recorded footprint rather than shape keys.
+    /// Captured fields and Liquify selections do not key their perimeter.
     pub fn can_animate_shape(self) -> bool {
-        !matches!(self, Self::Patch | Self::Macro)
+        !matches!(self, Self::Patch | Self::Macro | Self::Liquify)
     }
 
     /// Whether the tool modifies the field beneath it rather than adding one
@@ -131,7 +127,7 @@ impl ToolKind {
             Self::Divergence => "Diverge / converge",
             Self::Turn => "Rotate flow",
             Self::Warp => "Warp",
-            Self::Liquify => "Liquify",
+            Self::Liquify => "Displace",
             Self::Patch => "Patch",
             Self::Macro => "Macro",
         }
@@ -229,6 +225,8 @@ pub enum PropId {
     /// stamp's disc and the shape fill's presets ask the same question, and one
     /// name for it is what stops "px" meaning two things (spec.md 6.1).
     StampSpace,
+    /// View centre frozen when a pixel tool is drawn on the globe.
+    StampOrigin,
 
     // --- Circle ---
     /// Filled, perimeter, or filled with a radial gradient.
@@ -297,10 +295,17 @@ pub enum PropId {
     PushTo,
     /// How far a warp twists the field about its anchor, in degrees.
     TwistDeg,
-    /// How much of the pointer's own movement a liquify stroke applies, in
-    /// percent (spec.md 6.3, M17). At 100 the field is dragged as far as the
-    /// hand moved; at 50, half as far.
+    /// Retained for reading legacy Liquify properties. New selections use a
+    /// relative displacement; old Smear geometry already contains its strength.
     Strength,
+    /// Legacy horizontal Liquify track, migrated to DisplacementPosition.
+    DisplacementXKm,
+    /// Liquify relative position; one key holds both local coordinates.
+    DisplacementPosition,
+    /// Legacy vertical Liquify track, migrated to DisplacementPosition.
+    DisplacementYKm,
+    /// Width of the interpolated band outside the moved selection.
+    InterpolationDistanceKm,
     // Where `distance_km` and `push_bearing` were, before a warp pushed to a
     // *place* (spec.md 6.3). The ids are gone with the table rows: a property
     // no tool declares can still be held by an object from an older file, and
@@ -350,6 +355,8 @@ pub enum PropDefault {
     LonLat(f64, f64),
     /// An index into [`PropSpec::variants`].
     Enum(u8),
+    /// Relative position in kilometres.
+    Offset([f32; 2]),
 }
 
 impl PropDefault {
@@ -367,6 +374,7 @@ impl PropDefault {
                 lat: lat.clamp(-90.0, 90.0),
             }),
             Self::Enum(v) => PropValue::Enum(v),
+            Self::Offset(v) => PropValue::Offset(v),
         }
     }
 
@@ -378,6 +386,7 @@ impl PropDefault {
             Self::Angle(_) => PropKind::Angle,
             Self::LonLat(_, _) => PropKind::LonLat,
             Self::Enum(_) => PropKind::Enum,
+            Self::Offset(_) => PropKind::Offset,
         }
     }
 }
@@ -580,6 +589,7 @@ pub const STAMP_SPACES: &[&str] = &[
     "compact_miller",
     "equidistant_30",
     "equidistant_45",
+    "orthographic",
 ];
 /// Variants of [`PropId::FillMode`].
 pub const FILL_MODES: &[&str] = &["filled", "perimeter", "filled_gradient"];
@@ -731,14 +741,21 @@ const LIQUIFY: &[PropSpec] = &[
     modifier_stamp!(),
     modifier_size!(),
     num(
-        PropId::Strength,
-        "Strength",
+        PropId::InterpolationDistanceKm,
+        "Interpolation distance",
         100.0,
         0.0,
-        100.0,
-        Unit::Percent,
+        40000.0,
+        Unit::Kilometres,
     ),
     num(PropId::Feather, "Feather", 0.0, 0.0, 1.0, Unit::None),
+    PropSpec {
+        id: PropId::DisplacementPosition,
+        label: "Displacement position",
+        default: PropDefault::Offset([0.0, 0.0]),
+        unit: Unit::Kilometres,
+        ..pos(PropId::Position, "Position")
+    },
 ];
 
 const WARP: &[PropSpec] = &[
@@ -1243,7 +1260,13 @@ pub fn common_specs(tool: ToolKind) -> &'static [PropSpec] {
 
 /// Every property of `tool`, common first then tool-specific.
 pub fn all_specs(tool: ToolKind) -> impl Iterator<Item = &'static PropSpec> {
-    common_specs(tool).iter().chain(tool_specs(tool))
+    const ORIGIN: PropSpec = frozen(pos(PropId::StampOrigin, "Stamp origin"));
+    common_specs(tool).iter().chain(tool_specs(tool)).chain(
+        tool_specs(tool)
+            .iter()
+            .any(|s| s.id == PropId::StampSpace)
+            .then_some(&ORIGIN),
+    )
 }
 
 /// Looks up one property's spec for a tool.
@@ -1648,6 +1671,12 @@ mod tests {
                 // exactly as a patch's did (spec.md 8.7, D55).
                 (ToolKind::Macro, PropId::StampSpace),
             ]
+            .into_iter()
+            .flat_map(|(tool, id)| {
+                std::iter::once((tool, id))
+                    .chain((id == PropId::StampSpace).then_some((tool, PropId::StampOrigin)))
+            })
+            .collect::<Vec<_>>()
         );
     }
 
@@ -1743,7 +1772,7 @@ mod tests {
     /// one of them has a feather. Stated as a rule so a fifth modifier cannot
     /// ship with a different set by accident.
     #[test]
-    fn every_modifier_is_a_feathered_swept_stamp() {
+    fn every_modifier_is_a_swept_stamp() {
         for tool in ToolKind::ALL.into_iter().filter(|t| t.is_modifier()) {
             for id in [
                 PropId::Position,
@@ -1752,10 +1781,15 @@ mod tests {
                 PropId::Enabled,
                 PropId::SizeKm,
                 PropId::StampSpace,
-                PropId::Feather,
             ] {
                 assert!(spec_for(tool, id).is_some(), "{tool:?} is missing {id:?}");
             }
+            let transition = if tool == ToolKind::Liquify {
+                PropId::InterpolationDistanceKm
+            } else {
+                PropId::Feather
+            };
+            assert!(spec_for(tool, transition).is_some());
             // And none of them carries a speed or a direction of its own: what
             // it writes is what it read.
             for id in [PropId::Speed, PropId::Direction, PropId::DirectionMode] {

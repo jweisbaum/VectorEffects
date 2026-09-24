@@ -6,6 +6,10 @@ import type { StampSpace } from "./StampSpace";
  */
 export type EraseStroke = {
 /**
+ * Globe view centre frozen when a px stroke begins.
+ */
+projection_origin?: [number, number],
+/**
  * Pointer positions as `[lon, lat]`, in the order they were drawn.
  */
 points: Array<[number, number]>,

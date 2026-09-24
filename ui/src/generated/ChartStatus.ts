@@ -21,7 +21,7 @@ bounds: Array<number> | null,
  */
 error: string | null,
 /**
- * A token that changes whenever the directory does, so the map's tile
- * addresses change with it.
+ * An exact JavaScript integer that changes with the directory or palette,
+ * so cached tile addresses follow the application theme.
  */
 token: number, };

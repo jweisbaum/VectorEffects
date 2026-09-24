@@ -10,7 +10,19 @@ import type { PathPoint } from "./PathPoint";
  * stamp are brush-like *because* all three send a [`Self::Stroke`], not
  * because three separate code paths were written to match.
  */
-export type Gesture = { "kind": "stroke",
+export type Gesture = { "kind": "relocate",
+/**
+ * The source brush path, as longitude/latitude pairs.
+ */
+points: Array<[number, number]>,
+/**
+ * Where the second gesture grabbed the selection.
+ */
+from: [number, number],
+/**
+ * Where that grab was released.
+ */
+to: [number, number], } | { "kind": "stroke",
 /**
  * Pointer positions as `[lon, lat]`, in the order they were drawn.
  */

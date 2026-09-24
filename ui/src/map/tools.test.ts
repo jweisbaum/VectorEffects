@@ -10,11 +10,11 @@ import { describe, expect, it } from "vitest";
 
 import type { ToolOptionSpec } from "../generated/ToolOptionSpec";
 import type { ToolSchema } from "../generated/ToolSchema";
-import type { Camera } from "./camera";
+import { project, unproject, type Camera } from "./camera";
 import { footprintRadii, KM_PER_DEGREE } from "./footprint";
-import { OP_POINTS } from "./renderer";
 import {
   choiceOf,
+  relocationPoints,
   cloneSourceCamera,
   convertSizes,
   defaultState,
@@ -374,6 +374,38 @@ describe("sizes in px and km", () => {
 });
 
 describe("frozenOptions", () => {
+  it("freezes globe aspect and pixel scale independently of the stamp location", () => {
+    const globe: Camera = {centerLon: 175, centerLat: 72, pxPerDeg: 8, projection: "orthographic"};
+    const state: ToolState = {unit: "px", values: {SizeKm: {kind: "number", value: 208}}};
+    const sent = frozenOptions(state, brush, globe, 75, -150);
+    expect(sent).toContainEqual({property: "StampSpace", value: {kind: "choice", index: 15}});
+    expect(sent).toContainEqual({property: "StampOrigin", value: {kind: "position", lon: 175, lat: 72}});
+    expect(sent).toContainEqual({property: "SizeKm", value: {kind: "number", value: 26*KM_PER_DEGREE}});
+  });
+  it("measures globe presets in screen axes near the limb", () => {
+    const globe: Camera = {centerLon: 179, centerLat: 75, pxPerDeg: 8, projection: "orthographic"};
+    const view = {width: 1000, height: 900};
+    const from = {x: 760, y: 390}, to = {x: 870, y: 450};
+    const a = unproject(globe, view, from), b = unproject(globe, view, to);
+    for (const shape of ["rect", "square", "circle"] as const) {
+      const extent = perimeterExtent([a.lon,a.lat], [b.lon,b.lat], shape, "orthographic", globe);
+      const centre = project(globe, view, {lon: extent.centre[0], lat: extent.centre[1]});
+      expect(centre.x).toBeCloseTo(815, 8);
+      expect(centre.y).toBeCloseTo(shape === "square" ? 445 : 420, 8);
+      expect(extent.halfWidthKm/KM_PER_DEGREE*8).toBeCloseTo(55, 8);
+      expect(extent.halfHeightKm/KM_PER_DEGREE*8).toBeCloseTo(shape === "square" ? 55 : 30, 8);
+    }
+  });
+  it("keeps globe curve control points in the same screen plane as the committed curve", () => {
+    const globe: Camera = {centerLon: -30, centerLat: 60, pxPerDeg: 8, projection: "orthographic"};
+    const view = {width: 1000, height: 900};
+    const ll = (x: number, y: number): [number,number] => {const p = unproject(globe, view, {x,y}); return [p.lon,p.lat];};
+    const path = flattenPath([{at: ll(750,350), out_handle: ll(880,350)}, {at: ll(800,550), in_handle: ll(880,550)}], globe);
+    const midpoint = path[12]!;
+    const p = project(globe,view,{lon:midpoint[0],lat:midpoint[1]});
+    expect(p.x).toBeCloseTo((750+3*880+3*880+800)/8, 8);
+    expect(p.y).toBeCloseTo(450, 8);
+  });
   it("keeps a one-pixel nib below one kilometre when zoomed in", () => {
     const state: ToolState = { values: { SizeKm: { kind: "number", value: 1 } }, unit: "px" };
     const zoomed: Camera = { ...camera, pxPerDeg: 512, projection: "mercator" };
@@ -682,33 +714,8 @@ describe("operatorOf", () => {
     expect(spec?.points?.[1]?.[1]).toBeGreaterThan(250);
   });
 
-  /**
-   * A liquify's stamps carry the pointer's movement, scaled by the strength
-   * (spec.md 6.3); thinning a long stroke keeps the whole movement, so the
-   * field is dragged as far by the preview as by the commit.
-   */
-  it("gives a liquify each stamp's movement and keeps it through thinning", () => {
-    const points: [number, number][] = [];
-    for (let i = 0; i <= 200; i++) points.push(at(camera.centerLon + i * 0.01, camera.centerLat));
-    const spec = operatorOf(
-      "liquify",
-      state({
-        Strength: { kind: "number", value: 50 },
-        SizeKm: { kind: "number", value: 100 },
-        Feather: { kind: "number", value: 0.5 },
-      }),
-      stroke(...points),
-      camera,
-      view,
-    );
-    expect(spec?.kind).toBe("smear");
-    expect(spec?.points?.length).toBe(OP_POINTS);
-    expect(spec?.deltas?.[0]).toEqual([0, 0]);
-    const whole = (spec?.deltas ?? []).reduce((sum, [dx]) => sum + dx, 0);
-    // 2 degrees of travel at the camera's scale, halved by the strength.
-    expect(whole).toBeCloseTo(2 * camera.pxPerDeg * 0.5, 6);
-    expect(spec?.radiusPx).toBeGreaterThan(0);
-    expect(spec?.feather).toBe(0.5);
+  it("selects with Liquify without displacing the field during the first gesture", () => {
+    expect(operatorOf("liquify", state({SizeKm: {kind: "number", value: 100}}), stroke(at(10,20),at(15,20)), camera, view)).toBeNull();
   });
 
   /**
@@ -975,4 +982,28 @@ describe("perimeterExtent", () => {
     expect(across.halfWidthKm).toBeCloseTo(KM_PER_DEGREE, 6);
     expect(across.centre[0]).toBeCloseTo(180, 9);
   });
+});
+
+describe("Liquify destination geometry", () => {
+  it("preserves pixel offsets near the globe limb and across the dateline", () => {
+    const camera: Camera = {centerLon:179, centerLat:70, pxPerDeg:10, projection: "orthographic"};
+    const view = {width:1000,height:800};
+    const geo = (x:number,y:number): [number,number] => {const p=unproject(camera,view,{x,y}); return [p.lon,p.lat];};
+    const points=[geo(860,350),geo(910,390)];
+    const state: ToolState = {unit:"px", values:{SizeKm:{kind:"number",value:50}}};
+    const moved=relocationPoints({kind:"relocate",points,from:geo(880,370),to:geo(780,410)},state,camera);
+    moved.forEach((p,i) => {
+      const a=project(camera,view,{lon:points[i]![0],lat:points[i]![1]});
+      const b=project(camera,view,{lon:p[0],lat:p[1]});
+      expect(b.x-a.x).toBeCloseTo(-100,7); expect(b.y-a.y).toBeCloseTo(40,7);
+    });
+  });
+});
+
+it("retains zero interpolation distance when freezing and switching units", () => {
+  const schema: ToolSchema = {...brush, tool: "liquify", options: [option({property:"InterpolationDistanceKm",unit:"kilometres",min:0,default:{kind:"number",value:0}})]};
+  const start: ToolState = {unit:"km",values:{InterpolationDistanceKm:{kind:"number",value:0}}};
+  const pixels=convertSizes(start,schema,"px",camera,40);
+  expect(pixels.values.InterpolationDistanceKm).toEqual({kind:"number",value:0});
+  expect(frozenOptions(pixels,schema,camera,40).find(o=>o.property==="InterpolationDistanceKm")?.value).toEqual({kind:"number",value:0});
 });

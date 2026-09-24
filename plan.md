@@ -1,5 +1,177 @@
 # VectorEffects — Implementation Plan
 
+**2026-09-24: Prepare 0.1.15 Beta.** Version manifests and lockfiles advance
+together. Release notes cover globe pixel footprints, capture detail, Displace,
+workspace improvements, preset themes and custom application colours. The
+v0.1.15 tag starts the existing four-platform release workflow; publication is
+gated on successful builds and complete installer checksums.
+
+**2026-09-24: Custom application colours.** Appearance → Customize starts
+from a preset and offers colour pickers, hex inputs and a draft preview, with
+expandable interface, map and chart controls. Save selects a persistent Custom
+palette; Cancel discards drafts and Reset colors restores the base. Preset
+switching retains the saved custom colours. Preferences validate known roles
+and RGB values and roll back failed writes. Changes while Custom remains
+selected refresh overlays, basemap textures and chart URLs; queued chart
+requests keep their original palette and directory identity.
+
+Validation: 900 frontend tests passed (one skipped), plus focused editor tests
+after the final swatch styling. The 257 app unit tests and 17 settings/backdrop
+integration cases passed (one optional chart case ignored). Production build,
+Clippy and offline checks passed. Native WebKit verified editing, the Custom
+dropdown swatches, preset switching, cancel, globe colour refreshes, distinct
+chart tokens and unchanged project state. Restart persistence and failed-save
+rollback are covered by integration tests. The full Rust workspace suite and
+formatting checks also passed.
+
+**2026-09-24: Theme palette previews.** The Appearance dropdown shows five
+catalogue colour swatches beside every theme name and in the closed control.
+A check marks the saved choice. Arrow keys browse without saving; Enter
+selects, while Escape, Tab, outside focus and outside presses dismiss.
+
+Validation: 894 frontend tests passed (one skipped), including palette,
+keyboard, dismissal and failed-save checks. Production build and offline
+checks passed. Native WebKit verified all six palettes, unclipped names and
+rows, light/dark presentation, keyboard selection and saved preferences.
+
+**2026-09-24: Application theme preferences.** Settings → Appearance offers
+Original (Midnight), Sage & Teal, Ocean, Plum, Ember and Paper. The choice
+persists globally, including without an open project; old preferences retain
+Sage & Teal. A shared catalogue drives DOM roles, canvas interactions, basemap
+and chart colours. Projected basemap textures refresh on a theme change, and
+chart URLs include the requested palette with exact JavaScript integer tokens.
+Queued chart requests retain their named palette. Settings is accessible from
+the start page. Field ramps, glyph preferences, project data and history stay
+independent; Displace retains its orange destination outline.
+
+Validation: 891 frontend tests passed (one skipped), plus focused cursor/theme
+checks after the final cursor update. The 254 app unit tests, new catalogue
+test, and 15 settings/backdrop integration cases passed (one optional real-chart
+case ignored). Production build, Clippy, formatting and offline checks passed.
+Native WebKit exercised all six themes, globe texture refreshes, start-page
+Settings, light-theme glyph previews, and a new project retaining the theme.
+Tests cover restart persistence, failed saves, unknown preferences, unchanged
+project data, readable text contrast, and distinct lossless chart tokens.
+
+**2026-09-24: Start-page spacing and Project menu.** Recovered work has top and
+bottom padding and a gap between its explanation and list. The Recent/Clear row
+has its own vertical padding. The editor's New, Open, Save, Save As and Close
+buttons now share a Project dropdown, retaining their existing handlers and
+save guards. Arrow keys navigate; Escape, Tab and outside focus/clicks dismiss.
+
+Validation: 18 focused frontend tests, type checking, production build and the
+offline check passed. Native WebKit verified the section spacing, all five
+menu entries, popup placement and Escape focus restoration.
+
+**2026-09-24: Sage/teal application theme and Displace naming.** Shared theme
+roles apply the requested five-colour palette to panels, inputs, menus,
+buttons, dialogs, timeline, map chrome and basemap. Chart land matches the
+basemap. Displace uses burnt-orange destination outlines and connectors.
+The tool label, new object names, shortcut editor, hints and help now say
+Displace; its persisted ID remains compatible with existing projects.
+
+Validation: 875 frontend tests passed (one skipped), along with the chart
+suite, 44 tool-catalogue tests, five backdrop tests, type checking, production
+build, Clippy, formatting and the offline check. Native WebKit captures
+verified the new globe palette, source/destination outlines, connector and
+Displace controls; selection, commit, undo and cancellation checks passed.
+
+**2026-09-24: Liquify feather and placement affordances.** Feather softens the
+inner destination rim while preserving the core and always healing the source.
+Live brush and pending-selection previews draw union boundaries. Selected
+Liquify objects show both perimeters and a surface-following centre connector.
+Relative displacement uses one paired position track; schema 13 migrates the
+former X/Y axes without changing evaluated frames.
+
+Validation: 1,330 workspace test cases passed (24 ignored), plus the new
+bounded-migration regression passed in the focused core run. All workspace
+documentation tests passed on rerun after a transient dependency-artifact
+collision. Frontend tests passed (875, one skipped), as did type checking,
+Clippy, formatting, production build and the offline check. Native WebKit globe
+captures verified a curved stroke's union boundary, both committed perimeters,
+the centre connector, Feather, and the single Displacement position row.
+Regression coverage includes full feather, preserved cores, zero-distance
+source healing, globe frames, old animated-axis migration, shared keys,
+save/load and undo/redo.
+
+**2026-09-24: Liquify selection and relocation (supersedes D56 for new objects).**
+Brush a source region, release, then drag the selection to a new position.
+The interior copies its source exactly; harmonic interpolation heals the
+vacated region and a configurable band outside the destination. Interpolation
+distance shares the brush's pixel/geographic unit and supports zero. Selection
+Position, relative Displacement position, and Interpolation distance animate
+independently; Shape animation is unavailable. Shift-drag re-aims the relative
+destination as one undoable edit. Legacy Smear objects retain their evaluation.
+The CPU owns transient deterministic transition lattices shared by scene
+copies; the GPU declines the new operator. Nothing rendered is project data.
+
+Validation: the full Rust suite passed (1,326 tests, 24 ignored), as did
+874 frontend tests (one skipped), Clippy, formatting, production build and the
+offline check. Regression cases cover a preserved speed/direction gradient,
+overlap, zero-distance source healing, unchanged exterior, harmonic transition
+accuracy, long-distance moves, globe pixel frames, poles/dateline, independent
+keys, save/load, undo/redo, GPU fallback, cache stability, and legacy Smear
+round-trips. Native WebKit verified that the first release only selects, the
+second release commits once, one undo removes the move, and Escape/tool changes
+cancel pending selections. Native globe framebuffer captures show the source,
+destination, healed area and transition. Cold interpolation for the test cases
+takes 29–124 ms; subsequent samples reuse the scene's lattice.
+
+**2026-09-24: Globe pixel-tool geometry.** Pixel tools freeze an orthographic
+frame and its view centre at creation instead of committing equirectangular
+geometry after a screen-shaped hover. CPU and GPU use that frame for all
+creation tools; Shape Fill presets, polygons and curve controls use screen
+axes for both preview and commit. Outlines are lifted through the stored frame,
+and erasers preserve the same footprint for objects and imported/captured data.
+The appended space index and defaulted origin preserve existing documents;
+cache version is advanced.
+
+Validation: the full Rust suite passed (1,319 tests, 24 ignored), followed by
+the additional eraser regression; all four globe integration tests pass.
+The tests cover every sized tool near the limb, polar/dateline aspects,
+Shape Fill presets/polygons, Intensity's full committed area, erasing, and
+save/load plus Undo/Redo. Native Metal parity passed all seven tests, including
+the new globe coverage reference (30,665 general parity samples; maximum
+speed error 0.0079 m/s, direction error 0.008°). Native WebKit before/after
+images show circle, polygon, rectangle and square-stroke coverage matching
+the px preview. The same 800 × 720 scene drew in 5.75 ms before and 4.70 ms
+after. Frontend tests, production build, Clippy, formatting and offline checks
+passed. Existing shapes retain their authored geometry; new drawings receive
+the frozen globe frame.
+
+**2026-09-24: Capture detail and globe selection outlines.** Region copies and
+macro recordings now share a finer CPU capture lattice, targeting 0.05° and
+at least 512 intervals across local selections, bounded to 2048 nodes per
+side. The limit adjusts spacing to preserve the whole region. Rows bake in
+parallel without changing sample order. Patch sampling carries interpolated
+coverage into compositing, smoothing existing captures too while preserving
+the distinction between calm and undefined. The container remains compatible;
+the evaluator cache version is bumped. Selection and macro footprints follow
+geographic edges through the projection, breaking at horizons and seams.
+
+Validation: 1,315 Rust tests passed (24 ignored), 868 frontend tests passed
+(one skipped), and Clippy, formatting, production build and offline checks
+passed. Regression checks compare copied and saved-macro circular boundaries
+against positions 10 km inside and outside the source, verify old-capture
+coverage over an underlying field, and check globe edges near the poles and
+dateline. Native before/after images confirmed the copied patch and inserted
+macro match the source curve, and the globe outline follows the surface.
+The same 10° native copy went from 11 × 11 samples in 1 ms to 513 × 513 in
+28 ms; a separate 8° integration fixture took 63 ms. Existing recordings gain
+smoother edges; retaining additional source detail requires recapture.
+
+**2026-09-24: Maximized startup and stable tool row.** Launch maximized in the
+desktop work area. Keep the tool buttons centred independently of the selected
+tool's options, which occupy the row below and can widen the panel around that
+centre. Legend is now the final view option. The map's native focus ring is
+suppressed so its edges do not appear as blue bars above and below the panels.
+Validation: the frontend build, 864 frontend tests (one skipped), formatting
+and offline checks passed. Native WebKit confirmed maximized startup with full
+screen off, and exercised all 15 tools at 1024, 1440 and 1792 CSS-pixel widths
+with four sidebar layouts. The buttons stayed within 0.125 CSS pixels of their
+starting positions as the option rows widened; options stayed below the tools
+without overflowing. Legend's final position and toggle were checked.
+
 **2026-09-22: Open full screen.** The main Tauri window now starts in native
 full-screen mode on every launch, using the shared desktop window configuration.
 The initial mode is independent of whether the previous session left full screen.

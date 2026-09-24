@@ -251,7 +251,8 @@ pub fn raster_erased(erased: &[crate::scene::FlatRasterErasure], position: LonLa
         } else {
             Space::Geodesic
         };
-        let frame = Frame::in_space(origin, 0.0, 100.0, space);
+        let frame = Frame::in_space(origin, 0.0, 100.0, space)
+            .with_projection_origin(erasure.projection_origin.unwrap_or(origin));
         let chains: Vec<Vec<Local>> = erasure
             .chains
             .iter()
@@ -484,6 +485,51 @@ fn sample_layer(
         // accumulation buffer already holds, which at this point in the loop is
         // exactly everything below it in its layer (spec.md 6.3, 7.6).
         if let Some(modifier) = object.modifier {
+            if let Modifier::Relocate {
+                displacement,
+                distance,
+            } = modifier
+            {
+                if displacement == [0.0, 0.0]
+                    || object.frame.distance_m(position) > object.cap_radius_m
+                {
+                    continue;
+                }
+                let local = object.frame.to_local(position);
+                if !crate::relocate::affected(&object.shape, local, displacement, distance) {
+                    continue;
+                }
+                let source = crate::relocate::destination_point(local, displacement);
+                let read = |p| sample_layer(scene, span, index, object.frame.to_global(p), 0);
+                let (modified, modified_coverage) = if object.shape.distance(source)
+                    <= -object.feather * object.shape.feather_reference_m()
+                {
+                    read(source)
+                } else {
+                    object
+                        .transition
+                        .get_or_init(|| {
+                            crate::relocate::Transition::build(
+                                &object.shape,
+                                displacement,
+                                distance,
+                                object.feather,
+                                read,
+                            )
+                        })
+                        .sample(local)
+                };
+                let w = erased_factor(&object.erased, local) as f32;
+                if w == 1.0 {
+                    accumulated = modified;
+                    coverage = modified_coverage;
+                } else {
+                    accumulated.u += (modified.u - accumulated.u) * w;
+                    accumulated.v += (modified.v - accumulated.v) * w;
+                    coverage += (modified_coverage - coverage) * w;
+                }
+                continue;
+            }
             let Some(weight) = operator_weight(object, position) else {
                 continue;
             };
@@ -589,11 +635,11 @@ fn sample_layer(
             let Some(weight) = operator_weight(object, position) else {
                 continue;
             };
-            let Some(vector) = patch_sample(object, patch, position) else {
+            let Some((vector, source_coverage)) = patch_sample(object, patch, position) else {
                 continue;
             };
             let vector = with_motion(object, position, vector);
-            let w = weight as f32;
+            let w = weight as f32 * source_coverage;
             coverage = covered(object, coverage, w);
             accumulated = match object.edge_mode {
                 EdgeMode::Blend => Uv {
@@ -642,21 +688,24 @@ fn sample_layer(
 ///
 /// `None` where the capture has nothing: outside its lattice, or at a cell its
 /// source never covered.
-fn patch_sample(object: &FlatObject, patch: &FlatCapture, position: LonLat) -> Option<Uv> {
+fn patch_sample(object: &FlatObject, patch: &FlatCapture, position: LonLat) -> Option<(Uv, f32)> {
     let local = object.frame.to_local(position);
     // The lattice is read in the object's own frame, and a capture that
     // recorded a moving region has already moved the *frame* — anchor,
     // footprint and all (spec.md 8.7) — so there is nothing to subtract here.
-    let sample = patch.capture.sample_pick(
+    let (sample, coverage) = patch.capture.sample_pick_covered(
         patch.pick,
         patch.plane,
         local[0] / M_PER_DEGREE,
         local[1] / M_PER_DEGREE,
     )?;
-    Some(Uv {
-        u: sample[0],
-        v: sample[1],
-    })
+    Some((
+        Uv {
+            u: sample[0],
+            v: sample[1],
+        },
+        coverage,
+    ))
 }
 
 /// How much of a cell an object has written, after it (spec.md 8.5, D58).
@@ -778,7 +827,7 @@ fn modified_vector(modifier: Modifier, object: &FlatObject, position: LonLat, be
             }
         }
         // Handled by the caller, which has the scene a warp has to re-read.
-        Modifier::Warp(_) | Modifier::Smear => beneath,
+        Modifier::Warp(_) | Modifier::Smear | Modifier::Relocate { .. } => beneath,
     }
 }
 
@@ -878,6 +927,7 @@ mod erasure_tests {
     /// A one-stamp erasure over an imported layer, in one space or the other.
     fn stamp(at: LonLat, radius_m: f64, projected: bool) -> FlatRasterErasure {
         FlatRasterErasure {
+            projection_origin: None,
             projection: 0,
             chains: vec![vec![at]],
             radius_m,
@@ -973,6 +1023,7 @@ mod smear_tests {
             // when its first sample landed does; a real stroke's first stamp
             // carries none, which would leave the sum untested here.
             smear: vec![vec![[d, 0.0], [d, 0.0]]],
+            transition: Default::default(),
             capture: None,
             erases: false,
             motion: crate::scene::Motion::default(),
@@ -1091,6 +1142,7 @@ fn clone_source_position(object: &FlatObject, source: LonLat, position: LonLat) 
         // The displacement is replayed in the object's own space: a projected
         // patch is a map-space patch wherever it is read from.
         space: object.frame.space,
+        projection_origin: object.frame.projection_origin,
         rotation_deg: object.frame.rotation_deg,
         scale: object.frame.scale,
     };

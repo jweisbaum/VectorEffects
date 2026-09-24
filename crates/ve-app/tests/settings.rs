@@ -232,6 +232,152 @@ fn display_units_persist_without_changing_the_open_project() {
 }
 
 #[test]
+fn themes_persist_across_restarts_and_projects_without_editing_document_data() {
+    let root = TempRoot::new("themes");
+    let state = app(&root);
+    // Available before opening a project, and retained when one is created.
+    settings::theme_set(&state, "original".to_owned()).expect("theme without a project");
+    with_project(&state, "wind");
+    let before = projects::current(&state).unwrap().unwrap();
+    let document = || {
+        let session = state.session.lock().unwrap();
+        serde_json::to_value(&session.open.as_ref().unwrap().project).unwrap()
+    };
+    let stored = document();
+    for theme in ve_app::theme::themes() {
+        let saved = settings::theme_set(&state, theme.id.clone()).expect("theme");
+        assert_eq!(saved.theme, theme.id);
+        assert_eq!(settings::settings_of(&app(&root)).unwrap().theme, theme.id);
+        let after = projects::current(&state).unwrap().unwrap();
+        assert_eq!(before.revision, after.revision);
+        assert_eq!(before.dirty, after.dirty);
+        assert_eq!(document(), stored, "appearance must not enter project data");
+    }
+    let chosen = settings::settings_of(&state).unwrap().theme;
+    with_project(&state, "current");
+    assert_eq!(settings::settings_of(&state).unwrap().theme, chosen);
+    assert!(settings::theme_set(&state, "unknown".to_owned()).is_err());
+    assert_eq!(settings::settings_of(&state).unwrap().theme, chosen);
+}
+
+#[test]
+fn missing_and_unknown_themes_keep_the_current_default_and_other_preferences() {
+    use settings::{AppSettings, DistanceUnit};
+    for json in [
+        r#"{"distance_unit":"nm"}"#,
+        r#"{"theme":"unknown","distance_unit":"nm"}"#,
+    ] {
+        let settings: AppSettings = serde_json::from_str(json).unwrap();
+        let settings = settings.normalised();
+        assert_eq!(settings.theme, "sage");
+        assert_eq!(settings.distance_unit, DistanceUnit::Nm);
+    }
+}
+
+#[test]
+fn a_theme_that_cannot_be_saved_does_not_change_the_session() {
+    let root = TempRoot::new("theme-write-refused");
+    let state = app(&root);
+    let before = settings::settings_of(&state).unwrap();
+    std::fs::create_dir_all(state.paths.settings_file()).unwrap();
+    assert!(settings::theme_set(&state, "paper".to_owned()).is_err());
+    assert_eq!(settings::settings_of(&state).unwrap(), before);
+}
+
+#[test]
+fn custom_colours_survive_restarts_preset_switches_and_projects() {
+    let root = TempRoot::new("custom-theme");
+    let state = app(&root);
+    with_project(&state, "wind");
+    let document = || {
+        serde_json::to_value(&state.session.lock().unwrap().open.as_ref().unwrap().project).unwrap()
+    };
+    let before = document();
+    let custom = ve_app::theme::CustomTheme {
+        base: "paper".to_owned(),
+        colours: [
+            ("roles.accent", "#123456"),
+            ("map.land", "#abcdef"),
+            ("chart.deep", "#112233"),
+        ]
+        .into_iter()
+        .map(|(key, value)| (key.to_owned(), value.to_owned()))
+        .collect(),
+    };
+    let saved = settings::custom_theme_set(&state, custom.clone()).unwrap();
+    assert_eq!(saved.theme, "custom");
+    assert_eq!(saved.custom_theme, Some(custom.clone()));
+    assert_eq!(settings::settings_of(&app(&root)).unwrap(), saved);
+    assert_eq!(document(), before);
+    let palette = ve_app::theme::palette_for(&saved.theme, saved.custom_theme.as_ref());
+    assert_eq!(palette.land, [0xab, 0xcd, 0xef, 255]);
+    assert_eq!(palette.deep, [0x11, 0x22, 0x33, 255]);
+    assert_eq!(
+        palette.shallow,
+        ve_app::theme::chart_palette("paper").shallow
+    );
+    settings::theme_set(&state, "ocean".to_owned()).unwrap();
+    assert_eq!(
+        settings::settings_of(&state).unwrap().custom_theme,
+        Some(custom.clone())
+    );
+    settings::theme_set(&state, "custom".to_owned()).unwrap();
+    with_project(&state, "current");
+    assert_eq!(
+        settings::settings_of(&state).unwrap().custom_theme,
+        Some(custom)
+    );
+    assert_eq!(settings::settings_of(&state).unwrap().theme, "custom");
+}
+
+#[test]
+fn custom_colours_are_validated_and_failed_saves_restore_both_preferences() {
+    let root = TempRoot::new("custom-invalid");
+    let state = app(&root);
+    let before = settings::settings_of(&state).unwrap();
+    assert!(settings::theme_set(&state, "custom".to_owned()).is_err());
+    for (base, key, value) in [
+        ("unknown", "roles.accent", "#112233"),
+        ("sage", "roles.unknown", "#112233"),
+        ("sage", "map.land", "#xyzxyz"),
+        ("sage", "roles.text", "red"),
+        ("sage", "roles.panel", "url(remote)"),
+    ] {
+        let custom = ve_app::theme::CustomTheme {
+            base: base.to_owned(),
+            colours: [(key.to_owned(), value.to_owned())].into(),
+        };
+        assert!(settings::custom_theme_set(&state, custom.clone()).is_err());
+        assert_eq!(settings::settings_of(&state).unwrap(), before);
+        let invalid = settings::AppSettings {
+            theme: "custom".to_owned(),
+            custom_theme: Some(custom),
+            distance_unit: settings::DistanceUnit::Nm,
+            ..Default::default()
+        }
+        .normalised();
+        assert_eq!(invalid.theme, "sage");
+        assert!(invalid.custom_theme.is_none());
+        assert_eq!(invalid.distance_unit, settings::DistanceUnit::Nm);
+    }
+    let custom = ve_app::theme::CustomTheme {
+        base: "sage".to_owned(),
+        colours: Default::default(),
+    };
+    settings::custom_theme_set(&state, custom.clone()).unwrap();
+    settings::theme_set(&state, "ocean".to_owned()).unwrap();
+    let saved = settings::settings_of(&state).unwrap();
+    std::fs::remove_file(state.paths.settings_file()).unwrap();
+    std::fs::create_dir_all(state.paths.settings_file()).unwrap();
+    let mut changed = custom;
+    changed
+        .colours
+        .insert("roles.text".to_owned(), "#123456".to_owned());
+    assert!(settings::custom_theme_set(&state, changed).is_err());
+    assert_eq!(settings::settings_of(&state).unwrap(), saved);
+}
+
+#[test]
 fn glyph_appearance_is_independent_persistent_and_does_not_change_the_field() {
     use settings::{GlyphAppearance, GlyphSetting, GlyphStyle};
     let root = TempRoot::new("glyph-appearance");

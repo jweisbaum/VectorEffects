@@ -48,8 +48,8 @@ pub struct ChartStatus {
     pub bounds: Option<Vec<f64>>,
     /// What went wrong, where something did.
     pub error: Option<String>,
-    /// A token that changes whenever the directory does, so the map's tile
-    /// addresses change with it.
+    /// An exact JavaScript integer that changes with the directory or palette,
+    /// so cached tile addresses follow the application theme.
     pub token: u64,
 }
 
@@ -64,6 +64,8 @@ pub struct Backdrops {
     osm: Mutex<Option<Arc<ve_osm::Tiles>>>,
     /// A GIS file's features, by the path they were read from.
     vectors: Mutex<Vec<(PathBuf, Arc<Vectors>)>>,
+    /// Recent immutable chart URL palettes, including earlier custom edits.
+    palettes: Mutex<Vec<(u64, Palette)>>,
 }
 
 /// An indexed chart directory, and what it was opened from.
@@ -73,8 +75,6 @@ pub struct Charts {
     pub directory: PathBuf,
     /// The index.
     pub library: Library,
-    /// A token derived from the directory, for the tile addresses.
-    pub token: u64,
 }
 
 /// How many GIS files' geometry is held at once. A project has a handful of
@@ -84,17 +84,38 @@ const VECTORS_HELD: usize = 16;
 /// How many cells one tile may draw, coarse first.
 const CELL_BUDGET: usize = 16;
 
-fn token_of(text: &str) -> u64 {
-    // Only has to change when the text does, and be stable while it does not.
-    let hash = blake3::hash(text.as_bytes());
-    u64::from_le_bytes(
+fn token_of(text: &str, palette: &Palette) -> u64 {
+    // WebKit caches backdrop URLs across launches. Include the palette so a
+    // theme change cannot leave chart tiles in the previous colours.
+    let identity = format!("{text}\n{palette:?}");
+    let hash = blake3::hash(identity.as_bytes());
+    // The frontend carries this through JSON and back in a URL. Keep all bits
+    // within Number's exact-integer range so native token matching is lossless.
+    (u64::from_le_bytes(
         hash.as_bytes()[..8]
             .try_into()
             .unwrap_or([0, 0, 0, 0, 0, 0, 0, 0]),
-    ) | 1
+    ) & ((1_u64 << 53) - 1))
+        | 1
 }
 
 impl Backdrops {
+    /// Resolve an immutable chart URL without substituting newly edited colours.
+    fn palette_for_token(&self, directory: &str, token: u64) -> Option<Palette> {
+        self.palettes
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .find(|(held, palette)| *held == token && token_of(directory, palette) == token)
+            .map(|(_, palette)| *palette)
+            .or_else(|| {
+                crate::theme::themes()
+                    .iter()
+                    .map(crate::theme::Theme::chart_palette)
+                    .find(|palette| token_of(directory, palette) == token)
+            })
+    }
+
     /// The chart directory named by the settings, indexed on first use.
     ///
     /// A directory that changes is re-indexed; one that is unset or will not
@@ -116,7 +137,6 @@ impl Backdrops {
             .inspect_err(|err| tracing::warn!(%err, directory, "chart directory"))
             .ok()?;
         let charts = Arc::new(Charts {
-            token: token_of(directory),
             directory: path,
             library,
         });
@@ -125,13 +145,22 @@ impl Backdrops {
     }
 
     /// What to tell the frontend about the chart directory.
-    pub fn chart_status(&self, directory: &str) -> ChartStatus {
+    pub fn chart_status(&self, directory: &str, palette: Palette) -> ChartStatus {
+        let token = token_of(directory, &palette);
+        {
+            let mut palettes = self.palettes.lock().unwrap_or_else(PoisonError::into_inner);
+            palettes.retain(|(held, _)| *held != token);
+            palettes.push((token, palette));
+            if palettes.len() > 32 {
+                palettes.remove(0);
+            }
+        }
         let empty = ChartStatus {
             directory: directory.to_owned(),
             cells: 0,
             bounds: None,
             error: None,
-            token: token_of(directory),
+            token,
         };
         if directory.trim().is_empty() {
             return empty;
@@ -150,7 +179,6 @@ impl Backdrops {
                     .library
                     .bounds()
                     .map(|b| vec![b.west, b.south, b.east, b.north]),
-                token: charts.token,
                 ..empty
             },
             None => ChartStatus {
@@ -226,12 +254,30 @@ fn frame_of(id: TileId) -> TileFrame {
 /// what is being painted, which is what lets it be drawn while an edit is
 /// in flight.
 pub fn tile(state: &AppState, backdrop: Backdrop, id: TileId) -> Option<Vec<u8>> {
+    tile_for_token(state, backdrop, id, None)
+}
+
+/// A queued chart request keeps the palette named by its immutable URL even
+/// if the application switches themes while it is being drawn.
+pub fn tile_for_token(
+    state: &AppState,
+    backdrop: Backdrop,
+    id: TileId,
+    token: Option<u64>,
+) -> Option<Vec<u8>> {
     let frame = frame_of(id);
     match backdrop {
         Backdrop::Chart => {
             let directory = state.chart_directory();
+            let palette = match token {
+                Some(token) => state.backdrops.palette_for_token(&directory, token)?,
+                None => {
+                    let settings = crate::settings::settings_of(state).ok()?;
+                    crate::theme::palette_for(&settings.theme, settings.custom_theme.as_ref())
+                }
+            };
             let charts = state.backdrops.charts(&directory)?;
-            s57::draw_tile(&charts.library, frame, &Palette::default(), CELL_BUDGET)
+            s57::draw_tile(&charts.library, frame, &palette, CELL_BUDGET)
         }
         Backdrop::Osm => {
             let tiles = state
@@ -448,9 +494,44 @@ mod tests {
 
     #[test]
     fn a_token_follows_the_directory_and_is_never_zero() {
-        assert_eq!(token_of("/charts"), token_of("/charts"));
-        assert_ne!(token_of("/charts"), token_of("/other"));
-        assert_ne!(token_of(""), 0, "zero would read as no token at all");
+        let palette = Palette::default();
+        assert_eq!(token_of("/charts", &palette), token_of("/charts", &palette));
+        assert_ne!(token_of("/charts", &palette), token_of("/other", &palette));
+        assert_ne!(
+            token_of("", &palette),
+            0,
+            "zero would read as no token at all"
+        );
+        let tokens: std::collections::BTreeSet<_> = crate::theme::themes()
+            .iter()
+            .map(|theme| token_of("/charts", &theme.chart_palette()))
+            .collect();
+        assert_eq!(
+            tokens.len(),
+            crate::theme::themes().len(),
+            "each palette needs its own immutable URL"
+        );
+        assert!(tokens.iter().all(|token| *token < (1_u64 << 53)));
+    }
+
+    #[test]
+    fn custom_chart_edits_keep_the_old_url_palette_and_get_a_new_token() {
+        let backdrops = Backdrops::default();
+        let original = Palette::default();
+        let first = backdrops.chart_status("", original);
+        let changed = Palette {
+            land: [1, 2, 3, 255],
+            ..original
+        };
+        let second = backdrops.chart_status("", changed);
+        assert_ne!(first.token, second.token);
+        assert!(second.token < (1_u64 << 53));
+        assert_eq!(backdrops.palette_for_token("", first.token), Some(original));
+        assert_eq!(backdrops.palette_for_token("", second.token), Some(changed));
+        assert_eq!(
+            backdrops.palette_for_token("another directory", second.token),
+            None
+        );
     }
 
     #[test]

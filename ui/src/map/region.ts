@@ -214,6 +214,22 @@ export function regionRing(region: Region): Array<[number, number]> {
   }
 }
 
+/** Subdivide geographic edges before projecting them onto a curved map.
+ * Rectangles retain their explicit longitude span, including the whole earth;
+ * polygon edges follow the short route across the antimeridian. */
+export function regionOutline(region: Region): Array<[number, number]> {
+  const ring = regionRing(region);
+  const outline: Array<[number, number]> = [];
+  for (let i = 0; i < ring.length; i++) {
+    const a = ring[i]!, b = ring[(i + 1) % ring.length]!;
+    const dx = region.kind === "rect" ? b[0] - a[0] : normalizeLon(b[0] - a[0]);
+    const dy = b[1] - a[1];
+    const steps = Math.max(1, Math.ceil(Math.hypot(dx, dy) / 4));
+    for (let j = 0; j < steps; j++) outline.push([a[0] + dx * j / steps, a[1] + dy * j / steps]);
+  }
+  return outline;
+}
+
 /**
  * The region's bounding box in degrees, which is what a capture is taken over.
  *

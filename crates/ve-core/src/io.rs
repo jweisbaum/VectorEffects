@@ -41,7 +41,92 @@ const MIGRATIONS: &[(u32, Migration)] = &[
     (9, a_warp_pushes_to_a_place),
     (10, layers_carry_the_parameter),
     (11, a_turn_has_a_sense_and_an_amount),
+    (12, liquify_displacement_is_one_position),
 ];
+
+/// Join the former two scalar tracks. Matching key times/easing retain their
+/// sparse keys; independently edited legacy axes are sampled at each project
+/// step, preserving every evaluated frame even when their easing differs.
+fn liquify_displacement_is_one_position(value: &mut Value) -> Result<()> {
+    use crate::{
+        keyframe::Animatable,
+        value::{Interpolation, PropValue},
+    };
+    let Some(layers) = value.get_mut("layers").and_then(Value::as_array_mut) else {
+        return Ok(());
+    };
+    for layer in layers {
+        let Some(objects) = layer.get_mut("objects").and_then(Value::as_array_mut) else {
+            continue;
+        };
+        for object in objects {
+            if object.get("tool").and_then(Value::as_str) != Some("liquify") {
+                continue;
+            }
+            let Some(props) = object.get_mut("props").and_then(Value::as_object_mut) else {
+                continue;
+            };
+            if props.contains_key("displacement_position") {
+                continue;
+            }
+            let axis = |v: Option<Value>| -> Result<Animatable> {
+                Ok(match v {
+                    Some(v) => serde_json::from_value(v)?,
+                    None => Animatable::constant(PropValue::F32(0.0)),
+                })
+            };
+            let x = axis(props.remove("displacement_x_km"))?;
+            let y = axis(props.remove("displacement_y_km"))?;
+            let pair = |a: PropValue, b: PropValue| {
+                PropValue::Offset([a.as_f32().unwrap_or(0.0), b.as_f32().unwrap_or(0.0)])
+            };
+            let mut joined = Animatable::constant(pair(x.base(), y.base()));
+            let same = x.keys().len() == y.keys().len()
+                && x.keys()
+                    .iter()
+                    .zip(y.keys())
+                    .all(|(a, b)| a.step == b.step && a.interp == b.interp);
+            if same {
+                for (a, b) in x.keys().iter().zip(y.keys()) {
+                    joined.set_key(a.step, pair(a.value, b.value), a.interp);
+                }
+            } else {
+                let first = x
+                    .keys()
+                    .iter()
+                    .chain(y.keys())
+                    .map(|k| k.step)
+                    .min()
+                    .unwrap_or(0);
+                let last = x
+                    .keys()
+                    .iter()
+                    .chain(y.keys())
+                    .map(|k| k.step)
+                    .max()
+                    .unwrap_or(0);
+                if last >= crate::project::MAX_STEPS {
+                    return Err(CoreError::Migration {
+                        from: 12,
+                        reason: "Liquify displacement key exceeds the supported timeline".into(),
+                    });
+                }
+                for step in first..=last {
+                    joined.set_key(
+                        step,
+                        pair(x.value_at(step), y.value_at(step)),
+                        Interpolation::Linear,
+                    );
+                }
+            }
+            props.insert(
+                "displacement_position".into(),
+                serde_json::to_value(joined)?,
+            );
+        }
+    }
+    Ok(())
+}
 
 /// Version 11 stored a turn as one signed number of degrees, `turn_deg`.
 ///
@@ -1149,6 +1234,68 @@ mod tests {
     }
 
     #[test]
+    fn old_liquify_axes_become_one_track_without_changing_any_frame() {
+        for matching in [true, false] {
+            let mut project = sample();
+            let mut object = Object::new(ToolKind::Liquify, "Legacy relocation", 24);
+            object.props.remove(PropId::DisplacementPosition);
+            let mut x = Animatable::constant(PropValue::F32(50.0));
+            let mut y = Animatable::constant(PropValue::F32(-20.0));
+            x.set_key(2, PropValue::F32(100.0), Interpolation::EaseInOut);
+            x.set_key(12, PropValue::F32(300.0), Interpolation::Linear);
+            y.set_key(
+                if matching { 2 } else { 4 },
+                PropValue::F32(-50.0),
+                if matching {
+                    Interpolation::EaseInOut
+                } else {
+                    Interpolation::Step
+                },
+            );
+            y.set_key(12, PropValue::F32(120.0), Interpolation::Linear);
+            object.props.insert(PropId::DisplacementXKm, x.clone());
+            object.props.insert(PropId::DisplacementYKm, y.clone());
+            let id = object.id;
+            project.layers[0].objects.push(object);
+            let mut old = serde_json::to_value(&project).unwrap();
+            old["schema_version"] = Value::from(12);
+            let loaded = from_json(&old.to_string()).unwrap();
+            let props = &loaded.object(id).unwrap().props;
+            let joined = props.get(PropId::DisplacementPosition).unwrap();
+            assert_eq!(joined.base(), PropValue::Offset([50.0, -20.0]));
+            for step in 0..24 {
+                assert_eq!(
+                    joined.value_at(step).as_offset().unwrap(),
+                    [
+                        x.value_at(step).as_f32().unwrap(),
+                        y.value_at(step).as_f32().unwrap()
+                    ]
+                );
+            }
+            if matching {
+                assert_eq!(joined.keys().len(), 2);
+            }
+            assert!(props.get(PropId::DisplacementXKm).is_none());
+            assert!(props.get(PropId::DisplacementYKm).is_none());
+            assert_eq!(
+                from_json(&to_canonical_json(&loaded).unwrap()).unwrap(),
+                loaded
+            );
+        }
+    }
+
+    #[test]
+    fn liquify_migration_refuses_unbounded_legacy_key_ranges() {
+        let mut value = serde_json::json!({"layers":[{"objects":[{
+            "tool":"liquify", "props":{"displacement_x_km":{
+                "base":{"f32":0.0}, "keys":[{"step":u32::MAX,
+                "value":{"f32":1.0}, "interp":"linear"}]
+            }}
+        }]}]});
+        assert!(liquify_displacement_is_one_position(&mut value).is_err());
+    }
+
+    #[test]
     fn the_version_marker_can_be_read_without_parsing() {
         let dir = TempDir::new();
         let path = dir.path("t.veproj");
@@ -1734,6 +1881,7 @@ mod tests {
         project.layers[0]
             .erased
             .push(crate::document::RasterErasure {
+                projection_origin: None,
                 projection: 0,
                 chains: vec![vec![LonLat {
                     lon: HOSTILE[2],

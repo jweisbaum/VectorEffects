@@ -119,7 +119,7 @@ impl Tool {
             Self::Divergence => "Divergence",
             Self::Turn => "Rotation",
             Self::Warp => "Warp",
-            Self::Liquify => "Liquify",
+            Self::Liquify => "Displace",
             Self::Patch => "Patch",
             Self::Macro => "Macro",
         }
@@ -153,6 +153,15 @@ pub struct PathPoint {
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[ts(export, export_to = "Gesture.ts")]
 pub enum Gesture {
+    /// Brush a source region, then translate it without deforming its interior.
+    Relocate {
+        /// The source brush path, as longitude/latitude pairs.
+        points: Vec<[f64; 2]>,
+        /// Where the second gesture grabbed the selection.
+        from: [f64; 2],
+        /// Where that grab was released.
+        to: [f64; 2],
+    },
     /// A freehand polyline: the brush, the mask and the clone stamp.
     Stroke {
         /// Pointer positions as `[lon, lat]`, in the order they were drawn.
@@ -191,6 +200,7 @@ impl Gesture {
     fn label(&self) -> &'static str {
         match self {
             Self::Stroke { .. } => "a stroke",
+            Self::Relocate { .. } => "a selection and move",
             Self::Point { .. } => "a click",
             Self::Extent { .. } => "a drag",
             Self::Ring { .. } => "a polygon",
@@ -250,14 +260,6 @@ pub struct Created {
 ///
 /// Every mode question below asks this rather than the object, because the
 /// object does not exist yet when the geometry has to be built.
-/// A numeric option the gesture is being drawn with, if it holds one.
-fn number_of(props: &PropertyMap, tool: ToolKind, id: PropId) -> Option<f64> {
-    props
-        .value_at(tool, id, 0)
-        .and_then(PropValue::as_f32)
-        .map(f64::from)
-}
-
 fn choice(props: &PropertyMap, tool: ToolKind, id: PropId) -> u8 {
     props
         .value_at(tool, id, 0)
@@ -361,7 +363,11 @@ fn check_modes(tool: ToolKind, props: &PropertyMap, options: &[ToolOption]) -> R
 /// bend the drawing away from where it was made (spec.md 7.2).
 fn frame_at(anchor: LonLat, props: &PropertyMap, tool: ToolKind) -> Frame {
     let space = Space::from_choice(choice(props, tool, PropId::StampSpace));
-    Frame::in_space(anchor, 0.0, 100.0, space)
+    let origin = props
+        .value_at(tool, PropId::StampOrigin, 0)
+        .and_then(PropValue::as_lonlat)
+        .unwrap_or(anchor);
+    Frame::in_space(anchor, 0.0, 100.0, space).with_projection_origin(origin)
 }
 
 /// Reads a `[lon, lat]` pair.
@@ -465,34 +471,17 @@ fn geometry_of(
             ))
         }
 
-        // A liquify is the painted gesture with the pointer's movement kept:
-        // each stamp carries the step that reached it, scaled by the strength,
-        // so the geometry *is* the displacement (spec.md 6.3, M17). Measured in
-        // the local frame after the chain is, so a stamp's delta is the
-        // difference of the same numbers its position is.
-        (ToolKind::Liquify, Gesture::Stroke { points: raw }) => {
+        (
+            ToolKind::Liquify,
+            Gesture::Stroke { points: raw } | Gesture::Relocate { points: raw, .. },
+        ) => {
             let positions = points(raw, 1, "points")?;
             let anchor = positions[0];
             let frame = frame_at(anchor, props, tool);
-            let chain = local_chain(&frame, &positions);
-            let strength = number_of(props, tool, PropId::Strength).unwrap_or(100.0) / 100.0;
-            let stamps = chain
-                .iter()
-                .enumerate()
-                .map(|(i, p)| {
-                    let (dx, dy) = if i == 0 {
-                        (0.0, 0.0)
-                    } else {
-                        let q = chain[i - 1];
-                        ((p.x - q.x) * strength, (p.y - q.y) * strength)
-                    };
-                    ve_core::document::SmearPoint::new(p.x, p.y, dx, dy)
-                })
-                .collect();
             Ok((
                 anchor,
-                Geometry::Smear {
-                    chains: vec![stamps],
+                Geometry::Stroke {
+                    chains: vec![local_chain(&frame, &positions)],
                 },
                 positions,
             ))
@@ -697,9 +686,19 @@ fn shape_fill_geometry(
 /// callable without a Tauri handle.
 pub fn create(state: &AppState, new: NewObject) -> Result<Created> {
     let tool = new.tool.kind();
-    let props = resolve_options(tool, &new.options)?;
+    let mut props = resolve_options(tool, &new.options)?;
     check_modes(tool, &props, &new.options)?;
     let (anchor, geometry, positions) = geometry_of(tool, &new.gesture, &props)?;
+    if let Gesture::Relocate { from, to, .. } = &new.gesture {
+        let frame = frame_at(anchor, &props, tool);
+        let start = frame.to_local(point(*from)?);
+        let end = frame.to_local(point(*to)?);
+        if let Some(prop) = props.get_mut(PropId::DisplacementPosition) {
+            prop.set_base(PropValue::Offset(std::array::from_fn(|i| {
+                ((end[i] - start[i]) / 1000.0) as f32
+            })));
+        }
+    }
 
     if !geometry.is_finite() {
         return Err(AppError::BadOption {
@@ -817,9 +816,8 @@ fn merge_into(
     // anchor, and a push carries the field from the anchor to a place, so the
     // displacement is the offset between the two and moving the anchor changes
     // it (spec.md 6.3).
-    // A liquify merges with nothing: its deltas are its own, and re-expressing
-    // two smears under one frame would add the second's movement to the
-    // first's stamps (spec.md 6.3, M17).
+    // Each Liquify selection has its own relative displacement and transition
+    // boundary. Merging selections would change what is moved and healed.
     let anchored = matches!(
         object.tool,
         ToolKind::CloneStamp | ToolKind::Warp | ToolKind::Liquify

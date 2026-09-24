@@ -1,7 +1,7 @@
 //! A captured field, and the `.vecap` container it travels in (spec.md 8.5).
 //!
 //! A capture is what `Cmd`-`C` over a region takes: the visible composite
-//! inside that region, on the project's own lattice, at one step or over a run
+//! inside that region, on a capture lattice, at one step or over a run
 //! of them. `Cmd`-`V` puts it back as a **patch** — an object like any other,
 //! whose field is these samples instead of a formula.
 //!
@@ -104,7 +104,7 @@ pub struct Capture {
     pub ni: u32,
     /// Rows.
     pub nj: u32,
-    /// Degrees of the map between nodes, both axes. The project's resolution.
+    /// Degrees of the map between nodes, both axes.
     pub spacing_deg: f64,
     /// Offset of node `(0, 0)` from the anchor, in degrees, eastward.
     pub x0_deg: f64,
@@ -466,6 +466,20 @@ impl Capture {
         x_deg: f64,
         y_deg: f64,
     ) -> Option<[f32; 2]> {
+        self.sample_covered(frame, plane, x_deg, y_deg)
+            .map(|(uv, _)| uv)
+    }
+
+    /// Bilinear vector and coverage. Undefined corners contribute zero
+    /// coverage, not a zero vector. Keeping the interpolated coverage avoids
+    /// turning every cell with one written corner into an opaque square.
+    pub fn sample_covered(
+        &self,
+        frame: &CaptureFrame,
+        plane: usize,
+        x_deg: f64,
+        y_deg: f64,
+    ) -> Option<([f32; 2], f32)> {
         let (last_i, last_j) = (f64::from(self.ni - 1), f64::from(self.nj - 1));
         let fi = (x_deg - self.x0_deg) / self.spacing_deg;
         // Rows run north to south, so a larger `y` is a smaller row index.
@@ -498,7 +512,7 @@ impl Capture {
                 v += sample[1] * weight;
             }
         }
-        (total > 1e-6).then(|| [u / total, v / total])
+        (total > 1e-6).then(|| ([u / total, v / total], total.clamp(0.0, 1.0)))
     }
 }
 
@@ -635,13 +649,31 @@ impl Capture {
         x_deg: f64,
         y_deg: f64,
     ) -> Option<[f32; 2]> {
-        let a = self.sample(self.frames.get(pick.frame)?, plane, x_deg, y_deg)?;
+        self.sample_pick_covered(pick, plane, x_deg, y_deg)
+            .map(|(uv, _)| uv)
+    }
+
+    /// A time-resampled vector and its spatial coverage, with the same
+    /// undefined-frame rule as [`Self::sample_pick`].
+    pub fn sample_pick_covered(
+        &self,
+        pick: FramePick,
+        plane: usize,
+        x_deg: f64,
+        y_deg: f64,
+    ) -> Option<([f32; 2], f32)> {
+        let (a, coverage_a) =
+            self.sample_covered(self.frames.get(pick.frame)?, plane, x_deg, y_deg)?;
         if pick.frame == pick.next || pick.blend <= 0.0 {
-            return Some(a);
+            return Some((a, coverage_a));
         }
-        let b = self.sample(self.frames.get(pick.next)?, plane, x_deg, y_deg)?;
+        let (b, coverage_b) =
+            self.sample_covered(self.frames.get(pick.next)?, plane, x_deg, y_deg)?;
         let t = pick.blend;
-        Some([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t])
+        Some((
+            [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t],
+            coverage_a + (coverage_b - coverage_a) * t,
+        ))
     }
 }
 
@@ -823,6 +855,14 @@ mod tests {
         assert_eq!(capture.sample(frame, 0, 0.5, -1.0), None);
         // And outside the lattice there is nothing either.
         assert_eq!(capture.sample(frame, 0, 5.0, 0.0), None);
+        // A half-covered cell carries half coverage, not a full opaque cell.
+        // The vector stays 10 m/s: undefined is not an observation of calm.
+        for (y, coverage) in [(-0.25, 0.75), (-0.5, 0.5), (-0.75, 0.25)] {
+            assert_eq!(
+                capture.sample_covered(frame, 0, 0.5, y),
+                Some(([10.0, 0.0], coverage))
+            );
+        }
     }
 }
 

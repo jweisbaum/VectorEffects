@@ -168,6 +168,8 @@ pub struct TransformBaseline {
     /// projected object's points are map-space metres: converting them through
     /// a ground frame would bend the shape as the anchor moved.
     pub space: ve_render::aeqd::Space,
+    /// The globe aspect frozen with the geometry.
+    pub projection_origin: ve_core::LonLat,
     /// How far it reaches from its anchor, in metres.
     pub reach_m: f64,
     /// Its geometry when the drag began, for anchor moves.

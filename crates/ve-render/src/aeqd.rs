@@ -97,6 +97,8 @@ pub enum Space {
     Equidistant30,
     /// Frozen equidistant 45 map metres.
     Equidistant45,
+    /// Screen geometry in a frozen orthographic globe view.
+    Orthographic,
 }
 
 impl Space {
@@ -117,12 +119,13 @@ impl Space {
             12 => Self::CompactMiller,
             13 => Self::Equidistant30,
             14 => Self::Equidistant45,
+            15 => Self::Orthographic,
             _ => Self::Geodesic,
         }
     }
 
     /// Every persisted space, in stable index order.
-    pub const ALL: [Self; 15] = [
+    pub const ALL: [Self; 16] = [
         Self::Geodesic,
         Self::Projected,
         Self::Mercator,
@@ -138,6 +141,7 @@ impl Space {
         Self::CompactMiller,
         Self::Equidistant30,
         Self::Equidistant45,
+        Self::Orthographic,
     ];
 
     /// Stable schema / GPU index.
@@ -236,6 +240,8 @@ pub struct Frame {
     pub scale: f64,
     /// Which space the geometry is defined in.
     pub space: Space,
+    /// Projection centre at creation, independent of the object's anchor.
+    pub projection_origin: LonLat,
 }
 
 impl Frame {
@@ -257,7 +263,31 @@ impl Frame {
             rotation_deg,
             scale,
             space,
+            projection_origin: anchor,
         }
+    }
+
+    /// Freezes the aspect of a globe stamp. Cylindrical/ground frames ignore it.
+    pub fn with_projection_origin(mut self, origin: LonLat) -> Self {
+        self.projection_origin = origin;
+        self
+    }
+
+    /// Orthographic map coordinates in metres. Reject the far hemisphere so a
+    /// stamp never paints the back of the globe through its front.
+    fn globe_xy(&self, point: LonLat) -> Local {
+        let (sin0, cos0) = self.projection_origin.lat.to_radians().sin_cos();
+        let (sin, cos) = point.lat.to_radians().sin_cos();
+        let (sind, cosd) = normalize_lon(point.lon - self.projection_origin.lon)
+            .to_radians()
+            .sin_cos();
+        if sin0 * sin + cos0 * cos * cosd < -1e-10 {
+            return [f64::INFINITY; 2];
+        }
+        [
+            EARTH_RADIUS_M * cos * sind,
+            EARTH_RADIUS_M * (cos0 * sin - sin0 * cos * cosd),
+        ]
     }
 
     /// Projects a geographic position into the frame.
@@ -265,6 +295,17 @@ impl Frame {
     /// Returns metres in unscaled geometry units, so the result can be compared
     /// directly against the object's stored geometry.
     pub fn to_local(&self, position: LonLat) -> Local {
+        if self.space == Space::Orthographic {
+            let at = self.globe_xy(position);
+            if !at[0].is_finite() {
+                return [1e100; 2];
+            }
+            let anchor = self.globe_xy(self.anchor);
+            return self.unrotate([
+                (at[0] - anchor[0]) / self.scale,
+                (at[1] - anchor[1]) / self.scale,
+            ]);
+        }
         if self.space != Space::Geodesic {
             // Map space: the offset in degrees, scaled to metres. No cosine, so
             // a circle here is a circle on the map wherever the object sits.
@@ -285,6 +326,28 @@ impl Frame {
 
     /// Lifts a local point back to a geographic position.
     pub fn to_global(&self, local: Local) -> LonLat {
+        if self.space == Space::Orthographic {
+            let anchor = self.globe_xy(self.anchor);
+            let offset = self.rotate(local);
+            let x = (anchor[0] + offset[0] * self.scale) / EARTH_RADIUS_M;
+            let y = (anchor[1] + offset[1] * self.scale) / EARTH_RADIUS_M;
+            let r = x.hypot(y);
+            if r < 1e-12 {
+                return self.projection_origin;
+            }
+            // Outlines reaching beyond the visible disk meet its horizon.
+            let (sin, cos) = r.min(1.0).asin().sin_cos();
+            let (sin0, cos0) = self.projection_origin.lat.to_radians().sin_cos();
+            let lon = self.projection_origin.lon
+                + (x * sin)
+                    .atan2(r * cos0 * cos - y * sin0 * sin)
+                    .to_degrees();
+            let lat = (cos * sin0 + y * sin * cos0 / r)
+                .clamp(-1.0, 1.0)
+                .asin()
+                .to_degrees();
+            return LonLat::new(lon, lat).unwrap_or(self.anchor);
+        }
         if self.space != Space::Geodesic {
             let [east, north] = self.rotate(local);
             let lon = self.anchor.lon + east * self.scale / M_PER_DEGREE;
@@ -348,6 +411,14 @@ impl Frame {
     /// Geodesic and the original cylindrical spaces need only `r * scale`.
     /// Cylinders that compress latitude need an inverse-projected bound too.
     pub fn reach_m(&self, local_radius: f64) -> f64 {
+        if self.space == Space::Orthographic {
+            // At the limb, a planar metre can span much more than a ground
+            // metre. For planar displacement d*R, the squared difference in
+            // sphere heights is at most 2*d*R². Bound the full 3D chord, then
+            // convert it to an angular distance for the culling cap.
+            let d = local_radius * self.scale / EARTH_RADIUS_M;
+            return 2.0 * ((d * d + 2.0 * d).sqrt() / 2.0).min(1.0).asin() * EARTH_RADIUS_M;
+        }
         let radius = local_radius * self.scale;
         if self.space.choice() <= 3 {
             return radius;
@@ -709,7 +780,11 @@ mod cylindrical_tests {
 
     #[test]
     fn pixel_perimeters_are_circular_at_every_latitude_in_their_projection() {
-        for space in Space::ALL.into_iter().skip(1) {
+        for space in Space::ALL
+            .into_iter()
+            .skip(1)
+            .filter(|s| *s != Space::Orthographic)
+        {
             for lat in [-75.0, 0.0, 60.0, 75.0] {
                 let frame = Frame::in_space(LonLat::new(179.0, lat).unwrap(), 0.0, 100.0, space);
                 for i in 0..64 {

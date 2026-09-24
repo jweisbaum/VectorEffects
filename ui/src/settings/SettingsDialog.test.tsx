@@ -79,6 +79,8 @@ const held = vi.hoisted(() => {
     units: [] as Array<[string, string]>,
     charts: { directory: "", cells: 0, bounds: null, error: null, token: 1 },
     chartDirectories: [] as string[],
+    themeSet: vi.fn(),
+    customThemeSet: vi.fn(),
   };
 });
 
@@ -104,6 +106,8 @@ vi.mock("../ipc", () => ({
       return Promise.resolve(held.charts);
     },
     appSettings: () => Promise.resolve(settings),
+    setTheme: held.themeSet,
+    setCustomTheme: held.customThemeSet,
     macroLibrary: () => Promise.resolve(held.library),
     deleteMacros: (id: string | null) => {
       held.deleted.push(id);
@@ -120,6 +124,8 @@ vi.mock("../ipc", () => ({
 const SettingsDialog = (await import("./SettingsDialog")).default;
 
 const settings: AppSettings = {
+  theme: "sage",
+  custom_theme: null,
   glyphs: DEFAULT_GLYPHS,
   shortcuts: [],
   autosave: "recovery",
@@ -143,6 +149,8 @@ beforeEach(() => {
   held.deleted.length = 0;
   held.chosen.length = 0;
   held.units.length = 0;
+  held.themeSet.mockReset().mockImplementation((theme: string) => Promise.resolve({ ...settings, theme }));
+  held.customThemeSet.mockReset().mockImplementation(custom => Promise.resolve({ ...settings, theme: "custom", custom_theme: custom }));
   libraryChanges = 0;
   container = document.createElement("div");
   document.body.append(container);
@@ -154,13 +162,13 @@ afterEach(() => {
   container.remove();
 });
 
-async function render() {
+async function render(onSettings: (settings: AppSettings) => void = () => undefined) {
   await act(async () => {
     root.render(
       <SettingsDialog
         settings={settings}
         project={null}
-        onSettings={() => undefined}
+        onSettings={onSettings}
         onProject={() => undefined}
         onLibrary={() => {
           libraryChanges += 1;
@@ -201,6 +209,43 @@ async function click(el: HTMLElement) {
     el.dispatchEvent(new MouseEvent("click", { bubbles: true }));
   });
 }
+
+it("offers all application themes with no project open and reports the saved preference", async () => {
+  const changed = vi.fn();
+  await render(changed);
+  const trigger = container.querySelector<HTMLButtonElement>(".theme-trigger")!;
+  expect(trigger.textContent).toContain("Sage & Teal");
+  await click(trigger);
+  const options = [...container.querySelectorAll<HTMLElement>(".theme-option")];
+  expect(options.map(option => option.querySelector(".theme-name")?.textContent)).toEqual([
+    "Original (Midnight)", "Sage & Teal", "Ocean", "Plum", "Ember", "Paper",
+  ]);
+  await click(options[5]!);
+  expect(held.themeSet).toHaveBeenCalledWith("paper");
+  expect(changed).toHaveBeenCalledWith({ ...settings, theme: "paper" });
+});
+
+it("shows a theme save failure without applying the unsaved choice", async () => {
+  held.themeSet.mockRejectedValue(new Error("Settings could not be written"));
+  const changed = vi.fn();
+  await render(changed);
+  await click(container.querySelector<HTMLButtonElement>(".theme-trigger")!);
+  await click([...container.querySelectorAll<HTMLElement>(".theme-option")][5]!);
+  expect(changed).not.toHaveBeenCalled();
+  expect(container.querySelector(".modal-error")?.textContent).toContain("Settings could not be written");
+  expect(container.querySelector(".theme-trigger")?.textContent).toContain("Sage & Teal");
+});
+
+it("creates a custom theme from the current preset and reports the saved global preference", async () => {
+  const changed = vi.fn();
+  await render(changed);
+  await click(button("Customize…"));
+  expect(container.querySelector(".theme-editor")).not.toBeNull();
+  await click(button("Save custom theme"));
+  expect(held.customThemeSet).toHaveBeenCalledWith({ base: "sage", colours: {} });
+  expect(changed).toHaveBeenCalledWith({ ...settings, theme: "custom", custom_theme: { base: "sage", colours: {} } });
+  expect(container.querySelector(".theme-editor")).toBeNull();
+});
 
 /**
  * Choosing a gradient (M42).
