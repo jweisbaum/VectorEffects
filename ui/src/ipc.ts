@@ -322,8 +322,10 @@ export const api = {
       gesture: gesture ?? null,
     }),
 
-  setLiquifyDestination: (object: number, to: [number, number], step: number, autoKey: boolean) =>
-    call<ProjectSummary>("set_liquify_destination", {object, to, step, autoKey}),
+  /** With `from`, the destination moves by the drag from `from` to `to`
+   *  rather than putting the selection's anchor on `to`. */
+  setLiquifyDestination: (object: number, to: [number, number], step: number, autoKey: boolean, from?: [number, number]) =>
+    call<ProjectSummary>("set_liquify_destination", {object, to, step, autoKey, from: from ?? null}),
 
   // --- Animation (spec.md 9) ---
 

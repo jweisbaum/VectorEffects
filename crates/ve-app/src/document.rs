@@ -770,6 +770,11 @@ pub fn set_property_with(
 }
 
 /// Re-aim a Liquify selection while keying its relative displacement independently.
+///
+/// Without `from`, the selection's anchor lands on `to`. With it, the
+/// destination moves by the drag from `from` to `to` — the pressed point is
+/// carried to the pointer, so grabbing the destination outline away from its
+/// centre does not jump it. Either way the source stays where it is.
 #[tauri::command]
 pub fn set_liquify_destination(
     state: tauri::State<'_, AppState>,
@@ -777,8 +782,12 @@ pub fn set_liquify_destination(
     to: [f64; 2],
     step: u32,
     auto_key: bool,
+    from: Option<[f64; 2]>,
 ) -> Result<ProjectSummary> {
-    liquify_destination(&state, object, to, step, auto_key)
+    match from {
+        Some(from) => liquify_destination_by(&state, object, from, to, step, auto_key),
+        None => liquify_destination(&state, object, to, step, auto_key),
+    }
 }
 
 /// Both displacement components form one undoable edit.
@@ -790,6 +799,36 @@ pub fn liquify_destination(
     auto_key: bool,
 ) -> Result<ProjectSummary> {
     let to = LonLat::new(to[0], to[1])?;
+    write_displacement(state, object, step, auto_key, |frame, _| frame.to_local(to))
+}
+
+/// [`liquify_destination`] for a drag of the destination itself: it moves by
+/// the pointer's own travel in the selection's frame.
+pub fn liquify_destination_by(
+    state: &AppState,
+    object: u64,
+    from: [f64; 2],
+    to: [f64; 2],
+    step: u32,
+    auto_key: bool,
+) -> Result<ProjectSummary> {
+    let from = LonLat::new(from[0], from[1])?;
+    let to = LonLat::new(to[0], to[1])?;
+    write_displacement(state, object, step, auto_key, |frame, current| {
+        let (a, b) = (frame.to_local(from), frame.to_local(to));
+        [current[0] + b[0] - a[0], current[1] + b[1] - a[1]]
+    })
+}
+
+/// Writes a Displace selection's displacement, in its local metres, from the
+/// frame and the displacement it has at `step`.
+fn write_displacement(
+    state: &AppState,
+    object: u64,
+    step: u32,
+    auto_key: bool,
+    aim: impl FnOnce(&ve_render::aeqd::Frame, [f64; 2]) -> [f64; 2],
+) -> Result<ProjectSummary> {
     apply(state, |project| {
         let target = project
             .object(object_id(object))
@@ -809,7 +848,11 @@ pub fn liquify_destination(
                 field: "object",
                 value: "the selection is inactive".into(),
             })?;
-        let delta = flat.frame.to_local(to);
+        let current = match flat.modifier {
+            Some(ve_render::scene::Modifier::Relocate { displacement, .. }) => displacement,
+            _ => [0.0; 2],
+        };
+        let delta = aim(&flat.frame, current);
         let prop = PropId::DisplacementPosition;
         let before = target
             .props

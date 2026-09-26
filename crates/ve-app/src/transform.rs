@@ -767,6 +767,11 @@ fn baseline_of(
             position: stored(PropId::Position),
             rotation: stored(PropId::RotationDeg),
             scale: stored(PropId::ScalePct),
+            displacement: matches!(
+                flat.modifier,
+                Some(ve_render::scene::Modifier::Relocate { .. })
+            )
+            .then(|| stored(PropId::DisplacementPosition)),
         });
     }
     if items.is_empty() {
@@ -960,7 +965,11 @@ fn commands_for(gesture: &TransformGesture, pointer: LonLat) -> Vec<Command> {
             // entries -- a rotation that starts at exactly zero degrees is the
             // case that would find it.
             match gesture.kind {
-                TransformKind::Move => vec![set_position(gesture, item, to.anchor)],
+                TransformKind::Move => {
+                    let mut writes = vec![set_position(gesture, item, to.anchor)];
+                    writes.extend(hold_destination(gesture, item, to.anchor));
+                    writes
+                }
                 TransformKind::Rotate => vec![
                     set_position(gesture, item, to.anchor),
                     set_rotation(gesture, item, to.rotation_deg),
@@ -1032,6 +1041,48 @@ fn set_scale(gesture: &TransformGesture, item: &TransformBaseline, percent: f64)
         &item.scale,
         PropValue::F32(percent as f32),
     )
+}
+
+/// Keeps a Displace selection's destination on the ground while its source
+/// moves: the two outlines are placed independently, and dragging the source
+/// must not carry the target with it.
+///
+/// The displacement is stored relative to the anchor, in its local frame, so
+/// it is re-expressed about the new anchor. Written by the same rule as the
+/// position it compensates for: into the step's key when the position is keyed
+/// there, and otherwise into the base *and every key*, since a moved base
+/// moves the source at every step.
+fn hold_destination(
+    gesture: &TransformGesture,
+    item: &TransformBaseline,
+    to: LonLat,
+) -> Option<Command> {
+    let before = item.displacement.as_ref()?;
+    let old = Frame::in_space(item.anchor, item.rotation_deg, item.scale_pct, item.space)
+        .with_projection_origin(item.projection_origin);
+    let new = Frame::in_space(to, item.rotation_deg, item.scale_pct, item.space)
+        .with_projection_origin(item.projection_origin);
+    let held = |value: PropValue| {
+        let km = value.as_offset().unwrap_or([0.0; 2]);
+        let target = old.to_global(km.map(|v| f64::from(v) * 1000.0));
+        let local = new.to_local(target);
+        PropValue::Offset(local.map(|v| (v / 1000.0) as f32))
+    };
+    let mut after = before.clone();
+    if gesture.auto_key || item.position.is_animated() {
+        after = written(gesture, before, held(before.value_at(gesture.step)));
+    } else {
+        after.set_base(held(before.base()));
+        for key in before.keys() {
+            after.set_key(key.step, held(key.value), key.interp);
+        }
+    }
+    Some(Command::SetProperty {
+        object: item.object,
+        prop: PropId::DisplacementPosition,
+        before: Box::new(before.clone()),
+        after: Box::new(after),
+    })
 }
 
 /// Moves the anchor and leaves the geometry where it is on the ground.

@@ -184,6 +184,10 @@ pub struct TransformBaseline {
     /// drag, so re-flattening the object on every pointer report would be work
     /// for an answer that cannot have changed.
     pub outline: crate::transform::BaselineOutline,
+    /// A Displace selection's stored displacement, which a move rewrites so
+    /// the destination stays on the ground: the source and the target are
+    /// moved independently. `None` for every other object.
+    pub displacement: Option<ve_core::keyframe::Animatable>,
 }
 
 /// A transform drag in progress.

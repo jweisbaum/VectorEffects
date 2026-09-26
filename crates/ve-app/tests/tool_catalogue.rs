@@ -2274,6 +2274,98 @@ fn liquify_selection_and_displacement_animate_independently_and_round_trip() {
 }
 
 #[test]
+fn liquify_source_and_destination_move_independently() {
+    use ve_app::transform::{self, TransformKind};
+    use ve_render::scene::{Modifier, flatten_object};
+    // Across the antimeridian and at 75°N, where a displacement kept in the
+    // old frame would visibly swing when the anchor moved.
+    let (_root, state) = project("liquify-independent");
+    let made = create::create(
+        &state,
+        NewObject {
+            tool: Tool::Liquify,
+            gesture: Gesture::Relocate {
+                points: vec![[179.0, 75.0], [179.5, 75.0]],
+                from: [179.0, 75.0],
+                to: [-177.0, 76.0],
+            },
+            options: vec![
+                number(PropId::SizeKm, 100.0),
+                number(PropId::InterpolationDistanceKm, 0.0),
+            ],
+            layer: None,
+        },
+    )
+    .unwrap();
+    let id = ve_core::Id::from_raw(made.object);
+    // Where the anchor's displaced copy lands on the ground.
+    let ends = |doc: &ve_core::project::Project| {
+        let flat = flatten_object(doc.object(id).unwrap(), 0).unwrap();
+        let Some(Modifier::Relocate { displacement, .. }) = flat.modifier else {
+            panic!("relocate")
+        };
+        (flat.frame.anchor, flat.frame.to_global(displacement))
+    };
+    let (source, destination) = ends(&document(&state));
+    let placed = document(&state);
+
+    // Dragging the body moves the source a long way; the destination stays.
+    transform::start_transform(
+        &state,
+        &[made.object],
+        0,
+        TransformKind::Move,
+        source.lon,
+        source.lat,
+        false,
+    )
+    .unwrap();
+    transform::update_transform(&state, 170.0, 72.0).unwrap();
+    ve_app::document::finish_gesture(&state).unwrap();
+    let (moved_source, held) = ends(&document(&state));
+    assert!(moved_source.distance_m(ll(170.0, 72.0)) < 1.0);
+    assert!(
+        held.distance_m(destination) < 10.0,
+        "destination drifted {} m",
+        held.distance_m(destination)
+    );
+    let moved = document(&state);
+    ve_app::edit::undo_for_test(&state).unwrap();
+    assert_eq!(document(&state), placed, "a move is one undo");
+    ve_app::edit::redo_for_test(&state).unwrap();
+
+    // Grabbing the destination where it is and letting go elsewhere puts it
+    // exactly there, and leaves the source where the move left it.
+    let to = ll(-172.0, 78.0);
+    ve_app::document::liquify_destination_by(
+        &state,
+        made.object,
+        [held.lon, held.lat],
+        [to.lon, to.lat],
+        0,
+        false,
+    )
+    .unwrap();
+    let (still, landed) = ends(&document(&state));
+    assert_eq!(still, moved_source);
+    assert!(
+        landed.distance_m(to) < 10.0,
+        "landed {} m off",
+        landed.distance_m(to)
+    );
+    assert_eq!(
+        document(&state)
+            .object(id)
+            .unwrap()
+            .props
+            .get(PropId::Position),
+        moved.object(id).unwrap().props.get(PropId::Position)
+    );
+    ve_app::edit::undo_for_test(&state).unwrap();
+    assert_eq!(document(&state), moved, "a destination drag is one undo");
+}
+
+#[test]
 fn liquify_globe_relative_destination_uses_the_frozen_pixel_plane() {
     use ve_core::geo::EARTH_RADIUS_M;
     use ve_render::{

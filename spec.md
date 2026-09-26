@@ -2444,7 +2444,12 @@ finite and the cell is one cell.
 **Displace selects, then moves.** (The saved tool ID remains `liquify` for compatibility.) The first release retains a highlighted brushed
 region and prompts the user to drag it. The second release creates one object
 and one undo entry. Escape, tool/frame/layer changes, and cancelled pointers
-abandon pending selections. Pixel selections retain their frozen projected
+abandon pending selections. **Once placed, the source and the destination move
+independently.** Dragging the object's body moves the source and leaves the
+destination where it is on the ground (the displacement is rewritten about the
+new anchor, by the same keying rule as the position); dragging inside a
+selected destination outline with the hand tool — or Shift-dragging it with
+Displace — moves only the destination, by the pointer's travel, in one undo. Pixel selections retain their frozen projected
 frame, including the globe view centre; geographic selections use the local
 geodesic frame.
 

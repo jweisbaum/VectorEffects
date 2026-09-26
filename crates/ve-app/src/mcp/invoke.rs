@@ -133,7 +133,7 @@ pub const TABLE: &[(&str, Handler)] = &[
     command!(chart_status, crate::settings::chart_status, {}),
     command!(document_tree, crate::document::document_tree, { step: u32 }),
     command!(object_properties, crate::document::object_properties, { object: u64, step: u32 }),
-    command!(set_liquify_destination, crate::document::set_liquify_destination, { object: u64, to: [f64; 2], step: u32, auto_key: bool }),
+    command!(set_liquify_destination, crate::document::set_liquify_destination, { object: u64, to: [f64; 2], step: u32, auto_key: bool, from: Option<[f64; 2]> }),
     command!(set_object_property, crate::document::set_object_property, { object: u64, property: String, value: crate::document::PropertyValue, step: u32, auto_key: bool, gesture: Option<String> }),
     command!(rename_project, crate::document::rename_project, { name: String }),
     command!(add_layer, crate::document::add_layer, { name: String }),

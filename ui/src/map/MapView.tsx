@@ -1256,6 +1256,10 @@ export default function MapView({
   const pushDrag = useRef<{
     object: number;
     liquify: boolean;
+    /** A Displace destination grabbed by its own outline: `from` is the
+     *  pressed point, and the destination moves by the drag while the
+     *  source stays where it is. */
+    grab?: boolean;
     from: { lon: number; lat: number };
     to: { lon: number; lat: number };
   } | null>(null);
@@ -2195,7 +2199,7 @@ export default function MapView({
         "Scrub the ruler and drag the region into place at each step; every step visited is a key.",
       );
     } else if (tool === "liquify") {
-      setHint(liquifyPending ? "Drag the selected area to its new position. Escape cancels." : "Brush to select, then drag the selection to move it. Shift-drag an existing selection to re-aim its displacement.");
+      setHint(liquifyPending ? "Drag the selected area to its new position. Escape cancels." : "Brush to select, then drag the selection to move it. Shift-drag an existing selection to re-aim its displacement, or its destination outline to move only the destination.");
     } else if (tool === ERASE) {
       setHint(
         "Drag to erase what the brush covers in the active layer. Hold Shift to erase from this frame only.",
@@ -3357,9 +3361,20 @@ export default function MapView({
         dpr,
         outlined.erased,
       );
-      if (outlined.relocation) drawEdgeBand(context, outlined.relocation.destination,
-        DISPLACE_OUTLINE,
-        hovered ? 2.5 : 1.5, dpr, outlined.erased);
+      if (outlined.relocation) {
+        // A destination being dragged on its own follows the pointer; the
+        // release writes it, and the source stays put.
+        const moving = pushDrag.current?.grab && pushDrag.current.object === outlined.object ? pushDrag.current : null;
+        context.save();
+        if (moving) {
+          const a = toScreen(camera, view, moving.from);
+          const b = toScreen(camera, view, moving.to);
+          context.translate(b.x - a.x, b.y - a.y);
+        }
+        drawEdgeBand(context, outlined.relocation.destination, DISPLACE_OUTLINE,
+          hovered || moving ? 2.5 : 1.5, dpr, outlined.erased);
+        context.restore();
+      }
       // An inverted mask covers everything *but* this, so a wide faint band
       // goes with it: an edge alone cannot say which side is covered.
       if (outlined.inverted) {
@@ -3378,6 +3393,7 @@ export default function MapView({
     // erase the line. Sampled geographic points follow the globe's surface.
     for (const outlined of outlineList) {
       if (!outlined.relocation || dragLive || (!selection.includes(outlined.object) && hoveredOperator.current !== outlined.object)) continue;
+      if (pushDrag.current?.grab && pushDrag.current.object === outlined.object) continue;
       context.save();
       context.strokeStyle = DISPLACE_OUTLINE;
       context.lineWidth = dpr;
@@ -3439,7 +3455,7 @@ export default function MapView({
     // A warp being pulled: from its anchor to the pointer, which is the push
     // the release will write (spec.md 6.3).
     const pull = pushDrag.current;
-    if (pull) {
+    if (pull && !pull.grab) {
       const from = toScreen(camera, view, pull.from);
       const to = toScreen(camera, view, pull.to);
       context.save();
@@ -4343,6 +4359,25 @@ export default function MapView({
   };
 
   /**
+   * The Displace whose destination outline the pointer is inside, topmost
+   * first — among the selected ones only when `selectedOnly`, since that is
+   * when the destination is drawn. The destination is moved by its own
+   * outline, independently of the source (the object's body).
+   */
+  const destinationUnder = (point: { x: number; y: number }, selectedOnly: boolean): number | null => {
+    const context = overlayRef.current?.getContext("2d");
+    if (!context) return null;
+    for (let i = operatorOutlinesRef.current.length - 1; i >= 0; i -= 1) {
+      const entry = operatorOutlinesRef.current[i];
+      const destination = entry?.relocation?.destination;
+      if (entry === undefined || !destination) continue;
+      if (selectedOnly && !selection.includes(entry.object)) continue;
+      if (context.isPointInPath(maskPath(destination), point.x, point.y, destination.kind === "contours" ? "evenodd" : "nonzero")) return entry.object;
+    }
+    return null;
+  };
+
+  /**
    * Applies the cursor rule (`cursorFor`) to the canvas.
    *
    * Written to the element rather than rendered as a class: the two inputs
@@ -4803,6 +4838,13 @@ export default function MapView({
       // modifier key that paints a new object when it misses is a way to draw
       // one by accident, in the middle of aiming another.
       if ((tool === "warp" || tool === "liquify") && event.shiftKey) {
+        const target = tool === "liquify" ? destinationUnder(point, false) : null;
+        if (target !== null) {
+          onSelect([target]);
+          pushDrag.current = { object: target, liquify: true, grab: true, from: geo, to: geo };
+          requestOverlay();
+          return;
+        }
         const grabbed = warpUnder(point, tool);
         if (grabbed === null) return;
         onSelect([grabbed.object]);
@@ -4860,6 +4902,18 @@ export default function MapView({
 
       if (kind) {
         startTransform(kind, geo);
+        return;
+      }
+    }
+
+    // A selected Displace's destination is dragged by its own outline, and
+    // only it moves: the body drag below moves the source and leaves the
+    // destination where it is on the ground.
+    if (tool === "hand" && !(event.shiftKey || event.metaKey || event.ctrlKey)) {
+      const target = destinationUnder(point, true);
+      if (target !== null) {
+        pushDrag.current = { object: target, liquify: true, grab: true, from: geo, to: geo };
+        requestOverlay();
         return;
       }
     }
@@ -5765,7 +5819,13 @@ export default function MapView({
     const pull = pushDrag.current;
     if (pull) {
       pushDrag.current = null;
-      void (pull.liquify ? api.setLiquifyDestination(pull.object, [pull.to.lon, pull.to.lat], step, autoKey) : api
+      // A click on a destination is not a move of it: no undo entry.
+      if (pull.grab && pull.from.lon === pull.to.lon && pull.from.lat === pull.to.lat) {
+        requestOverlay();
+        return;
+      }
+      void (pull.liquify ? api.setLiquifyDestination(pull.object, [pull.to.lon, pull.to.lat], step, autoKey,
+        pull.grab ? [pull.from.lon, pull.from.lat] : undefined) : api
         .setObjectProperty(
           pull.object,
           "PushTo",
