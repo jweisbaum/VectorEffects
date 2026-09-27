@@ -37,7 +37,7 @@ import { ReadinessPoller } from "./readiness";
 import { playbackCount, playbackTime } from "./metrics";
 import type { PlaybackMap, PreparationStatus } from "./preparation";
 import { reportError, setHint } from "../hint";
-import { msg, t, useT } from "../i18n";
+import { msg, t, useT, isolate } from "../i18n";
 import { onReveal } from "../help/highlight";
 import { api } from "../ipc";
 import { IconSvg, LOOP_ICON } from "../map/ToolIcon";
@@ -1123,7 +1123,7 @@ export default function Timeline({
           ◆ {t("Auto-key")}
         </button>
         <span className="tl-position" data-feature="timeline:position">
-          {t("Step {step} / {last}", { step, last })} · {forecastLabel(step, project.step_hours)}
+          {t("Step {step} / {last}", { step, last })} · {isolate(forecastLabel(step, project.step_hours))}
           {/* The frame's UTC time, when step 0 has one (M29). */}
           {utcLabel(step, project.step_hours, project.start_unix_s) !== null && (
             <span className="tl-when"> · {utcLabel(step, project.step_hours, project.start_unix_s)}</span>

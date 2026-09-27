@@ -1,5 +1,27 @@
 # VectorEffects — Implementation Plan
 
+**2026-09-27: Five more interface languages.** Italian, Dutch, Japanese,
+Simplified Chinese and Arabic join English, Spanish, French and German — every
+catalogue (1,472 keys each), the help reference page for page, the native Help
+item, and a per-language glossary (`GLOSSARY.<lang>.md`). Arabic reads right
+to left without turning the workspace round (spec 5.7): each text element takes
+its direction from its content (`unicode-bidi: plaintext`), the help reference
+and Help menu are mirrored, substituted values are wrapped in Unicode isolates
+so "+0 h" or a path keeps its order, and the readout drops its monospace face,
+which has no Arabic joining. Search folds Latin accents and Arabic vowel signs
+but not Japanese dakuten, and full-width forms to ASCII. The Settings autosave
+row no longer builds a sentence from fragments. Chinese is Simplified;
+Traditional is not offered. Digits are Western throughout.
+
+Validation: 963 frontend tests passed (one skipped); ve-app settings, MCP and
+ui_strings tests, Clippy, formatting and the offline check passed. Native
+WebKit: every new language fits the title bar at 1792 px with nothing clipped;
+Arabic computed styles confirmed a right-to-left, right-aligned Help menu, the
+readout in the interface face, and isolated values in the timeline. The window
+could not be photographed off screen, so Arabic has not been looked at as
+pixels. The main bundle grew from 1.31 MB to 1.90 MB (all catalogues load
+eagerly). No translation has been checked by a native speaker.
+
 **2026-09-27: Interface languages and Help search.** The interface and the
 help reference are offered in English, Spanish, French and German (spec 5.7),
 chosen from a picker in the title bar, on the start page and in Settings →

@@ -476,7 +476,7 @@ fn the_language_persists_without_touching_the_document_and_refuses_unknown_ones(
     assert_eq!(before.revision, after.revision);
     assert_eq!(before.dirty, after.dirty);
     assert!(settings::language_set(&state, "xx".to_owned()).is_err());
-    assert_eq!(settings::settings_of(&state).unwrap().language, "de");
+    assert_eq!(settings::settings_of(&state).unwrap().language, "ar");
     let old: settings::AppSettings = serde_json::from_str(r#"{"language":"klingon"}"#).unwrap();
     assert_eq!(old.normalised().language, "en");
     let older: settings::AppSettings = serde_json::from_str("{}").unwrap();

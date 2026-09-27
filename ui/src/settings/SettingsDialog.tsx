@@ -254,7 +254,7 @@ export default function SettingsDialog({
         <section data-feature="settings:autosave">
           <h3>{t("Autosave")}</h3>
           <label className="settings-field">
-            {t("While you work, unsaved changes are")}
+            {t("Unsaved work")}
             <select
               value={settings.autosave}
               onChange={(event) => {
@@ -266,9 +266,9 @@ export default function SettingsDialog({
               }}
               title={t("Every minute, or every fifty edits, whichever comes first")}
             >
-              <option value="recovery">{t("kept as a recovery snapshot, offered back after a crash")}</option>
-              <option value="save">{t("saved into the project file itself")}</option>
-              <option value="off">{t("left until you save")}</option>
+              <option value="recovery">{t("Keep a recovery snapshot, offered back after a crash")}</option>
+              <option value="save">{t("Save into the project file itself")}</option>
+              <option value="off">{t("Leave them until you save")}</option>
             </select>
           </label>
         </section>

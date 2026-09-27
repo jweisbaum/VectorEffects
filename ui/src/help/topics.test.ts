@@ -2,6 +2,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
 import { TOPICS, searchTopics } from "./topics";
+import { LANGUAGES } from "../i18n";
 
 it("keeps every reference image and cross-reference reachable offline", () => {
   const ids = new Set(TOPICS.map(topic => topic.id));
@@ -37,7 +38,7 @@ it("translates the whole reference, page for page", async () => {
       images: section.images?.map(image => image.path),
     })),
   }));
-  for (const language of ["es", "fr", "de"] as const) {
+  for (const { id: language } of LANGUAGES.filter(l => l.id !== "en")) {
     const translated = topicsFor(language);
     expect(translated, language).not.toBe(TOPICS);
     expect(shape(translated), language).toEqual(shape(TOPICS));

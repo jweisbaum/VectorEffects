@@ -56,6 +56,10 @@ describe("feature registry", () => {
     expect(searchFeatures("sprache").map(m => m.feature.id)).toContain("shell:language");
     setLanguage("fr");
     expect(searchFeatures("langue").map(m => m.feature.id)).toContain("shell:language");
+    for (const [language, query] of [["it", "lingua"], ["nl", "taal"], ["ja", "言語"], ["zh", "语言"], ["ar", "اللغة"]] as const) {
+      setLanguage(language);
+      expect(searchFeatures(query).map(m => m.feature.id), language).toContain("shell:language");
+    }
     setLanguage("en");
   });
   it("ranks a label match above a description match", () => {

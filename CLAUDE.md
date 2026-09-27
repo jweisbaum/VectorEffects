@@ -380,7 +380,8 @@ state all the same, so it is saved and undone like everything else.
 
 ### Adding interface text
 
-**Every feature ships in English, Spanish, French and German** (spec §5.7).
+**Every feature ships in all nine interface languages** — English, Spanish,
+French, German, Italian, Dutch, Japanese, Simplified Chinese, Arabic (spec §5.7).
 Text that reaches only English is a failing test, not a follow-up.
 
 1. Write the English at the place it is shown and pass it through `t()`
@@ -390,8 +391,9 @@ Text that reaches only English is a failing test, not a follow-up.
    `t` at module load freezes whatever language was on at startup.
 2. Never concatenate translated pieces or pass an interpolated template to
    `t`; a variable part is a `{placeholder}`, and a count picks between two keys.
-3. Add the key to `ui/src/i18n/locales/{es,fr,de}/<area>.ts` — once per
-   language across all areas, in the terms of `ui/src/i18n/GLOSSARY.md`.
+3. Add the key to `ui/src/i18n/locales/<lang>/<area>.ts` for every language —
+   once per language across all areas, in the terms of `ui/src/i18n/GLOSSARY.md`
+   and `GLOSSARY.<lang>.md`.
    `coverage.test.ts` fails on a key missing, unused, translated two ways, or
    with different placeholders, and on JSX text or a `title`/`aria-label`/
    `placeholder` that skips `t` altogether.
@@ -399,7 +401,7 @@ Text that reaches only English is a failing test, not a follow-up.
    in `ui/src/i18n/rust-strings.json`: `VE_BLESS=1 cargo test -p ve-app --test
    ui_strings` rewrites it, and the catalogues then need the new entries.
 5. A help page is written in `ui/src/help/topics.ts` **and** in
-   `ui/src/help/locales/{es,fr,de}.ts`, page for page; `topics.test.ts`
+   `ui/src/help/locales/<lang>.ts` for every language, page for page; `topics.test.ts`
    compares their shapes.
 6. A control a person might search for gets `data-feature="<area>:<name>"` and
    an entry in `ui/src/help/features/<area>.ts` (label, description, synonyms,
@@ -1091,7 +1093,7 @@ decoder's output.
 - The relevant recipe above was followed in full.
 - Touched perf budgets were measured, not assumed.
 - If behaviour changed, `spec.md` was updated in the same commit.
-- Every new string is translated into es, fr and de, and every new control
+- Every new string is translated into every interface language, and every new control
   is in the Help search (`npm run ui:test` fails otherwise).
 
 ---

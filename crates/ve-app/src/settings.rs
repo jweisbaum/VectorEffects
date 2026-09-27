@@ -824,7 +824,7 @@ pub fn theme_set(state: &AppState, theme: String) -> Result<AppSettings> {
 }
 
 /// The interface languages the frontend carries a catalogue for.
-pub const LANGUAGES: &[&str] = &["en", "es", "fr", "de"];
+pub const LANGUAGES: &[&str] = &["en", "es", "fr", "de", "it", "nl", "ja", "zh", "ar"];
 
 /// Changes the interface language independently of any open project.
 #[tauri::command]

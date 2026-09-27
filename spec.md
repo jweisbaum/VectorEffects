@@ -1739,7 +1739,8 @@ loose from the object.
 
 ### 5.7 Interface language
 
-The interface is offered in English, Spanish, French and German, chosen from
+The interface is offered in English, Spanish, French, German, Italian, Dutch,
+Japanese, Simplified Chinese and Arabic, chosen from
 the language picker in the title bar, on the start page, or in Settings →
 Appearance. The choice is a person's preference, saved in the settings file
 (`AppSettings.language`) like the theme: it is not part of any project, its
@@ -1754,6 +1755,15 @@ option labels, slider ends) and the help reference. Two things stay as written:
 document data (layer, object and project names, which the person typed or the
 application numbered) and error messages that originate in the backend, which
 carry file paths and values and are reported as the backend wrote them.
+
+**Arabic reads right to left; the workspace does not turn round.** Every piece
+of text takes its direction from its own content, so an Arabic label reads
+right to left and aligns to its start while a number, unit or file name inside
+it keeps its order; the help reference and the Help menu's results are
+mirrored. The map, the docks and the timeline keep their arrangement: the
+map's chrome is placed by the camera and the docks by their edges, and the
+timeline runs left to right in time as a chart's axis does. Numbers are written
+with Western digits in every language.
 
 **A feature is not finished until it is translated.** Every string passes
 through `t()` with its English as the key, and a test holds every catalogue to

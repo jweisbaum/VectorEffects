@@ -51,6 +51,11 @@ pub fn relabel_menu<R: tauri::Runtime>(app: &tauri::AppHandle<R>, language: &str
         "es" => "Ayuda de VectorEffects",
         "fr" => "Aide de VectorEffects",
         "de" => "VectorEffects-Hilfe",
+        "it" => "Guida di VectorEffects",
+        "nl" => "VectorEffects Help",
+        "ja" => "VectorEffects ヘルプ",
+        "zh" => "VectorEffects 帮助",
+        "ar" => "تعليمات VectorEffects",
         _ => "VectorEffects Help",
     };
     let Some(menu) = app.menu() else { return };

@@ -19,6 +19,14 @@ ERA5, GlobCurrent, OpenStreetMap, S-57, GIS, KML, GPX, GeoJSON, Claude Code,
 Codex, Claude Desktop, file extensions, unit symbols (kt, km, nm, mph, km/h,
 m/s, px, °, h).
 
+Italian, Dutch, Japanese, Simplified Chinese and Arabic keep their terms in
+`GLOSSARY.<lang>.md` beside this file, in the same order as the table below.
+Japanese uses the polite form (です/ます) in sentences and plain nouns or
+verb stems on buttons; Chinese is Simplified, with full-width punctuation in
+sentences; Arabic is Modern Standard Arabic with Western digits, and is shown
+right to left (spec §5.7); Italian uses the impersonal and infinitive forms usual in
+software ("Fare clic per…", "Salva"); Dutch addresses the reader as u.
+
 | English | Español | Français | Deutsch |
 |---|---|---|---|
 | project | proyecto | projet | Projekt |

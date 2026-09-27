@@ -444,6 +444,22 @@ body {
 .help-search-detail { opacity: 0.7; font-size: 11px; }
 .help-search-heading { padding: 6px 8px 2px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; opacity: 0.6; }
 .help-search-empty { padding: 6px 8px; opacity: 0.7; }
+/*
+ * A right-to-left language (spec.md 5.7). The workspace keeps its arrangement
+ * — the map's chrome is placed by the camera and the docks by their edges —
+ * but every piece of text takes its direction from its own content, so an
+ * Arabic label reads right to left and aligns to its start, while a number, a
+ * unit or a file name inside it keeps its own order. Reading surfaces — the
+ * help reference and the Help menu's results — are mirrored outright.
+ */
+:root[data-text-dir="rtl"] body :where(p, li, label, span, button, option, select, input, textarea, h1, h2, h3, h4, th, td, figcaption, dt, dd, legend, summary) {
+  unicode-bidi: plaintext;
+}
+:root[data-text-dir="rtl"] :where(.help-dialog, .help-menu-popup) { direction: rtl; }
+/* A monospace face has no Arabic joining forms; digits stay aligned by
+   tabular figures in the interface's own face. */
+:root[data-text-dir="rtl"] .map-readout { font-family: inherit; }
+:root[data-text-dir="rtl"] .help-menu-popup { text-align: right; }
 /* Where the Help search found a feature: three pulses, then gone. */
 .feature-flash {
   position: fixed;
