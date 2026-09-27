@@ -1,5 +1,11 @@
 # VectorEffects — Implementation Plan
 
+**2026-09-27: Prepare 0.1.18 Beta.** 0.1.17 was tagged but not published: its
+Windows frontend tests failed because the two i18n source-scanning tests built
+their root from `URL.pathname`, which is `/D:/…` on Windows. They use
+`fileURLToPath` now, and relative paths are compared with forward slashes.
+0.1.18 carries 0.1.17's content and notes.
+
 **2026-09-27: Prepare 0.1.17 Beta.** The language picker lives in Settings →
 Appearance only; it left the title bar and the start page, and the Help search
 finds it there. Version manifests and lockfiles advance together; release

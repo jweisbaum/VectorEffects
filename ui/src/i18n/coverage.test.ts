@@ -19,11 +19,12 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
+import { fileURLToPath } from "node:url";
 import { parse } from "@babel/parser";
 import { CATALOGUES, type Catalogue } from "./index";
 import rustStrings from "./rust-strings.json";
 
-const ROOT = new URL("..", import.meta.url).pathname;
+const ROOT = fileURLToPath(new URL("..", import.meta.url));
 
 /** Words that read the same in every language offered. */
 const VERBATIM = new Set([
@@ -40,7 +41,7 @@ const MESSAGE_CALLS = new Set(["setHint", "reportError"]);
 function sources(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
     const path = join(dir, name);
-    const rel = relative(ROOT, path);
+    const rel = relative(ROOT, path).replaceAll("\\", "/");
     if (statSync(path).isDirectory()) {
       if (["generated", "locales"].includes(name)) continue;
       sources(path, out);
@@ -88,7 +89,7 @@ function scan(): Scan {
   for (const file of sources(ROOT)) {
     const text = readFileSync(file, "utf8");
     const lines = text.split("\n");
-    const rel = relative(ROOT, file);
+    const rel = relative(ROOT, file).replaceAll("\\", "/");
     const ignored = (line: number) => /i18n-ignore/.test(lines[line - 2] ?? "") || /i18n-ignore/.test(lines[line - 1] ?? "");
     const ast = parse(text, { sourceType: "module", plugins: ["typescript", "jsx"], errorRecovery: true });
     const flag = (node: Node, what: string) => {

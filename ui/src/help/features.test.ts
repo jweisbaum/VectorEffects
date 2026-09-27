@@ -5,12 +5,13 @@
  */
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { FEATURES, searchFeatures } from "./features";
 import { TOPICS } from "./topics";
 import { setLanguage } from "../i18n";
 
-const ROOT = new URL("..", import.meta.url).pathname;
+const ROOT = fileURLToPath(new URL("..", import.meta.url));
 
 function source(dir: string, out: string[] = [], tsxOnly = false): string[] {
   for (const name of readdirSync(dir)) {
