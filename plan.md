@@ -1,5 +1,10 @@
 # VectorEffects — Implementation Plan
 
+**2026-09-27: Prepare 0.1.17 Beta.** The language picker lives in Settings →
+Appearance only; it left the title bar and the start page, and the Help search
+finds it there. Version manifests and lockfiles advance together; release
+notes cover the nine interface languages and the Help search.
+
 **2026-09-27: Five more interface languages.** Italian, Dutch, Japanese,
 Simplified Chinese and Arabic join English, Spanish, French and German — every
 catalogue (1,472 keys each), the help reference page for page, the native Help

@@ -7,9 +7,7 @@ import type { Autosave } from "../generated/Autosave";
 import type { RecentProject } from "../generated/RecentProject";
 import NewProjectForm from "./NewProjectForm";
 import ConfirmDialog from "./ConfirmDialog";
-import type { AppSettings } from "../generated/AppSettings";
 import HelpMenu from "../help/HelpMenu";
-import LanguagePicker from "../i18n/LanguagePicker";
 import { useT } from "../i18n";
 import { pickGribToImport, pickProjectToOpen, pickZarrToImport } from "./dialogs";
 
@@ -23,12 +21,9 @@ import { pickGribToImport, pickProjectToOpen, pickZarrToImport } from "./dialogs
 export default function StartScreen({
   onOpened,
   onSettings,
-  onPreferences,
 }: {
   onOpened: (project: ProjectSummary) => void;
   onSettings?: () => void;
-  /** The settings after the language picker saved them. */
-  onPreferences?: (settings: AppSettings) => void;
 }) {
   const t = useT();
   const [recent, setRecent] = useState<RecentProject[]>([]);
@@ -95,7 +90,6 @@ export default function StartScreen({
       <div className="start-panel">
         <header>
           <div className="start-header-controls">
-            <LanguagePicker onSettings={onPreferences} />
             <HelpMenu />
             {onSettings && <button className="start-settings" data-feature="start:settings" onClick={onSettings}>{t("Settings")}</button>}
           </div>

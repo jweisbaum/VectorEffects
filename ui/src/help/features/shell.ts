@@ -5,8 +5,6 @@ import type { Feature } from "../features";
 const features: Feature[] = [
   { id: "shell:help", label: msg("Help"), description: msg("Search features and the help reference."),
     keywords: [msg("search"), msg("find"), msg("manual")], topic: "workspace" },
-  { id: "shell:language", label: msg("Language"), description: msg("Choose the language of the interface and help."),
-    keywords: [msg("translation"), msg("locale")], topic: "settings" },
   { id: "start:settings", label: msg("Settings"), description: msg("Preferences for units, appearance, shortcuts and the macro library."),
     keywords: [msg("preferences")], topic: "settings" },
 

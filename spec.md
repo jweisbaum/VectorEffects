@@ -1740,9 +1740,9 @@ loose from the object.
 ### 5.7 Interface language
 
 The interface is offered in English, Spanish, French, German, Italian, Dutch,
-Japanese, Simplified Chinese and Arabic, chosen from
-the language picker in the title bar, on the start page, or in Settings →
-Appearance. The choice is a person's preference, saved in the settings file
+Japanese, Simplified Chinese and Arabic, chosen in Settings → Appearance
+(reachable from the editor's gear and the start page's Settings button, and
+found by the Help search). The choice is a person's preference, saved in the settings file
 (`AppSettings.language`) like the theme: it is not part of any project, its
 history or an export, and changing it re-renders the interface in place — no
 project is closed and no state is lost. The native menu's own entry (*VectorEffects

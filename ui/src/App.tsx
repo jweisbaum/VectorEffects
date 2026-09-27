@@ -19,7 +19,6 @@ import BetaGate from "./project/BetaGate";
 import Help from "./help/Help";
 import HelpMenu from "./help/HelpMenu";
 import { onReveal } from "./help/highlight";
-import LanguagePicker from "./i18n/LanguagePicker";
 import { msg, setLanguage, useT } from "./i18n";
 import UnsavedChangesDialog from "./project/UnsavedChangesDialog";
 import { mayReplaceProject, type UnsavedChoice } from "./project/saveGuard";
@@ -605,7 +604,7 @@ function EditorApp() {
 
   if (!project) {
     return <UnitsProvider settings={settings}>
-      <StartScreen onOpened={setProject} onSettings={() => setShowSettings(true)} onPreferences={setSettings} />
+      <StartScreen onOpened={setProject} onSettings={() => setShowSettings(true)} />
       {settingsDialog}
     </UnitsProvider>;
   }
@@ -657,7 +656,6 @@ function EditorApp() {
         {/* The map's view controls and the capture tool land here (D68). */}
         <div className="titlebar-centre" ref={setViewSlot} />
         <span className="spacer" />
-        <LanguagePicker onSettings={setSettings} />
         <HelpMenu />
         <ProjectMenu
           onNew={() => void startNewProject()}

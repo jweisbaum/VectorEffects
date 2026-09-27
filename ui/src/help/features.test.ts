@@ -49,16 +49,16 @@ describe("feature registry", () => {
   });
   it("searches in the language on screen", () => {
     setLanguage("en");
-    expect(searchFeatures("langu").map(m => m.feature.id)).toContain("shell:language");
+    expect(searchFeatures("langu").map(m => m.feature.id)).toContain("settings:language");
     setLanguage("es");
-    expect(searchFeatures("idioma").map(m => m.feature.id)).toContain("shell:language");
+    expect(searchFeatures("idioma").map(m => m.feature.id)).toContain("settings:language");
     setLanguage("de");
-    expect(searchFeatures("sprache").map(m => m.feature.id)).toContain("shell:language");
+    expect(searchFeatures("sprache").map(m => m.feature.id)).toContain("settings:language");
     setLanguage("fr");
-    expect(searchFeatures("langue").map(m => m.feature.id)).toContain("shell:language");
+    expect(searchFeatures("langue").map(m => m.feature.id)).toContain("settings:language");
     for (const [language, query] of [["it", "lingua"], ["nl", "taal"], ["ja", "言語"], ["zh", "语言"], ["ar", "اللغة"]] as const) {
       setLanguage(language);
-      expect(searchFeatures(query).map(m => m.feature.id), language).toContain("shell:language");
+      expect(searchFeatures(query).map(m => m.feature.id), language).toContain("settings:language");
     }
     setLanguage("en");
   });
