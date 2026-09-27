@@ -264,7 +264,7 @@ pub fn create(
 ) -> Result<ProjectSummary> {
     let mut settings = request.into_settings()?;
     let name = if request.name.trim().is_empty() {
-        "Untitled".to_owned()
+        crate::names::untitled(&crate::settings::settings_of(state)?.language).to_owned()
     } else {
         request.name.trim().to_owned()
     };
@@ -284,7 +284,12 @@ pub fn create(
             }
             .clamped(),
         );
-        let project = Project::new(name, settings);
+        let mut project = Project::new(name, settings);
+        // The first layer's name, like every default name, is in the
+        // interface language (spec.md 5.7).
+        if let Some(first) = project.layers.first_mut() {
+            first.name = crate::names::layer(&session.settings.language, 1);
+        }
         tracing::info!(
             name = %project.name,
             resolution = %project.settings.resolution.label(),

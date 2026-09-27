@@ -105,25 +105,6 @@ impl Tool {
             ToolKind::Macro => Self::Macro,
         }
     }
-
-    /// The stem new objects of this tool are named from.
-    fn noun(self) -> &'static str {
-        match self {
-            Self::Brush => "Stroke",
-            Self::Circle => "Circle",
-            Self::ShapeFill => "Shape",
-            Self::Mask => "Mask",
-            Self::CloneStamp => "Clone",
-            Self::Curve => "Curve",
-            Self::Intensity => "Intensity",
-            Self::Divergence => "Divergence",
-            Self::Turn => "Rotation",
-            Self::Warp => "Warp",
-            Self::Liquify => "Displace",
-            Self::Patch => "Patch",
-            Self::Macro => "Macro",
-        }
-    }
 }
 
 /// One node of a drawn path, in geographic coordinates.
@@ -708,6 +689,7 @@ pub fn create(state: &AppState, new: NewObject) -> Result<Created> {
     }
 
     with_session(state, |session| {
+        let language = session.settings.language.clone();
         let open = session.require_open()?;
         let step_count = open.project.settings.step_count;
 
@@ -723,7 +705,11 @@ pub fn create(state: &AppState, new: NewObject) -> Result<Created> {
         )?;
         crate::document::pointed_at(layer)?;
 
-        let mut object = Object::new(tool, name_for(&open.project, new.tool), step_count);
+        let mut object = Object::new(
+            tool,
+            name_for(&open.project, new.tool, &language),
+            step_count,
+        );
         object.geometry = geometry;
         object.props = props;
         if let Some(prop) = object.props.get_mut(PropId::Position) {
@@ -828,8 +814,9 @@ fn merge_into(
     Ok(merge_target(layer, object, positions))
 }
 
-/// A name for a new object: the tool's noun and how many of them there are.
-fn name_for(project: &ve_core::project::Project, tool: Tool) -> String {
+/// A name for a new object, in the interface language: the tool's noun and
+/// how many of them there are.
+fn name_for(project: &ve_core::project::Project, tool: Tool, language: &str) -> String {
     let kind = tool.kind();
     let count = project
         .layers
@@ -837,7 +824,7 @@ fn name_for(project: &ve_core::project::Project, tool: Tool) -> String {
         .flat_map(|layer| &layer.objects)
         .filter(|object| object.tool == kind)
         .count();
-    format!("{} {}", tool.noun(), count + 1)
+    crate::names::object(language, kind, count + 1)
 }
 
 /// Whether the object a gesture would create contributes anything at all.

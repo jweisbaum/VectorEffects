@@ -1079,9 +1079,10 @@ pub fn add_layer(state: tauri::State<'_, AppState>, name: String) -> Result<Proj
 
 /// Implementation of [`add_layer`].
 pub fn layer_add(state: &AppState, name: String) -> Result<ProjectSummary> {
+    let language = crate::settings::settings_of(state)?.language;
     apply(state, |project| {
         let name = if name.trim().is_empty() {
-            format!("Layer {}", project.layers.len() + 1)
+            crate::names::layer(&language, project.layers.len() + 1)
         } else {
             name.trim().to_owned()
         };
@@ -1909,6 +1910,7 @@ pub fn duplicate_object(state: tauri::State<'_, AppState>, object: u64) -> Resul
 
 /// Implementation of [`duplicate_object`].
 pub fn object_duplicate(state: &AppState, object: u64) -> Result<ProjectSummary> {
+    let language = crate::settings::settings_of(state)?.language;
     apply(state, |project| {
         let id = object_id(object);
         let (layer_index, index) = project.locate(id).ok_or_else(|| missing_object(object))?;
@@ -1923,7 +1925,7 @@ pub fn object_duplicate(state: &AppState, object: u64) -> Result<ProjectSummary>
         // A fresh identity, or the two would be the same object to every
         // command that follows.
         copy.id = ve_core::Id::new();
-        copy.name = format!("{} copy", copy.name);
+        copy.name = crate::names::copy(&language, &copy.name);
 
         Ok(Command::AddObject {
             layer: target.id,

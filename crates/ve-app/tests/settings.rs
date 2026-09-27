@@ -482,3 +482,37 @@ fn the_language_persists_without_touching_the_document_and_refuses_unknown_ones(
     let older: settings::AppSettings = serde_json::from_str("{}").unwrap();
     assert_eq!(older.language, "en");
 }
+
+#[test]
+fn new_layers_and_objects_are_named_in_the_interface_language() {
+    use ve_app::create::{self, Gesture, NewObject, Tool};
+    let root = TempRoot::new("language-names");
+    let state = app(&root);
+    settings::language_set(&state, "de".to_owned()).expect("language");
+    with_project(&state, "wind");
+    ve_app::document::layer_add(&state, String::new()).expect("layer");
+    let circle = create::create(
+        &state,
+        NewObject {
+            tool: Tool::Circle,
+            gesture: Gesture::Point { at: [10.0, 50.0] },
+            options: Vec::new(),
+            layer: None,
+        },
+    )
+    .expect("circle");
+    ve_app::document::object_duplicate(&state, circle.object).expect("duplicate");
+    // Named once, at creation: a later change of language leaves them be.
+    settings::language_set(&state, "en".to_owned()).expect("language");
+    let session = state.session.lock().unwrap();
+    let project = &session.open.as_ref().unwrap().project;
+    let layers: Vec<_> = project.layers.iter().map(|l| l.name.as_str()).collect();
+    assert_eq!(layers, ["Ebene 1", "Ebene 2"]);
+    let objects: Vec<_> = project
+        .layers
+        .iter()
+        .flat_map(|l| &l.objects)
+        .map(|o| o.name.as_str())
+        .collect();
+    assert_eq!(objects, ["Kreis 1", "Kreis 1 Kopie"]);
+}

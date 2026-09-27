@@ -23,6 +23,7 @@ pub mod macros;
 pub mod mcp;
 pub mod measure;
 pub mod merge;
+pub mod names;
 pub mod opening;
 pub mod palette;
 pub mod paths;

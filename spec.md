@@ -1756,6 +1756,11 @@ document data (layer, object and project names, which the person typed or the
 application numbered) and error messages that originate in the backend, which
 carry file paths and values and are reported as the backend wrote them.
 
+**Default names are written in the interface language** — a new layer
+("Ebene 2"), a new object ("Kreis 1"), a duplicate ("Kreis 1 Kopie") and a
+project left unnamed. A name is document data once given: it is written in the
+language on screen at creation and stays as written when the language changes.
+
 **Arabic reads right to left; the workspace does not turn round.** Every piece
 of text takes its direction from its own content, so an Arabic label reads
 right to left and aligns to its start while a number, unit or file name inside
