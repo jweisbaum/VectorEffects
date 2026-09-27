@@ -8,21 +8,23 @@
 import { open, save } from "@tauri-apps/plugin-dialog";
 
 import { whileChoosing } from "../busy";
+import { msg, t } from "../i18n";
 import { EXTENSION } from "./format";
 
-const FILTERS = [{ name: "VectorEffects project", extensions: [EXTENSION] }];
+/** A function, not a constant: the filter's name is read in the language on screen. */
+const filters = () => [{ name: t("VectorEffects project"), extensions: [EXTENSION] }];
 
 /** Asks for a project to open. Returns null if the user cancelled. */
 export async function pickProjectToOpen(): Promise<string | null> {
-  const chosen = await whileChoosing("Choosing a project", () =>
-    open({ multiple: false, directory: false, filters: FILTERS }),
+  const chosen = await whileChoosing(msg("Choosing a project"), () =>
+    open({ multiple: false, directory: false, filters: filters() }),
   );
   return typeof chosen === "string" ? chosen : null;
 }
 
 /** Asks for a GRIB2 file to import as a layer. Returns null if cancelled. */
 export async function pickGribToImport(): Promise<string | null> {
-  const chosen = await whileChoosing("Choosing a GRIB file", () =>
+  const chosen = await whileChoosing(msg("Choosing a GRIB file"), () =>
     open({
       multiple: false,
       directory: false,
@@ -34,16 +36,16 @@ export async function pickGribToImport(): Promise<string | null> {
 
 /** A local Zarr store is a directory, even when its name has no extension. */
 export async function pickZarrToImport(): Promise<string | null> {
-  const chosen = await whileChoosing("Choosing a Zarr directory", () =>
-    open({ multiple: false, directory: true, title: "Open Zarr directory" }),
+  const chosen = await whileChoosing(msg("Choosing a Zarr directory"), () =>
+    open({ multiple: false, directory: true, title: t("Open Zarr directory") }),
   );
   return typeof chosen === "string" ? chosen : null;
 }
 
 /** The S-57 chart directory: an exchange set's root (spec.md 4.11). */
 export async function pickChartDirectory(): Promise<string | null> {
-  const chosen = await whileChoosing("Choosing a chart directory", () =>
-    open({ multiple: false, directory: true, title: "Choose the ENC chart directory" }),
+  const chosen = await whileChoosing(msg("Choosing a chart directory"), () =>
+    open({ multiple: false, directory: true, title: t("Choose the ENC chart directory") }),
   );
   return typeof chosen === "string" ? chosen : null;
 }
@@ -56,13 +58,13 @@ export async function pickChartDirectory(): Promise<string | null> {
  * Which of the two a file is, is a question its extension answers.
  */
 export async function pickGisToImport(): Promise<string | null> {
-  const chosen = await whileChoosing("Choosing a GIS file", () =>
+  const chosen = await whileChoosing(msg("Choosing a GIS file"), () =>
     open({
       multiple: false,
       directory: false,
       filters: [
         {
-          name: "GIS data",
+          name: t("GIS data"),
           extensions: ["geojson", "json", "shp", "kml", "kmz", "gpx", "tif", "tiff"],
         },
       ],
@@ -84,11 +86,11 @@ export function isGeoRaster(path: string): boolean {
  * georeference is something only the file knows.
  */
 export async function pickImageToImport(): Promise<string | null> {
-  const chosen = await whileChoosing("Choosing an image", () =>
+  const chosen = await whileChoosing(msg("Choosing an image"), () =>
     open({
       multiple: false,
       directory: false,
-      filters: [{ name: "Image", extensions: ["tif", "tiff", "png", "jpg", "jpeg"] }],
+      filters: [{ name: t("Image"), extensions: ["tif", "tiff", "png", "jpg", "jpeg"] }],
     }),
   );
   return typeof chosen === "string" ? chosen : null;
@@ -96,7 +98,7 @@ export async function pickImageToImport(): Promise<string | null> {
 
 /** Asks where to write a GRIB2 file. Returns null if the user cancelled. */
 export async function pickGribDestination(projectName: string): Promise<string | null> {
-  const chosen = await whileChoosing("Choosing where to export", () =>
+  const chosen = await whileChoosing(msg("Choosing where to export"), () =>
     save({
       defaultPath: `${projectName}.grib2`,
       filters: [{ name: "GRIB2", extensions: ["grib2"] }],
@@ -107,7 +109,7 @@ export async function pickGribDestination(projectName: string): Promise<string |
 
 /** Asks where to write a Zarr V3 directory. */
 export async function pickZarrDestination(projectName: string): Promise<string | null> {
-  const chosen = await whileChoosing("Choosing where to export", () =>
+  const chosen = await whileChoosing(msg("Choosing where to export"), () =>
     save({
       defaultPath: `${projectName}.zarr`,
       filters: [{ name: "Zarr V3", extensions: ["zarr"] }],
@@ -118,10 +120,10 @@ export async function pickZarrDestination(projectName: string): Promise<string |
 
 /** Asks where to save. Returns null if the user cancelled. */
 export async function pickProjectToSave(suggestedName: string): Promise<string | null> {
-  const chosen = await whileChoosing("Choosing where to save", () =>
+  const chosen = await whileChoosing(msg("Choosing where to save"), () =>
     save({
       defaultPath: `${suggestedName}.${EXTENSION}`,
-      filters: FILTERS,
+      filters: filters(),
     }),
   );
   return typeof chosen === "string" ? chosen : null;

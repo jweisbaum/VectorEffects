@@ -1,0 +1,54 @@
+import { msg } from "../../i18n";
+import type { Feature } from "../features";
+
+/** The timeline dock: transport, ruler, lifetime bars and property tracks. */
+const dock = ["panel:bottom"];
+const tracks = ["panel:bottom", "timeline:expand"];
+
+const features: Feature[] = [
+  { id: "timeline:play", label: msg("Play / pause"), description: msg("Play the animation through the timeline, or pause it."),
+    keywords: [msg("playback"), msg("animate"), msg("start")], topic: "animation", reveal: dock },
+  { id: "timeline:stop", label: msg("Stop"), description: msg("Stop playback and return to the first step."),
+    keywords: [msg("rewind"), msg("first frame")], topic: "animation", reveal: dock },
+  { id: "timeline:loop", label: msg("Loop"), description: msg("Start playback again from the beginning when it reaches the end."),
+    keywords: [msg("repeat"), msg("cycle")], topic: "animation", reveal: dock },
+  { id: "timeline:rate", label: msg("Playback speed"), description: msg("How many steps playback shows per second."),
+    keywords: [msg("frame rate"), msg("steps per second"), msg("fps")], topic: "animation", reveal: dock },
+  { id: "timeline:autokey", label: msg("Auto-key"), description: msg("Editing a property keys it at the current step."),
+    keywords: [msg("automatic keyframes"), msg("record")], topic: "animation", reveal: dock },
+  { id: "timeline:position", label: msg("Current step"), description: msg("The step the playhead is on, its forecast hour and its UTC time."),
+    keywords: [msg("current frame"), msg("forecast hour"), msg("time")], topic: "animation", reveal: dock },
+  { id: "timeline:playhead", label: msg("Playhead"), description: msg("The step being viewed and edited; drag along the ruler to scrub."),
+    keywords: [msg("current frame"), msg("scrub"), msg("cursor")], topic: "animation", reveal: dock },
+  { id: "timeline:readiness", label: msg("Readiness strip"), description: msg("The ruler shows which steps are rendered for the current view; click or drag it to move the playhead."),
+    keywords: [msg("ruler"), msg("rendered"), msg("buffering"), msg("scrub")], topic: "animation", reveal: dock },
+  { id: "timeline:steps", label: msg("Number of steps"), description: msg("How many time steps the project has."),
+    keywords: [msg("duration"), msg("length"), msg("frames")], topic: "animation", reveal: dock },
+  { id: "timeline:start-time", label: msg("Start time"), description: msg("Give step 0 a UTC date and time, or remove it."),
+    keywords: [msg("date"), msg("clock"), msg("reference time")], topic: "animation", reveal: dock },
+  { id: "timeline:grib-frames", label: msg("Imported frames"), description: msg("The steps an imported GRIB layer has a message for; select them to copy, paste or hide."),
+    keywords: [msg("messages"), msg("copy frames"), msg("paste frames")], topic: "imports", reveal: dock },
+  { id: "timeline:tracks", label: msg("Show properties"), description: msg("Expand an object to show its animatable properties."),
+    keywords: [msg("tracks"), msg("expand"), msg("animation")], topic: "animation", reveal: dock },
+  { id: "timeline:lifetime", label: msg("Lifetime bar"), description: msg("The steps an object is active; drag it to move, or drag an end to resize."),
+    keywords: [msg("active range"), msg("start frame"), msg("end frame"), msg("duration")], topic: "spans", reveal: dock },
+  { id: "timeline:shape-animation", label: msg("Animate shape"), description: msg("Edit an object's perimeter points on the map and key its shape."),
+    keywords: [msg("shape keys"), msg("perimeter"), msg("morph")], topic: "shape", reveal: dock },
+  { id: "timeline:key", label: msg("Add or remove key"), description: msg("Key a property at the current step, or remove the key there."),
+    keywords: [msg("keyframe"), msg("diamond"), msg("delete key")], topic: "animation", reveal: tracks },
+  { id: "timeline:keyframe", label: msg("Keyframe"), description: msg("Drag to move; right-click to choose interpolation; Delete removes the selected keys."),
+    keywords: [msg("diamond"), msg("move key"), msg("delete key")], topic: "animation", reveal: tracks },
+  { id: "timeline:interpolation", label: msg("Interpolation"), description: msg("Right-click a keyframe to choose how the value eases to the next key."),
+    keywords: [msg("easing"), msg("hold"), msg("linear"), msg("ease in")], topic: "animation", reveal: tracks },
+  { id: "timeline:graph", label: msg("Value graph"), description: msg("Show a property's value at every step as a graph."),
+    keywords: [msg("graph editor"), msg("curve"), msg("chart")], topic: "animation", reveal: tracks },
+  { id: "timeline:constant-motion", label: msg("Add constant motion"), description: msg("Move an object at a constant speed and bearing to the next position keyframe."),
+    keywords: [msg("velocity"), msg("drift"), msg("travel")], topic: "animation", reveal: tracks },
+  { id: "timeline:constant-motion-dialog", label: msg("Constant motion"), description: msg("Choose the direction and speed of an object's constant motion."),
+    keywords: [msg("bearing"), msg("speed"), msg("move object")], topic: "animation", reveal: tracks },
+  { id: "timeline:motion-vectors", label: msg("Motion vectors"), description: msg("Add an object's own movement along a track to the vectors it paints."),
+    keywords: [msg("velocity vectors"), msg("rotational vectors"), msg("motion contribution")], topic: "motion-vectors", reveal: tracks },
+  { id: "timeline:follow", label: msg("Follow link"), description: msg("Make a position or rotation follow another object's."),
+    keywords: [msg("link"), msg("parent"), msg("attach")], topic: "links", reveal: tracks },
+];
+export default features;

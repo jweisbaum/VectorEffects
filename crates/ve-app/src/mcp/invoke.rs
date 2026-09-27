@@ -98,6 +98,10 @@ pub const EXCLUDED: &[&str] = &[
     "export_grib",
     "export_zarr",
     "import_history",
+    // The interface language takes the handle to relabel the native menu,
+    // and is a person's reading preference that the webview holds too: a
+    // client changing it would leave the interface in the old language.
+    "set_language",
     // No state to hand it, which is the one shape the table holds; the
     // curated tool of the same name carries it.
     "history_archives",

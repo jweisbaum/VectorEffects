@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { THEMES, themeOf, type Theme } from "./themes";
+import { THEMES, themeName, themeOf, type Theme } from "./themes";
+import { useT } from "../i18n";
 import type { CustomTheme } from "../generated/CustomTheme";
 
 /** Use the catalogue colours directly so previews do not inherit the active theme. */
@@ -16,6 +17,7 @@ export default function ThemePicker({ value, custom, onChoose }: {
   custom?: CustomTheme | null;
   onChoose: (id: string) => void;
 }) {
+  const t = useT();
   const themes = custom ? [...THEMES, themeOf("custom", custom)] : THEMES;
   const chosen = themes.find(theme => theme.id === value) ?? themeOf(undefined);
   const [open, setOpen] = useState(false);
@@ -51,13 +53,14 @@ export default function ThemePicker({ value, custom, onChoose }: {
   return <div className="theme-picker" ref={held} onBlur={event => {
     if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false);
   }}>
-    <label id={`${id}-label`} htmlFor={id}>Theme</label>
+    <label id={`${id}-label`} htmlFor={id}>{t("Theme")}</label>
     <button
       ref={trigger}
       id={id}
       type="button"
       role="combobox"
       className="theme-trigger"
+      data-feature="settings:theme"
       aria-labelledby={`${id}-label`}
       aria-haspopup="listbox"
       aria-expanded={open}
@@ -91,7 +94,7 @@ export default function ThemePicker({ value, custom, onChoose }: {
         event.stopPropagation();
       }}
     >
-      <span className="theme-name">{chosen.name}</span>
+      <span className="theme-name">{themeName(chosen)}</span>
       <Palette theme={chosen} />
       <span className="theme-marker" aria-hidden="true">▾</span>
     </button>
@@ -106,7 +109,7 @@ export default function ThemePicker({ value, custom, onChoose }: {
         onPointerDown={event => event.preventDefault()}
         onClick={() => choose(theme)}
       >
-        <span className="theme-name">{theme.name}</span>
+        <span className="theme-name">{themeName(theme)}</span>
         <Palette theme={theme} />
         <span className="theme-marker" aria-hidden="true">{theme.id === chosen.id ? "✓" : ""}</span>
       </li>)}

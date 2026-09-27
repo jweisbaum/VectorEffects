@@ -5,13 +5,16 @@
  * tile of each kind is a different tile.
  */
 
+import { msg } from "./i18n";
+
 export type FieldKindName = "wind" | "current";
 
 export const KINDS: readonly FieldKindName[] = ["wind", "current"];
 
+/** English, marked with `msg`: pass an entry through `t` where it is shown. */
 export const KIND_LABELS: Record<FieldKindName, string> = {
-  wind: "10 m wind",
-  current: "Surface currents",
+  wind: msg("10 m wind"),
+  current: msg("Surface currents"),
 };
 
 /** The kind's segment in a tile address: `w` or `c`, as `protocol::parse` reads it. */

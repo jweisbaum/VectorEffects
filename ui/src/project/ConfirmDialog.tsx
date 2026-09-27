@@ -1,5 +1,7 @@
 import { useEffect } from "react";
 
+import { useT } from "../i18n";
+
 /**
  * Asks before something irreversible.
  *
@@ -21,6 +23,7 @@ export default function ConfirmDialog({
   onConfirm: () => void;
   onCancel: () => void;
 }) {
+  const t = useT();
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
@@ -44,7 +47,7 @@ export default function ConfirmDialog({
           </button>
           <span className="spacer" />
           <button className="primary" autoFocus onClick={onCancel}>
-            Cancel
+            {t("Cancel")}
           </button>
         </div>
       </div>

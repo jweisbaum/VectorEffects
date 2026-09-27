@@ -12,6 +12,7 @@
  * correct aspect ratio. Vertical scale need not equal one at the equator.
  */
 
+import { msg } from "../i18n/msg";
 import { GENERAL_MAPS, generalMap, type GeneralMap } from "./projections/general";
 import { AZIMUTHAL_MODE, GPU_AZIMUTHALS } from "./projectionShaders";
 
@@ -76,7 +77,7 @@ const clamp = (value: number, limit: number) => Math.max(-limit, Math.min(limit,
 /** Equirectangular: `y` *is* the latitude. The projection the app grew up in. */
 const EQUIRECTANGULAR: Projection & { id: CylindricalProjectionId } = {
   id: "equirectangular",
-  label: "Equirectangular",
+  label: msg("Equirectangular"),
   mode: 0,
   yOf: (lat) => lat,
   latOf: (y) => y,
@@ -181,21 +182,21 @@ function polynomial(id: CylindricalProjectionId, label: string, mode: number, co
 /** Stable order: mode + 1 is the persisted pixel-tool space. Append only. */
 export const PROJECTIONS: readonly (Projection & { id: CylindricalProjectionId })[] = [
   EQUIRECTANGULAR, MERCATOR, MILLER,
-  equalArea("lambert", "Lambert cylindrical equal-area", 3, 0),
+  equalArea("lambert", msg("Lambert cylindrical equal-area"), 3, 0),
   equalArea("behrmann", "Behrmann", 4, 30),
   equalArea("gall_peters", "Gall–Peters", 5, 45),
   equalArea("hobo_dyer", "Hobo–Dyer", 6, 37.5),
-  stereographic("gall_stereographic", "Gall stereographic", 7, 1 + Math.SQRT2),
-  stereographic("braun", "Braun stereographic", 8, 2),
-  { id: "central_cylindrical", label: "Central cylindrical (±80°)", mode: 9, maxLat: 80,
+  stereographic("gall_stereographic", msg("Gall stereographic"), 7, 1 + Math.SQRT2),
+  stereographic("braun", msg("Braun stereographic"), 8, 2),
+  { id: "central_cylindrical", label: msg("Central cylindrical (±80°)"), mode: 9, maxLat: 80,
     yOf: lat => Math.tan(clamp(lat, 80) * DEG) / DEG,
     latOf: y => Math.atan(y * DEG) / DEG,
     scaleAt: lat => 1 / Math.cos(clamp(lat, 80) * DEG) ** 2,
   },
   polynomial("patterson", "Patterson", 10, [1.0148, 0, 0.23185, -0.14499, 0.02406]),
-  polynomial("compact_miller", "Compact Miller", 11, [0.9902, 0.1604, -0.03054]),
-  equidistant("equidistant_30", "Equidistant cylindrical (30°)", 12, 30),
-  equidistant("equidistant_45", "Equidistant cylindrical (45°)", 13, 45),
+  polynomial("compact_miller", msg("Compact Miller"), 11, [0.9902, 0.1604, -0.03054]),
+  equidistant("equidistant_30", msg("Equidistant cylindrical (30°)"), 12, 30),
+  equidistant("equidistant_45", msg("Equidistant cylindrical (45°)"), 13, 45),
 ];
 
 /** Index zero is geodesic; the original projected/mercator/miller indices stay fixed. */

@@ -12,6 +12,7 @@
 
 import { useSyncExternalStore } from "react";
 
+import { t } from "../i18n";
 import type { DocumentTree } from "../generated/DocumentTree";
 import type { OpenProgress } from "../generated/OpenProgress";
 
@@ -79,11 +80,15 @@ export function barFraction(state: OpeningSnapshot): number {
 
 /** The line under the bar: what is being read, and how much of it. */
 export function barLabel(state: OpeningSnapshot): string {
-  if (state.stage === "drawing") return "Drawing the map";
+  if (state.stage === "drawing") return t("Drawing the map");
   const progress = state.progress;
-  if (progress === null) return "Reading";
+  if (progress === null) return t("Reading");
   if (progress.total === 0) return progress.label;
-  return `${progress.label} · ${progress.done.toLocaleString()} of ${progress.total.toLocaleString()}`;
+  return t("{label} · {done} of {total}", {
+    label: progress.label,
+    done: progress.done.toLocaleString(),
+    total: progress.total.toLocaleString(),
+  });
 }
 
 /**
@@ -97,8 +102,12 @@ export function unreadLayers(tree: DocumentTree): string | null {
     .filter((layer) => layer.grib !== null && !layer.grib.loaded)
     .map((layer) => layer.name);
   if (names.length === 0) return null;
-  const what = names.length === 1 ? `the layer "${names[0]}"` : `${names.length} layers (${names.join(", ")})`;
-  return `Opened without ${what}: the imported file is missing or unreadable.`;
+  return names.length === 1
+    ? t("Opened without the layer “{name}”: the imported file is missing or unreadable.", { name: names[0]! })
+    : t("Opened without {count} layers ({names}): the imported files are missing or unreadable.", {
+        count: names.length,
+        names: names.join(", "),
+      });
 }
 
 export function useOpening(): OpeningSnapshot {

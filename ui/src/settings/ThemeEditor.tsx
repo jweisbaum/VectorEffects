@@ -1,33 +1,34 @@
 import { useId, useState } from "react";
 import type { CustomTheme } from "../generated/CustomTheme";
-import { THEMES, themeOf, validColour, type Theme } from "./themes";
+import { THEMES, themeName, themeOf, validColour, type Theme } from "./themes";
+import { msg, useT } from "../i18n";
 
 type ColourKey = `roles.${keyof Theme["roles"]}` | `map.${keyof Theme["map"]}` | `chart.${keyof Theme["chart"]}`;
 const PRIMARY: [ColourKey, string][] = [
-  ["roles.bg", "Window background"], ["roles.panel", "Panels"], ["roles.inset", "Controls"],
-  ["roles.text", "Text"], ["roles.muted", "Secondary text"], ["roles.accent", "Accent"],
+  ["roles.bg", msg("Window background")], ["roles.panel", msg("Panels")], ["roles.inset", msg("Controls")],
+  ["roles.text", msg("Text")], ["roles.muted", msg("Secondary text")], ["roles.accent", msg("Accent")],
 ];
 const GROUPS: [string, [ColourKey, string][]][] = [
-  ["More interface colors", [
-    ["roles.surface", "Surface"], ["roles.raised", "Menus"], ["roles.hover", "Hover"],
-    ["roles.active", "Active row"], ["roles.border", "Borders"], ["roles.border-subtle", "Dividers"],
-    ["roles.highlight", "Highlight"], ["roles.warning", "Warning text"], ["roles.error", "Error text"],
-    ["roles.danger-border", "Danger border"], ["roles.danger-surface", "Danger background"],
-    ["roles.selected-bg", "Selected button"], ["roles.selected-ink", "Selected button text"],
-    ["roles.selected-border", "Selected button border"], ["roles.selected-hover", "Selected button hover"],
-    ["roles.selection-ink", "Text selection"],
+  [msg("More interface colors"), [
+    ["roles.surface", msg("Surface")], ["roles.raised", msg("Menus")], ["roles.hover", msg("Hover")],
+    ["roles.active", msg("Active row")], ["roles.border", msg("Borders")], ["roles.border-subtle", msg("Divider lines")],
+    ["roles.highlight", msg("Highlight")], ["roles.warning", msg("Warning text")], ["roles.error", msg("Error text")],
+    ["roles.danger-border", msg("Danger border")], ["roles.danger-surface", msg("Danger background")],
+    ["roles.selected-bg", msg("Selected button")], ["roles.selected-ink", msg("Selected button text")],
+    ["roles.selected-border", msg("Selected button border")], ["roles.selected-hover", msg("Selected button hover")],
+    ["roles.selection-ink", msg("Text selection")],
   ]],
-  ["Map colors", [
-    ["map.sea", "Water"], ["map.land", "Land"], ["map.coast", "Coastlines"],
-    ["map.graticule", "Grid lines"], ["map.void", "Outside the globe"],
-    ["map.source", "Source outlines"], ["map.selection", "Selected outlines"],
-    ["map.hover", "Brush hover"], ["map.ink", "Label background"],
-    ["map.text", "Map text"], ["map.measure", "Measurements"],
+  [msg("Map colors"), [
+    ["map.sea", msg("Water")], ["map.land", msg("Land")], ["map.coast", msg("Coastlines")],
+    ["map.graticule", msg("Grid lines")], ["map.void", msg("Outside the globe")],
+    ["map.source", msg("Source outlines")], ["map.selection", msg("Selected outlines")],
+    ["map.hover", msg("Brush hover")], ["map.ink", msg("Label background")],
+    ["map.text", msg("Map text")], ["map.measure", msg("Measurements")],
   ]],
-  ["Chart colors", [
-    ["chart.shallow", "Shallow water"], ["chart.middle", "Mid-depth water"],
-    ["chart.deep", "Deep water"], ["chart.coast", "Chart coastlines"],
-    ["chart.contour", "Contours"], ["chart.text", "Chart text"], ["chart.built", "Built-up areas"],
+  [msg("Chart colors"), [
+    ["chart.shallow", msg("Shallow water")], ["chart.middle", msg("Mid-depth water")],
+    ["chart.deep", msg("Deep water")], ["chart.coast", msg("Chart coastlines")],
+    ["chart.contour", msg("Contours")], ["chart.text", msg("Chart text")], ["chart.built", msg("Built-up areas")],
   ]],
 ];
 
@@ -47,6 +48,7 @@ export default function ThemeEditor({ initial, onSave, onCancel }: {
   onSave: (custom: CustomTheme) => Promise<void>;
   onCancel: () => void;
 }) {
+  const t = useT();
   const [draft, setDraft] = useState<CustomTheme>(() => ({ ...initial, colours: { ...initial.colours } }));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -63,9 +65,9 @@ export default function ThemeEditor({ initial, onSave, onCancel }: {
       const value = draft.colours[key] ?? hexOf(colourOf(base, key));
       const swatch = validColour(value) ? value : hexOf(colourOf(base, key));
       return <div className="theme-colour" key={key}>
-        <label htmlFor={`${id}-${key}`}>{label}</label>
+        <label htmlFor={`${id}-${key}`}>{t(label)}</label>
         <span className="theme-colour-swatch" style={{ backgroundColor: swatch }}>
-          <input type="color" aria-label={`${label} color`} value={swatch}
+          <input type="color" aria-label={t("{label} color", { label: t(label) })} value={swatch}
             onChange={event => setColour(key, event.target.value)} />
         </span>
         <input type="text" id={`${id}-${key}`} value={value} spellCheck={false} maxLength={7}
@@ -75,38 +77,38 @@ export default function ThemeEditor({ initial, onSave, onCancel }: {
   </div>;
 
   return <fieldset className="theme-editor" disabled={saving}>
-    <legend>Custom theme</legend>
-    <label className="settings-field">Start from
+    <legend>{t("Custom theme")}</legend>
+    <label className="settings-field">{t("Start from")}
       <select value={draft.base} onChange={event => {
         setDraft({ base: event.target.value, colours: {} }); setError(null);
       }}>
-        {THEMES.map(theme => <option key={theme.id} value={theme.id}>{theme.name}</option>)}
+        {THEMES.map(theme => <option key={theme.id} value={theme.id}>{themeName(theme)}</option>)}
       </select>
     </label>
     <div className="theme-preview" style={{ background: preview.roles.bg, color: preview.roles.text, borderColor: preview.roles.border }}>
       <div style={{ background: preview.roles.panel, borderColor: preview.roles.border }}>
-        <strong>Theme preview</strong>
-        <span style={{ color: preview.roles.muted }}>Text and controls</span>
-        <span className="theme-preview-accent" style={{ color: preview.roles.accent }}>Accent</span>
-        <span className="theme-preview-button" style={{ background: preview.roles["selected-bg"], color: preview.roles["selected-ink"] }}>Selected</span>
+        <strong>{t("Theme preview")}</strong>
+        <span style={{ color: preview.roles.muted }}>{t("Text and controls")}</span>
+        <span className="theme-preview-accent" style={{ color: preview.roles.accent }}>{t("Accent")}</span>
+        <span className="theme-preview-button" style={{ background: preview.roles["selected-bg"], color: preview.roles["selected-ink"] }}>{t("Selected")}</span>
       </div>
     </div>
     {fields(PRIMARY)}
     {GROUPS.map(([label, rows]) => <details key={label}>
-      <summary>{label}</summary>
+      <summary>{t(label)}</summary>
       {fields(rows)}
     </details>)}
-    {!valid && <p className="modal-error" role="alert">Use six-digit hex colors, such as #87bba2.</p>}
+    {!valid && <p className="modal-error" role="alert">{t("Use six-digit hex colors, such as #87bba2.")}</p>}
     {error && <p className="modal-error" role="alert">{error}</p>}
     <div className="theme-editor-actions">
-      <button type="button" onClick={() => { setDraft({ base: draft.base, colours: {} }); setError(null); }}>Reset colors</button>
-      <button type="button" onClick={onCancel}>Cancel</button>
+      <button type="button" onClick={() => { setDraft({ base: draft.base, colours: {} }); setError(null); }}>{t("Reset colors")}</button>
+      <button type="button" onClick={onCancel}>{t("Cancel")}</button>
       <button type="button" className="primary" disabled={!valid || saving} onClick={async () => {
         setSaving(true); setError(null);
         try { await onSave(draft); }
         catch (error) { setError(String(error)); }
         finally { setSaving(false); }
-      }}>{saving ? "Saving…" : "Save custom theme"}</button>
+      }}>{saving ? t("Saving…") : t("Save custom theme")}</button>
     </div>
   </fieldset>;
 }

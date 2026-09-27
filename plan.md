@@ -1,5 +1,36 @@
 # VectorEffects — Implementation Plan
 
+**2026-09-27: Interface languages and Help search.** The interface and the
+help reference are offered in English, Spanish, French and German (spec 5.7),
+chosen from a picker in the title bar, on the start page and in Settings →
+Appearance, saved as `AppSettings.language` by `set_language` and applied in
+place. Strings pass through `t()` keyed by their English; per-area catalogues
+live in `ui/src/i18n/locales/<lang>/`, terminology in `GLOSSARY.md`. Schema
+labels are exported to `rust-strings.json` by a ve-app test; history entries
+and measurement totals, which Rust writes in English, are translated by pattern
+at the frontend. The native menu's Help item follows the language. A coverage
+test fails on any missing, unused, conflicting or placeholder-mismatched entry
+and on interface text that skips `t()`, so a new feature must be translated to
+pass. Not translated: document data and backend error messages.
+The Help menu holds a search (spec 5.8), opened by Cmd-F / Ctrl-F, listing
+matching features and help pages in the language on screen. Choosing a
+feature reveals it — selecting a tool, opening a panel, the project menu or
+Settings at its section — and flashes a rectangle around it; about 250
+controls are registered in `ui/src/help/features/`. Pages open the reference.
+`set_language` is excluded from MCP invoke (it takes the app handle and the
+webview holds the language too).
+
+Validation: 938 frontend tests passed (one skipped), including coverage,
+registry, Help menu, language picker and history-label tests; Rust workspace
+tests, Clippy, formatting, offline check and production build passed. The
+projection worker bundle carries no catalogues. Native WebKit: French and
+German applied across the title bar and tooltips without overflow at 1792 px;
+Cmd-F search in French selected the Brush and flashed its Feather option;
+Settings features opened the dialog at their section. In an uncomposited
+automation window the flash arrives late because timers are throttled; a
+visible window was not checked by hand. Translations are machine-produced and
+reviewed per language for consistency with the help, not by native speakers.
+
 **2026-09-24: Prepare 0.1.15 Beta.** Version manifests and lockfiles advance
 together. Release notes cover globe pixel footprints, capture detail, Displace,
 workspace improvements, preset themes and custom application colours. The

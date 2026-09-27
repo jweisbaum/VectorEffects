@@ -5,6 +5,7 @@ import { KIND_LABELS, kindOf } from "../kind";
 import NumberField from "../NumberField";
 import { startDraftFrom } from "../timeline/Timeline";
 import { setHint } from "../hint";
+import { useT } from "../i18n";
 import { api, IpcError } from "../ipc";
 import type { ExportEstimate } from "../generated/ExportEstimate";
 import type { ExportProgress } from "../generated/ExportProgress";
@@ -29,6 +30,7 @@ export default function ExportDialog({
 }) {
   // The project's start time when it has one, else now rounded to the
   // nearest hour, UTC (M29): the dialog still asks, it just starts right.
+  const t = useT();
   const start = startDraftFrom(project.start_unix_s);
   const [year, setYear] = useState(start.year);
   const [month, setMonth] = useState(start.month);
@@ -69,8 +71,11 @@ export default function ExportDialog({
       // result behind a modal makes the user dismiss a box to get back to the
       // map they were already looking at.
       setHint(
-        `Exported ${result.messages} messages, ${formatBytes(result.bytes)}, ` +
-          `in ${(result.elapsed_ms / 1000).toFixed(1)} s`,
+        t("Exported {messages} messages, {size}, in {seconds} s", {
+          messages: result.messages,
+          size: formatBytes(result.bytes),
+          seconds: (result.elapsed_ms / 1000).toFixed(1),
+        }),
       );
       setRunning(false);
       setProgress(null);
@@ -80,7 +85,7 @@ export default function ExportDialog({
       // Cancelling is a choice, not a failure.
       const message = err instanceof IpcError ? err.message : String(err);
       setError(err instanceof IpcError && err.kind === "cancelled" ? null : message);
-      if (err instanceof IpcError && err.kind === "cancelled") setDone("Export cancelled");
+      if (err instanceof IpcError && err.kind === "cancelled") setDone(t("Export cancelled"));
     } finally {
       setRunning(false);
       setProgress(null);
@@ -93,33 +98,33 @@ export default function ExportDialog({
   return (
     <div className="modal-backdrop" onClick={running ? undefined : onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h2>Export GRIB2</h2>
+        <h2>{t("Export GRIB2")}</h2>
 
         <p className="muted modal-summary">
-          {project.kinds_present.map((kind) => KIND_LABELS[kindOf(kind)]).join(" + ") ||
-            "no field"}{" "}
+          {project.kinds_present.map((kind) => t(KIND_LABELS[kindOf(kind)])).join(" + ") ||
+            t("no field")}{" "}
           · {project.grid_ni} × {project.grid_nj} ·{" "}
-          {project.step_count} steps every {project.step_hours} h
-          {estimate && <> · about {formatBytes(estimate.bytes)}</>}
+          {t("{count} steps every {hours} h", { count: project.step_count, hours: project.step_hours })}
+          {estimate && <> · {t("about {size}", { size: formatBytes(estimate.bytes) })}</>}
         </p>
 
         <fieldset disabled={running}>
-          <legend>Forecast start (UTC)</legend>
+          <legend>{t("Forecast start (UTC)")}</legend>
           <div className="modal-row">
             <label>
-              Year
+              {t("Year")}
               <NumberField min={1900} max={2999} value={year} onCommit={setYear} />
             </label>
             <label>
-              Month
+              {t("Month")}
               <NumberField min={1} max={12} value={month} onCommit={setMonth} />
             </label>
             <label>
-              Day
+              {t("Day")}
               <NumberField min={1} max={31} value={day} onCommit={setDay} />
             </label>
             <label>
-              Hour
+              {t("Hour")}
               <NumberField min={0} max={23} value={hour} onCommit={setHour} />
             </label>
           </div>
@@ -132,7 +137,7 @@ export default function ExportDialog({
               <div className="progress-fill" style={{ width: `${percent}%` }} />
             </div>
             <span className="muted">
-              {progress ? `step ${progress.step} of ${progress.total}` : "starting…"}
+              {progress ? t("step {step} of {total}", { step: progress.step, total: progress.total }) : t("starting…")}
             </span>
           </div>
         )}
@@ -142,12 +147,12 @@ export default function ExportDialog({
 
         <div className="modal-actions">
           {running ? (
-            <button onClick={() => void api.cancelExport()}>Cancel export</button>
+            <button onClick={() => void api.cancelExport()}>{t("Cancel export")}</button>
           ) : (
             <>
-              <button onClick={onClose}>Close</button>
+              <button onClick={onClose}>{t("Close")}</button>
               <button className="primary" onClick={() => void run()}>
-                Choose location and export…
+                {t("Choose location and export…")}
               </button>
             </>
           )}

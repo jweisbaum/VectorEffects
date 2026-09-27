@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 
+import { useT } from "../i18n";
 import type { UnsavedChoice } from "./saveGuard";
 
 /**
@@ -17,6 +18,7 @@ export default function UnsavedChangesDialog({
   name: string;
   onChoose: (choice: UnsavedChoice) => void;
 }) {
+  const t = useT();
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
@@ -31,19 +33,19 @@ export default function UnsavedChangesDialog({
   return (
     <div className="modal-backdrop" onClick={() => onChoose("cancel")}>
       <div className="modal modal-narrow" onClick={(e) => e.stopPropagation()}>
-        <h2>Unsaved changes</h2>
+        <h2>{t("Unsaved changes")}</h2>
         <p className="modal-summary">
-          “{name}” has changes that have not been saved.
+          {t("“{name}” has changes that have not been saved.", { name })}
         </p>
 
         <div className="modal-actions">
           <button onClick={() => onChoose("discard")} className="danger">
-            Don’t save
+            {t("Don’t save")}
           </button>
           <span className="spacer" />
-          <button onClick={() => onChoose("cancel")}>Cancel</button>
+          <button onClick={() => onChoose("cancel")}>{t("Cancel")}</button>
           <button className="primary" autoFocus onClick={() => onChoose("save")}>
-            Save
+            {t("Save")}
           </button>
         </div>
       </div>

@@ -1,11 +1,23 @@
 import catalogue from "./themes.json";
 import type { CustomTheme } from "../generated/CustomTheme";
+import { msg, t } from "../i18n";
 
 export const THEMES = catalogue;
 export const DEFAULT_THEME = "sage";
 export type Theme = typeof THEMES[number];
 export type MapColour = keyof Theme["map"];
 export const validColour = (value: string): boolean => /^#[0-9a-f]{6}$/i.test(value);
+/**
+ * The bundled themes' names, marked for the catalogues: `themes.json` holds
+ * them in English, and they are translated where they are shown.
+ */
+export const THEME_NAMES: readonly string[] = [
+  msg("Original (Midnight)"), msg("Sage & Teal"), msg("Ocean"), msg("Plum"), msg("Ember"), msg("Paper"), msg("Custom"),
+];
+/** A theme's name in the language on screen. */
+export function themeName(theme: Theme): string {
+  return t(theme.name);
+}
 export function themeOf(id: string | undefined, custom?: CustomTheme | null): Theme {
   if (id === "custom" && custom) {
     const base = themeOf(custom.base === "custom" ? DEFAULT_THEME : custom.base);

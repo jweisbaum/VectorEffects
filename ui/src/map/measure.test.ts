@@ -124,3 +124,14 @@ describe("pointsNeeded", () => {
     expect(pointsNeeded("rings")).toBe(1);
   });
 });
+
+it("translates the word of a measurement's total and keeps its distance", async () => {
+  const { setLanguage } = await import("../i18n");
+  const { totalLabel } = await import("./measure");
+  expect(totalLabel("total 12.3 nm")).toBe("total 12.3 nm");
+  setLanguage("de");
+  expect(totalLabel("outer 50 nm")).toBe("außen 50 nm");
+  expect(totalLabel("total 12.3 nm")).toBe("gesamt 12.3 nm");
+  expect(totalLabel("GC 12 nm")).toBe("GC 12 nm");
+  setLanguage("en");
+});

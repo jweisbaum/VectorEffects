@@ -16,6 +16,11 @@ export type AppSettings = {
  */
 theme: string,
 /**
+ * The interface language, one of [`LANGUAGES`]. A preference of the
+ * person, like the theme: no project, export or history reads it.
+ */
+language: string,
+/**
  * Saved custom colours, retained when switching to a bundled theme.
  */
 custom_theme: CustomTheme | null,

@@ -11,6 +11,7 @@
  */
 
 import { IS_MAC } from "../chords";
+import { t } from "../i18n";
 import type { AppSettings } from "../generated/AppSettings";
 import type { Shortcut } from "../generated/Shortcut";
 import type { ShortcutAction } from "../generated/ShortcutAction";
@@ -69,7 +70,7 @@ export function bindingFor(
  * cannot describe one binding two ways.
  */
 export function chordLabel(binding: Shortcut | null): string {
-  if (!binding) return "unbound";
+  if (!binding) return t("unbound");
   const named: Record<string, string> = {
     " ": "Space",
     arrowleft: "←",

@@ -12,6 +12,8 @@
  * this module simply never looks at the local zone.
  */
 
+import { msg, t } from "../i18n";
+
 /** Seconds in an hour. The archives are hourly and so is the range. */
 const HOUR = 3600;
 
@@ -29,9 +31,9 @@ export const MAX_FETCHED_STEPS = 240;
 export interface ArchiveChoice {
   /** The identifier the command takes. */
   id: string;
-  /** What the checkbox says. */
+  /** What the checkbox says. English, via `msg`: pass it through `t` to show it. */
   label: string;
-  /** What that archive holds. */
+  /** What that archive holds. English, via `msg`: pass it through `t` to show it. */
   detail: string;
 }
 
@@ -39,13 +41,13 @@ export interface ArchiveChoice {
 export const ARCHIVES: readonly ArchiveChoice[] = [
   {
     id: "era5-wind",
-    label: "ERA5 wind",
-    detail: "10 m wind, hourly, 0.25°",
+    label: msg("ERA5 wind"),
+    detail: msg("10 m wind, hourly, 0.25°"),
   },
   {
     id: "globcurrent",
     label: "GlobCurrent",
-    detail: "total surface current, hourly, 0.25°",
+    detail: msg("total surface current, hourly, 0.25°"),
   },
 ];
 
@@ -130,25 +132,25 @@ export function rangeState(
   const start = parseUtcHour(startValue);
   const end = parseUtcHour(endValue);
   if (start === null || end === null) {
-    return { start, end, steps: 0, problem: "Both dates need a day and an hour." };
+    return { start, end, steps: 0, problem: t("Both dates need a day and an hour.") };
   }
   if (end < start) {
-    return { start, end, steps: 0, problem: "The end is before the start." };
+    return { start, end, steps: 0, problem: t("The end is before the start.") };
   }
   const steps = stepsInRange(start, end, stepHours, stepCount);
   if (steps === 0) {
-    return { start, end, steps, problem: "That range holds none of the project's steps." };
+    return { start, end, steps, problem: t("That range holds none of the project's steps.") };
   }
   if (steps > MAX_FETCHED_STEPS) {
     return {
       start,
       end,
       steps,
-      problem: `${steps} steps is more than one import fetches. Ask for ${MAX_FETCHED_STEPS} or fewer.`,
+      problem: t("{steps} steps is more than one import fetches. Ask for {max} or fewer.", { steps, max: MAX_FETCHED_STEPS }),
     };
   }
   if (archives.length === 0) {
-    return { start, end, steps, problem: "Choose at least one archive." };
+    return { start, end, steps, problem: t("Choose at least one archive.") };
   }
   return { start, end, steps, problem: null };
 }

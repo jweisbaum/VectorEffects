@@ -254,8 +254,9 @@ the map interaction handler, a hover indicator (or an explicit decision that the
 tool has none — see spec §6.2), a palette entry with a shortcut, an icon in
 `ToolIcon.tsx` (the `Record` makes this a compile error, not a blank button),
 an entry in `tool_catalogue.rs`'s `catalogue()` — which is what puts the new
-tool into the seven shared-rule tests — and copy/paste plus keyframe coverage
-in tests.
+tool into the seven shared-rule tests — copy/paste plus keyframe coverage
+in tests, and its name, options, hints and help page in every language with a
+Help search entry (see *Adding interface text*).
 
 **Renaming a tool** is a migration, not a table edit: `ToolKind` is stored on
 every object it drew, so an old file fails to deserialise rather than loading as
@@ -376,6 +377,40 @@ state all the same, so it is saved and undone like everything else.
    — and run it with `VE_SCENARIO_TOOLS=all` too, since an agent with a shell
    can decide not to use the service at all. When prose is not enough, make
    the question a required parameter (`storm_create`'s two winds).
+
+### Adding interface text
+
+**Every feature ships in English, Spanish, French and German** (spec §5.7).
+Text that reaches only English is a failing test, not a follow-up.
+
+1. Write the English at the place it is shown and pass it through `t()`
+   (`ui/src/i18n`): `t("Delete {name}", { name })`. Components call
+   `const t = useT()` so a language switch re-renders them. A table built at
+   module load marks its strings `msg("…")` and translates them at render —
+   `t` at module load freezes whatever language was on at startup.
+2. Never concatenate translated pieces or pass an interpolated template to
+   `t`; a variable part is a `{placeholder}`, and a count picks between two keys.
+3. Add the key to `ui/src/i18n/locales/{es,fr,de}/<area>.ts` — once per
+   language across all areas, in the terms of `ui/src/i18n/GLOSSARY.md`.
+   `coverage.test.ts` fails on a key missing, unused, translated two ways, or
+   with different placeholders, and on JSX text or a `title`/`aria-label`/
+   `placeholder` that skips `t` altogether.
+4. A new schema label (a tool name, an option label, a slider end) is listed
+   in `ui/src/i18n/rust-strings.json`: `VE_BLESS=1 cargo test -p ve-app --test
+   ui_strings` rewrites it, and the catalogues then need the new entries.
+5. A help page is written in `ui/src/help/topics.ts` **and** in
+   `ui/src/help/locales/{es,fr,de}.ts`, page for page; `topics.test.ts`
+   compares their shapes.
+6. A control a person might search for gets `data-feature="<area>:<name>"` and
+   an entry in `ui/src/help/features/<area>.ts` (label, description, synonyms,
+   help page, and the `reveal` steps that bring it on screen — `onReveal` in the
+   component that owns the hiding state). `features.test.ts` holds the tags
+   and the registry to each other.
+
+Not translated: document data (layer, object, project names) and error text
+that comes from Rust, which is shown as the backend wrote it. History entries
+are English in Rust and translated by pattern in `panels/historyLabels.ts`; a
+new history label needs its pattern there.
 
 ### Adding a numeric input
 
@@ -1056,6 +1091,8 @@ decoder's output.
 - The relevant recipe above was followed in full.
 - Touched perf budgets were measured, not assumed.
 - If behaviour changed, `spec.md` was updated in the same commit.
+- Every new string is translated into es, fr and de, and every new control
+  is in the Help search (`npm run ui:test` fails otherwise).
 
 ---
 
@@ -1084,7 +1121,7 @@ January 1, 2027 expiry gate must remain enforced in both the UI and native IPC.
 Help images are bundled assets: the illustrated reference includes the user's
 supplied screenshots under `ui/public/help/reference`; current dialog captures
 are generated with `tools/webdriver/help.mjs` using isolated automation storage.
-Parameter descriptions live in `ui/src/help/topics.ts` and must track the actual
-tool catalogue; screenshot values are examples, not declarations of defaults.
+Parameter descriptions live in `ui/src/help/topics.ts` (and its translations in
+`ui/src/help/locales/`) and must track the actual tool catalogue; screenshot values are examples, not declarations of defaults.
 Never ship the WebDriver feature. Publishing and
 four-platform verification follow `docs/github-release-plan.md`.

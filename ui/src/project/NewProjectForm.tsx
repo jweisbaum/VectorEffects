@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import NumberField from "../NumberField";
+import { useT } from "../i18n";
 import type { NewProjectRequest } from "../generated/NewProjectRequest";
 import {
   MAX_STEPS,
@@ -29,7 +30,8 @@ export default function NewProjectForm({
   submitLabel: string;
   onSubmit: (request: NewProjectRequest) => void;
 }) {
-  const [name, setName] = useState("Untitled");
+  const t = useT();
+  const [name, setName] = useState(() => t("Untitled"));
   const [resolution, setResolution] = useState<string>("0.25");
   const [stepHours, setStepHours] = useState(3);
   const [stepCount, setStepCount] = useState(24);
@@ -52,13 +54,13 @@ export default function NewProjectForm({
 
   return (
     <>
-      <label>
-        Name
+      <label data-feature="new:name">
+        {t("Name")}
         <input value={name} onChange={(e) => setName(e.target.value)} spellCheck={false} />
       </label>
 
-      <label>
-        Resolution
+      <label data-feature="new:resolution">
+        {t("Resolution")}
         <select value={resolution} onChange={(e) => setResolution(e.target.value)}>
           {RESOLUTIONS.map((r) => (
             <option key={r.value} value={r.value}>
@@ -68,27 +70,29 @@ export default function NewProjectForm({
         </select>
       </label>
 
-      <label>
-        Time step
+      <label data-feature="new:time-step">
+        {t("Time step")}
         <select value={stepHours} onChange={(e) => setStepHours(Number(e.target.value))}>
           {STEP_HOURS.map((h) => (
             <option key={h} value={h}>
-              {h} hour{h === 1 ? "" : "s"}
+              {h === 1 ? t("1 hour") : t("{count} hours", { count: h })}
             </option>
           ))}
         </select>
       </label>
 
-      <label>
-        Steps
+      <label data-feature="new:steps">
+        {t("Steps")}
         <NumberField min={1} max={MAX_STEPS} value={stepCount} onCommit={setStepCount} />
       </label>
 
       <p className="start-implications muted">
-        {ni} × {nj} grid · covers {durationHours} h · export about {formatBytes(exportBytes)}
+        {t("{ni} × {nj} grid · covers {hours} h · export about {size}", {
+          ni, nj, hours: durationHours, size: formatBytes(exportBytes),
+        })}
         <br />
         <span className="warn-note">
-          Field, resolution and time step cannot be changed later.
+          {t("Field, resolution and time step cannot be changed later.")}
         </span>
       </p>
 

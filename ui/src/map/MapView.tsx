@@ -40,6 +40,8 @@ import { actionFor, chordOf, toolChord } from "../settings/bindings";
 import { cursorFor, pointerPriorityFor } from "./cursor";
 import { createPortal } from "react-dom";
 import { reportError, setActivity, setHint } from "../hint";
+import { msg, useLanguage, useT } from "../i18n";
+import { onReveal } from "../help/highlight";
 import { IconSvg, REDO_ICON, UNDO_ICON } from "./ToolIcon";
 import type { PositionPick } from "../picking";
 import type { SelectionTransform } from "../generated/SelectionTransform";
@@ -375,6 +377,7 @@ const NUDGE_PX_CSS = 3;
 /** The cursor readout: position, field, zoom. */
 function MapReadout({ store, convention }: { store: ReadoutStore; convention: string }) {
   const units = useUnits();
+  const t = useT();
   const { sample, zoomPercent } = useSyncExternalStore(store.subscribe, store.get);
   return (
     <div className="map-readout">
@@ -384,19 +387,19 @@ function MapReadout({ store, convention }: { store: ReadoutStore; convention: st
           <span>{formatDegrees(normalizeLon(sample.lon), "E", "W")}</span>
           {sample.defined ? (
             <>
-              <span className="muted">{sample.kind === "wind" ? "wind" : "current"}</span>
+              <span className="muted">{sample.kind === "wind" ? t("wind") : t("current")}</span>
               <span className="accent">{units.speedFromKnots(sample.speedKnots).toFixed(1)} {units.speedUnit}</span>
               <span>
-                {Math.round(sample.directionDeg)}° ({convention})
+                {Math.round(sample.directionDeg)}° ({convention === "from" ? t("from") : t("toward")})
               </span>
             </>
           ) : (
-            <span className="muted">no field</span>
+            <span className="muted">{t("no field")}</span>
           )}
           <span className="muted">{zoomPercent}%</span>
         </>
       ) : (
-        <span className="muted">move the cursor over the map</span>
+        <span className="muted">{t("move the cursor over the map")}</span>
       )}
     </div>
   );
@@ -444,6 +447,13 @@ const HOVER_TOOLS: ReadonlySet<string> = new Set([
   "turn",
   "warp",
 ]);
+/** The measure bar's per-kind clear button: whole phrases, so each language can inflect them. */
+const CLEAR_MEASURE: Record<MeasurementKind, { label: string; title: string }> = {
+  dividers: { label: msg("Clear dividers"), title: msg("Clear every dividers measurement") },
+  passage: { label: msg("Clear great circle / rhumb"), title: msg("Clear every great circle / rhumb measurement") },
+  rings: { label: msg("Clear range rings"), title: msg("Clear every range rings measurement") },
+};
+
 /** Hit radius of a transform handle, in CSS pixels. */
 const HANDLE_RADIUS_CSS = 6;
 
@@ -631,6 +641,8 @@ export default function MapView({
   autoKey: boolean;
 }) {
   const units = useUnits();
+  const t = useT();
+  const language = useLanguage();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const rendererRef = useRef<MapRenderer | null>(null);
   const glyphSettingsRef = useRef(settings?.glyphs ?? DEFAULT_GLYPHS);
@@ -994,9 +1006,9 @@ export default function MapView({
   // (M27): the count comes and goes on every edit, and the status bar is
   // where the eye already goes for what is happening.
   useEffect(() => {
-    setActivity(pending > 0 ? `rendering ${pending}…` : null);
+    setActivity(pending > 0 ? t("rendering {count}…", { count: pending }) : null);
     return () => setActivity(null);
-  }, [pending]);
+  }, [pending, language]);
   const [tool, setActiveTool] = useState<ActiveTool>(HAND);
   const setTool = useCallback((next: ActiveTool) => {
     onExitShapeEditing?.();
@@ -1925,7 +1937,7 @@ export default function MapView({
       preserveDrawingBuffer: false,
     });
     if (!gl) {
-      setError("WebGL2 is unavailable, so the map cannot be drawn.");
+      setError(t("WebGL2 is unavailable, so the map cannot be drawn."));
       return;
     }
 
@@ -2042,7 +2054,7 @@ export default function MapView({
    * rebound key appears in the tooltip — which is the half of a rebind that is
    * otherwise forgotten (M15).
    */
-  const chord = (tool: string) => (settings ? toolChord(settings, tool) : "unbound");
+  const chord = (tool: string) => (settings ? toolChord(settings, tool) : t("unbound"));
 
   /** The actions that move the camera rather than choosing a tool. */
   const PAN_ZOOM = new Set<ShortcutAction>([
@@ -2189,31 +2201,33 @@ export default function MapView({
    */
   useEffect(() => {
     if (tool === CAPTURE && recording === null && region === null) {
-      setHint("Draw a region first — it is what gets recorded.");
+      setHint(t("Draw a region first — it is what gets recorded."));
     } else if (recording !== null && recording.phase === "previewing") {
       setHint(
-        "Click the map to see a copy of the macro there, or drag to pan. Save keeps the macro in the library; Edit goes back to recording; the copies go with the preview.",
+        t("Click the map to see a copy of the macro there, or drag to pan. Save keeps the macro in the library; Edit goes back to recording; the copies go with the preview."),
       );
     } else if (recording !== null) {
       setHint(
-        "Scrub the ruler and drag the region into place at each step; every step visited is a key.",
+        t("Scrub the ruler and drag the region into place at each step; every step visited is a key."),
       );
     } else if (tool === "liquify") {
-      setHint(liquifyPending ? "Drag the selected area to its new position. Escape cancels." : "Brush to select, then drag the selection to move it. Shift-drag an existing selection to re-aim its displacement, or its destination outline to move only the destination.");
+      setHint(liquifyPending ? t("Drag the selected area to its new position. Escape cancels.") : t("Brush to select, then drag the selection to move it. Shift-drag an existing selection to re-aim its displacement, or its destination outline to move only the destination."));
     } else if (tool === ERASE) {
       setHint(
-        "Drag to erase what the brush covers in the active layer. Hold Shift to erase from this frame only.",
+        t("Drag to erase what the brush covers in the active layer. Hold Shift to erase from this frame only."),
       );
     } else if (tool === INSERT && recording === null) {
       setHint(
         (library?.entries.length ?? 0) === 0
-          ? "The macro library is empty. Capture a run of frames first."
-          : "Click the map to place the macro.",
+          ? t("The macro library is empty. Capture a run of frames first.")
+          : t("Click the map to place the macro."),
       );
     } else {
       setHint(null);
     }
-  }, [library, recording, region, tool, liquifyPending]);
+    // The language is a dependency so the hint follows a change of it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [library, recording, region, tool, liquifyPending, language]);
 
   /** The macro library, for the insert tool's bar. */
   const readLibrary = useCallback(() => {
@@ -2337,6 +2351,33 @@ export default function MapView({
     requestOverlay();
     return true;
   }, [requestOverlay]);
+
+  /**
+   * The Help search's reveal steps the map owns (spec.md 5.7): `tool:<id>`
+   * selects a tool, the same way its palette button does, so a tool's options
+   * are on screen to be flashed; `measure:<kind>` also picks the measurement.
+   * Refused while a capture runs, as the palette is.
+   */
+  useEffect(() => {
+    const pick = (next: ActiveTool) => {
+      if (recording === null && tool !== next) setTool(next);
+    };
+    const offTool = onReveal("tool:", (step) => pick(step.slice("tool:".length) as ActiveTool));
+    const offMeasure = onReveal("measure:", (step) => {
+      pick(MEASURE);
+      const kind = step.slice("measure:".length);
+      if (kind === "dividers" || kind === "passage" || kind === "rings") {
+        if (kind !== measureKind) {
+          endMeasuring();
+          setMeasureKind(kind);
+        }
+      }
+    });
+    return () => {
+      offTool();
+      offMeasure();
+    };
+  }, [recording, tool, setTool, measureKind, endMeasuring]);
 
   // Single-key tool shortcuts, as in every other paint application.
   useEffect(() => {
@@ -2742,8 +2783,7 @@ export default function MapView({
     (layer: number) => {
       alignStore.current!.begin(layer);
       setHint(
-        "Click a feature in the picture, then the same place on the map. Repeat as often as " +
-          "you like, then press Enter. Escape cancels; Backspace drops the last pair.",
+        t("Click a feature in the picture, then the same place on the map. Repeat as often as you like, then press Enter. Escape cancels; Backspace drops the last pair."),
       );
       requestOverlay();
     },
@@ -3565,7 +3605,7 @@ export default function MapView({
         context.font = `${11 * dpr}px system-ui, sans-serif`;
         context.textAlign = "left";
         context.textBaseline = "bottom";
-        context.fillText(`${transform.count} objects`, at.x + arm + 4 * dpr, at.y - arm);
+        context.fillText(t("{count} objects", { count: transform.count }), at.x + arm + 4 * dpr, at.y - arm);
       }
     }
 
@@ -3782,7 +3822,7 @@ export default function MapView({
         context.font = `${11 * dpr}px system-ui, sans-serif`;
         context.textAlign = "left";
         context.textBaseline = "bottom";
-        context.fillText(picking.label, cursor.x + arm + 4 * dpr, cursor.y - arm);
+        context.fillText(t(picking.label), cursor.x + arm + 4 * dpr, cursor.y - arm);
       }
       context.restore();
     }
@@ -4582,11 +4622,11 @@ export default function MapView({
             reportError(null);
           } else {
             reportError(
-              `At most ${MAX_CONTROL_POINTS} control points are allowed — drop one with Backspace to add another.`,
+              t("At most {count} control points are allowed — drop one with Backspace to add another.", { count: MAX_CONTROL_POINTS }),
             );
           }
         } else {
-          reportError("That point is outside the picture — click a place inside it.");
+          reportError(t("That point is outside the picture — click a place inside it."));
         }
       } else {
         const geo = unproject(cameraRef.current, viewRef.current, point);
@@ -4636,7 +4676,7 @@ export default function MapView({
     // says this frame only. A size in pixels becomes kilometres here, at the
     // latitude the stroke begins, as a brush's does.
     if ((drawsObjects(tool) || tool === ERASE || tool === INSERT) && projectRef.current.layer_count === 0) {
-      setHint("Add a layer before using this tool.");
+      setHint(t("Add a layer before using this tool."));
       return;
     }
 
@@ -5540,7 +5580,7 @@ export default function MapView({
       liquifySelection.current = {points: drawing.points, state: toolState, schema,
         camera: cameraRef.current, layer: activeLayer, drag: null};
       setLiquifyPending(true);
-      setHint("Drag the selected area to its new position. Escape cancels.");
+      setHint(t("Drag the selected area to its new position. Escape cancels."));
       refreshOperator(null);
       requestDraw();
       return;
@@ -5598,7 +5638,7 @@ export default function MapView({
       // preview displaces the rendered field itself and has no layer of its
       // own to displace.
       if (activeLayerHidden()) {
-        setHint("That layer is hidden. Show it before drawing on it.");
+        setHint(t("That layer is hidden. Show it before drawing on it."));
         return;
       }
       const kind = gestureKind(schema, toolState.values);
@@ -6342,18 +6382,18 @@ export default function MapView({
 
       <canvas ref={overlayRef} className="map-overlay" />
 
-      {error === null && !ready && <div className="map-status">Loading basemap…</div>}
+      {error === null && !ready && <div className="map-status">{t("Loading basemap…")}</div>}
       {previewing && <div className="map-preview-frame" aria-hidden="true" />}
-      {previewing && <div className="map-preview-badge">Macro Preview</div>}
+      {previewing && <div className="map-preview-badge">{t("Macro Preview")}</div>}
       {liquifyPending && <div className="shape-edit-hint" role="status">
-        Displace · Drag the selected area to its new position. Escape cancels.
+        {t("Displace · Drag the selected area to its new position. Escape cancels.")}
       </div>}
       {shapeEditing !== null && <div className="shape-edit-hint" role="status">
-        Shape animation · Drag a dot to key frame {step}. Choose a tool or press Escape to finish.
+        {t("Shape animation · Drag a dot to key frame {step}. Choose a tool or press Escape to finish.", { step })}
       </div>}
 
       <div className="map-toolbar">
-        <div className="tools" role="group" aria-label="Tool">
+        <div className="tools" role="group" aria-label={t("Tool")}>
           {/*
             Icon-only, so the name has to reach anyone not reading the picture:
             `aria-label` carries it, and `title` carries it plus the shortcut
@@ -6363,9 +6403,10 @@ export default function MapView({
             className={tool === HAND && shapeEditing === null ? "icon active" : "icon"}
             disabled={recording !== null}
             onClick={() => setTool(HAND)}
-            aria-label="Hand"
+            aria-label={t("Hand")}
             aria-pressed={tool === HAND && shapeEditing === null}
-            title={`Hand (${chord("hand")}) · pan, select and transform · shift-drag for a rubber band, add cmd to reach across layers · cmd-click to add or remove one object`}
+            data-feature="tool:hand"
+            title={t("Hand ({chord}) · pan, select and transform · shift-drag for a rubber band, add cmd to reach across layers · cmd-click to add or remove one object", { chord: chord("hand") })}
           >
             <ToolIcon tool={HAND} />
           </button>
@@ -6379,9 +6420,10 @@ export default function MapView({
             className={tool === SELECT ? "icon active" : "icon"}
             disabled={recording !== null}
             onClick={() => setTool(SELECT)}
-            aria-label="Select"
+            aria-label={t("Select")}
             aria-pressed={tool === SELECT}
-            title={`Select (${chord("select")}) · drag a region of the map · cmd-A selects the view, cmd-shift-A the whole map, cmd-D clears`}
+            data-feature="tool:select"
+            title={t("Select ({chord}) · drag a region of the map · cmd-A selects the view, cmd-shift-A the whole map, cmd-D clears", { chord: chord("select") })}
           >
             <ToolIcon tool={SELECT} />
           </button>
@@ -6394,9 +6436,10 @@ export default function MapView({
             className={tool === ERASE ? "icon active" : "icon"}
             disabled={recording !== null}
             onClick={() => setTool(ERASE)}
-            aria-label="Erase"
+            aria-label={t("Erase")}
             aria-pressed={tool === ERASE}
-            title={`Erase (${chord("erase")}) · drag to erase geometry in the active layer · hold Shift to erase from this frame only`}
+            data-feature="tool:erase"
+            title={t("Erase ({chord}) · drag to erase geometry in the active layer · hold Shift to erase from this frame only", { chord: chord("erase") })}
           >
             <ToolIcon tool={ERASE} />
           </button>
@@ -6417,9 +6460,10 @@ export default function MapView({
             className={tool === INSERT ? "icon active" : "icon"}
             disabled={recording !== null}
             onClick={() => setTool(INSERT)}
-            aria-label="Insert macro"
+            aria-label={t("Insert macro")}
             aria-pressed={tool === INSERT}
-            title={`Insert macro (${chord("insert")}) · put a captured run of frames back on the map`}
+            data-feature="tool:insert"
+            title={t("Insert macro ({chord}) · put a captured run of frames back on the map", { chord: chord("insert") })}
           >
             <ToolIcon tool={INSERT} />
           </button>
@@ -6429,9 +6473,10 @@ export default function MapView({
               className={tool === entry.tool ? "icon active" : "icon"}
               disabled={recording !== null}
               onClick={() => setTool(entry.tool)}
-              aria-label={entry.label}
+              aria-label={t(entry.label)}
               aria-pressed={tool === entry.tool}
-              title={`${entry.label} (${chord(entry.tool)})`}
+              data-feature={`tool:${entry.tool}`}
+              title={t("{tool} ({chord})", { tool: t(entry.label), chord: chord(entry.tool) })}
             >
               <ToolIcon tool={entry.tool} />
             </button>
@@ -6445,20 +6490,20 @@ export default function MapView({
           clear, which is the whole of what a region can be told.
         */}
         {tool === SELECT && (
-          <div className="tool-options" role="group" aria-label="Select options">
-            <label>
-              Shape
+          <div className="tool-options" role="group" aria-label={t("Select options")}>
+            <label data-feature="select:shape">
+              {t("Shape")}
               <ToolSelect
                 value={regionMode}
                 onChange={(event) => {
                   setRegionMode(event.target.value as RegionMode);
                   releaseFocus(event);
                 }}
-                title="Rectangle and lasso are drawn corner to corner and freehand; a circle is dragged out from its centre"
+                title={t("Rectangle and lasso are drawn corner to corner and freehand; a circle is dragged out from its centre")}
               >
-                <option value="rect">Rectangle</option>
-                <option value="circle">Circle</option>
-                <option value="lasso">Lasso</option>
+                <option value="rect">{t("Rectangle")}</option>
+                <option value="circle">{t("Circle")}</option>
+                <option value="lasso">{t("Lasso")}</option>
               </ToolSelect>
             </label>
             <button
@@ -6467,9 +6512,10 @@ export default function MapView({
                 setRegion(null);
                 requestOverlay();
               }}
-              title="Clear the selected region (cmd-D)"
+              title={t("Clear the selected region (cmd-D)")}
+              data-feature="select:deselect"
             >
-              Deselect
+              {t("Deselect")}
             </button>
           </div>
         )}
@@ -6480,31 +6526,31 @@ export default function MapView({
           out, because every document write is refused while it runs.
         */}
         {(tool === CAPTURE || recording !== null) && (
-          <div className="tool-options" role="group" aria-label="Capture options">
+          <div className="tool-options" role="group" aria-label={t("Capture options")}>
             {recording === null ? (
               <>
-                <label>
-                  Shape
+                <label data-feature="capture:shape">
+                  {t("Shape")}
                   <ToolSelect
                     value={regionMode}
                     onChange={(event) => {
                   setRegionMode(event.target.value as RegionMode);
                   releaseFocus(event);
                 }}
-                    title="The select tool's own gestures: rectangle and lasso are drawn corner to corner and freehand, a circle from its centre"
+                    title={t("The select tool's own gestures: rectangle and lasso are drawn corner to corner and freehand, a circle from its centre")}
                   >
-                    <option value="rect">Rectangle</option>
-                    <option value="circle">Circle</option>
-                    <option value="lasso">Lasso</option>
+                    <option value="rect">{t("Rectangle")}</option>
+                    <option value="circle">{t("Circle")}</option>
+                    <option value="lasso">{t("Lasso")}</option>
                   </ToolSelect>
                 </label>
-                <label title="Static writes every frame as if the region never moved, so a region dragged to follow a system yields that system standing still. Record movement keeps each frame's displacement from the first.">
+                <label data-feature="capture:movement" title={t("Static writes every frame as if the region never moved, so a region dragged to follow a system yields that system standing still. Record movement keeps each frame's displacement from the first.")}>
                   <input
                     type="checkbox"
                     checked={recordMovement}
                     onChange={(event) => setRecordMovement(event.target.checked)}
                   />
-                  Record movement
+                  {t("Record movement")}
                 </label>
                 <button
                   disabled={region === null || busy}
@@ -6515,9 +6561,10 @@ export default function MapView({
                       .then((mode) => setRecording(mode.active ? mode : null))
                       .catch((err: unknown) => setError(String(err)));
                   }}
-                  title="Start recording. Until it is finished or cancelled, every edit is refused."
+                  title={t("Start recording. Until it is finished or cancelled, every edit is refused.")}
+                  data-feature="capture:start"
                 >
-                  Start capture
+                  {t("Start capture")}
                 </button>
 
               </>
@@ -6525,12 +6572,13 @@ export default function MapView({
               <>
                 {recording.phase === "recording" ? (
                   <span className="accent">
-                    Recording from step {recording.first_step} · {recording.keys.length} keys
-                    {recording.record_movement ? " · movement" : " · static"}
+                    {recording.record_movement
+                      ? t("Recording from step {step} · {keys} keys · movement", { step: recording.first_step, keys: recording.keys.length })
+                      : t("Recording from step {step} · {keys} keys · static", { step: recording.first_step, keys: recording.keys.length })}
                   </span>
                 ) : (
                   <span className="accent">
-                    Preview · steps {recording.first_step}–{recording.last_step}
+                    {t("Preview · steps {first}–{last}", { first: recording.first_step, last: recording.last_step })}
                   </span>
                 )}
                 {recording.phase === "recording" && (
@@ -6544,9 +6592,9 @@ export default function MapView({
                         .then(setCapture)
                         .catch((err: unknown) => setError(String(err)));
                     }}
-                    title="End the recording on this frame, bake the frames and show the macro alone on the map, looping. Nothing is written."
+                    title={t("End the recording on this frame, bake the frames and show the macro alone on the map, looping. Nothing is written.")}
                   >
-                    Finish recording
+                    {t("Finish recording")}
                   </button>
                 )}
                 {recording.phase === "previewing" && (
@@ -6558,15 +6606,15 @@ export default function MapView({
                         .then(setCapture)
                         .catch((err: unknown) => setError(String(err)));
                     }}
-                    title="Back to recording, keys intact"
+                    title={t("Back to recording, keys intact")}
                   >
-                    Edit macro
+                    {t("Edit macro")}
                   </button>
                 )}
                 {recording.phase === "previewing" &&
                   (captureName === null ? (
-                  <button onClick={() => setCaptureName(`Macro ${library?.entries.length ?? 0}`)}>
-                    Save macro…
+                  <button onClick={() => setCaptureName(t("Macro {number}", { number: library?.entries.length ?? 0 }))}>
+                    {t("Save macro…")}
                   </button>
                 ) : (
                   <>
@@ -6577,8 +6625,8 @@ export default function MapView({
                       onKeyDown={(event) => {
                         if (event.key === "Enter") event.currentTarget.blur();
                       }}
-                      aria-label="Macro name"
-                      placeholder="Name"
+                      aria-label={t("Macro name")}
+                      placeholder={t("Name")}
                     />
                     <button
                       disabled={captureName.trim().length === 0}
@@ -6597,7 +6645,7 @@ export default function MapView({
                           .catch((err: unknown) => setError(String(err)));
                       }}
                     >
-                      Save macro
+                      {t("Save macro")}
                     </button>
                   </>
                 ))}
@@ -6612,9 +6660,9 @@ export default function MapView({
                       })
                       .catch((err: unknown) => setError(String(err)));
                   }}
-                  title="Abandon the capture. Nothing is written."
+                  title={t("Abandon the capture. Nothing is written.")}
                 >
-                  Cancel
+                  {t("Cancel")}
                 </button>
               </>
             )}
@@ -6632,9 +6680,9 @@ export default function MapView({
           eraser makes no object for a schema to describe.
         */}
         {tool === ERASE && recording === null && (
-          <div className="tool-options" role="group" aria-label="Eraser options">
-            <label>
-              Size
+          <div className="tool-options" role="group" aria-label={t("Eraser options")}>
+            <label data-feature="erase:size">
+              {t("Size")}
               <NumberField
                 min={eraser.unit === "px" ? 1 : units.distanceFromKm(1)}
                 max={eraser.unit === "px" ? 2000 : units.distanceFromKm(20000)}
@@ -6649,14 +6697,14 @@ export default function MapView({
                   setEraser({ ...eraser, unit: e.target.value === "px" ? "px" : "km" });
                   releaseFocus(e);
                 }}
-                title="px cuts a stamp on the map — the same size on screen at any latitude; a ground distance cuts one on the ground. The choice is made where the stroke begins and holds for the whole stroke."
+                title={t("px cuts a stamp on the map — the same size on screen at any latitude; a ground distance cuts one on the ground. The choice is made where the stroke begins and holds for the whole stroke.")}
               >
                 <option value="km">{units.distanceUnit}</option>
                 <option value="px">px</option>
               </ToolSelect>
             </label>
-            <label>
-              Brush shape
+            <label data-feature="erase:shape">
+              {t("Brush shape")}
               <ToolSelect
                 value={eraser.shape}
                 onChange={(e) => {
@@ -6664,12 +6712,12 @@ export default function MapView({
                   releaseFocus(e);
                 }}
               >
-                <option value="circle">circle</option>
-                <option value="square">square</option>
+                <option value="circle">{t("circle")}</option>
+                <option value="square">{t("square")}</option>
               </ToolSelect>
             </label>
-            <label>
-              Feather
+            <label data-feature="erase:feather">
+              {t("Feather")}
               <input
                 type="range"
                 min={0}
@@ -6682,9 +6730,9 @@ export default function MapView({
           </div>
         )}
         {tool === INSERT && recording === null && (
-          <div className="tool-options" role="group" aria-label="Insert options">
-            <label>
-              Macro
+          <div className="tool-options" role="group" aria-label={t("Insert options")}>
+            <label data-feature="insert:macro">
+              {t("Macro")}
               <ToolSelect
                 value={macroId ?? ""}
                 disabled={(library?.entries.length ?? 0) === 0}
@@ -6695,14 +6743,15 @@ export default function MapView({
               >
                 {library?.entries.map((entry) => (
                   <option key={entry.id} value={entry.id}>
-                    {entry.name} · {entry.frames} frames · {entry.span_hours} h
-                    {entry.moves ? " · moves" : ""}
+                    {entry.moves
+                      ? t("{name} · {frames} frames · {hours} h · moves", { name: entry.name, frames: entry.frames, hours: entry.span_hours })
+                      : t("{name} · {frames} frames · {hours} h", { name: entry.name, frames: entry.frames, hours: entry.span_hours })}
                   </option>
                 ))}
               </ToolSelect>
             </label>
-            <button onClick={readLibrary} title="Re-read the macro library from disk">
-              Refresh
+            <button onClick={readLibrary} title={t("Re-read the macro library from disk")} data-feature="insert:refresh">
+              {t("Refresh")}
             </button>
           </div>
         )}
@@ -6714,9 +6763,9 @@ export default function MapView({
           kind it is, how big a ring set is, and when to go away.
         */}
         {tool === MEASURE && (
-          <div className="tool-options" role="group" aria-label="Measure options">
-            <label>
-              Measure
+          <div className="tool-options" role="group" aria-label={t("Measure options")}>
+            <label data-feature={`measure:${measureKind}`}>
+              {t("Measure")}
               <ToolSelect
                 value={measureKind}
                 onChange={(event) => {
@@ -6724,19 +6773,19 @@ export default function MapView({
                   setMeasureKind(event.target.value as MeasurementKind);
                   releaseFocus(event);
                 }}
-                title="Dividers measure a chain leg by leg; a passage draws both ways of sailing between two points; range rings are geodesic circles about a centre"
+                title={t("Dividers measure a chain leg by leg; a passage draws both ways of sailing between two points; range rings are geodesic circles about a centre")}
               >
                 {(Object.keys(MEASURE_LABELS) as MeasurementKind[]).map((kind) => (
                   <option key={kind} value={kind}>
-                    {MEASURE_LABELS[kind]}
+                    {t(MEASURE_LABELS[kind])}
                   </option>
                 ))}
               </ToolSelect>
             </label>
             {measureKind === "rings" && (
               <>
-                <label>
-                  Interval ({units.distanceUnit})
+                <label data-feature="measure:interval">
+                  {t("Interval ({unit})", { unit: units.distanceUnit })}
                   <NumberField
                     value={units.distanceFromKm(ringIntervalKm)}
                     min={units.distanceFromKm(0.1)}
@@ -6751,11 +6800,11 @@ export default function MapView({
                           .catch(() => undefined);
                       }
                     }}
-                    title={`Spacing between rings, in ${units.distanceUnit}`}
+                    title={t("Spacing between rings, in {unit}", { unit: units.distanceUnit })}
                   />
                 </label>
-                <label>
-                  Rings
+                <label data-feature="measure:ring-count">
+                  {t("Rings")}
                   <NumberField
                     value={ringCount}
                     min={1}
@@ -6771,7 +6820,7 @@ export default function MapView({
                           .catch(() => undefined);
                       }
                     }}
-                    title="How many rings"
+                    title={t("How many rings")}
                   />
                 </label>
               </>
@@ -6779,12 +6828,13 @@ export default function MapView({
             <span className="muted">
               {pointsNeeded(measureKind) === 1
                 ? activeRings === null
-                  ? "Click to place."
-                  : "Editing the last set placed. Click to place another."
+                  ? t("Click to place.")
+                  : t("Editing the last set placed. Click to place another.")
                 : openChain.current !== null
-                  ? "Click to add a leg; Enter or Escape to finish."
-                  : `Click ${pointsNeeded(measureKind)} points.`}
-              {" Alt-click a point to remove its measurement."}
+                  ? t("Click to add a leg; Enter or Escape to finish.")
+                  : t("Click {count} points.", { count: pointsNeeded(measureKind) })}
+              {" "}
+              {t("Alt-click a point to remove its measurement.")}
             </span>
             <button
               disabled={!measurements.some((m) => m.kind === measureKind)}
@@ -6796,9 +6846,9 @@ export default function MapView({
                   .then(tookMeasurements)
                   .catch(() => undefined);
               }}
-              title={`Clear every ${MEASURE_LABELS[measureKind].toLowerCase()} measurement`}
+              title={t(CLEAR_MEASURE[measureKind].title)}
             >
-              Clear {MEASURE_LABELS[measureKind].toLowerCase()}
+              {t(CLEAR_MEASURE[measureKind].label)}
             </button>
             <button
               disabled={measurements.length === 0}
@@ -6807,9 +6857,10 @@ export default function MapView({
                 setActiveRings(null);
                 void api.clearMeasurements(null).then(tookMeasurements).catch(() => undefined);
               }}
-              title="Clear every measurement on the map"
+              title={t("Clear every measurement on the map")}
+              data-feature="measure:clear-all"
             >
-              Clear all
+              {t("Clear all")}
             </button>
           </div>
         )}
@@ -6848,33 +6899,36 @@ export default function MapView({
       */}
       {viewSlot !== null &&
         createPortal(
-          <div className="view-controls" role="group" aria-label="View">
+          <div className="view-controls" role="group" aria-label={t("View")}>
         <button
           className={tool === CAPTURE ? "icon active" : "icon"}
           onClick={() => setTool(CAPTURE)}
-          aria-label="Capture"
+          aria-label={t("Capture")}
           aria-pressed={tool === CAPTURE}
-          title={`Capture (${chord("capture")}) · record a region of the field over a run of frames into the macro library`}
+          data-feature="tool:capture"
+          title={t("Capture ({chord}) · record a region of the field over a run of frames into the macro library", { chord: chord("capture") })}
         >
           <ToolIcon tool={CAPTURE} />
         </button>
         <button
           className={tool === MEASURE ? "icon active" : "icon"}
           onClick={() => setTool(MEASURE)}
-          aria-label="Measure"
+          aria-label={t("Measure")}
           aria-pressed={tool === MEASURE}
-          title={`Measure (${chord("measure")}) · dividers, a passage's two paths, or range rings · click to place, drag a point to move it, Enter or Escape to finish a chain`}
+          data-feature="tool:measure"
+          title={t("Measure ({chord}) · dividers, a passage's two paths, or range rings · click to place, drag a point to move it, Enter or Escape to finish a chain", { chord: chord("measure") })}
         >
           <ToolIcon tool={MEASURE} />
         </button>
         <span className="divider" />
-        <div className="history" role="group" aria-label="History">
+        <div className="history" role="group" aria-label={t("History")}>
           <button
             className="icon"
             disabled={!project.can_undo || busy}
             onClick={() => void api.undo().then(onProjectChanged)}
-            title="Undo (Cmd+Z)"
-            aria-label="Undo"
+            title={t("Undo (Cmd+Z)")}
+            aria-label={t("Undo")}
+            data-feature="map:undo"
           >
             <IconSvg icon={UNDO_ICON} />
           </button>
@@ -6882,36 +6936,37 @@ export default function MapView({
             className="icon"
             disabled={!project.can_redo || busy}
             onClick={() => void api.redo().then(onProjectChanged)}
-            title="Redo (Cmd+Shift+Z)"
-            aria-label="Redo"
+            title={t("Redo (Cmd+Shift+Z)")}
+            aria-label={t("Redo")}
+            data-feature="map:redo"
           >
             <IconSvg icon={REDO_ICON} />
           </button>
         </div>
         <span className="divider" />
 
-        <label title="Direction glyphs: wind as barbs, currents as arrows. The colour ramp carries the speed either way.">
+        <label data-feature="map:glyphs" title={t("Direction glyphs: wind as barbs, currents as arrows. The colour ramp carries the speed either way.")}>
           <input
             type="checkbox"
             checked={showGlyphs}
             onChange={(e) => setShowGlyphs(e.target.checked)}
           />
-          Glyphs
+          {t("Glyphs")}
         </label>
         <label>
-          Projection
+          {t("Projection")}
           <ProjectionPicker value={settings?.projection ?? "equirectangular"} disabled={settings === null}
             onChange={id => api.setProjection(id).then(onSettings)} />
         </label>
-        <label>
+        <label data-feature="map:graticule">
           <input
             type="checkbox"
             checked={showGraticule}
             onChange={(e) => setShowGraticule(e.target.checked)}
           />
-          Graticule
+          {t("Graticule")}
         </label>
-        <label title="Auto scale: run the colour ramp from the slowest to the fastest speed in view, across every layer and object. A view setting: it changes nothing stored or exported.">
+        <label data-feature="map:auto-scale" title={t("Auto scale: run the colour ramp from the slowest to the fastest speed in view, across every layer and object. A view setting: it changes nothing stored or exported.")}>
           <input
             type="checkbox"
             checked={autoScale}
@@ -6920,20 +6975,22 @@ export default function MapView({
               void api.setAutoScale(e.target.checked).then(onSettings);
             }}
           />
-          Auto scale
+          {t("Auto scale")}
         </label>
-        <label title={chartStatus?.directory
-          ? `Electronic charts from ${chartStatus.directory}${chartStatus.cells ? ` (${chartStatus.cells} cells)` : ""}. Drawn under everything; not a layer, and not part of the project.`
-          : "Electronic charts (S-57). Choose the chart directory in Settings first."}>
+        <label data-feature="map:charts" title={chartStatus?.directory
+          ? chartStatus.cells
+            ? t("Electronic charts from {directory} ({cells} cells). Drawn under everything; not a layer, and not part of the project.", { directory: chartStatus.directory, cells: chartStatus.cells })
+            : t("Electronic charts from {directory}. Drawn under everything; not a layer, and not part of the project.", { directory: chartStatus.directory })
+          : t("Electronic charts (S-57). Choose the chart directory in Settings first.")}>
           <input
             type="checkbox"
             checked={showCharts}
             disabled={!chartStatus?.directory || chartStatus.cells === 0}
             onChange={(e) => setShowCharts(e.target.checked)}
           />
-          Charts
+          {t("Charts")}
         </label>
-        <label title="OpenStreetMap tiles in place of the built-in basemap. Tiles are fetched from openstreetmap.org while this is on, and kept on disk; everything else in the application stays offline.">
+        <label data-feature="map:osm" title={t("OpenStreetMap tiles in place of the built-in basemap. Tiles are fetched from openstreetmap.org while this is on, and kept on disk; everything else in the application stays offline.")}>
           <input
             type="checkbox"
             checked={showOsm}
@@ -6941,21 +6998,21 @@ export default function MapView({
           />
           OpenStreetMap
         </label>
-        <label title="The cursor readout over the map: the position under the pointer and the field there. A view setting: it changes nothing stored or exported.">
+        <label data-feature="map:readout" title={t("The cursor readout over the map: the position under the pointer and the field there. A view setting: it changes nothing stored or exported.")}>
           <input
             type="checkbox"
             checked={showReadout}
             onChange={(e) => setShowReadout(e.target.checked)}
           />
-          Readout
+          {t("Readout")}
         </label>
-        <label title="The colour legend over the map: the ramp each kind of field is painted with, and the speeds at its ends. A view setting: it changes nothing stored or exported.">
+        <label data-feature="map:legend" title={t("The colour legend over the map: the ramp each kind of field is painted with, and the speeds at its ends. A view setting: it changes nothing stored or exported.")}>
           <input
             type="checkbox"
             checked={showLegend}
             onChange={(e) => setShowLegend(e.target.checked)}
           />
-          Legend
+          {t("Legend")}
         </label>
           </div>,
           viewSlot,
@@ -6966,8 +7023,8 @@ export default function MapView({
           {kindsShown.map((kind) => (
             <div key={kind} className="legend-row">
               <div className="legend-kind">
-                <span>{KIND_LABELS[kind]}</span>
-                <span className="muted">{kind === "wind" ? "barbs" : "arrows"}</span>
+                <span>{t(KIND_LABELS[kind])}</span>
+                <span className="muted">{kind === "wind" ? t("barbs") : t("arrows")}</span>
               </div>
               {/*
                 The bar is the gradient the map is actually painted with
@@ -6988,9 +7045,9 @@ export default function MapView({
                 {ramps[kind].auto && (
                   <span
                     className="legend-auto"
-                    title="Auto scale: the ramp spans the speeds in view"
+                    title={t("Auto scale: the ramp spans the speeds in view")}
                   >
-                    auto
+                    {t("auto")}
                   </span>
                 )}
                 <span>{ramps[kind].maxKnots} {units.speedUnit}</span>

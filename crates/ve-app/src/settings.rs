@@ -496,6 +496,9 @@ impl Default for McpSettings {
 pub struct AppSettings {
     /// Application-wide appearance; never part of a project or its history.
     pub theme: String,
+    /// The interface language, one of [`LANGUAGES`]. A preference of the
+    /// person, like the theme: no project, export or history reads it.
+    pub language: String,
     /// Saved custom colours, retained when switching to a bundled theme.
     pub custom_theme: Option<crate::theme::CustomTheme>,
     /// Global arrow and wind-barb appearance preferences.
@@ -608,6 +611,7 @@ impl Default for AppSettings {
     fn default() -> Self {
         Self {
             theme: crate::theme::DEFAULT_THEME.to_owned(),
+            language: LANGUAGES[0].to_owned(),
             custom_theme: None,
             glyphs: GlyphSettings::default(),
             distance_unit: DistanceUnit::Km,
@@ -681,6 +685,9 @@ impl AppSettings {
     /// not the launch.
     pub fn normalised(mut self) -> Self {
         self.custom_theme = self.custom_theme.filter(crate::theme::CustomTheme::valid);
+        if !LANGUAGES.contains(&self.language.as_str()) {
+            self.language = LANGUAGES[0].to_owned();
+        }
         if !crate::theme::known(&self.theme)
             && !(self.theme == "custom" && self.custom_theme.is_some())
         {
@@ -810,6 +817,37 @@ pub fn theme_set(state: &AppState, theme: String) -> Result<AppSettings> {
         let before = std::mem::replace(&mut session.settings.theme, theme);
         if let Err(error) = session.save_settings(&file) {
             session.settings.theme = before;
+            return Err(error);
+        }
+        Ok(session.settings.clone())
+    })
+}
+
+/// The interface languages the frontend carries a catalogue for.
+pub const LANGUAGES: &[&str] = &["en", "es", "fr", "de"];
+
+/// Changes the interface language independently of any open project.
+#[tauri::command]
+pub fn set_language(app: tauri::AppHandle, language: String) -> Result<AppSettings> {
+    use tauri::Manager;
+    let saved = language_set(&app.state::<AppState>(), language)?;
+    crate::relabel_menu(&app, &saved.language);
+    Ok(saved)
+}
+
+/// Persists the language before reporting success, restoring it if the write fails.
+pub fn language_set(state: &AppState, language: String) -> Result<AppSettings> {
+    let file = state.paths.settings_file();
+    with_session(state, |session| {
+        if !LANGUAGES.contains(&language.as_str()) {
+            return Err(AppError::BadOption {
+                field: "language",
+                value: language,
+            });
+        }
+        let before = std::mem::replace(&mut session.settings.language, language);
+        if let Err(error) = session.save_settings(&file) {
+            session.settings.language = before;
             return Err(error);
         }
         Ok(session.settings.clone())

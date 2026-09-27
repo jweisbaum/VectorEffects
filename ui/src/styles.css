@@ -400,6 +400,68 @@ body {
 }
 .project-menu-items button:focus { background: var(--hover); outline: none; }
 .project-name { font-weight: 600; }
+/* The language picker and the Help search (spec.md 5.6, 5.7). */
+.language-picker {
+  background: var(--raised);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 2px 4px;
+  font: inherit;
+  flex-shrink: 0;
+}
+.help-menu { position: relative; flex-shrink: 0; }
+.help-menu > button { display: flex; align-items: center; gap: 8px; }
+.help-menu-popup {
+  position: absolute;
+  z-index: 60;
+  top: calc(100% + 6px);
+  right: 0;
+  width: min(380px, calc(100vw - 32px));
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 6px 20px #0006;
+  font-size: 12px;
+  text-align: left;
+}
+.help-menu-popup input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--inset);
+  color: var(--text);
+  font: inherit;
+}
+.help-menu-popup ul { list-style: none; margin: 6px 0 0; padding: 0; max-height: 60vh; overflow-y: auto; }
+.help-menu-popup li[role=option] { display: flex; flex-direction: column; gap: 1px; padding: 6px 8px; border-radius: 5px; cursor: pointer; }
+.help-menu-popup li.active { background: var(--hover); }
+.help-search-label { font-weight: 600; }
+.help-search-detail { opacity: 0.7; font-size: 11px; }
+.help-search-heading { padding: 6px 8px 2px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; opacity: 0.6; }
+.help-search-empty { padding: 6px 8px; opacity: 0.7; }
+/* Where the Help search found a feature: three pulses, then gone. */
+.feature-flash {
+  position: fixed;
+  z-index: 10000;
+  pointer-events: none;
+  box-sizing: border-box;
+  border: 3px solid var(--accent);
+  border-radius: 6px;
+  box-shadow: 0 0 0 2px #0008, 0 0 14px 2px var(--accent);
+  animation: feature-flash 0.8s ease-in-out 3;
+}
+@keyframes feature-flash {
+  0%, 100% { opacity: 0; }
+  50% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .feature-flash { animation: none; }
+}
 /* The name is a button that looks like the name, and a field while edited. */
 .titlebar button.project-name {
   background: none;
@@ -516,7 +578,7 @@ body {
   padding: 1.75rem 2rem 2rem;
 }
 .start-panel header { margin-bottom: 1.5rem; }
-.start-settings { float: right; margin-left: 1rem; }
+.start-header-controls { float: right; display: flex; gap: 8px; align-items: center; margin-left: 1rem; }
 .start-panel h1 { margin: 0 0 0.25rem; font-size: 1.4rem; }
 .start-panel h2 { font-size: 0.95rem; margin: 0 0 0.9rem; }
 .start-panel h3 { font-size: 0.8rem; margin: 1rem 0 0.4rem; font-weight: 500; }

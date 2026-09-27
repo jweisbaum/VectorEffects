@@ -17,6 +17,10 @@ import LoadingScreen from "./project/LoadingScreen";
 import { finishOpening, unreadLayers, useOpening } from "./project/opening";
 import BetaGate from "./project/BetaGate";
 import Help from "./help/Help";
+import HelpMenu from "./help/HelpMenu";
+import { onReveal } from "./help/highlight";
+import LanguagePicker from "./i18n/LanguagePicker";
+import { msg, setLanguage, useT } from "./i18n";
 import UnsavedChangesDialog from "./project/UnsavedChangesDialog";
 import { mayReplaceProject, type UnsavedChoice } from "./project/saveGuard";
 import { pickProjectToOpen, pickProjectToSave } from "./project/dialogs";
@@ -55,6 +59,7 @@ export default function App() {
 }
 
 function EditorApp() {
+  const t = useT();
   const [info, setInfo] = useState<AppInfo | null>(null);
   const [project, setProject] = useState<ProjectSummary | null>(null);
   // A failed download's saved request belongs to this opening of the project.
@@ -137,6 +142,10 @@ function EditorApp() {
     // refusing to start.
     void api.appSettings().then(setSettings).catch(() => undefined);
   }, []);
+  // The settings file is the authority on the language (spec.md 5.6).
+  useEffect(() => {
+    if (settings) setLanguage(settings.language);
+  }, [settings?.language]);
   /**
    * Selects objects — and drops the map's region, because the two are
    * mutually exclusive (spec.md 8.2, M23): a region is a way of pointing at
@@ -182,6 +191,26 @@ function EditorApp() {
       savePanels(next);
       return next;
     });
+  }, []);
+  /**
+   * The Help search's reveal steps for what the shell hides (spec.md 5.7):
+   * `panel:<name>` opens a closed panel, `settings:` opens Settings (the
+   * dialog itself scrolls to the section the feature is in).
+   */
+  useEffect(() => {
+    const offPanel = onReveal("panel:", (step) => {
+      const name = step.slice("panel:".length) as keyof PanelState;
+      setPanels((current) => {
+        if (!(name in current) || current[name]) return current;
+        const next = { ...current, [name]: true };
+        // Opening a section opens the dock it sits in.
+        if (name === "properties" || name === "history") next.right = true;
+        savePanels(next);
+        return next;
+      });
+    });
+    const offSettings = onReveal("settings:", () => setShowSettings(true));
+    return () => { offPanel(); offSettings(); };
   }, []);
   /** The project's name being edited in the title bar, if it is (M25). */
   const [renaming, setRenaming] = useState<string | null>(null);
@@ -268,7 +297,7 @@ function EditorApp() {
         mapRef.current?.focus(e.payload.lon, e.payload.lat, e.payload.px_per_deg ?? undefined),
       ),
       listen<McpActivity>("mcp://activity", (e) =>
-        setMcpActivity(e.payload.sessions > 0 ? (e.payload.last_tool ?? "connected") : null),
+        setMcpActivity(e.payload.sessions > 0 ? (e.payload.last_tool ?? t("connected")) : null),
       ),
     ];
     return () => {
@@ -329,7 +358,7 @@ function EditorApp() {
       if (path === null) return false;
       const saved = await api.saveProjectAs(path);
       setProject(saved);
-      flash(`Saved to ${saved.path ?? path}`);
+      flash(t("Saved to {path}", { path: saved.path ?? path }));
       return true;
     } catch (err) {
       report(err);
@@ -343,7 +372,7 @@ function EditorApp() {
     if (project.path === null) return saveAs();
     try {
       setProject(await api.saveProject());
-      flash("Saved");
+      flash(t("Saved"));
       return true;
     } catch (err) {
       report(err);
@@ -364,7 +393,7 @@ function EditorApp() {
               resolve("cancel");
               return;
             }
-            setAskUnsaved({ name: project?.name ?? "This project", resolve });
+            setAskUnsaved({ name: project?.name ?? t("This project"), resolve });
           }),
         save,
       ),
@@ -576,7 +605,7 @@ function EditorApp() {
 
   if (!project) {
     return <UnitsProvider settings={settings}>
-      <StartScreen onOpened={setProject} onSettings={() => setShowSettings(true)} />
+      <StartScreen onOpened={setProject} onSettings={() => setShowSettings(true)} onPreferences={setSettings} />
       {settingsDialog}
     </UnitsProvider>;
   }
@@ -595,7 +624,8 @@ function EditorApp() {
             className="project-name"
             autoFocus
             value={renaming}
-            aria-label="Project name"
+            aria-label={t("Project name")}
+            data-feature="shell:rename"
             onChange={(event) => setRenaming(event.target.value)}
             onBlur={() => {
               const name = renaming.trim();
@@ -613,10 +643,11 @@ function EditorApp() {
           <button
             className="project-name"
             onClick={() => setRenaming(project.name)}
-            title="Click to rename the project"
+            title={t("Click to rename the project")}
+            data-feature="shell:rename"
           >
             {project.name}
-            {project.dirty && <span className="dirty" title="Unsaved changes"> •</span>}
+            {project.dirty && <span className="dirty" title={t("Unsaved changes")}> •</span>}
           </button>
         )}
         <span className="muted project-meta">
@@ -626,6 +657,8 @@ function EditorApp() {
         {/* The map's view controls and the capture tool land here (D68). */}
         <div className="titlebar-centre" ref={setViewSlot} />
         <span className="spacer" />
+        <LanguagePicker onSettings={setSettings} />
+        <HelpMenu />
         <ProjectMenu
           onNew={() => void startNewProject()}
           onOpen={() => void openProject()}
@@ -642,8 +675,9 @@ function EditorApp() {
         <button
           className="settings"
           onClick={() => setShowSettings(true)}
-          title="Settings (Cmd+,) · shortcuts, default scales, the macro library"
-          aria-label="Settings"
+          title={t("Settings (Cmd+,) · shortcuts, default scales, the macro library")}
+          aria-label={t("Settings")}
+          data-feature="shell:settings"
         >
           ⚙
         </button>
@@ -729,9 +763,9 @@ function EditorApp() {
         {panels.right ? (
           <aside className={recording !== null ? "sidebar right dimmed" : "sidebar right"}>
               <section className="panel-section">
-                <header onClick={() => toggle("properties")}>
+                <header onClick={() => toggle("properties")} data-feature="shell:properties">
                   <span className="disclose">{panels.properties ? "▾" : "▸"}</span>
-                  <h2>Properties</h2>
+                  <h2>{t("Properties")}</h2>
                 </header>
                 {panels.properties && (
                   <Inspector
@@ -747,9 +781,9 @@ function EditorApp() {
                 )}
               </section>
               <section className="panel-section">
-                <header onClick={() => toggle("history")}>
+                <header onClick={() => toggle("history")} data-feature="shell:history">
                   <span className="disclose">{panels.history ? "▾" : "▸"}</span>
-                  <h2>History</h2>
+                  <h2>{t("History")}</h2>
                 </header>
                 {panels.history && <HistoryPanel project={project} onChanged={setProject} />}
               </section>
@@ -795,19 +829,19 @@ function EditorApp() {
       <DockToggle
         side="left"
         open={panels.left}
-        label="the layer panel"
+        labels={[msg("Show the layer panel"), msg("Hide the layer panel")]}
         onToggle={() => toggle("left")}
       />
       <DockToggle
         side="right"
         open={panels.right}
-        label="the properties and history"
+        labels={[msg("Show the properties and history"), msg("Hide the properties and history")]}
         onToggle={() => toggle("right")}
       />
       <DockToggle
         side="bottom"
         open={panels.bottom}
-        label="the timeline"
+        labels={[msg("Show the timeline"), msg("Hide the timeline")]}
         onToggle={() => toggle("bottom")}
       />
       </div>
@@ -841,21 +875,21 @@ function EditorApp() {
         <UnsavedChangesDialog name={askUnsaved.name} onChoose={answerUnsaved} />
       )}
 
-      <div className="statusbar">
+      <div className="statusbar" data-feature="shell:statusbar">
         <BusySpinner />
         <HistoryProgressBar />
         {info && (
           <>
             <span className="muted">v{info.version}</span>
             <span className="muted">
-              evaluator: <span className="accent">{info.evaluator.backend}</span>
+              {t("evaluator:")} <span className="accent">{info.evaluator.backend}</span>
               {info.evaluator.fallback_reason !== null &&
                 ` — ${info.evaluator.fallback_reason}`}
             </span>
           </>
         )}
         <span className="muted">
-          {project.grid_ni} × {project.grid_nj} grid
+          {t("{ni} × {nj} grid", { ni: project.grid_ni, nj: project.grid_nj })}
         </span>
         <span className="spacer" />
         <StatusHint status={status} />
@@ -865,11 +899,11 @@ function EditorApp() {
           The product of the whole app, so it sits apart from the file
           operations in the title bar rather than among them.
         */}
-        <button className="export" onClick={() => setExporting(true)}>
-          Export GRIB…
+        <button className="export" data-feature="shell:export-grib" onClick={() => setExporting(true)}>
+          {t("Export GRIB…")}
         </button>
-        <button className="export" onClick={() => setExportingZarr(true)}>
-          Export Zarr…
+        <button className="export" data-feature="shell:export-zarr" onClick={() => setExportingZarr(true)}>
+          {t("Export Zarr…")}
         </button>
       </div>
     </div>
@@ -900,21 +934,24 @@ const DOCK_GLYPH = {
 function DockToggle({
   side,
   open,
-  label,
+  labels,
   onToggle,
 }: {
   side: "left" | "right" | "bottom";
   open: boolean;
-  label: string;
+  /** What the tab says while the panel is closed, and while it is open. English, via `msg`. */
+  labels: [show: string, hide: string];
   onToggle: () => void;
 }) {
-  const verb = open ? "Hide" : "Show";
+  const t = useT();
+  const label = t(open ? labels[1] : labels[0]);
   return (
     <button
       className={`dock-toggle ${side}`}
+      data-feature={`dock:${side}`}
       onClick={onToggle}
-      title={`${verb} ${label}`}
-      aria-label={`${verb} ${label}`}
+      title={label}
+      aria-label={label}
       aria-expanded={open}
     >
       {DOCK_GLYPH[side][open ? "open" : "closed"]}
@@ -931,6 +968,7 @@ function DockToggle({
  * when work starts and ends.
  */
 function BusySpinner() {
+  const t = useT();
   const busy = useBusy();
   const on = isBusy(busy);
   return (
@@ -938,8 +976,8 @@ function BusySpinner() {
       className={on ? "busy-spinner on" : "busy-spinner"}
       role="status"
       aria-live="polite"
-      aria-label={on ? busy.labels.join(", ") : "Idle"}
-      title={on ? busy.labels.join(" · ") : undefined}
+      aria-label={on ? busy.labels.map((label) => t(label)).join(", ") : t("Idle")}
+      title={on ? busy.labels.map((label) => t(label)).join(" · ") : undefined}
     />
   );
 }
@@ -960,6 +998,7 @@ function BusySpinner() {
  * this bar and not the shell.
  */
 function HistoryProgressBar() {
+  const t = useT();
   const busy = useBusy();
   const [progress, setProgress] = useState<HistoryProgress | null>(null);
   const running = busy.labels.includes(HISTORY_LABEL);
@@ -984,7 +1023,7 @@ function HistoryProgressBar() {
   const percent = total > 0 ? Math.round(((progress?.done ?? 0) / total) * 100) : 0;
   const label =
     progress === null
-      ? "Opening the archives"
+      ? t("Opening the archives")
       : `${progress.archive} · ${progress.done}/${progress.total}`;
   return (
     <span className="history-progress" title={label} aria-label={label}>
@@ -1003,6 +1042,7 @@ function HistoryProgressBar() {
  * report from the map — re-render this span and nothing else.
  */
 function StatusHint({ status }: { status: string | null }) {
+  const t = useT();
   const state = useHint();
   const line = shown(state);
   // The map's activity — tiles still rendering — leads the line (M27).
@@ -1010,7 +1050,7 @@ function StatusHint({ status }: { status: string | null }) {
     state.activity !== null ? <span className="activity">{state.activity}</span> : null;
   // A client driving the application says so, where the map's own activity is
   // said: an edit that nobody at the keyboard made is worth an explanation.
-  const mcp = state.mcp !== null ? <span className="activity mcp-badge" title="An MCP client is connected">MCP: {state.mcp}</span> : null;
+  const mcp = state.mcp !== null ? <span className="activity mcp-badge" title={t("An MCP client is connected")}>MCP: {state.mcp}</span> : null;
   if (status !== null) {
     return (
       <span className="hint accent">
@@ -1029,7 +1069,7 @@ function StatusHint({ status }: { status: string | null }) {
       title={line.detail ?? undefined}
     >
       <span className="hint-message">{mcp}{mcp && " · "}{activity}{activity && " · "}{line.text}</span>
-      {line.kind === "error" && state.retry && <button className="status-retry" onClick={retryError}>Retry download</button>}
+      {line.kind === "error" && state.retry && <button className="status-retry" onClick={retryError}>{t("Retry download")}</button>}
     </span>
   );
 }

@@ -27,6 +27,7 @@ import { useState } from "react";
 import { createPortal } from "react-dom";
 
 import type { ProjectSummary } from "../generated/ProjectSummary";
+import { useT } from "../i18n";
 import {
   ARCHIVES,
   MAX_FETCHED_STEPS,
@@ -60,6 +61,7 @@ export default function HistoryImportDialog({
   onImport: (choice: HistoryChoice) => void;
   onClose: () => void;
 }) {
+  const t = useT();
   const dated = project.start_unix_s !== null;
   const initial = defaultRange(now, {
     startUnixS: project.start_unix_s,
@@ -86,17 +88,17 @@ export default function HistoryImportDialog({
       <div
         className="modal modal-narrow history-import"
         role="dialog"
-        aria-label="Import history"
+        aria-label={t("Import history")}
+        data-feature="history-import:dialog"
         onClick={(event) => event.stopPropagation()}
       >
-        <h2>Import history</h2>
+        <h2>{t("Import history")}</h2>
         <p className="muted">
-          Fetches past times from the public archives and adds one layer for each. Times are
-          UTC and land on the hour.
+          {t("Fetches past times from the public archives and adds one layer for each. Times are UTC and land on the hour.")}
         </p>
 
-        <label className="field">
-          <span>Start (UTC)</span>
+        <label className="field" data-feature="history-import:start">
+          <span>{t("Start (UTC)")}</span>
           <input
             type="datetime-local"
             step={3600}
@@ -104,8 +106,8 @@ export default function HistoryImportDialog({
             onChange={(event) => setStart(event.target.value)}
           />
         </label>
-        <label className="field">
-          <span>End (UTC)</span>
+        <label className="field" data-feature="history-import:end">
+          <span>{t("End (UTC)")}</span>
           <input
             type="datetime-local"
             step={3600}
@@ -114,26 +116,29 @@ export default function HistoryImportDialog({
           />
         </label>
 
-        <label className="check">
+        <label className="check" data-feature="history-import:set-start">
           <input
             type="checkbox"
             checked={setStartTime}
             onChange={(event) => setSetStartTime(event.target.checked)}
           />
           <span>
-            {dated ? "Move the timeline\u2019s start" : "Set the timeline\u2019s start"} to{" "}
-            {start.replace("T", " ")} UTC
+            {dated
+              ? t("Move the timeline\u2019s start to {time} UTC", { time: start.replace("T", " ") })
+              : t("Set the timeline\u2019s start to {time} UTC", { time: start.replace("T", " ") })}
             {dated && (
               <span className="muted">
                 {" "}
-                — it is {formatUtcHour(project.start_unix_s ?? 0).replace("T", " ")} now
+                {t("— it is {time} now", {
+                  time: formatUtcHour(project.start_unix_s ?? 0).replace("T", " "),
+                })}
               </span>
             )}
           </span>
         </label>
 
-        <fieldset className="field">
-          <legend>Archives</legend>
+        <fieldset className="field" data-feature="history-import:archives">
+          <legend>{t("Archives")}</legend>
           {ARCHIVES.map((archive) => (
             <label key={archive.id} className="check">
               <input
@@ -142,7 +147,7 @@ export default function HistoryImportDialog({
                 onChange={() => toggle(archive.id)}
               />
               <span>
-                {archive.label} <span className="muted">— {archive.detail}</span>
+                {t(archive.label)} <span className="muted">— {t(archive.detail)}</span>
               </span>
             </label>
           ))}
@@ -156,18 +161,30 @@ export default function HistoryImportDialog({
         */}
         <p className={state.problem === null ? "muted" : "error"}>
           {state.problem ??
-            `${state.steps} step${state.steps === 1 ? "" : "s"} at ${project.step_hours} h, ` +
-              `${downloads} download${downloads === 1 ? "" : "s"} in all.`}
+            (state.steps === 1
+              ? downloads === 1
+                ? t("1 step at {hours} h, 1 download in all.", { hours: project.step_hours })
+                : t("1 step at {hours} h, {downloads} downloads in all.", {
+                    hours: project.step_hours,
+                    downloads,
+                  })
+              : // Several steps are several downloads from every archive chosen.
+                t("{steps} steps at {hours} h, {downloads} downloads in all.", {
+                  steps: state.steps,
+                  hours: project.step_hours,
+                  downloads,
+                }))}
         </p>
 
         <div className="modal-actions">
-          <button onClick={onClose}>Cancel</button>
+          <button onClick={onClose}>{t("Cancel")}</button>
           <button
             disabled={!ready}
+            data-feature="history-import:import"
             title={
               ready
-                ? `Fetch ${state.steps} steps from each archive`
-                : `Up to ${MAX_FETCHED_STEPS} steps at a time`
+                ? t("Fetch {steps} steps from each archive", { steps: state.steps })
+                : t("Up to {max} steps at a time", { max: MAX_FETCHED_STEPS })
             }
             onClick={() => {
               if (state.start === null || state.end === null || state.problem !== null) return;
@@ -179,7 +196,7 @@ export default function HistoryImportDialog({
               });
             }}
           >
-            Import
+            {t("Import")}
           </button>
         </div>
       </div>

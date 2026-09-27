@@ -1,3 +1,5 @@
+import { fold, language, type Language } from "../i18n";
+
 export type Parameter = readonly [name: string, description: string];
 export interface HelpImage { path: string; caption: string }
 export interface HelpSection {
@@ -137,10 +139,23 @@ export const TOPICS: HelpTopic[] = [
     related: ["layers", "clone", "divergence", "history", "export"] },
 ];
 
-export function searchTopics(query: string): HelpTopic[] {
-  const words = query.toLocaleLowerCase().trim().split(/\s+/).filter(Boolean);
-  return TOPICS.filter((topic) => {
-    const text = JSON.stringify(topic).toLocaleLowerCase();
+/**
+ * The reference in each language. Every translation has the same pages, in
+ * the same order, with the same ids, images and cross-references — only the
+ * words differ; `topics.test.ts` holds them to that shape.
+ */
+const translations = import.meta.glob<{ default: HelpTopic[] }>("./locales/*.ts", { eager: true });
+
+export function topicsFor(language: Language): HelpTopic[] {
+  if (language === "en") return TOPICS;
+  return translations[`./locales/${language}.ts`]?.default ?? TOPICS;
+}
+
+/** Topics whose text holds every word of the query, in the given language. */
+export function searchTopics(query: string, topics: HelpTopic[] = topicsFor(language())): HelpTopic[] {
+  const words = fold(query).trim().split(/\s+/).filter(Boolean);
+  return topics.filter((topic) => {
+    const text = fold(JSON.stringify(topic));
     return words.every((word) => text.includes(word));
   });
 }

@@ -2,6 +2,8 @@ import { useEffect } from "react";
 import { listen } from "@tauri-apps/api/event";
 
 import type { OpenProgress } from "../generated/OpenProgress";
+import { useT } from "../i18n";
+import { RECOVERED_TITLE } from "../ipc";
 import { barFraction, barLabel, reportOpening, useOpening } from "./opening";
 
 /**
@@ -17,6 +19,7 @@ import { barFraction, barLabel, reportOpening, useOpening } from "./opening";
  * a frame or two never flashes a page at anyone.
  */
 export default function LoadingScreen() {
+  const t = useT();
   const opening = useOpening();
 
   useEffect(() => {
@@ -28,11 +31,13 @@ export default function LoadingScreen() {
 
   if (opening.title === null) return null;
   const percent = Math.round(barFraction(opening) * 100);
+  // A file name is shown as it is; the one title made of words is translated.
+  const title = opening.title === RECOVERED_TITLE ? t(RECOVERED_TITLE) : opening.title;
   return (
-    <div className="loading" role="dialog" aria-modal="true" aria-label={`Opening ${opening.title}`}>
+    <div className="loading" role="dialog" aria-modal="true" aria-label={t("Opening {title}", { title })}>
       <div className="loading-panel">
-        <p className="muted loading-verb">Opening</p>
-        <h1 className="loading-title" title={opening.title}>{opening.title}</h1>
+        <p className="muted loading-verb">{t("Opening")}</p>
+        <h1 className="loading-title" title={title}>{title}</h1>
         <div
           className="progress-bar loading-bar"
           role="progressbar"

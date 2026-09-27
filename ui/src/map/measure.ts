@@ -11,6 +11,7 @@
  * Pure and free of React, so the geometry can be tested rather than looked at.
  */
 
+import { msg, t } from "../i18n";
 import { mapColour } from "../settings/themes";
 import type { MeasurementView } from "../generated/MeasurementView";
 import type { MeasurementKind } from "../generated/MeasurementKind";
@@ -186,7 +187,7 @@ export function drawMeasurements(
         lat: measurement.total_at[1]!,
       });
       if (Number.isFinite(at.x) && Number.isFinite(at.y)) {
-        writeLabel(context, dpr, measurement.total, { x: at.x, y: at.y + 16 * dpr }, copies, true);
+        writeLabel(context, dpr, totalLabel(measurement.total), { x: at.x, y: at.y + 16 * dpr }, copies, true);
       }
     }
 
@@ -268,11 +269,11 @@ function writeLabel(
   }
 }
 
-/** What the option bar calls each kind. */
+/** What the option bar calls each kind, in English: pass it through `t` to show it. */
 export const MEASURE_LABELS: Record<MeasurementKind, string> = {
-  dividers: "Dividers",
-  passage: "Great circle / rhumb",
-  rings: "Range rings",
+  dividers: msg("Dividers"),
+  passage: msg("Great circle / rhumb"),
+  rings: msg("Range rings"),
 };
 
 /** How many points a kind needs before it becomes a measurement. */
@@ -285,4 +286,16 @@ export function pointsNeeded(kind: MeasurementKind): number {
     case "rings":
       return 1;
   }
+}
+
+/**
+ * A measurement's total, which the backend writes as "total 12.3 nm" or, for
+ * range rings, "outer 50 nm": the word is translated, the distance kept.
+ */
+export function totalLabel(text: string): string {
+  const match = /^(outer|total) (.*)$/.exec(text);
+  if (!match) return text;
+  return match[1] === "outer"
+    ? t("outer {distance}", { distance: match[2]! })
+    : t("total {distance}", { distance: match[2]! });
 }

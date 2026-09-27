@@ -1,11 +1,15 @@
 import { useEffect, useId, useRef, useState } from "react";
 
+import { onReveal } from "../help/highlight";
+import { msg, useT } from "../i18n";
+
 type Action = () => void;
 
 /** Project commands share their existing save/replace guards in App. */
 export default function ProjectMenu({ onNew, onOpen, onSave, onSaveAs, onClose }: {
   onNew: Action; onOpen: Action; onSave: Action; onSaveAs: Action; onClose: Action;
 }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const id = useId();
   const container = useRef<HTMLDivElement>(null);
@@ -13,12 +17,15 @@ export default function ProjectMenu({ onNew, onOpen, onSave, onSaveAs, onClose }
   const menu = useRef<HTMLDivElement>(null);
   const firstFocus = useRef(0);
   const actions = [
-    { label: "New…", run: onNew },
-    { label: "Open…", run: onOpen },
-    { label: "Save", run: onSave },
-    { label: "Save As…", run: onSaveAs },
-    { label: "Close", run: onClose },
+    { label: msg("New…"), feature: "new", run: onNew },
+    { label: msg("Open…"), feature: "open", run: onOpen },
+    { label: msg("Save"), feature: "save", run: onSave },
+    { label: msg("Save As…"), feature: "save-as", run: onSaveAs },
+    { label: msg("Close"), feature: "close", run: onClose },
   ];
+
+  // The Help search opens the menu to show one of its items (spec.md 5.7).
+  useEffect(() => onReveal("menu:project", () => setOpen(true)), []);
 
   useEffect(() => {
     if (!open) return;
@@ -37,7 +44,7 @@ export default function ProjectMenu({ onNew, onOpen, onSave, onSaveAs, onClose }
   const close = () => { setOpen(false); trigger.current?.focus(); };
 
   return <div className="project-menu" ref={container}>
-    <button ref={trigger} aria-haspopup="menu" aria-expanded={open} aria-controls={open ? id : undefined}
+    <button ref={trigger} data-feature="shell:project-menu" aria-haspopup="menu" aria-expanded={open} aria-controls={open ? id : undefined}
       onClick={() => { firstFocus.current = 0; setOpen(!open); }}
       onKeyDown={event => {
         if (event.key === "ArrowDown" || event.key === "ArrowUp") {
@@ -46,9 +53,9 @@ export default function ProjectMenu({ onNew, onOpen, onSave, onSaveAs, onClose }
           setOpen(true);
         }
       }}>
-      Project <span aria-hidden="true">▾</span>
+      {t("Project")} <span aria-hidden="true">▾</span>
     </button>
-    {open && <div ref={menu} id={id} className="project-menu-items" role="menu" aria-label="Project"
+    {open && <div ref={menu} id={id} className="project-menu-items" role="menu" aria-label={t("Project")}
       onKeyDown={event => {
         // Existing project shortcuts still reach App's window handler.
         if (event.metaKey || event.ctrlKey) { setOpen(false); return; }
@@ -65,8 +72,9 @@ export default function ProjectMenu({ onNew, onOpen, onSave, onSaveAs, onClose }
         // Start normal tab navigation from the trigger when the popup closes.
         else if (event.key === "Tab") close();
       }}>
-      {actions.map(action => <button key={action.label} role="menuitem" tabIndex={-1}
-        onClick={() => { close(); action.run(); }}>{action.label}</button>)}
+      {actions.map(action => <button key={action.feature} role="menuitem" tabIndex={-1}
+        data-feature={`project:${action.feature}`}
+        onClick={() => { close(); action.run(); }}>{t(action.label)}</button>)}
     </div>}
   </div>;
 }

@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, expect, it } from "vitest";
-import { applyTheme, DEFAULT_THEME, mapColour, rgba, THEMES, themeOf } from "./themes";
+import { applyTheme, DEFAULT_THEME, mapColour, rgba, THEME_NAMES, THEMES, themeName, themeOf } from "./themes";
+import { setLanguage } from "../i18n";
 
 afterEach(() => applyTheme(DEFAULT_THEME));
 
@@ -47,4 +48,16 @@ it("resolves custom colours without changing presets and applies edits while Cus
   expect(mapColour("source")).toBe("#abcdef");
   applyTheme("custom", { ...custom, colours: { "map.source": "#123456" } });
   expect(mapColour("source")).toBe("#123456");
+});
+
+it("marks every bundled theme's name for translation", () => {
+  // `themes.json` is data, which the coverage test cannot read; a theme added
+  // there without its name in THEME_NAMES would stay English in every language.
+  expect(THEMES.map(theme => theme.name).filter(name => !THEME_NAMES.includes(name))).toEqual([]);
+  setLanguage("es");
+  try {
+    expect(themeName(themeOf("ocean"))).toBe("Océano");
+  } finally {
+    setLanguage("en");
+  }
 });

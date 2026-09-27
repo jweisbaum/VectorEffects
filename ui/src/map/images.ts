@@ -14,6 +14,7 @@
 import type { ImageLayerView } from "../generated/ImageLayerView";
 import { EARTH_RADIUS_M, distanceM } from "./geo";
 import { currentHint, reportError } from "../hint";
+import { t } from "../i18n";
 import type { ImageDraw } from "./renderer";
 
 /** How a fetch is doing. */
@@ -96,9 +97,10 @@ export class WarpSpanWarnings {
       this.clear(layer);
       return;
     }
-    const message =
-      `“${path}”'s warp spans more than a quarter of the earth; the mesh path this draws it ` +
-      "through is built for a local chart and may look coarse that far out.";
+    const message = t(
+      "The warp of “{path}” spans more than a quarter of the earth; the mesh it is drawn through is built for a local chart and may look coarse that far out.",
+      { path },
+    );
     this.active.set(layer, message);
     reportError(message);
   }

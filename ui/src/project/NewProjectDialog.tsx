@@ -4,6 +4,7 @@ import { api, IpcError } from "../ipc";
 import type { NewProjectRequest } from "../generated/NewProjectRequest";
 import type { ProjectSummary } from "../generated/ProjectSummary";
 import NewProjectForm from "./NewProjectForm";
+import { useT } from "../i18n";
 
 /**
  * Creates a project without going back to the start screen.
@@ -22,6 +23,7 @@ export default function NewProjectDialog({
   onCreated: (project: ProjectSummary) => void;
   onCancel: () => void;
 }) {
+  const t = useT();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -49,14 +51,14 @@ export default function NewProjectDialog({
   return (
     <div className="modal-backdrop" onClick={busy ? undefined : onCancel}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h2>New project</h2>
+        <h2>{t("New project")}</h2>
         <div className="start-new">
-          <NewProjectForm disabled={busy} submitLabel="Create project" onSubmit={create} />
+          <NewProjectForm disabled={busy} submitLabel={t("Create project")} onSubmit={create} />
         </div>
         {error !== null && <p className="error">{error}</p>}
         <div className="modal-actions">
           <button onClick={onCancel} disabled={busy}>
-            Cancel
+            {t("Cancel")}
           </button>
         </div>
       </div>

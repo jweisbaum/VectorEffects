@@ -37,6 +37,8 @@ import { ReadinessPoller } from "./readiness";
 import { playbackCount, playbackTime } from "./metrics";
 import type { PlaybackMap, PreparationStatus } from "./preparation";
 import { reportError, setHint } from "../hint";
+import { msg, t, useT } from "../i18n";
+import { onReveal } from "../help/highlight";
 import { api } from "../ipc";
 import { IconSvg, LOOP_ICON } from "../map/ToolIcon";
 import { MAX_STEPS } from "../project/format";
@@ -123,21 +125,34 @@ function graphable(base: PropertyValue): boolean {
 }
 
 /** Names for the easings, in the order the backend offers them. */
+const EASING_NAMES: Record<InterpolationView["kind"], string> = {
+  step: msg("Hold"),
+  linear: msg("Linear"),
+  ease_in: msg("Ease in"),
+  ease_out: msg("Ease out"),
+  ease_in_out: msg("Ease in–out"),
+  bezier: msg("Custom curve"),
+};
+
 function easingName(interp: InterpolationView): string {
-  switch (interp.kind) {
-    case "step":
-      return "Hold";
-    case "linear":
-      return "Linear";
-    case "ease_in":
-      return "Ease in";
-    case "ease_out":
-      return "Ease out";
-    case "ease_in_out":
-      return "Ease in–out";
-    case "bezier":
-      return "Custom curve";
-  }
+  return t(EASING_NAMES[interp.kind]);
+}
+
+/** What a readiness state means, for a tick's tooltip (spec.md 9.5). */
+const STATE_TITLES: Record<StepState, string> = {
+  empty: msg("{time} · not rendered"),
+  partial: msg("{time} · partly rendered"),
+  solid: msg("{time} · rendered"),
+  stale: msg("{time} · out of date"),
+};
+
+/**
+ * Fills a translated sentence's `{placeholders}` with elements, so a count can
+ * stay bold without the sentence being built from fragments.
+ */
+function fillNodes(text: string, nodes: Record<string, React.ReactNode>): React.ReactNode[] {
+  return text.split(/\{(\w+)\}/).map((part, index) =>
+    index % 2 === 1 ? <Fragment key={index}>{nodes[part] ?? `{${part}}`}</Fragment> : part);
 }
 
 /** A start time as it is typed: a UTC date and hour (M29). */
@@ -179,12 +194,17 @@ export function unixOf(draft: StartDraft): number | null {
 /**
  * What the motion switch adds, named for the track (M29): the object's
  * travel is a velocity, its turn a rotational vector, its growth a scale one.
+ * Whole sentences, one per case, so each language can phrase its own.
  */
-function motionWord(label: string): string {
+function motionTitle(label: string, on: boolean): string {
   const lower = label.toLowerCase();
-  if (lower.startsWith("pos")) return "velocity";
-  if (lower.startsWith("rot")) return "rotational";
-  return "scale";
+  if (lower.startsWith("pos")) {
+    return on ? t("Remove velocity vectors from the vector data.") : t("Add velocity vectors to the vector data.");
+  }
+  if (lower.startsWith("rot")) {
+    return on ? t("Remove rotational vectors from the vector data.") : t("Add rotational vectors to the vector data.");
+  }
+  return on ? t("Remove scale vectors from the vector data.") : t("Add scale vectors to the vector data.");
 }
 
 export default function Timeline({
@@ -251,6 +271,7 @@ export default function Timeline({
   /** Put away: not drawn, but mounted, so playback goes on (M27). */
   hidden?: boolean;
 }) {
+  const t = useT();
   const units = useUnits();
   const capturing = capture !== null && capture.active;
   const recordingPhase = capturing && capture.phase === "recording";
@@ -568,6 +589,20 @@ export default function Timeline({
     }
   };
 
+  /*
+    The Help search's way to a property track's controls (spec.md 5.7): open
+    the selected object's tracks, or the topmost object's when nothing is
+    selected, so a key, graph or link button is on screen to point at.
+  */
+  const revealTarget = useRef<number | null>(null);
+  revealTarget.current = selection[0]
+    ?? [...(tree?.layers ?? [])].reverse().flatMap((layer) => [...layer.objects].reverse())[0]?.id
+    ?? null;
+  useEffect(() => onReveal("timeline:expand", () => {
+    const target = revealTarget.current;
+    if (target !== null) setExpanded((current) => new Set(current).add(target));
+  }), []);
+
   const toggleGraph = (object: number, property: string) => {
     setGraphs((current) => {
       const next = new Set(current);
@@ -609,7 +644,7 @@ export default function Timeline({
   const [linkArm, setLinkArm] = useState<{ object: number; property: string } | null>(null);
   useEffect(() => {
     if (linkArm === null) return;
-    setHint("Click another object's row of the same property to follow it; click the link again to cancel.");
+    setHint(t("Click another object's row of the same property to follow it; click the link again to cancel."));
     return () => setHint(null);
   }, [linkArm]);
   const [linkDrag, setLinkDrag] = useState<{
@@ -1053,22 +1088,23 @@ export default function Timeline({
     <div className={capturing ? "timeline tl-capturing" : "timeline"} hidden={hidden}>
       {constantMotion && <ConstantMotionDialog segment={constantMotion} onClose={() => setConstantMotion(null)} onDone={(summary) => run(Promise.resolve(summary))} />}
       <div className="tl-transport">
-        <button onClick={() => setPlaying((on) => !on)} title="Play / pause (Space)">
+        <button data-feature="timeline:play" onClick={() => setPlaying((on) => !on)} title={t("Play / pause (Space)")}>
           {playing ? "❚❚" : "▶"}
         </button>
-        <button onClick={stop} title="Stop and return to the start">
+        <button data-feature="timeline:stop" onClick={stop} title={t("Stop and return to the start")}>
           ■
         </button>
         <button
           className={loop ? "active tl-loop" : "tl-loop"}
           onClick={() => setLoop((on) => !on)}
-          title="Loop"
-          aria-label="Loop"
+          data-feature="timeline:loop"
+          title={t("Loop")}
+          aria-label={t("Loop")}
           aria-pressed={loop}
         >
           <IconSvg icon={LOOP_ICON} size={22} />
         </button>
-        <label title="Steps per second (spec.md 9.4)">
+        <label data-feature="timeline:rate" title={t("Steps per second")}>
           <NumberField
             min={0.5}
             max={60}
@@ -1076,28 +1112,29 @@ export default function Timeline({
             value={rate}
             onCommit={setRate}
           />
-          steps/s
+          {t("steps/s")}
         </label>
         <button
           className={autoKey ? "active autokey" : "autokey"}
+          data-feature="timeline:autokey"
           onClick={() => onAutoKey(!autoKey)}
-          title="Auto-key: editing a property keys it at the current step (spec.md 9.3)"
+          title={t("Auto-key: editing a property keys it at the current step")}
         >
-          ◆ Auto-key
+          ◆ {t("Auto-key")}
         </button>
-        <span className="tl-position">
-          Step {step} / {last} · {forecastLabel(step, project.step_hours)}
+        <span className="tl-position" data-feature="timeline:position">
+          {t("Step {step} / {last}", { step, last })} · {forecastLabel(step, project.step_hours)}
           {/* The frame's UTC time, when step 0 has one (M29). */}
           {utcLabel(step, project.step_hours, project.start_unix_s) !== null && (
             <span className="tl-when"> · {utcLabel(step, project.step_hours, project.start_unix_s)}</span>
           )}
-          {buffering && <span className="tl-buffering"> · buffering…</span>}
-          {!playing && prepared.ready < prepared.total && <span className="tl-buffering"> · preparing playback {prepared.ready}/{prepared.total}</span>}
+          {buffering && <span className="tl-buffering"> · {t("buffering…")}</span>}
+          {!playing && prepared.ready < prepared.total && <span className="tl-buffering"> · {t("preparing playback {ready}/{total}", { ready: prepared.ready, total: prepared.total })}</span>}
         </span>
         {startDraft !== null && (
-          <span className="tl-start-editor" role="group" aria-label="Start time (UTC)">
-            <label>
-              Y
+          <span className="tl-start-editor" role="group" aria-label={t("Start time (UTC)")}>
+            <label title={t("Year")}>
+              {t("Y")}
               <NumberField
                 min={1900}
                 max={2999}
@@ -1105,8 +1142,8 @@ export default function Timeline({
                 onCommit={(year) => setStartDraft({ ...startDraft, year })}
               />
             </label>
-            <label>
-              M
+            <label title={t("Month")}>
+              {t("M")}
               <NumberField
                 min={1}
                 max={12}
@@ -1114,8 +1151,8 @@ export default function Timeline({
                 onCommit={(month) => setStartDraft({ ...startDraft, month })}
               />
             </label>
-            <label>
-              D
+            <label title={t("Day")}>
+              {t("D")}
               <NumberField
                 min={1}
                 max={31}
@@ -1123,8 +1160,8 @@ export default function Timeline({
                 onCommit={(day) => setStartDraft({ ...startDraft, day })}
               />
             </label>
-            <label>
-              h
+            <label title={t("Hour")}>
+              {t("h")}
               <NumberField
                 min={0}
                 max={23}
@@ -1140,9 +1177,9 @@ export default function Timeline({
                 if (unix !== null) run(api.setStartTime(unix));
               }}
             >
-              Set
+              {t("Set")}
             </button>
-            <button onClick={() => setStartDraft(null)}>Cancel</button>
+            <button onClick={() => setStartDraft(null)}>{t("Cancel")}</button>
           </span>
         )}
         <span className="spacer" />
@@ -1151,8 +1188,8 @@ export default function Timeline({
           GRIB file gives it one, and the export asks for the one it needs.
           The ruler labels forecast hours until then.
         */}
-        <label title="Number of time steps. Reducing it deletes keyframes past the end, after a confirmation (spec.md 4.1)">
-          Steps
+        <label data-feature="timeline:steps" title={t("Number of time steps. Reducing it deletes keyframes past the end, after a confirmation.")}>
+          {t("Steps")}
           <NumberField
             min={1}
             max={MAX_STEPS}
@@ -1179,12 +1216,12 @@ export default function Timeline({
         <div className="tl-row tl-ruler">
           <div className="tl-labels tl-ruler-label">
             {recordingPhase ? (
-              <span className="tl-recording">● Recording</span>
+              <span className="tl-recording">● {t("Recording")}</span>
             ) : previewing ? (
-              <span className="tl-preview-label">Macro preview</span>
+              <span className="tl-preview-label">{t("Macro preview")}</span>
             ) : (
               <>
-                Time
+                {t("Time")}
                 {/*
                   A start time, by choice (M29): step 0 as a UTC date and
                   hour, so the ruler and the step readout can say when a
@@ -1194,17 +1231,19 @@ export default function Timeline({
                 {project.start_unix_s === null ? (
                   <button
                     className="tl-start"
+                    data-feature="timeline:start-time"
                     onClick={() => setStartDraft(startDraftFrom(null))}
-                    title="Give step 0 a UTC date and time. Labels then show when each frame is, and the export starts there by default."
+                    title={t("Give step 0 a UTC date and time. Labels then show when each frame is, and the export starts there by default.")}
                   >
-                    Add start time
+                    {t("Add start time")}
                   </button>
                 ) : (
                   <button
                     className="tl-start"
+                    data-feature="timeline:start-time"
                     onClick={() => run(api.setStartTime(null))}
-                    title="Remove the start time. Nothing else changes."
-                    aria-label="Remove the start time"
+                    title={t("Remove the start time. Nothing else changes.")}
+                    aria-label={t("Remove the start time")}
                   >
                     ×
                   </button>
@@ -1214,6 +1253,7 @@ export default function Timeline({
           </div>
           <div
             className="tl-grid"
+            data-feature="timeline:readiness"
             style={{ width: gridWidth }}
             onPointerDown={(event) => {
               // The ruler scrubs; it is not a place to select keys from.
@@ -1249,16 +1289,14 @@ export default function Timeline({
                 style={{ left: s * pxPerStep, width: pxPerStep }}
                 title={
                   capturing
-                    ? `${tickLabel(s)} · ${
-                        s < firstStep
-                          ? "before the capture"
-                          : s > runEnd
-                            ? "after the frame the recording ends on"
-                            : capture.keys.includes(s)
-                            ? "region keyed here"
-                            : "region between its keys"
-                      }`
-                    : `${tickLabel(s)} · ${states[s] ?? "not rendered"}`
+                    ? s < firstStep
+                      ? t("{time} · before the capture", { time: tickLabel(s) })
+                      : s > runEnd
+                        ? t("{time} · after the frame the recording ends on", { time: tickLabel(s) })
+                        : capture.keys.includes(s)
+                          ? t("{time} · region keyed here", { time: tickLabel(s) })
+                          : t("{time} · region between its keys", { time: tickLabel(s) })
+                    : t(STATE_TITLES[states[s] ?? "empty"], { time: tickLabel(s) })
                 }
               >
                 {s % every === 0 && <span className="tl-tick-label">{tickLabel(s)}</span>}
@@ -1268,7 +1306,7 @@ export default function Timeline({
                 />
               </div>
             ))}
-            <div className="tl-playhead" style={{ left: (step + 0.5) * pxPerStep }} />
+            <div className="tl-playhead" data-feature="timeline:playhead" style={{ left: (step + 0.5) * pxPerStep }} />
           </div>
         </div>
 
@@ -1282,8 +1320,8 @@ export default function Timeline({
         {recordingPhase && (
           <div className="tl-row tl-track tl-capture-track">
             <div className="tl-labels tl-track-label">
-              <span className="tl-track-name" title="Where the recorded region sits at each step">
-                selection position
+              <span className="tl-track-name" title={t("Where the recorded region sits at each step")}>
+                {t("Selection position")}
               </span>
             </div>
             <div className="tl-grid" style={{ width: gridWidth }}>
@@ -1303,8 +1341,8 @@ export default function Timeline({
                     style={{ left: (s + 0.5) * pxPerStep }}
                     title={
                       s === capture.first_step
-                        ? "The first key; it stays"
-                        : "Click and press Delete, or Alt-click, to remove this key"
+                        ? t("The first key; it stays")
+                        : t("Click and press Delete, or Alt-click, to remove this key")
                     }
                     onPointerDown={(event) => {
                       event.stopPropagation();
@@ -1351,10 +1389,10 @@ export default function Timeline({
                     frameSel?.layer === layer.id && frameSel.steps.has(s);
                   const what =
                     kind === "pasted"
-                      ? `shows the message from ${tickLabel(frame.source ?? 0)}`
+                      ? t("{layer}: shows the message from {time}", { layer: layer.name, time: tickLabel(frame.source ?? 0) })
                       : kind === "hidden"
-                        ? "its message is hidden"
-                        : `a message at ${tickLabel(s)}`;
+                        ? t("{layer}: its message is hidden", { layer: layer.name })
+                        : t("{layer}: a message at {time}", { layer: layer.name, time: tickLabel(s) });
                   return (
                     <span
                       key={s}
@@ -1362,7 +1400,8 @@ export default function Timeline({
                         kind === "hidden" ? " hidden" : ""
                       }${chosen ? " selected" : ""}`}
                       style={{ left: s * pxPerStep, width: Math.max(2, pxPerStep - 1) }}
-                      title={`${layer.name}: ${what}`}
+                      data-feature="timeline:grib-frames"
+                      title={what}
                       onPointerDown={(event) => {
                         event.stopPropagation();
                         selectFrame(layer.id, s, event.shiftKey);
@@ -1416,23 +1455,25 @@ export default function Timeline({
                     <div className="tl-labels">
                       <button
                         className="tl-disclose"
+                        data-feature="timeline:tracks"
                         onClick={() => toggleObject(object.id)}
-                        title={open ? "Hide properties" : "Show properties"}
+                        title={open ? t("Hide properties") : t("Show properties")}
                       >
                         {open ? "▾" : "▸"}
                       </button>
                       <span
                         className="tl-object-name"
                         onClick={() => onSelect([object.id])}
-                        title={object.tool_label}
+                        title={t(object.tool_label)}
                       >
                         {object.name}
                       </span>
                       {object.tool !== "macro" && object.tool !== "patch" && object.tool !== "liquify" && <button
                         className={`tl-shape-toggle${shapeEditing === object.id ? " on" : ""}`}
-                        aria-label={`Animate shape of ${object.name}`}
+                        data-feature="timeline:shape-animation"
+                        aria-label={t("Animate shape of {name}", { name: object.name })}
                         aria-pressed={shapeEditing === object.id}
-                        title={shapeEditing === object.id ? "Finish editing shape animation" : "Animate shape — edit perimeter points on the map"}
+                        title={shapeEditing === object.id ? t("Finish editing shape animation") : t("Animate shape — edit perimeter points on the map")}
                         disabled={layer.locked || !layer.visible}
                         onClick={() => {
                           if (shapeEditing !== object.id && !open) toggleObject(object.id);
@@ -1454,8 +1495,9 @@ export default function Timeline({
                           the object, the way its name does. */}
                       <div
                         className="tl-range"
+                        data-feature="timeline:lifetime"
                         style={{ left: lo * pxPerStep, width: (hi - lo + 1) * pxPerStep }}
-                        title={`Active steps ${lo}–${hi} — drag to move, drag an end to resize`}
+                        title={t("Active steps {from}–{to} — drag to move, drag an end to resize", { from: lo, to: hi })}
                         onPointerDown={(event) =>
                           takeHold(event, {
                             object: object.id,
@@ -1479,9 +1521,9 @@ export default function Timeline({
                           role="slider"
                           tabIndex={0}
                           onKeyDown={event => nudgeEnd(event, "start")}
-                          aria-label={`Start frame for ${object.name}`}
+                          aria-label={t("Start frame for {name}", { name: object.name })}
                           aria-valuemin={0} aria-valuemax={last} aria-valuenow={lo}
-                          title={`Start frame ${lo} — drag to resize`}
+                          title={t("Start frame {step} — drag to resize", { step: lo })}
                           onPointerDown={(event) =>
                             takeHold(event, {
                               object: object.id,
@@ -1497,9 +1539,9 @@ export default function Timeline({
                           role="slider"
                           tabIndex={0}
                           onKeyDown={event => nudgeEnd(event, "end")}
-                          aria-label={`End frame for ${object.name}`}
+                          aria-label={t("End frame for {name}", { name: object.name })}
                           aria-valuemin={0} aria-valuemax={last} aria-valuenow={hi}
-                          title={`End frame ${hi} — drag to resize`}
+                          title={t("End frame {step} — drag to resize", { step: hi })}
                           onPointerDown={(event) =>
                             takeHold(event, {
                               object: object.id,
@@ -1579,11 +1621,12 @@ export default function Timeline({
                             {graphable(track.base) ? (
                               <button
                                 className="tl-disclose tl-graph-toggle"
+                                data-feature="timeline:graph"
                                 onClick={() => toggleGraph(object.id, track.property)}
                                 title={
                                   graphOpen
-                                    ? "Hide the value graph"
-                                    : "Show this property's value at every step"
+                                    ? t("Hide the value graph")
+                                    : t("Show this property's value at every step")
                                 }
                               >
                                 {graphOpen ? "▾" : "▸"}
@@ -1591,11 +1634,12 @@ export default function Timeline({
                             ) : (
                               <span className="tl-graph-toggle" />
                             )}
-                            <span className="tl-track-name">{track.label}</span>
+                            <span className="tl-track-name">{t(track.label)}</span>
                             {track.property === "Position" && <button
                               className="tl-motion"
-                              aria-label="Add constant motion"
-                              title={track.follows !== null ? "Unlink position before adding constant motion" : "Add constant motion from this frame to the next position keyframe"}
+                              data-feature="timeline:constant-motion"
+                              aria-label={t("Add constant motion")}
+                              title={track.follows !== null ? t("Unlink position before adding constant motion") : t("Add constant motion from this frame to the next position keyframe")}
                               disabled={track.follows !== null || step >= Math.min(object.end_step, last)}
                               onClick={() => {
                                 setPlaying(false);
@@ -1613,11 +1657,8 @@ export default function Timeline({
                             {track.motion_available && (
                               <button
                                 className={`tl-motion${track.motion ? " on" : ""}`}
-                                title={
-                                  track.motion
-                                    ? `Remove ${motionWord(track.label)} vectors from the vector data.`
-                                    : `Add ${motionWord(track.label)} vectors to the vector data.`
-                                }
+                                data-feature="timeline:motion-vectors"
+                                title={motionTitle(track.label, track.motion)}
                                 onClick={() =>
                                   run(api.setMotion(object.id, track.property, !track.motion))
                                 }
@@ -1635,7 +1676,8 @@ export default function Timeline({
                               (track.follows !== null ? (
                                 <button
                                   className="tl-follow on"
-                                  title={`Following ${track.follows_name ?? "another object"} — click to unlink`}
+                                  data-feature="timeline:follow"
+                                  title={t("Following {name} — click to unlink", { name: track.follows_name ?? t("another object") })}
                                   onClick={() => linkTo(object.id, track.property, null)}
                                 >
                                   ⛓
@@ -1647,7 +1689,8 @@ export default function Timeline({
                                       ? "tl-follow armed"
                                       : "tl-follow"
                                   }
-                                  title={`Click, then click another object's ${track.label.toLowerCase()} row to follow it — or drag onto that row`}
+                                  data-feature="timeline:follow"
+                                  title={t("Click, then click the same row of another object to follow it — or drag onto that row")}
                                   onClick={() =>
                                     setLinkArm((current) =>
                                       current?.object === object.id && current.property === track.property
@@ -1672,16 +1715,17 @@ export default function Timeline({
                                 </button>
                               ))}
                             {track.interpolated_here && (
-                              <span className="muted" title="Interpolated between keys at this step">
+                              <span className="muted" title={t("Interpolated between keys at this step")}>
                                 ~
                               </span>
                             )}
                             <button
                               className={`tl-key-here${track.keyed_here ? " on" : ""}`}
+                              data-feature="timeline:key"
                               title={
                                 track.keyed_here
-                                  ? "Remove the key at this step"
-                                  : "Key this property at this step"
+                                  ? t("Remove the key at this step")
+                                  : t("Key this property at this step")
                               }
                               onClick={() =>
                                 run(
@@ -1697,7 +1741,7 @@ export default function Timeline({
                           <div
                             className="tl-grid"
                             style={{ width: gridWidth }}
-                            title={track.property === "shape" ? "Click to visit a frame; double-click to add a shape key" : undefined}
+                            title={track.property === "shape" ? t("Click to visit a frame; double-click to add a shape key") : undefined}
                             onPointerDown={(event) => {
                               if (track.property !== "shape" || shapeEditing !== object.id || event.target !== event.currentTarget) return;
                               event.stopPropagation();
@@ -1735,11 +1779,16 @@ export default function Timeline({
                                 <span
                                   key={key.step}
                                   className={`tl-key${selected ? " selected" : ""}${key.interp.kind === "step" ? " hold" : ""}${borrowed ? " borrowed" : ""}`}
+                                  data-feature="timeline:keyframe"
                                   style={{ left: (shown + 0.5) * pxPerStep }}
                                   title={
                                     borrowed
-                                      ? `${track.label} follows ${track.follows_name ?? "another object"}, which is keyed at step ${key.step} — edit it there`
-                                      : `${track.label} at step ${key.step} · ${easingName(key.interp)}`
+                                      ? t("{property} follows {name}, which is keyed at step {step} — edit it there", {
+                                          property: t(track.label), name: track.follows_name ?? t("another object"), step: key.step,
+                                        })
+                                      : t("{property} at step {step} · {easing}", {
+                                          property: t(track.label), step: key.step, easing: easingName(key.interp),
+                                        })
                                   }
                                   onPointerDown={
                                     borrowed ? undefined : (event) => beginKeyDrag(event, id)
@@ -1790,7 +1839,7 @@ export default function Timeline({
                                   </span>
                                 </>
                               ) : (
-                                <span className="muted">Sampling…</span>
+                                <span className="muted">{t("Sampling…")}</span>
                               )}
                             </div>
                             <div className="tl-grid" style={{ width: gridWidth }}>
@@ -1878,10 +1927,11 @@ export default function Timeline({
       {menu && (
         <div
           className="tl-menu"
+          data-feature="timeline:interpolation"
           style={{ left: menu.x, top: menu.y }}
           onClick={(event) => event.stopPropagation()}
         >
-          <div className="tl-menu-title">Ease the segment leaving step {menu.key.step}</div>
+          <div className="tl-menu-title">{t("Ease the segment leaving step {step}", { step: menu.key.step })}</div>
           {menu.options.map((option) => (
             <button
               key={option.kind}
@@ -1899,14 +1949,13 @@ export default function Timeline({
       {shrink && (
         <div className="modal-backdrop" onClick={() => setShrink(null)}>
           <div className="modal modal-narrow" onClick={(event) => event.stopPropagation()}>
-            <h2>Reduce to {shrink.to} steps?</h2>
+            <h2>{t("Reduce to {count} steps?", { count: shrink.to })}</h2>
             <p>
-              Reducing to {shrink.to} steps will delete <strong>{shrink.impact.keyframes}</strong>{" "}
-              keyframe{shrink.impact.keyframes === 1 ? "" : "s"} and shorten{" "}
-              <strong>{shrink.impact.clamped_ranges}</strong> lifetime
-              {shrink.impact.clamped_ranges === 1 ? "" : "s"} across{" "}
-              <strong>{shrink.impact.objects.length}</strong> object
-              {shrink.impact.objects.length === 1 ? "" : "s"}.
+              {fillNodes(t("Reducing to {count} steps will delete {keyframes} and shorten {lifetimes} across {objects}.", { count: shrink.to }), {
+                keyframes: <strong>{shrink.impact.keyframes === 1 ? t("1 keyframe") : t("{count} keyframes", { count: shrink.impact.keyframes })}</strong>,
+                lifetimes: <strong>{shrink.impact.clamped_ranges === 1 ? t("1 lifetime") : t("{count} lifetimes", { count: shrink.impact.clamped_ranges })}</strong>,
+                objects: <strong>{shrink.impact.objects.length === 1 ? t("1 object") : t("{count} objects", { count: shrink.impact.objects.length })}</strong>,
+              })}
             </p>
             {shrink.impact.objects.length > 0 && (
               <ul className="tl-impact">
@@ -1915,9 +1964,9 @@ export default function Timeline({
                 ))}
               </ul>
             )}
-            <p className="muted">This can be undone until the project is saved.</p>
+            <p className="muted">{t("This can be undone until the project is saved.")}</p>
             <div className="modal-actions">
-              <button onClick={() => setShrink(null)}>Cancel</button>
+              <button onClick={() => setShrink(null)}>{t("Cancel")}</button>
               <button
                 className="danger"
                 onClick={() => {
@@ -1927,7 +1976,7 @@ export default function Timeline({
                   if (step > to - 1) onStepChange(to - 1);
                 }}
               >
-                Reduce to {shrink.to} steps
+                {t("Reduce to {count} steps", { count: shrink.to })}
               </button>
             </div>
           </div>

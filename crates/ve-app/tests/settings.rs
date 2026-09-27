@@ -456,3 +456,29 @@ fn invalid_glyph_edits_are_atomic_and_old_preferences_gain_defaults() {
     assert_eq!(fixed.glyphs.arrow, GlyphAppearance::default());
     assert_eq!(fixed.glyphs.barb.color, "#123456");
 }
+
+#[test]
+fn the_language_persists_without_touching_the_document_and_refuses_unknown_ones() {
+    let root = TempRoot::new("language");
+    let state = app(&root);
+    assert_eq!(settings::settings_of(&state).unwrap().language, "en");
+    with_project(&state, "wind");
+    let before = projects::current(&state).unwrap().unwrap();
+    for language in settings::LANGUAGES {
+        let saved = settings::language_set(&state, (*language).to_owned()).expect("language");
+        assert_eq!(saved.language, *language);
+        assert_eq!(
+            settings::settings_of(&app(&root)).unwrap().language,
+            *language
+        );
+    }
+    let after = projects::current(&state).unwrap().unwrap();
+    assert_eq!(before.revision, after.revision);
+    assert_eq!(before.dirty, after.dirty);
+    assert!(settings::language_set(&state, "xx".to_owned()).is_err());
+    assert_eq!(settings::settings_of(&state).unwrap().language, "de");
+    let old: settings::AppSettings = serde_json::from_str(r#"{"language":"klingon"}"#).unwrap();
+    assert_eq!(old.normalised().language, "en");
+    let older: settings::AppSettings = serde_json::from_str("{}").unwrap();
+    assert_eq!(older.language, "en");
+}

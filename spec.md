@@ -1737,6 +1737,55 @@ Objects are pinned to the earth (§8.3) and so is everything drawn to point at
 them: a handle that lags a pan by even a frame reads as the selection coming
 loose from the object.
 
+### 5.7 Interface language
+
+The interface is offered in English, Spanish, French and German, chosen from
+the language picker in the title bar, on the start page, or in Settings →
+Appearance. The choice is a person's preference, saved in the settings file
+(`AppSettings.language`) like the theme: it is not part of any project, its
+history or an export, and changing it re-renders the interface in place — no
+project is closed and no state is lost. The native menu's own entry (*VectorEffects
+Help*) follows it; the rest of the native menu is the platform's and is named
+by the system.
+
+**Everything a person reads is translated**: every label, button, tooltip,
+hint, status line, dialog, the names and options the schema sends (tool names,
+option labels, slider ends) and the help reference. Two things stay as written:
+document data (layer, object and project names, which the person typed or the
+application numbered) and error messages that originate in the backend, which
+carry file paths and values and are reported as the backend wrote them.
+
+**A feature is not finished until it is translated.** Every string passes
+through `t()` with its English as the key, and a test holds every catalogue to
+every such string, to the schema labels, and flags interface text that skips
+`t()` altogether. A feature written in English only fails the suite. The
+terminology is fixed in `ui/src/i18n/GLOSSARY.md`, for nautical and
+meteorological readers.
+
+### 5.8 Help search
+
+The Help menu in the title bar (and on the start page) holds a search. `Cmd`-`F`
+(`Ctrl`-`F` elsewhere) opens it with the field focused; with the help
+reference open, the same chord focuses the reference's own search.
+
+As the person types, the dropdown lists matching **features** — tools, tool
+options, buttons, panels, settings — and then matching **help pages**, in the
+language on screen: it searches the translated names, descriptions and
+synonyms, ignoring case and accents. Arrow keys move through the results, Enter
+chooses, Escape closes; the last row always opens the help reference.
+
+Choosing a feature **shows where it is**: whatever hides it is undone first —
+a closed panel opens, a tool's option bar appears by selecting that tool,
+Settings opens at the right section — and a rectangle flashes around the
+control three times. Choosing a help page opens the reference at that page. A
+feature that cannot be shown here (an editor control on the start page) opens
+its help page instead.
+
+Every control that a search should find carries a `data-feature` id and is
+registered with a label, a description and synonyms; a test holds the registry
+and the tagged elements to each other, so a tagged control is always findable
+and a registered feature always has something to flash.
+
 ---
 
 ## 6. Vector-creation tools

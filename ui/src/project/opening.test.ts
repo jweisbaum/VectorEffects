@@ -92,7 +92,7 @@ describe("layers that could not be read", () => {
   it("are named, and a painted layer is never one of them", () => {
     expect(unreadLayers(tree([{ name: "Paint", loaded: null }, { name: "Wind", loaded: true }]))).toBeNull();
     expect(unreadLayers(tree([{ name: "Wind (gfs.grib2)", loaded: false }]))).toContain(
-      '"Wind (gfs.grib2)"',
+      '“Wind (gfs.grib2)”',
     );
     const two = unreadLayers(
       tree([

@@ -1,8 +1,10 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { api } from "../ipc";
+import { useT } from "../i18n";
 
 /** Do not mount the editor, or issue its commands, before the native clock check. */
 export default function BetaGate({ children }: { children: ReactNode }) {
+  const t = useT();
   const [status, setStatus] = useState<string | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
@@ -20,8 +22,8 @@ export default function BetaGate({ children }: { children: ReactNode }) {
   if (status === null) return children;
   return <main className="beta-gate" aria-live="polite">
     <div><h1>VectorEffects</h1>
-      <p>{status ?? (error ? "Unable to check this version’s expiry date." : "Starting VectorEffects…")}</p>
-      {error && <><p className="muted">{error}</p><button onClick={() => setAttempt(attempt + 1)}>Try again</button></>}
+      <p>{status ?? (error ? t("Unable to check this version’s expiry date.") : t("Starting VectorEffects…"))}</p>
+      {error && <><p className="muted">{error}</p><button onClick={() => setAttempt(attempt + 1)}>{t("Try again")}</button></>}
     </div>
   </main>;
 }

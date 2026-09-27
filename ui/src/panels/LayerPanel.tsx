@@ -21,6 +21,8 @@ import HistoryImportDialog, { type HistoryChoice } from "./HistoryImportDialog";
 import { dropSide, layerDropIndex, objectDropIndex } from "./reorder";
 import { KIND_LABELS, KINDS, type FieldKindName, kindOf } from "../kind";
 import SpeedFilter from "./SpeedFilter";
+import { useT } from "../i18n";
+import { onReveal } from "../help/highlight";
 
 /**
  * Whether a layer source carries a field of its own.
@@ -143,6 +145,7 @@ export default function LayerPanel({
    */
   canAlign: boolean;
 }) {
+  const t = useT();
   const [tree, setTree] = useState<DocumentTree | null>(null);
   /**
    * The revision `tree` was fetched at. The speed filter compares it with
@@ -165,6 +168,8 @@ export default function LayerPanel({
   const [folded, setFolded] = useState<Set<number>>(new Set());
   /** Whether the history range dialog is up (M38). */
   const [historyOpen, setHistoryOpen] = useState(false);
+  // The Help search opens the dialog to show one of its controls.
+  useEffect(() => onReveal("layers:history-import", () => setHistoryOpen(true)), []);
   const opening = useRef<number | null>(project.image_token);
   opening.current = project.image_token;
   useEffect(() => {
@@ -483,7 +488,7 @@ export default function LayerPanel({
   }, []);
 
   if (!tree) {
-    return <div className="panel-empty muted">Loading…</div>;
+    return <div className="panel-empty muted">{t("Loading…")}</div>;
   }
 
   // Top of the stack first: index 0 is the bottom of the document.
@@ -534,42 +539,51 @@ export default function LayerPanel({
       onDragStartCapture={(event) => event.preventDefault()}
     >
       <header>
-        <h2>Layers</h2>
-        <button title="Add a layer" onClick={() => run(api.addLayer(""))}>
+        <h2>{t("Layers")}</h2>
+        <button
+          title={t("Add a layer")}
+          data-feature="layers:add"
+          onClick={() => run(api.addLayer(""))}
+        >
           +
         </button>
         <button
           className="import-grib"
-          title="Import a GRIB2 file as a layer"
+          title={t("Import a GRIB2 file as a layer")}
+          data-feature="layers:import-grib"
           onClick={() => void importGrib()}
         >
           + GRIB
         </button>
         <button
           className="import-grib"
-          title="Import wind and currents from a routing Zarr directory as layers"
+          title={t("Import wind and currents from a routing Zarr directory as layers")}
+          data-feature="layers:import-zarr"
           onClick={() => void importZarr()}
         >
           + Zarr
         </button>
         <button
           className="import-grib"
-          title="Lay a georeferenced image under the field. A GeoTIFF or an image with a world file lands where it says; anything else lands on the view, to be placed by hand."
+          title={t("Lay a georeferenced image under the field. A GeoTIFF or an image with a world file lands where it says; anything else lands on the view, to be placed by hand.")}
+          data-feature="layers:import-image"
           onClick={() => void importImage()}
         >
-          + image
+          {t("+ image")}
         </button>
         <button
           className="import-grib"
-          title="Lay GIS data under the field: a shapefile, GeoJSON, KML/KMZ, a GPX route or track, or a georeferenced raster. Display only — it makes no wind and reaches no export."
+          title={t("Lay GIS data under the field: a shapefile, GeoJSON, KML/KMZ, a GPX route or track, or a georeferenced raster. Display only — it makes no wind and reaches no export.")}
+          data-feature="layers:import-gis"
           onClick={() => void importGis()}
         >
           + GIS
         </button>
         <button
           className="import-grib icon-button"
-          title="Import past hours from the ERA5 and GlobCurrent archives as layers. This is the only action that reaches the network."
-          aria-label="Import history"
+          title={t("Import past hours from the ERA5 and GlobCurrent archives as layers. This is the only action that reaches the network.")}
+          aria-label={t("Import history")}
+          data-feature="layers:import-history"
           onClick={() => setHistoryOpen(true)}
         >
           <CalendarIcon />
@@ -585,7 +599,7 @@ export default function LayerPanel({
         />
       )}
 
-      <ul className="layers">
+      <ul className="layers" data-feature="layers:list">
         {layers.map((layer, reversed) => {
           const index = tree.layers.length - 1 - reversed;
           return (
@@ -605,15 +619,21 @@ export default function LayerPanel({
                 }}
                 onMouseDown={noTextSelect}
                 onPointerDown={(e) => startPress(e, { kind: "layer", id: layer.id })}
-                title="Click to make this the active layer; drag to reorder"
+                title={t("Click to make this the active layer; drag to reorder")}
               >
-                <span className="grip" aria-hidden="true" title="Drag to reorder">
+                <span
+                  className="grip"
+                  aria-hidden="true"
+                  title={t("Drag to reorder")}
+                  data-feature="layers:reorder"
+                >
                   ⋮⋮
                 </span>
                 <button
                   className={folded.has(layer.id) ? "fold" : "fold open"}
-                  title={folded.has(layer.id) ? "Show this layer's objects" : "Hide this layer's objects"}
-                  aria-label={folded.has(layer.id) ? "Show objects" : "Hide objects"}
+                  title={folded.has(layer.id) ? t("Show this layer's objects") : t("Hide this layer's objects")}
+                  aria-label={folded.has(layer.id) ? t("Show objects") : t("Hide objects")}
+                  data-feature="layers:fold"
                   aria-expanded={!folded.has(layer.id)}
                   onClick={(e) => {
                     e.stopPropagation();
@@ -624,8 +644,9 @@ export default function LayerPanel({
                 </button>
                 <button
                   className={layer.visible ? "eye on" : "eye"}
-                  title={layer.visible ? "Hide layer" : "Show layer"}
-                  aria-label={layer.visible ? "Hide layer" : "Show layer"}
+                  title={layer.visible ? t("Hide layer") : t("Show layer")}
+                  aria-label={layer.visible ? t("Hide layer") : t("Show layer")}
+                  data-feature="layers:visibility"
                   aria-pressed={layer.visible}
                   onClick={() => run(api.setLayerVisible(layer.id, !layer.visible))}
                 >
@@ -633,7 +654,8 @@ export default function LayerPanel({
                 </button>
                 <button
                   className={layer.locked ? "lock on" : "lock"}
-                  title={layer.locked ? "Unlock" : "Lock"}
+                  title={layer.locked ? t("Unlock") : t("Lock")}
+                  data-feature="layers:lock"
                   onClick={() => run(api.setLayerLocked(layer.id, !layer.locked))}
                 >
                   {layer.locked ? "🔒" : "🔓"}
@@ -657,7 +679,8 @@ export default function LayerPanel({
                       setRenaming(layer.id);
                       setDraft(layer.name);
                     }}
-                    title={`${layer.name}\nDrag to reorder · double-click to rename`}
+                    title={t("{name}\nDrag to reorder · double-click to rename", { name: layer.name })}
+                    data-feature="layers:rename"
                   >
                     {layer.name}
                   </span>
@@ -665,29 +688,33 @@ export default function LayerPanel({
                 {layer.grib && !layer.grib.loaded && (
                   <span
                     className="grib-missing"
-                    title={`${layer.grib.path}\nThe file could not be read, so this layer contributes nothing.`}
+                    title={t("{path}\nThe file could not be read, so this layer contributes nothing.", {
+                      path: layer.grib.path,
+                    })}
                   >
-                    file missing
+                    {t("file missing")}
                   </span>
                 )}
 
                 <span className="spacer" />
                 <button
-                  title="Move up"
+                  title={t("Move up")}
+                  data-feature="layers:move-up"
                   disabled={index === tree.layers.length - 1}
                   onClick={() => run(api.moveLayer(index, index + 1))}
                 >
                   ↑
                 </button>
                 <button
-                  title="Move down"
+                  title={t("Move down")}
                   disabled={index === 0}
                   onClick={() => run(api.moveLayer(index, index - 1))}
                 >
                   ↓
                 </button>
                 <button
-                  title="Delete layer"
+                  title={t("Delete layer")}
+                  data-feature="layers:delete"
                   onClick={() => run(api.removeLayer(layer.id))}
                 >
                   ×
@@ -700,8 +727,11 @@ export default function LayerPanel({
               */}
               {layer.source === "painted" && (
                 <div className="layer-parameter">
-                  <label title="Which field this layer's objects are part of. Wind layers export together as the wind messages, current layers as the current messages.">
-                    Field
+                  <label
+                    title={t("Which field this layer's objects are part of. Wind layers export together as the wind messages, current layers as the current messages.")}
+                    data-feature="layers:field-kind"
+                  >
+                    {t("Field")}
                     <select
                       value={layer.parameter}
                       onChange={(e) =>
@@ -710,7 +740,7 @@ export default function LayerPanel({
                     >
                       {KINDS.map((kind) => (
                         <option key={kind} value={kind}>
-                          {KIND_LABELS[kind]}
+                          {t(KIND_LABELS[kind])}
                         </option>
                       ))}
                     </select>
@@ -719,8 +749,9 @@ export default function LayerPanel({
               )}
               {(layer.source === "raster" || layer.source === "zarr") && (
                 <div className="layer-parameter muted">
-                  Field: {KIND_LABELS[kindOf(layer.parameter)]} ·{" "}
-                  {layer.grib?.history ? "from the archive" : "from the file"}
+                  {layer.grib?.history
+                    ? t("Field: {kind} · from the archive", { kind: t(KIND_LABELS[kindOf(layer.parameter)]) })
+                    : t("Field: {kind} · from the file", { kind: t(KIND_LABELS[kindOf(layer.parameter)]) })}
                 </div>
               )}
               {hasField(layer.source) && (
@@ -753,7 +784,7 @@ export default function LayerPanel({
               )}
 
               {!folded.has(layer.id) && (
-              <ul className="objects">
+              <ul className="objects" data-feature="layers:objects">
                 {/* Objects are also shown top-first. */}
                 {[...layer.objects].reverse().map((object, reversedObject) => {
                   const documentIndex = layer.objects.length - 1 - reversedObject;
@@ -778,9 +809,9 @@ export default function LayerPanel({
                         if (dragged.current) return;
                         clickObject(object.id, layer.id, e);
                       }}
-                      title="Drag to change stacking order"
+                      title={t("Drag to change stacking order")}
                     >
-                      <span className="grip" aria-hidden="true" title="Drag to reorder">
+                      <span className="grip" aria-hidden="true" title={t("Drag to reorder")}>
                         ⋮⋮
                       </span>
                       {renaming === object.id ? (
@@ -801,14 +832,19 @@ export default function LayerPanel({
                             setRenaming(object.id);
                             setDraft(object.name);
                           }}
-                          title={`${object.tool_label} · steps ${object.start_step}–${object.end_step} · drag to reorder · double-click to rename`}
+                          title={t("{tool} · steps {start}–{end} · drag to reorder · double-click to rename", {
+                            tool: t(object.tool_label),
+                            start: object.start_step,
+                            end: object.end_step,
+                          })}
                         >
                           {object.name}
                         </span>
                       )}
-                      <span className="tool muted">{object.tool_label}</span>
+                      <span className="tool muted">{t(object.tool_label)}</span>
                       <button
-                        title="Duplicate"
+                        title={t("Duplicate")}
+                        data-feature="layers:duplicate-object"
                         onClick={(e) => {
                           e.stopPropagation();
                           run(api.duplicateObject(object.id));
@@ -817,7 +853,8 @@ export default function LayerPanel({
                         ⧉
                       </button>
                       <button
-                        title="Delete"
+                        title={t("Delete")}
+                        data-feature="layers:delete-object"
                         onClick={(e) => {
                           e.stopPropagation();
                           onSelect(selection.filter((id) => id !== object.id));
@@ -834,7 +871,7 @@ export default function LayerPanel({
                     with nothing on it is empty. The condition used to name
                     the GRIB alone and called a loaded chart empty. */}
                 {layer.objects.length === 0 && layer.source === "painted" && (
-                  <li className="object empty muted">empty</li>
+                  <li className="object empty muted">{t("empty")}</li>
                 )}
               </ul>
               )}
@@ -871,27 +908,28 @@ function GisControls({
   gis: GisLayerView;
   onStyle: (style: { colour?: string; widthPx?: number; fillOpacity?: number }) => void;
 }) {
+  const t = useT();
   if (!gis.loaded) {
     return (
       <div className="grib-info">
         <span className="grib-missing" title={`${gis.path}\n${gis.error ?? ""}`}>
-          {gis.error ?? "The file could not be read."}
+          {gis.error ?? t("The file could not be read.")}
         </span>
       </div>
     );
   }
   return (
     <div className="grib-info">
-      <label className="layer-filter-row" title="Line and point colour.">
-        <span className="layer-filter-label">Colour</span>
+      <label className="layer-filter-row" title={t("Line and point colour.")} data-feature="layers:gis-colour">
+        <span className="layer-filter-label">{t("Colour")}</span>
         <input
           type="color"
           value={gis.colour}
           onChange={(event) => onStyle({ colour: event.target.value })}
         />
       </label>
-      <label className="layer-filter-row" title="Line width, in screen pixels.">
-        <span className="layer-filter-label">Width</span>
+      <label className="layer-filter-row" title={t("Line width, in screen pixels.")} data-feature="layers:gis-width">
+        <span className="layer-filter-label">{t("Width")}</span>
         <input
           type="range"
           min={2}
@@ -908,9 +946,10 @@ function GisControls({
       {gis.areas > 0 && (
         <label
           className="layer-filter-row"
-          title="How strongly areas are filled. At nothing, only their outlines are drawn — which is what a boundary over a field usually wants. Lines and marks are never filled."
+          title={t("How strongly areas are filled. At nothing, only their outlines are drawn — which is what a boundary over a field usually wants. Lines and marks are never filled.")}
+          data-feature="layers:gis-fill"
         >
-          <span className="layer-filter-label">Fill</span>
+          <span className="layer-filter-label">{t("Fill")}</span>
           <input
             type="range"
             min={0}
@@ -921,7 +960,7 @@ function GisControls({
         </label>
       )}
       <span className="layer-filter-summary muted" title={gis.path}>
-        {gis.features.toLocaleString()} features · display only
+        {t("{count} features · display only", { count: gis.features.toLocaleString() })}
       </span>
     </div>
   );
@@ -949,38 +988,43 @@ export function ImageControls({
    */
   canAlign: boolean;
 }) {
+  const t = useT();
   if (!image.loaded) {
     return (
       <div className="image-controls">
-        <span className="grib-missing" title={`${image.path}\nThe file could not be read.`}>
-          image missing
+        <span className="grib-missing" title={t("{path}\nThe file could not be read.", { path: image.path })}>
+          {t("image missing")}
         </span>
       </div>
     );
   }
   return (
-    <div className="image-controls" title="Hand tool: drag a corner to resize proportionally, a side to stretch, or the picture to move it.">
-      <label>
-        Opacity
+    <div
+      className="image-controls"
+      title={t("Hand tool: drag a corner to resize proportionally, a side to stretch, or the picture to move it.")}
+    >
+      <label data-feature="layers:image-opacity">
+        {t("Opacity")}
         <input
           type="range"
           min={0}
           max={100}
           value={Math.round(image.opacity * 100)}
           onChange={(event) => onOpacity(Number(event.target.value) / 100)}
-          title="How strongly the image shows through"
+          title={t("How strongly the image shows through")}
         />
       </label>
       <span className="muted">
         {image.width}×{image.height}
-        {image.georeferenced && " · georeferenced"}
+        {image.georeferenced && t(" · georeferenced")}
       </span>
       {canAlign && (
         <button
           className="align"
           onClick={onAlign}
-          aria-label="Align by pointing"
-          title="Align by pointing: click a place in the picture, then the same place on the map. Repeat as often as you like, then press Enter. Escape cancels; Backspace drops the last pair."
+          aria-label={t("Align by pointing")}
+          data-feature="layers:image-align"
+          title={t("Align by pointing: click a place in the picture, then the same place on the map. Repeat as often as you like, then press Enter. Escape cancels; Backspace drops the last pair.")}
         >
           <AlignIcon />
         </button>
@@ -988,13 +1032,14 @@ export function ImageControls({
       {(image.georeferenced || image.warped || image.control_points.length > 0) && (
         <button
           onClick={onReset}
+          data-feature="layers:image-reset"
           title={
             image.georeferenced
-              ? "Put the image back where its own file says it goes, and clear every control point"
-              : "Clear every control point and put the image back where it was before any were placed"
+              ? t("Put the image back where its own file says it goes, and clear every control point")
+              : t("Clear every control point and put the image back where it was before any were placed")
           }
         >
-          Reset place
+          {t("Reset place")}
         </button>
       )}
     </div>

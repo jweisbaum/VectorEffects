@@ -1,5 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type SelectHTMLAttributes } from "react";
 import { createPortal } from "react-dom";
+import { useT } from "./i18n";
 
 /**
  * A select with an in-page option list. WebKit's native popup can retain mouse
@@ -8,6 +9,7 @@ import { createPortal } from "react-dom";
  * native popup. Closing our list does not consume presses outside the control.
  */
 export default function ToolSelect(props: SelectHTMLAttributes<HTMLSelectElement>) {
+  const t = useT();
   const select = useRef<HTMLSelectElement>(null);
   const menu = useRef<HTMLDivElement>(null);
   const id = useId();
@@ -112,7 +114,7 @@ export default function ToolSelect(props: SelectHTMLAttributes<HTMLSelectElement
         }
       }} />
     {open && createPortal(<div ref={menu} id={id} role="listbox" className="tool-select-menu"
-      aria-label={props["aria-label"] ?? select.current?.labels?.[0]?.textContent ?? "Options"}
+      aria-label={props["aria-label"] ?? select.current?.labels?.[0]?.textContent ?? t("Options")}
       style={position} onPointerDown={event => event.preventDefault()}>
       {options.map((option, index) => <button key={`${index}-${option.value}`} id={`${id}-${index}`}
         type="button" role="option" tabIndex={-1} aria-selected={option.selected}

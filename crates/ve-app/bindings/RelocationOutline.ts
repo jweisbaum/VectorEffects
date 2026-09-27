@@ -4,11 +4,11 @@ import type { ObjectOutline } from "./ObjectOutline";
 /**
  * Liquify's moved boundary and a surface-following line joining the centres.
  */
-export type RelocationOutline = {
+export type RelocationOutline = { 
 /**
  * The translated source perimeter.
  */
-destination: ObjectOutline,
+destination: ObjectOutline, 
 /**
  * Sampled in the object's own frame, then lifted onto the globe.
  */

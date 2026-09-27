@@ -10,6 +10,8 @@ import type { McpClient } from "../generated/McpClient";
 import type { McpStatus } from "../generated/McpStatus";
 import NumberField from "../NumberField";
 import { api } from "../ipc";
+import { t, useT } from "../i18n";
+import { rich } from "./rich";
 
 /** The Claude Code command and a generic HTTP client entry. */
 export function clientSnippets(status: McpStatus): { claudeCode: string; json: string; bridge: string } {
@@ -48,12 +50,26 @@ function registrationKey(status: McpStatus): string {
 /** The button's words: not yet added, added as it stands, or added and since changed. */
 export function registerLabel(client: McpClient, given: string | undefined, status: McpStatus): string {
   const name = CLIENT_NAMES[client];
-  if (given === undefined) return `Add to ${name}`;
-  if (INSTALLS_ITSELF.has(client)) return `Opened in ${name}`;
-  return given === registrationKey(status) ? `Added to ${name}` : `Update in ${name}`;
+  if (given === undefined) return t("Add to {client}", { client: name });
+  if (INSTALLS_ITSELF.has(client)) return t("Opened in {client}", { client: name });
+  return given === registrationKey(status)
+    ? t("Added to {client}", { client: name })
+    : t("Update in {client}", { client: name });
+}
+
+/** How many clients are connected, and the last tool one called. */
+function connectedLabel(sessions: number, lastTool: string | null): string {
+  if (sessions === 0) return t("No client connected");
+  if (lastTool) {
+    return sessions === 1
+      ? t("1 client connected, last: {tool}", { tool: lastTool })
+      : t("{count} clients connected, last: {tool}", { count: sessions, tool: lastTool });
+  }
+  return sessions === 1 ? t("1 client connected") : t("{count} clients connected", { count: sessions });
 }
 
 export default function McpSection({ onError }: { onError: (err: unknown) => void }) {
+  const t = useT();
   const [status, setStatus] = useState<McpStatus | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   // Remembered for as long as the dialog is open and no longer. The clients'
@@ -106,8 +122,8 @@ export default function McpSection({ onError }: { onError: (err: unknown) => voi
 
   if (status === null)
     return (
-      <section>
-        <h3>MCP service</h3>
+      <section data-feature="settings:mcp">
+        <h3>{t("MCP service")}</h3>
         <span>…</span>
       </section>
     );
@@ -115,22 +131,21 @@ export default function McpSection({ onError }: { onError: (err: unknown) => voi
   const url = `http://127.0.0.1:${status.port}/mcp`;
 
   return (
-    <section>
-      <h3>MCP service</h3>
+    <section data-feature="settings:mcp">
+      <h3>{t("MCP service")}</h3>
       <p className="settings-note">
-        Lets an AI client on this computer drive the application: open and edit projects, animate, import, export and take
-        pictures of the map. Nothing outside this machine can reach it, and nothing can reach it while it is off.
+        {t("Lets an AI client on this computer drive the application: open and edit projects, animate, import, export and take pictures of the map. Nothing outside this machine can reach it, and nothing can reach it while it is off.")}
       </p>
-      <label className="settings-field settings-check">
+      <label className="settings-field settings-check" data-feature="settings:mcp-enable">
         <input
           type="checkbox"
           checked={status.enabled}
           onChange={(event) => apply(api.setMcp(event.target.checked, status.port))}
         />
-        Enable the MCP service on this computer
+        {t("Enable the MCP service on this computer")}
       </label>
-      <label className="settings-field">
-        Port
+      <label className="settings-field" data-feature="settings:mcp-port">
+        {t("Port")}
         <NumberField
           value={status.port}
           min={1}
@@ -148,18 +163,16 @@ export default function McpSection({ onError }: { onError: (err: unknown) => voi
             <code>{url}</code>
           </div>
           <div className="settings-field">
-            <span>Token</span>
+            <span>{t("Token")}</span>
             <code>{status.token}</code>
-            <button onClick={() => apply(api.rotateMcpToken())}>Rotate token</button>
+            <button data-feature="settings:mcp-token" onClick={() => apply(api.rotateMcpToken())}>{t("Rotate token")}</button>
           </div>
           <div className="settings-field">
             <span>
-              {status.sessions === 0
-                ? "No client connected"
-                : `${status.sessions} client${status.sessions === 1 ? "" : "s"} connected${status.last_tool ? `, last: ${status.last_tool}` : ""}`}
+              {connectedLabel(status.sessions, status.last_tool)}
             </span>
           </div>
-          <div className="settings-field">
+          <div className="settings-field" data-feature="settings:mcp-clients">
             {status.clients.map((client) => (
               <button key={client} disabled={adding !== null} onClick={() => register(client, status)}>
                 {registerLabel(client, given[client], status)}
@@ -167,35 +180,36 @@ export default function McpSection({ onError }: { onError: (err: unknown) => voi
             ))}
           </div>
           {status.clients.some((client) => !INSTALLS_ITSELF.has(client) && given[client] === registrationKey(status)) && (
-            <p className="settings-note">Added. A session that is already running picks it up when it is restarted.</p>
+            <p className="settings-note">{t("Added. A session that is already running picks it up when it is restarted.")}</p>
           )}
           {skills.claude_code !== undefined && (
             <p className="settings-note">
-              Claude Code was also given a skill that says when to use VectorEffects: <code>{skills.claude_code}</code>
+              {rich(t("Claude Code was also given a skill that says when to use VectorEffects: {path}"), {
+                path: <code>{skills.claude_code}</code>,
+              })}
             </p>
           )}
           {given.claude_desktop !== undefined && (
             <p className="settings-note">
-              Claude Desktop is asking whether to install the VectorEffects extension; confirm it there. It needs
-              installing once: a new token or port reaches it without another visit here.
+              {t("Claude Desktop is asking whether to install the VectorEffects extension; confirm it there. It needs installing once: a new token or port reaches it without another visit here.")}
             </p>
           )}
           {skills.claude_desktop !== undefined && (
             <p className="settings-note">
-              A skill that says when to use VectorEffects was written to <code>{skills.claude_desktop}</code>. An
-              extension cannot carry one, so add it yourself: in Claude Desktop's settings, under Skills, upload that
-              file.
+              {rich(t("A skill that says when to use VectorEffects was written to {path}. An extension cannot carry one, so add it yourself: in Claude Desktop’s settings, under Skills, upload that file."), {
+                path: <code>{skills.claude_desktop}</code>,
+              })}
             </p>
           )}
           <details>
-            <summary>Configuration for other clients</summary>
+            <summary>{t("Configuration for other clients")}</summary>
             <pre className="settings-snippet">{snippets.claudeCode}</pre>
-            <button onClick={() => copy("claude", snippets.claudeCode)}>Copy Claude Code command</button>
+            <button onClick={() => copy("claude", snippets.claudeCode)}>{t("Copy Claude Code command")}</button>
             <pre className="settings-snippet">{snippets.json}</pre>
-            <button onClick={() => copy("json", snippets.json)}>Copy HTTP client JSON</button>
+            <button onClick={() => copy("json", snippets.json)}>{t("Copy HTTP client JSON")}</button>
             <pre className="settings-snippet">{snippets.bridge}</pre>
-            <button onClick={() => copy("bridge", snippets.bridge)}>Copy stdio bridge command</button>
-            {copied && <span className="settings-note">Copied.</span>}
+            <button onClick={() => copy("bridge", snippets.bridge)}>{t("Copy stdio bridge command")}</button>
+            {copied && <span className="settings-note">{t("Copied.")}</span>}
           </details>
         </>
       )}

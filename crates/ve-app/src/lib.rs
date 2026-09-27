@@ -42,6 +42,29 @@ use commands::AppState;
 use paths::AppPaths;
 
 /// Starts the application. Returns only when the last window closes.
+/// Puts the native menu's one item of our own into the interface language.
+///
+/// The rest of the menu is the platform's, which the system already names in
+/// its own language; the webview's text is translated by the frontend.
+pub fn relabel_menu<R: tauri::Runtime>(app: &tauri::AppHandle<R>, language: &str) {
+    let text = match language {
+        "es" => "Ayuda de VectorEffects",
+        "fr" => "Aide de VectorEffects",
+        "de" => "VectorEffects-Hilfe",
+        _ => "VectorEffects Help",
+    };
+    let Some(menu) = app.menu() else { return };
+    let Some(item) = menu.get(tauri::menu::HELP_SUBMENU_ID) else {
+        return;
+    };
+    if let Some(help) = item.as_submenu()
+        && let Some(entry) = help.get("vector-help")
+        && let Some(entry) = entry.as_menuitem()
+    {
+        let _ = entry.set_text(text);
+    }
+}
+
 pub fn run() -> anyhow::Result<()> {
     let paths = AppPaths::resolve()?;
     // Held for the process lifetime; dropping it loses buffered log lines.
@@ -95,6 +118,14 @@ pub fn run() -> anyhow::Result<()> {
                 )?)?;
             }
             app.set_menu(menu)?;
+            let app_state = app.state::<AppState>();
+            let language = app_state
+                .session
+                .lock()
+                .map(|s| s.settings.language.clone());
+            if let Ok(language) = language {
+                relabel_menu(app.handle(), &language);
+            }
             // The pool renders ahead of the playhead for the life of the
             // process, and tells the frontend as each tile lands so the
             // readiness strip can catch up (spec.md 9.5).
@@ -219,6 +250,7 @@ pub fn run() -> anyhow::Result<()> {
                 document::clipboard_kind,
                 settings::app_settings,
                 settings::set_theme,
+                settings::set_language,
                 settings::set_custom_theme,
                 settings::set_shortcut,
                 settings::reset_shortcuts,

@@ -4,6 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import NumberField from "../NumberField";
 import { startDraftFrom } from "../timeline/Timeline";
 import { setHint } from "../hint";
+import { useT } from "../i18n";
 import { api, IpcError } from "../ipc";
 import type { ExportProgress } from "../generated/ExportProgress";
 import type { ProjectSummary } from "../generated/ProjectSummary";
@@ -18,6 +19,7 @@ export default function ExportZarrDialog({
   project: ProjectSummary;
   onClose: () => void;
 }) {
+  const t = useT();
   const start = startDraftFrom(project.start_unix_s);
   const [year, setYear] = useState(start.year);
   const [month, setMonth] = useState(start.month);
@@ -47,8 +49,11 @@ export default function ExportZarrDialog({
     try {
       const result = await api.exportZarr({ path, year, month, day, hour });
       setHint(
-        `Exported Zarr V3 (${result.chunks} chunks, ${formatBytes(result.bytes)}) ` +
-          `in ${(result.elapsed_ms / 1000).toFixed(1)} s`,
+        t("Exported Zarr V3 ({chunks} chunks, {size}) in {seconds} s", {
+          chunks: result.chunks,
+          size: formatBytes(result.bytes),
+          seconds: (result.elapsed_ms / 1000).toFixed(1),
+        }),
       );
       setRunning(false);
       setProgress(null);
@@ -56,7 +61,7 @@ export default function ExportZarrDialog({
     } catch (err) {
       const message = err instanceof IpcError ? err.message : String(err);
       setError(err instanceof IpcError && err.kind === "cancelled" ? null : message);
-      if (err instanceof IpcError && err.kind === "cancelled") setDone("Export cancelled");
+      if (err instanceof IpcError && err.kind === "cancelled") setDone(t("Export cancelled"));
     } finally {
       setRunning(false);
       setProgress(null);
@@ -69,30 +74,31 @@ export default function ExportZarrDialog({
   return (
     <div className="modal-backdrop" onClick={running ? undefined : onClose}>
       <div className="modal" onClick={(event) => event.stopPropagation()}>
-        <h2>Export Zarr V3</h2>
+        <h2>{t("Export Zarr V3")}</h2>
         <p className="muted modal-summary">
-          u/v 10 m wind + u/v total surface current · Float16 · Zstd · land masked
+          {t("u/v 10 m wind + u/v total surface current · Float16 · Zstd · land masked")}
           <br />
-          {project.grid_ni} × {project.grid_nj} · {project.step_count} steps every {project.step_hours} h
+          {project.grid_ni} × {project.grid_nj} ·{" "}
+          {t("{count} steps every {hours} h", { count: project.step_count, hours: project.step_hours })}
         </p>
 
         <fieldset disabled={running}>
-          <legend>Forecast start (UTC)</legend>
+          <legend>{t("Forecast start (UTC)")}</legend>
           <div className="modal-row">
             <label>
-              Year
+              {t("Year")}
               <NumberField min={1900} max={2999} value={year} onCommit={setYear} />
             </label>
             <label>
-              Month
+              {t("Month")}
               <NumberField min={1} max={12} value={month} onCommit={setMonth} />
             </label>
             <label>
-              Day
+              {t("Day")}
               <NumberField min={1} max={31} value={day} onCommit={setDay} />
             </label>
             <label>
-              Hour
+              {t("Hour")}
               <NumberField min={0} max={23} value={hour} onCommit={setHour} />
             </label>
           </div>
@@ -104,7 +110,7 @@ export default function ExportZarrDialog({
               <div className="progress-fill" style={{ width: `${percent}%` }} />
             </div>
             <span className="muted">
-              {progress ? `step ${progress.step} of ${progress.total}` : "starting…"}
+              {progress ? t("step {step} of {total}", { step: progress.step, total: progress.total }) : t("starting…")}
             </span>
           </div>
         )}
@@ -113,12 +119,12 @@ export default function ExportZarrDialog({
 
         <div className="modal-actions">
           {running ? (
-            <button onClick={() => void api.cancelExport()}>Cancel export</button>
+            <button onClick={() => void api.cancelExport()}>{t("Cancel export")}</button>
           ) : (
             <>
-              <button onClick={onClose}>Close</button>
+              <button onClick={onClose}>{t("Close")}</button>
               <button className="primary" onClick={() => void run()}>
-                Choose location and export…
+                {t("Choose location and export…")}
               </button>
             </>
           )}

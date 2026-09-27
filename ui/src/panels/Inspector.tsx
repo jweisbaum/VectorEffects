@@ -15,6 +15,14 @@ import { formatUtcHour } from "./historyRange";
 import { useUnits } from "../settings/units";
 import type { PositionPick } from "../picking";
 import { toShownAngle } from "./inspectorAngle";
+import { msg, useT } from "../i18n";
+import { variantLabel } from "../map/ToolOptions";
+
+/**
+ * The archives' names as the backend writes them (`ve_zarr::Archive::label`),
+ * marked so the catalogues hold them; shown through `t` like any other label.
+ */
+export const ARCHIVE_NAMES = [msg("ERA5 10 m wind"), msg("GlobCurrent surface current")] as const;
 
 /**
  * What a layer is, for the panel to say when no object is selected (M55).
@@ -28,68 +36,76 @@ import { toShownAngle } from "./inspectorAngle";
  * provenance those layers have carried since M38 with nowhere to display it.
  */
 function LayerFacts({ layer }: { layer: LayerNode | null }) {
+  const t = useT();
   if (layer === null) {
     return (
       <div className="panel-empty muted">
-        Select an object to edit its properties, or a layer to see what it holds.
+        {t("Select an object to edit its properties, or a layer to see what it holds.")}
       </div>
     );
   }
   const rows: [string, string][] = [];
   const kindOfLayer =
     layer.source === "painted"
-      ? "Painted"
+      ? t("Painted")
       : layer.source === "image"
-        ? "Image"
+        ? t("Image")
         : layer.grib?.history
-          ? "History"
-          : "Imported field";
-  rows.push(["Layer", layer.name]);
-  rows.push(["Holds", kindOfLayer]);
-  if (layer.source !== "image") rows.push(["Field", KIND_LABELS[kindOf(layer.parameter)]]);
-  if (!layer.visible) rows.push(["Shown", "hidden"]);
-  if (layer.locked) rows.push(["Locked", "yes"]);
+          ? t("History")
+          : t("Imported field");
+  rows.push([t("Layer"), layer.name]);
+  rows.push([t("Holds"), kindOfLayer]);
+  if (layer.source !== "image") rows.push([t("Field"), t(KIND_LABELS[kindOf(layer.parameter)])]);
+  if (!layer.visible) rows.push([t("Shown"), t("hidden")]);
+  if (layer.locked) rows.push([t("Locked"), t("yes")]);
 
   const grib = layer.grib;
   if (grib) {
     if (grib.history) {
-      rows.push(["Archive", grib.history.label]);
+      rows.push([t("Archive"), t(grib.history.label)]);
       rows.push([
-        "Hours",
-        `${formatUtcHour(grib.history.start_unix_s).replace("T", " ")} to ` +
-          `${formatUtcHour(grib.history.end_unix_s).replace("T", " ")} UTC`,
+        t("Hours"),
+        t("{start} to {end} UTC", {
+          start: formatUtcHour(grib.history.start_unix_s).replace("T", " "),
+          end: formatUtcHour(grib.history.end_unix_s).replace("T", " "),
+        }),
       ]);
     }
-    rows.push([layer.source === "zarr" && !grib.history ? "Directory" : "File", grib.path]);
+    rows.push([layer.source === "zarr" && !grib.history ? t("Directory") : t("File"), grib.path]);
     rows.push([
-      "Frames",
+      t("Frames"),
       grib.loaded
-        ? `${grib.frame_count} over ${grib.span_hours} h`
-        : "not read — the file is missing or unreadable",
+        ? t("{count} over {hours} h", { count: grib.frame_count, hours: grib.span_hours })
+        : t("not read — the file is missing or unreadable"),
     ]);
     const covered = grib.covered_steps.filter(Boolean).length;
-    rows.push(["Steps covered", `${covered} of ${grib.covered_steps.length}`]);
+    rows.push([
+      t("Steps covered"),
+      t("{covered} of {total}", { covered, total: grib.covered_steps.length }),
+    ]);
     if (grib.speed_min_mps !== null || grib.speed_max_mps !== null) {
-      rows.push(["Speed filter", "on — see the layer panel"]);
+      rows.push([t("Speed filter"), t("on — see the layer panel")]);
     }
   }
 
   const image = layer.image;
   if (image) {
-    rows.push(["File", image.path]);
+    rows.push([t("File"), image.path]);
     rows.push([
-      "Size",
-      image.loaded ? `${image.width} × ${image.height} px` : "not read — missing or unreadable",
+      t("Size"),
+      image.loaded
+        ? `${image.width} × ${image.height} px`
+        : t("not read — missing or unreadable"),
     ]);
-    rows.push(["Opacity", `${Math.round(image.opacity * 100)}%`]);
+    rows.push([t("Opacity"), `${Math.round(image.opacity * 100)}%`]);
   }
 
   if (layer.source === "painted") {
-    rows.push(["Objects", String(layer.objects.length)]);
+    rows.push([t("Objects"), String(layer.objects.length)]);
   }
 
   return (
-    <div className="layer-facts">
+    <div className="layer-facts" data-feature="inspector:layer-facts">
       {rows.map(([label, value]) => (
         <div className="layer-fact" key={label}>
           <span className="muted">{label}</span>
@@ -136,6 +152,7 @@ export default function Inspector({
   onPick: (pick: PositionPick | null) => void;
   onChanged: (project: ProjectSummary) => void;
 }) {
+  const t = useT();
   const { toDisplay, toStored, suffix: unitLabel } = useUnits();
   // Editing shows one object's values. A multi-selection is transformed on the
   // map rather than edited field by field, and showing one member's numbers as
@@ -192,8 +209,10 @@ export default function Inspector({
     if (selection.length > 1) {
       return (
         <div className="panel-empty muted">
-          {selection.length} objects selected. Drag the handles to transform them, or select one
-          to edit its properties.
+          {t(
+            "{count} objects selected. Drag the handles to transform them, or select one to edit its properties.",
+            { count: selection.length },
+          )}
         </div>
       );
     }
@@ -204,7 +223,7 @@ export default function Inspector({
     return <LayerFacts layer={layer} />;
   }
   if (!properties) {
-    return <div className="panel-empty muted">Loading…</div>;
+    return <div className="panel-empty muted">{t("Loading…")}</div>;
   }
 
   const write = (property: string, value: PropertyValue) => {
@@ -226,13 +245,23 @@ export default function Inspector({
   };
 
   return (
-    <div className="inspector">
+    <div className="inspector" data-feature="inspector:properties">
       <div className="properties">
         {properties.map((property) => {
           const suffix = unitLabel(property.unit);
+          // The schema's words are English from the backend; they are shown,
+          // and read back by the slider's readout, in the interface language.
+          const slider = property.slider && {
+            ...property.slider,
+            low_label: t(property.slider.low_label),
+            high_label: t(property.slider.high_label),
+          };
           return (
             <label
               key={property.id}
+              // Each property is findable by its identifier: `Enabled` is the one
+              // labelled Visible (the Help search registers the ones people ask for).
+              data-feature={`inspector:property-${property.id.toLowerCase()}`}
               // Two coordinates and a picker do not fit beside a label in this
               // panel's width, so a position takes the next line for itself.
               className={
@@ -240,7 +269,7 @@ export default function Inspector({
               }
             >
               <span className="property-label">
-                {property.label}
+                {t(property.label)}
                 {/* The diamond: filled when this step is keyed, hollow when the
                     value is interpolated, dim otherwise. Clicking keys or
                     unkeys this step (spec.md 9.3).
@@ -253,12 +282,13 @@ export default function Inspector({
                   <button
                     type="button"
                     className={`key-here${property.keyed_here ? " on" : property.interpolated_here ? " between" : ""}`}
+                    data-feature="inspector:keyframe"
                     title={
                       property.keyed_here
-                        ? "Keyed at this step — click to remove the key"
+                        ? t("Keyed at this step — click to remove the key")
                         : property.interpolated_here
-                          ? "Interpolated at this step — click to key it here"
-                          : "Click to key this property at this step"
+                          ? t("Interpolated at this step — click to key it here")
+                          : t("Click to key this property at this step")
                     }
                     onClick={(event) => {
                       event.preventDefault();
@@ -270,16 +300,16 @@ export default function Inspector({
                 )}
               </span>
 
-              {property.value.kind === "number" && property.slider && (
+              {property.value.kind === "number" && slider && (
                 <span className="property-editor slider">
                   <CentredSlider
                     value={property.value.value}
                     min={property.min ?? -100}
                     max={property.max ?? 100}
-                    lowLabel={property.slider.low_label}
-                    highLabel={property.slider.high_label}
-                    reversed={property.slider.reversed}
-                    format={readoutFor(property.slider, property.unit)}
+                    lowLabel={slider.low_label}
+                    highLabel={slider.high_label}
+                    reversed={slider.reversed}
+                    format={readoutFor(slider, property.unit)}
                     // On release, not on every tick: an inspector write is a
                     // document edit and an undo entry (spec.md 8.4).
                     onCommit={(next) => write(property.id, { kind: "number", value: next })}
@@ -365,7 +395,7 @@ export default function Inspector({
                   >
                     {property.variants.map((variant, index) => (
                       <option key={variant} value={index}>
-                        {variant.replace(/_/g, " ")}
+                        {variantLabel(variant)}
                       </option>
                     ))}
                   </ToolSelect>
@@ -377,7 +407,7 @@ export default function Inspector({
                   {(["x", "y"] as const).map((axis) => <NumberField key={axis}
                     step="any"
                     value={toDisplay("kilometres", property.value.kind === "offset" ? property.value[axis] : 0)}
-                    format={(v) => v.toFixed(3)} title={`${axis.toUpperCase()} displacement (${unitLabel("kilometres")})`}
+                    format={(v) => v.toFixed(3)} title={t("{axis} displacement ({unit})", { axis: axis.toUpperCase(), unit: unitLabel("kilometres") })}
                     commitWhileTyping={false}
                     onCommit={(v) => {
                       if (property.value.kind === "offset") write(property.id, {...property.value, [axis]: toStored("kilometres", v)});
@@ -391,7 +421,7 @@ export default function Inspector({
                     step="any"
                     value={property.value.lon}
                     format={(v) => v.toFixed(3)}
-                    title="Longitude"
+                    title={t("Longitude")}
                     commitWhileTyping={false}
                     onCommit={(lon) => {
                       if (property.value.kind !== "position") return;
@@ -404,7 +434,7 @@ export default function Inspector({
                     max={90}
                     value={property.value.lat}
                     format={(v) => v.toFixed(3)}
-                    title="Latitude"
+                    title={t("Latitude")}
                     commitWhileTyping={false}
                     onCommit={(lat) => {
                       if (property.value.kind !== "position") return;
@@ -419,7 +449,8 @@ export default function Inspector({
                   */}
                   <button
                     className={picking?.property === property.id ? "active" : ""}
-                    title="Click the map to place this point"
+                    data-feature="inspector:pick-position"
+                    title={t("Click the map to place this point")}
                     onClick={(e) => {
                       // The row is a `<label>`, and a click inside one is
                       // forwarded to its first input: without this the button
@@ -432,14 +463,14 @@ export default function Inspector({
                           : {
                               object,
                               property: property.id,
-                              label: property.label,
+                              label: t(property.label),
                               lon: property.value.lon,
                               lat: property.value.lat,
                             },
                       );
                     }}
                   >
-                    {picking?.property === property.id ? "Click the map…" : "Pick"}
+                    {picking?.property === property.id ? t("Click the map…") : t("Pick")}
                   </button>
                 </span>
               )}

@@ -14,6 +14,11 @@ import { useUnits } from "./units";
 
 import { useEffect, useState } from "react";
 
+import { msg, useT } from "../i18n";
+import LanguagePicker from "../i18n/LanguagePicker";
+import { onReveal } from "../help/highlight";
+import { rich } from "./rich";
+
 import type { AppSettings } from "../generated/AppSettings";
 import type { AutosaveMode } from "../generated/AutosaveMode";
 import type { MacroLibrary } from "../generated/MacroLibrary";
@@ -36,35 +41,35 @@ import { DEFAULT_THEME } from "./themes";
 
 /** The rows the Shortcuts section lists, in order, with their labels. */
 const ACTIONS: ReadonlyArray<{ action: Shortcut["action"]; tool: string; label: string }> = [
-  { action: "play_pause", tool: "", label: "Play / pause" },
-  { action: "step_back", tool: "", label: "Step back" },
-  { action: "step_forward", tool: "", label: "Step forward" },
-  { action: "pan_left", tool: "", label: "Pan left" },
-  { action: "pan_right", tool: "", label: "Pan right" },
-  { action: "pan_up", tool: "", label: "Pan up" },
-  { action: "pan_down", tool: "", label: "Pan down" },
-  { action: "zoom_in", tool: "", label: "Zoom in" },
-  { action: "zoom_out", tool: "", label: "Zoom out" },
-  { action: "nudge_left", tool: "", label: "Nudge selection left" },
-  { action: "nudge_right", tool: "", label: "Nudge selection right" },
-  { action: "nudge_up", tool: "", label: "Nudge selection up" },
-  { action: "nudge_down", tool: "", label: "Nudge selection down" },
-  { action: "tool", tool: "hand", label: "Hand tool" },
-  { action: "tool", tool: "select", label: "Select tool" },
-  { action: "tool", tool: "brush", label: "Brush" },
-  { action: "tool", tool: "circle", label: "Circle" },
-  { action: "tool", tool: "shape_fill", label: "Shape fill" },
-  { action: "tool", tool: "mask", label: "Mask" },
-  { action: "tool", tool: "clone_stamp", label: "Clone stamp" },
-  { action: "tool", tool: "curve", label: "Curve" },
-  { action: "tool", tool: "intensity", label: "Intensify / reduce" },
-  { action: "tool", tool: "divergence", label: "Diverge / converge" },
-  { action: "tool", tool: "turn", label: "Rotate flow" },
-  { action: "tool", tool: "warp", label: "Warp" },
-  { action: "tool", tool: "liquify", label: "Displace" },
-  { action: "tool", tool: "measure", label: "Measure" },
-  { action: "tool", tool: "capture", label: "Capture a macro" },
-  { action: "tool", tool: "insert", label: "Insert a macro" },
+  { action: "play_pause", tool: "", label: msg("Play / pause") },
+  { action: "step_back", tool: "", label: msg("Step back") },
+  { action: "step_forward", tool: "", label: msg("Step forward") },
+  { action: "pan_left", tool: "", label: msg("Pan left") },
+  { action: "pan_right", tool: "", label: msg("Pan right") },
+  { action: "pan_up", tool: "", label: msg("Pan up") },
+  { action: "pan_down", tool: "", label: msg("Pan down") },
+  { action: "zoom_in", tool: "", label: msg("Zoom in") },
+  { action: "zoom_out", tool: "", label: msg("Zoom out") },
+  { action: "nudge_left", tool: "", label: msg("Nudge selection left") },
+  { action: "nudge_right", tool: "", label: msg("Nudge selection right") },
+  { action: "nudge_up", tool: "", label: msg("Nudge selection up") },
+  { action: "nudge_down", tool: "", label: msg("Nudge selection down") },
+  { action: "tool", tool: "hand", label: msg("Hand tool") },
+  { action: "tool", tool: "select", label: msg("Select tool") },
+  { action: "tool", tool: "brush", label: msg("Brush") },
+  { action: "tool", tool: "circle", label: msg("Circle") },
+  { action: "tool", tool: "shape_fill", label: msg("Shape fill") },
+  { action: "tool", tool: "mask", label: msg("Mask") },
+  { action: "tool", tool: "clone_stamp", label: msg("Clone stamp") },
+  { action: "tool", tool: "curve", label: msg("Curve") },
+  { action: "tool", tool: "intensity", label: msg("Intensify / reduce") },
+  { action: "tool", tool: "divergence", label: msg("Diverge / converge") },
+  { action: "tool", tool: "turn", label: msg("Rotate flow") },
+  { action: "tool", tool: "warp", label: msg("Warp") },
+  { action: "tool", tool: "liquify", label: msg("Displace") },
+  { action: "tool", tool: "measure", label: msg("Measure") },
+  { action: "tool", tool: "capture", label: msg("Capture a macro") },
+  { action: "tool", tool: "insert", label: msg("Insert a macro") },
 ];
 
 export default function SettingsDialog({
@@ -89,6 +94,7 @@ export default function SettingsDialog({
   onLibrary: () => void;
   onClose: () => void;
 }) {
+  const t = useT();
   const units = useUnits();
   const [error, setError] = useState<string | null>(null);
   const [customDraft, setCustomDraft] = useState<CustomTheme | null>(null);
@@ -126,6 +132,29 @@ export default function SettingsDialog({
 
   const report = (err: unknown) => setError(String(err));
 
+  /**
+   * The Help search's second reveal step (spec.md 5.7): `settings:` opened the
+   * dialog, and `settings:<section>` brings that section into view. Each is
+   * written out, not looped over, so the registry's test can read them.
+   */
+  useEffect(() => {
+    const show = (step: string) => {
+      document.querySelector(`[data-feature="${step}"]`)?.scrollIntoView?.({ block: "start" });
+    };
+    const offs = [
+      onReveal("settings:appearance", show),
+      onReveal("settings:glyphs", show),
+      onReveal("settings:shortcuts", show),
+      onReveal("settings:autosave", show),
+      onReveal("settings:units", show),
+      onReveal("settings:display", show),
+      onReveal("settings:charts", show),
+      onReveal("settings:macros", show),
+      onReveal("settings:mcp", show),
+    ];
+    return () => { for (const off of offs) off(); };
+  }, []);
+
   const rebind = (row: (typeof ACTIONS)[number], event: React.KeyboardEvent) => {
     event.preventDefault();
     event.stopPropagation();
@@ -151,38 +180,41 @@ export default function SettingsDialog({
       <div
         className="modal settings"
         role="dialog"
-        aria-label="Settings"
+        aria-label={t("Settings")}
         onClick={(event) => event.stopPropagation()}
       >
-        <h2>Settings</h2>
+        <h2>{t("Settings")}</h2>
         {error !== null && <p className="modal-error">{error}</p>}
 
-        <section>
-          <h3>Appearance</h3>
+        <section data-feature="settings:appearance">
+          <h3>{t("Appearance")}</h3>
           <ThemePicker value={settings.theme ?? DEFAULT_THEME} custom={settings.custom_theme} onChoose={id => {
             setError(null);
             setCustomDraft(null);
             void api.setTheme(id).then(onSettings).catch(report);
           }} />
-          <p className="muted">Applies throughout the app, across all projects.</p>
+          <label className="settings-field" data-feature="settings:language">
+            {t("Language")}
+            <LanguagePicker onSettings={onSettings} />
+          </label>
+          <p className="muted">{t("Applies throughout the app, across all projects.")}</p>
           {customDraft ? <ThemeEditor initial={customDraft} onCancel={() => setCustomDraft(null)} onSave={async custom => {
             setError(null);
             const saved = await api.setCustomTheme(custom);
             onSettings(saved);
             setCustomDraft(null);
-          }} /> : <button type="button" className="theme-customize" onClick={() => {
+          }} /> : <button type="button" className="theme-customize" data-feature="settings:custom-theme" onClick={() => {
             setCustomDraft(settings.theme === "custom" && settings.custom_theme
               ? settings.custom_theme : { base: settings.theme ?? DEFAULT_THEME, colours: {} });
-          }}>{settings.theme === "custom" ? "Edit custom theme…" : "Customize…"}</button>}
+          }}>{settings.theme === "custom" ? t("Edit custom theme…") : t("Customize…")}</button>}
         </section>
 
         <GlyphSettings settings={settings} onSettings={value => { setError(null); onSettings(value); }} onError={report} />
 
-        <section>
-          <h3>Shortcuts</h3>
+        <section data-feature="settings:shortcuts">
+          <h3>{t("Shortcuts")}</h3>
           <p className="muted">
-            Click a key and press the one you want, with Shift or Alt held if you like.
-            A key that is already taken, or one the window owns, is refused.
+            {t("Click a key and press the one you want, with Shift or Alt held if you like. A key that is already taken, or one the window owns, is refused.")}
           </p>
           <div className="shortcut-rows">
             {ACTIONS.map((row) => {
@@ -193,35 +225,36 @@ export default function SettingsDialog({
                 ) ?? null;
               return (
                 <div className="shortcut-row" key={id}>
-                  <span>{row.label}</span>
+                  <span>{t(row.label)}</span>
                   <button
                     className={capturing === id ? "chord capturing" : "chord"}
                     onClick={() => setCapturing(capturing === id ? null : id)}
                     onKeyDown={(event) => {
                       if (capturing === id) rebind(row, event);
                     }}
-                    title="Click, then press a key"
+                    title={t("Click, then press a key")}
                   >
-                    {capturing === id ? "press a key…" : chordLabel(binding)}
+                    {capturing === id ? t("press a key…") : chordLabel(binding)}
                   </button>
                 </div>
               );
             })}
           </div>
           <button
+            data-feature="settings:shortcuts-reset"
             onClick={() => {
               setError(null);
               void api.resetShortcuts().then(onSettings).catch(report);
             }}
           >
-            Reset to defaults
+            {t("Reset to defaults")}
           </button>
         </section>
 
-        <section>
-          <h3>Autosave</h3>
+        <section data-feature="settings:autosave">
+          <h3>{t("Autosave")}</h3>
           <label className="settings-field">
-            While you work, unsaved changes are
+            {t("While you work, unsaved changes are")}
             <select
               value={settings.autosave}
               onChange={(event) => {
@@ -231,48 +264,48 @@ export default function SettingsDialog({
                   .then(onSettings)
                   .catch(report);
               }}
-              title="Every minute, or every fifty edits, whichever comes first"
+              title={t("Every minute, or every fifty edits, whichever comes first")}
             >
-              <option value="recovery">kept as a recovery snapshot, offered back after a crash</option>
-              <option value="save">saved into the project file itself</option>
-              <option value="off">left until you save</option>
+              <option value="recovery">{t("kept as a recovery snapshot, offered back after a crash")}</option>
+              <option value="save">{t("saved into the project file itself")}</option>
+              <option value="off">{t("left until you save")}</option>
             </select>
           </label>
         </section>
 
-        <section>
-          <h3>Units</h3>
-          <label className="settings-field">
-            Distance
+        <section data-feature="settings:units">
+          <h3>{t("Units")}</h3>
+          <label className="settings-field" data-feature="settings:distance-unit">
+            {t("Distance")}
             <select value={settings.distance_unit} onChange={(e) => {
               void api.setDisplayUnits(e.target.value as AppSettings["distance_unit"], settings.speed_unit).then(onSettings).catch(report);
             }}>
-              <option value="km">km — kilometres</option>
-              <option value="nm">nm — nautical miles</option>
+              <option value="km">{t("km — kilometres")}</option>
+              <option value="nm">{t("nm — nautical miles")}</option>
             </select>
           </label>
-          <label className="settings-field">
-            Speed
+          <label className="settings-field" data-feature="settings:speed-unit">
+            {t("Speed")}
             <select value={settings.speed_unit} onChange={(e) => {
               void api.setDisplayUnits(settings.distance_unit, e.target.value as AppSettings["speed_unit"]).then(onSettings).catch(report);
             }}>
-              <option value="kt">kt — knots</option>
-              <option value="mph">mph — miles per hour</option>
-              <option value="kmh">km/h — kilometres per hour</option>
+              <option value="kt">{t("kt — knots")}</option>
+              <option value="mph">{t("mph — miles per hour")}</option>
+              <option value="kmh">{t("km/h — kilometres per hour")}</option>
             </select>
           </label>
         </section>
 
-        <section>
-          <h3>Display</h3>
+        <section data-feature="settings:display">
+          <h3>{t("Display")}</h3>
           {/*
             The scale is the *project's* (spec.md 5.3): two people opening one
             file should see the same map. What lives in the preferences is the
             default a new project gets.
           */}
           {project !== null && (
-            <label className="settings-field">
-              This project&rsquo;s colour scale for wind, in {units.speedUnit}
+            <label className="settings-field" data-feature="settings:colour-scale">
+              {t("This project’s colour scale for wind, in {unit}", { unit: units.speedUnit })}
               <NumberField
                 value={units.speedFromKnots(project.wind_scale_knots)}
                 min={units.speedFromKnots(1)}
@@ -288,7 +321,7 @@ export default function SettingsDialog({
           )}
           {project !== null && (
             <label className="settings-field">
-              This project&rsquo;s colour scale for currents, in {units.speedUnit}
+              {t("This project’s colour scale for currents, in {unit}", { unit: units.speedUnit })}
               <NumberField
                 value={units.speedFromKnots(project.current_scale_knots)}
                 min={units.speedFromKnots(1)}
@@ -324,31 +357,32 @@ export default function SettingsDialog({
                     ...known,
                     {
                       id: chosen,
-                      label: `${chosen} (not in this version)`,
-                      note: "Drawn with the default until this project is opened by the version that has it.",
+                      label: t("{name} (not in this version)", { name: chosen }),
+                      note: t("Drawn with the default until this project is opened by the version that has it."),
                       stops: [],
                       known: false,
                     },
                   ];
               return (
-                <GradientPicker
-                  key={kind}
-                  label={
-                    kind === "wind"
-                      ? "This project\u2019s colour gradient for wind"
-                      : "This project\u2019s colour gradient for currents"
-                  }
-                  value={chosen}
-                  gradients={rows}
-                  onChoose={(id) => {
-                    setError(null);
-                    void api.setColourGradient(kind, id).then(onProject).catch(report);
-                  }}
-                />
+                <div key={kind} data-feature={`settings:gradient-${kind}`}>
+                  <GradientPicker
+                    label={
+                      kind === "wind"
+                        ? t("This project’s colour gradient for wind")
+                        : t("This project’s colour gradient for currents")
+                    }
+                    value={chosen}
+                    gradients={rows}
+                    onChoose={(id) => {
+                      setError(null);
+                      void api.setColourGradient(kind, id).then(onProject).catch(report);
+                    }}
+                  />
+                </div>
               );
             })}
-          <label className="settings-field">
-            Default for new wind projects, in {units.speedUnit}
+          <label className="settings-field" data-feature="settings:default-scales">
+            {t("Default for new wind projects, in {unit}", { unit: units.speedUnit })}
             <NumberField
               value={units.speedFromKnots(settings.default_wind_scale_knots)}
               min={units.speedFromKnots(1)}
@@ -364,7 +398,7 @@ export default function SettingsDialog({
             />
           </label>
           <label className="settings-field">
-            Default for new current projects, in {units.speedUnit}
+            {t("Default for new current projects, in {unit}", { unit: units.speedUnit })}
             <NumberField
               value={units.speedFromKnots(settings.default_current_scale_knots)}
               min={units.speedFromKnots(1)}
@@ -381,14 +415,14 @@ export default function SettingsDialog({
           </label>
         </section>
 
-        <section>
-          <h3>Charts</h3>
+        <section data-feature="settings:charts">
+          <h3>{t("Charts")}</h3>
           <p className="muted">
-            Electronic navigational charts (S-57). Choose the directory an
-            exchange set was unpacked into — the one holding the cell folders,
-            usually beside a <code>CATALOG.031</code>. Turn them on with
-            <strong> Charts</strong> in the view controls. Charts are drawn
-            under the field and are never part of a project.
+            {rich(t("Electronic navigational charts (S-57). Choose the directory an exchange set was unpacked into — the one holding the cell folders, usually beside a {file}. Turn them on with {charts} in the view controls. Charts are drawn under the field and are never part of a project."), {
+              // i18n-ignore: a file name
+              file: <code>CATALOG.031</code>,
+              charts: <strong>{t("Charts")}</strong>,
+            })}
           </p>
           <div className="settings-field">
             <span>
@@ -397,11 +431,14 @@ export default function SettingsDialog({
                 : chartStatus.error
                   ? chartStatus.error
                   : chartStatus.directory
-                    ? `${chartStatus.cells.toLocaleString()} cells in ${chartStatus.directory}`
-                    : "No chart directory chosen."}
+                    ? chartStatus.cells === 1
+                      ? t("1 cell in {directory}", { directory: chartStatus.directory })
+                      : t("{count} cells in {directory}", { count: chartStatus.cells.toLocaleString(), directory: chartStatus.directory })
+                    : t("No chart directory chosen.")}
             </span>
             <span className="settings-actions">
               <button
+                data-feature="settings:chart-directory"
                 onClick={() => {
                   void (async () => {
                     const directory = await pickChartDirectory();
@@ -416,7 +453,7 @@ export default function SettingsDialog({
                   })();
                 }}
               >
-                Choose…
+                {t("Choose…")}
               </button>
               <button
                 disabled={!chartStatus?.directory}
@@ -430,20 +467,20 @@ export default function SettingsDialog({
                     .catch(report);
                 }}
               >
-                Clear
+                {t("Clear")}
               </button>
             </span>
           </div>
         </section>
 
-        <section>
-          <h3>Macros</h3>
-          <label className="settings-field">
-            Library directory
+        <section data-feature="settings:macros">
+          <h3>{t("Macros")}</h3>
+          <label className="settings-field" data-feature="settings:macro-directory">
+            {t("Library directory")}
             <input
               type="text"
               value={settings.macro_directory}
-              placeholder="(the default, under the app data directory)"
+              placeholder={t("(the default, under the app data directory)")}
               onChange={(event) => {
                 void api.setMacroDirectory(event.target.value).then(onSettings).catch(report);
               }}
@@ -459,14 +496,17 @@ export default function SettingsDialog({
             <span>
               {library === null
                 ? "…"
-                : `${library.entries.length} macro${library.entries.length === 1 ? "" : "s"}, ${formatBytes(library.total_bytes)}`}
+                : library.entries.length === 1
+                  ? t("1 macro, {size}", { size: formatBytes(library.total_bytes) })
+                  : t("{count} macros, {size}", { count: library.entries.length, size: formatBytes(library.total_bytes) })}
             </span>
             <button
+              data-feature="settings:delete-macros"
               disabled={library === null || library.entries.length === 0}
-              title="Projects that already use a macro keep their own copy of its frames, so this breaks nothing"
+              title={t("Projects that already use a macro keep their own copy of its frames, so this breaks nothing")}
               onClick={() => setConfirmClear(true)}
             >
-              Delete all macros
+              {t("Delete all macros")}
             </button>
           </div>
         </section>
@@ -474,7 +514,7 @@ export default function SettingsDialog({
         <McpSection onError={report} />
 
         <div className="modal-actions">
-          <button onClick={onClose}>Close</button>
+          <button onClick={onClose}>{t("Close")}</button>
         </div>
       </div>
 
@@ -489,23 +529,22 @@ export default function SettingsDialog({
           <div
             className="modal modal-narrow"
             role="dialog"
-            aria-label="Delete all macros"
+            aria-label={t("Delete all macros")}
             onClick={(event) => event.stopPropagation()}
           >
             <h2>
-              Delete {library.entries.length} macro
-              {library.entries.length === 1 ? "" : "s"}?
+              {library.entries.length === 1
+                ? t("Delete 1 macro?")
+                : t("Delete {count} macros?", { count: library.entries.length })}
             </h2>
             <p>
-              This removes {formatBytes(library.total_bytes)} from the macro library on disk.
-              It cannot be undone.
+              {t("This removes {size} from the macro library on disk. It cannot be undone.", { size: formatBytes(library.total_bytes) })}
             </p>
             <p className="muted">
-              Projects that already use a macro keep their own copy of its frames, so nothing
-              you have placed will change.
+              {t("Projects that already use a macro keep their own copy of its frames, so nothing you have placed will change.")}
             </p>
             <div className="modal-actions">
-              <button onClick={() => setConfirmClear(false)}>Cancel</button>
+              <button onClick={() => setConfirmClear(false)}>{t("Cancel")}</button>
               <button
                 className="danger"
                 onClick={() => {
@@ -520,8 +559,9 @@ export default function SettingsDialog({
                     .catch(report);
                 }}
               >
-                Delete {library.entries.length} macro
-                {library.entries.length === 1 ? "" : "s"}
+                {library.entries.length === 1
+                  ? t("Delete 1 macro")
+                  : t("Delete {count} macros", { count: library.entries.length })}
               </button>
             </div>
           </div>

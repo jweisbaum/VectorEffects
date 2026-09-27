@@ -1,0 +1,93 @@
+import { msg } from "../../i18n";
+import type { Feature } from "../features";
+
+const LEFT = ["panel:left"];
+const PROPERTIES = ["panel:properties"];
+
+/** The layer panel, the properties panel, the history list and the history import. */
+const features: Feature[] = [
+  // The layer panel.
+  { id: "layers:add", label: msg("Add a layer"), description: msg("Adds an empty painted layer on top of the stack."),
+    keywords: [msg("new layer"), msg("create layer")], topic: "layers", reveal: LEFT },
+  { id: "layers:import-grib", label: msg("Import GRIB"), description: msg("Imports a GRIB2 file as one layer per kind of field."),
+    keywords: [msg("open forecast"), msg("load file")], topic: "imports", reveal: LEFT },
+  { id: "layers:import-zarr", label: msg("Import Zarr"), description: msg("Imports wind and currents from a routing Zarr directory."),
+    keywords: [msg("routing"), msg("load file")], topic: "imports", reveal: LEFT },
+  { id: "layers:import-image", label: msg("Import an image"), description: msg("Lays a picture under the field as a reference."),
+    keywords: [msg("picture"), msg("reference image"), msg("georeference")], topic: "imports", reveal: LEFT },
+  { id: "layers:import-gis", label: msg("Import GIS data"), description: msg("Lays a shapefile, GeoJSON, KML or GPX file under the field."),
+    keywords: [msg("shapefile"), msg("route"), msg("track")], topic: "imports", reveal: LEFT },
+  { id: "layers:import-history", label: msg("Import history"), description: msg("Downloads past hours of wind and currents from the ERA5 and GlobCurrent archives."),
+    keywords: [msg("calendar"), msg("download"), msg("past weather"), msg("archive")], topic: "history", reveal: LEFT },
+  { id: "layers:list", label: msg("Layers"), description: msg("The stack of layers, top first; click one to make it the active layer."),
+    keywords: [msg("active layer"), msg("stack")], topic: "layers", reveal: LEFT },
+  { id: "layers:visibility", label: msg("Show or hide a layer"), description: msg("The eye beside a layer shows or hides it on the map and in the export."),
+    keywords: [msg("eye"), msg("visible"), msg("hidden")], topic: "layers", reveal: LEFT },
+  { id: "layers:lock", label: msg("Lock a layer"), description: msg("A locked layer refuses edits until it is unlocked."),
+    keywords: [msg("unlock"), msg("protect")], topic: "layers", reveal: LEFT },
+  { id: "layers:fold", label: msg("Show or hide a layer's objects"), description: msg("Folds a layer's list of objects away."),
+    keywords: [msg("collapse"), msg("expand")], topic: "layers", reveal: LEFT },
+  { id: "layers:rename", label: msg("Rename a layer"), description: msg("Double-click a layer's or an object's name to rename it."),
+    keywords: [msg("name"), msg("title")], topic: "layers", reveal: LEFT },
+  { id: "layers:reorder", label: msg("Reorder layers"), description: msg("Drag a layer or an object by its grip to change the stacking order."),
+    keywords: [msg("drag"), msg("stacking order"), msg("move up")], topic: "layers", reveal: LEFT },
+  { id: "layers:move-up", label: msg("Move up"), description: msg("Moves a layer up or down the stack one place."),
+    keywords: [msg("move down"), msg("stacking order")], topic: "layers", reveal: LEFT },
+  { id: "layers:delete", label: msg("Delete layer"), description: msg("Removes a layer and everything in it; Undo brings it back."),
+    keywords: [msg("remove layer")], topic: "layers", reveal: LEFT },
+  { id: "layers:field-kind", label: msg("Field"), description: msg("Whether a painted layer's objects are part of the wind or the current field."),
+    keywords: [msg("wind or current"), msg("field kind"), msg("parameter")], topic: "layers", reveal: LEFT },
+  { id: "layers:speed-filter", label: msg("Speed filter"), description: msg("Keeps only the speeds inside a band and lets the rest show through."),
+    keywords: [msg("threshold"), msg("minimum speed"), msg("maximum speed")], topic: "layers", reveal: LEFT },
+  { id: "layers:objects", label: msg("Object list"), description: msg("A layer's objects, top first; click to select, Shift-click to add."),
+    keywords: [msg("select object"), msg("objects")], topic: "selection", reveal: LEFT },
+  { id: "layers:duplicate-object", label: msg("Duplicate"), description: msg("Makes a copy of an object in the same layer."),
+    keywords: [msg("copy"), msg("clone object")], topic: "selection", reveal: LEFT },
+  { id: "layers:delete-object", label: msg("Delete an object"), description: msg("Removes an object from its layer."),
+    keywords: [msg("remove object")], topic: "selection", reveal: LEFT },
+  { id: "layers:image-opacity", label: msg("Image opacity"), description: msg("How strongly an image layer shows through."),
+    keywords: [msg("transparency"), msg("fade")], topic: "imports", reveal: LEFT },
+  { id: "layers:image-align", label: msg("Align by pointing"), description: msg("Places an image by clicking a place in the picture and then the same place on the map."),
+    keywords: [msg("control points"), msg("georeference"), msg("warp image")], topic: "imports", reveal: LEFT },
+  { id: "layers:image-reset", label: msg("Reset place"), description: msg("Puts an image back where it was and clears its control points."),
+    keywords: [msg("control points"), msg("undo placement")], topic: "imports", reveal: LEFT },
+  { id: "layers:gis-colour", label: msg("GIS colour"), description: msg("The colour of a GIS layer's lines and points."),
+    keywords: [msg("line colour"), msg("style")], topic: "imports", reveal: LEFT },
+  { id: "layers:gis-width", label: msg("GIS line width"), description: msg("How thick a GIS layer's lines are drawn."),
+    keywords: [msg("thickness"), msg("style")], topic: "imports", reveal: LEFT },
+  { id: "layers:gis-fill", label: msg("GIS area fill"), description: msg("How strongly a GIS layer's areas are filled."),
+    keywords: [msg("fill opacity"), msg("style")], topic: "imports", reveal: LEFT },
+
+  // The properties panel.
+  { id: "inspector:properties", label: msg("Properties"), description: msg("Edits the selected object's values at the current step."),
+    keywords: [msg("inspector"), msg("edit object"), msg("values")], topic: "selection", reveal: PROPERTIES },
+  { id: "inspector:keyframe", label: msg("Key this property"), description: msg("The diamond beside a property keys it at this step, or removes the key."),
+    keywords: [msg("keyframe"), msg("diamond"), msg("animate")], topic: "animation", reveal: PROPERTIES },
+  { id: "inspector:pick-position", label: msg("Pick on map"), description: msg("Places a position property by clicking the map."),
+    keywords: [msg("pick"), msg("coordinates"), msg("latitude")], topic: "selection", reveal: PROPERTIES },
+  { id: "inspector:property-position", label: msg("Position"), description: msg("Where an object sits, as longitude and latitude."),
+    keywords: [msg("coordinates"), msg("location")], topic: "selection", reveal: PROPERTIES },
+  { id: "inspector:property-enabled", label: msg("Visible"), description: msg("Switches an object on or off, per step if it is keyed."),
+    keywords: [msg("enabled"), msg("on or off"), msg("hide object")], topic: "animation", reveal: PROPERTIES },
+  { id: "inspector:layer-facts", label: msg("Layer details"), description: msg("With nothing selected, shows what the active layer holds and where it came from."),
+    keywords: [msg("source"), msg("provenance"), msg("file")], topic: "layers", reveal: PROPERTIES },
+
+  // The history list.
+  { id: "history:list", label: msg("History"), description: msg("Every edit since the project opened; click one to go back to it."),
+    keywords: [msg("undo"), msg("redo"), msg("undo list")], topic: "workspace", reveal: ["panel:history"] },
+
+  // The history import dialog.
+  { id: "history-import:dialog", label: msg("Import history"), description: msg("Chooses the hours and the archives to download."),
+    keywords: [msg("download"), msg("past weather")], topic: "history", reveal: [...LEFT, "layers:history-import"] },
+  { id: "history-import:start", label: msg("Start (UTC)"), description: msg("The first hour to download."),
+    keywords: [msg("date range"), msg("from date")], topic: "history", reveal: [...LEFT, "layers:history-import"] },
+  { id: "history-import:end", label: msg("End (UTC)"), description: msg("The last hour to download."),
+    keywords: [msg("date range"), msg("to date")], topic: "history", reveal: [...LEFT, "layers:history-import"] },
+  { id: "history-import:set-start", label: msg("Set the timeline's start"), description: msg("Stamps the project's first step with the first hour downloaded."),
+    keywords: [msg("start time"), msg("timeline date")], topic: "history", reveal: [...LEFT, "layers:history-import"] },
+  { id: "history-import:archives", label: msg("Archives"), description: msg("Which archives to download from: ERA5 wind, GlobCurrent currents."),
+    keywords: [msg("data source")], topic: "history", reveal: [...LEFT, "layers:history-import"] },
+  { id: "history-import:import", label: msg("Import"), description: msg("Starts the download; one layer is added per archive."),
+    keywords: [msg("fetch"), msg("download")], topic: "history", reveal: [...LEFT, "layers:history-import"] },
+];
+export default features;

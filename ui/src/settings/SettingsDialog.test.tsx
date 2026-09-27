@@ -125,6 +125,7 @@ const SettingsDialog = (await import("./SettingsDialog")).default;
 
 const settings: AppSettings = {
   theme: "sage",
+  language: "en",
   custom_theme: null,
   glyphs: DEFAULT_GLYPHS,
   shortcuts: [],

@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import type { GribLayerInfo } from "../generated/GribLayerInfo";
 import NumberField from "../NumberField";
+import { useT } from "../i18n";
 import { useUnits } from "../settings/units";
 
 /** A band in whole display units, low end first — the slider's own resolution. */
@@ -67,6 +68,7 @@ export default function SpeedFilter({
     gesture: string | null,
   ) => Promise<number | null>;
 }) {
+  const t = useT();
   const units = useUnits();
   const { speedFromMps, speedToMps } = units;
   const ceiling = Math.max(5, Math.ceil(speedFromMps(grib.speed_ceiling_mps)));
@@ -133,13 +135,16 @@ export default function SpeedFilter({
 
   return (
     <div className="grib-filter">
-      <label title="Keep only the speeds inside this band; the rest of the imported field is dropped, and whatever is beneath it shows through.">
+      <label
+        data-feature="layers:speed-filter"
+        title={t("Keep only the speeds inside this band; the rest of the imported field is dropped, and whatever is beneath it shows through.")}
+      >
         <input
           type="checkbox"
           checked={on}
           onChange={(e) => (e.target.checked ? set(0, ceiling) : onChange(null, null, null))}
         />
-        Speed filter
+        {t("Speed filter")}
       </label>
       {on && (
         <div className="grib-filter-band">
@@ -154,7 +159,7 @@ export default function SpeedFilter({
               onPointerUp={endDrag}
               onKeyUp={endDrag}
               onBlur={endDrag}
-              title="Slowest speed kept"
+              title={t("Slowest speed kept")}
             />
             <NumberField
               min={0}
@@ -174,7 +179,7 @@ export default function SpeedFilter({
               onPointerUp={endDrag}
               onKeyUp={endDrag}
               onBlur={endDrag}
-              title="Fastest speed kept"
+              title={t("Fastest speed kept")}
             />
             <NumberField
               min={0}
@@ -183,7 +188,9 @@ export default function SpeedFilter({
               onCommit={(next) => set(low, next)}
             />
           </span>
-          <span className="muted">{units.speedUnit} · speeds outside this range are hidden</span>
+          <span className="muted">
+            {t("{unit} · speeds outside this range are hidden", { unit: units.speedUnit })}
+          </span>
         </div>
       )}
     </div>

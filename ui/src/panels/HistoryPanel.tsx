@@ -3,6 +3,8 @@ import { useEffect, useState } from "react";
 import { api } from "../ipc";
 import type { HistoryView } from "../generated/HistoryView";
 import type { ProjectSummary } from "../generated/ProjectSummary";
+import { useT } from "../i18n";
+import { translateHistoryLabel } from "./historyLabels";
 
 /**
  * The undo stack, as a list you can jump around in.
@@ -17,6 +19,7 @@ export default function HistoryPanel({
   project: ProjectSummary;
   onChanged: (project: ProjectSummary) => void;
 }) {
+  const t = useT();
   const [history, setHistory] = useState<HistoryView | null>(null);
 
   useEffect(() => {
@@ -29,12 +32,12 @@ export default function HistoryPanel({
 
   return (
     <div className="history-panel">
-      <ol className="history">
+      <ol className="history" data-feature="history:list">
         <li
           className={history.cursor === 0 ? "entry current" : "entry"}
           onClick={() => void api.jumpToHistory(0).then(onChanged)}
         >
-          <span className="muted">Opened</span>
+          <span className="muted">{t("Opened")}</span>
         </li>
         {history.entries.map((entry) => (
           <li
@@ -47,9 +50,9 @@ export default function HistoryPanel({
               .filter(Boolean)
               .join(" ")}
             onClick={() => void api.jumpToHistory(entry.index + 1).then(onChanged)}
-            title="Jump to this point"
+            title={t("Jump to this point")}
           >
-            {entry.label}
+            {translateHistoryLabel(entry.label)}
           </li>
         ))}
       </ol>

@@ -8,6 +8,7 @@
  */
 
 import type { TimelineReadiness } from "../generated/TimelineReadiness";
+import { msg, t } from "../i18n";
 
 /**
  * How ready one step is, as the ruler shows it (spec.md 9.5).
@@ -169,6 +170,12 @@ export function forecastLabel(step: number, stepHours: number): string {
   return `+${step * stepHours} h`;
 }
 
+/** Month abbreviations for `utcLabel`, translated when a label is made. */
+const MONTHS = [
+  msg("Jan"), msg("Feb"), msg("Mar"), msg("Apr"), msg("May"), msg("Jun"),
+  msg("Jul"), msg("Aug"), msg("Sep"), msg("Oct"), msg("Nov"), msg("Dec"),
+];
+
 /**
  * The absolute time of a step, once a start is set (spec.md 9.1).
  *
@@ -186,9 +193,7 @@ export function utcLabel(
   const at = new Date((startUnixS + step * stepHours * 3600) * 1000);
   const two = (n: number) => String(n).padStart(2, "0");
   const day = two(at.getUTCDate());
-  const month = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][
-    at.getUTCMonth()
-  ];
+  const month = t(MONTHS[at.getUTCMonth()]!);
   return `${day} ${month} ${two(at.getUTCHours())}:${two(at.getUTCMinutes())}Z`;
 }
 

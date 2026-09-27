@@ -3,6 +3,7 @@
  * Definitions are bundled: changing a view never performs a network request. */
 import proj4 from "proj4";
 import catalogue from "./crs.json";
+import { msg, TranslatableError } from "../../i18n/msg";
 
 export const METRES_PER_DEGREE = 6371229 * Math.PI / 180;
 const DEG = Math.PI / 180;
@@ -27,38 +28,47 @@ export interface MapTransform {
 }
 const sphere = "+a=6371229 +b=6371229 +x_0=0 +y_0=0 +units=m +no_defs";
 const world = (id: string, label: string, method: string): GeneralMap => ({
-  id, label, group: "World maps", definition: `+proj=${method} +lon_0=0 ${sphere}`, bbox: [-180, -90, 180, 90],
+  id, label, group: msg("World maps"), definition: `+proj=${method} +lon_0=0 ${sphere}`, bbox: [-180, -90, 180, 90],
 });
 export const GENERAL_MAPS: readonly GeneralMap[] = [
-  { ...world("orthographic", "Globe (orthographic)", "ortho"), group: "Globe and azimuthal", movable: "orthographic" },
+  { ...world("orthographic", msg("Globe (orthographic)"), "ortho"), group: msg("Globe and azimuthal"), movable: "orthographic" },
   world("robinson", "Robinson", "robin"),
   world("mollweide", "Mollweide", "moll"),
   world("winkel_tripel", "Winkel Tripel", "wintri"),
   world("equal_earth", "Equal Earth", "eqearth"),
-  world("sinusoidal", "Sinusoidal", "sinu"),
-  ...([ ["azimuthal_equidistant", "Azimuthal equidistant", "aeqd"],
-    ["azimuthal_equal_area", "Lambert azimuthal equal-area", "laea"],
-    ["stereographic", "Stereographic", "stere"], ["gnomonic", "Gnomonic", "gnom"] ] as const).map(([id,label,movable]) => ({
-      id, label, movable, group: "Globe and azimuthal", definition: `+proj=${movable} +lat_0=0 +lon_0=0 ${sphere}`,
+  world("sinusoidal", msg("Sinusoidal"), "sinu"),
+  ...([ ["azimuthal_equidistant", msg("Azimuthal equidistant"), "aeqd"],
+    ["azimuthal_equal_area", msg("Lambert azimuthal equal-area"), "laea"],
+    ["stereographic", msg("Stereographic"), "stere"], ["gnomonic", msg("Gnomonic"), "gnom"] ] as const).map(([id,label,movable]) => ({
+      id, label, movable, group: msg("Globe and azimuthal"), definition: `+proj=${movable} +lat_0=0 +lon_0=0 ${sphere}`,
       bbox: [-180,-90,180,90] as Box,
     })),
   ...catalogue.map(row => ({ ...row, bbox: row.bbox as unknown as Box })),
 ];
+/**
+ * The bundled catalogue's group headings, which live in `crs.json` and are
+ * translated where they are shown; listed here so every catalogue holds them.
+ * The CRS names themselves are proper names and stay as the registry has them.
+ */
+export const CATALOGUE_GROUPS = [
+  msg("Polar and sea ice"), msg("New Zealand"), msg("Europe"), msg("Japan"),
+  msg("Alaska and Hawaii"), msg("Australia"), msg("Canada"),
+] as const;
 const byId = new Map(GENERAL_MAPS.map(p => [p.id,p]));
 
 /** Custom definitions are stored in the same view preference as a preset ID. */
 export function customMap(definition: string): GeneralMap {
   const text = definition.trim();
-  if (!text || text.length > 8192) throw new Error("Enter a PROJ or WKT definition (up to 8192 characters).");
+  if (!text || text.length > 8192) throw new TranslatableError(msg("Enter a PROJ or WKT definition (up to {max} characters)."), { max: 8192 });
   const epsg = /^(?:EPSG:)?(\d+)$/i.exec(text);
   if (epsg) {
     const preset = byId.get(`epsg_${Number(epsg[1])}`);
-    if (!preset) throw new Error(`EPSG:${epsg[1]} is not bundled. Paste its PROJ or WKT definition.`);
+    if (!preset) throw new TranslatableError(msg("EPSG:{code} is not bundled. Paste its PROJ or WKT definition."), { code: epsg[1]! });
     return preset;
   }
   const parsed = new proj4.Proj(text) as unknown as {projName?: string; names?: string[]; long0?: number; lat0?: number; zone?: number};
   if (["longlat", "identity", "geocent"].includes(parsed.projName ?? "")) {
-    throw new Error("Choose a projected map definition. Use Equirectangular for a longitude/latitude view.");
+    throw new TranslatableError(msg("Choose a projected map definition. Use Equirectangular for a longitude/latitude view."));
   }
   // A custom regional definition has no EPSG area of use. Start around its
   // declared origin, with a useful regional extent instead of its antipode.
@@ -66,10 +76,10 @@ export function customMap(definition: string): GeneralMap {
   const lon = parsed.long0 !== undefined ? parsed.long0 / DEG : parsed.zone ? parsed.zone * 6 - 183 : 0;
   const lat = (parsed.lat0 ?? 0) / DEG;
   const bbox: Box = regional ? [lon-10,Math.max(-85,lat-10),lon+10,Math.min(85,lat+10)] : [-180,-80,180,80];
-  const map: GeneralMap = {id: `custom:${encodeURIComponent(text)}`, label: "Custom projection", group: "Custom", definition:text, bbox};
+  const map: GeneralMap = {id: `custom:${encodeURIComponent(text)}`, label: msg("Custom projection"), group: msg("Custom"), definition:text, bbox};
   const transform=mapTransform(map,defaultCentre(map));
   const centre=defaultCentre(map),xy=transform.forward(centre);
-  if(!xy || !transform.inverse(xy))throw new Error("This definition cannot be projected and inverted. Check its parameters and datum grids.");
+  if(!xy || !transform.inverse(xy))throw new TranslatableError(msg("This definition cannot be projected and inverted. Check its parameters and datum grids."));
   return map;
 }
 export function generalMap(id: string): GeneralMap | undefined {

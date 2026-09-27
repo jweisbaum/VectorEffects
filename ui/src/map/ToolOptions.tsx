@@ -14,6 +14,8 @@ import ToolSelect from "../ToolSelect";
 
 import { memo } from "react";
 
+import { msg, t, useT } from "../i18n";
+
 import CentredSlider, { readoutFor } from "../CentredSlider";
 import NumberField from "../NumberField";
 
@@ -34,8 +36,80 @@ import {
   type ToolState,
 } from "./tools";
 
-/** A schema variant name as a label: `toward_point` becomes `Toward point`. */
+/**
+ * What each schema variant is called on screen, in English.
+ *
+ * The variant names are ids — the backend stores the index and names it for
+ * the frontend — so the words shown are this table's, translated at render
+ * time. A variant missing here still shows, as its id made readable, in
+ * English: `toward_point` becomes `Toward point`.
+ */
+const VARIANT_LABELS: Record<string, string> = {
+  // Direction mode, and the curve's.
+  constant: msg("Constant"),
+  toward_point: msg("Toward point"),
+  away_from_point: msg("Away from point"),
+  relative_to_path: msg("Relative to path"),
+  // Edge.
+  blend: msg("Blend"),
+  replace: msg("Replace"),
+  // Brush shape and shape source.
+  circle: msg("Circle"),
+  square: msg("Square"),
+  polygon: msg("Polygon"),
+  rectangle: msg("Rectangle"),
+  // Stamp space: on the ground, or frozen in a projection.
+  geodesic: msg("Geodesic"),
+  projected: msg("Projected"),
+  mercator: msg("Mercator"),
+  miller: msg("Miller"),
+  lambert: msg("Lambert"),
+  behrmann: msg("Behrmann"),
+  gall_peters: msg("Gall–Peters"),
+  hobo_dyer: msg("Hobo–Dyer"),
+  gall_stereographic: msg("Gall stereographic"),
+  braun: msg("Braun"),
+  central_cylindrical: msg("Central cylindrical"),
+  patterson: msg("Patterson"),
+  compact_miller: msg("Compact Miller"),
+  equidistant_30: msg("Equidistant 30"),
+  equidistant_45: msg("Equidistant 45"),
+  orthographic: msg("Orthographic"),
+  // Fill and vector modes.
+  filled: msg("Filled"),
+  perimeter: msg("Perimeter"),
+  filled_gradient: msg("Filled gradient"),
+  gradient: msg("Gradient"),
+  // Rotation and turn senses.
+  cw: msg("Clockwise"),
+  ccw: msg("Counterclockwise"),
+  clockwise: msg("Clockwise"),
+  counterclockwise: msg("Counterclockwise"),
+  // Macro interpolation strategy.
+  "Repeat Frames": msg("Repeat Frames"),
+  Interpolate: msg("Interpolate"),
+  "Empty Frames": msg("Empty Frames"),
+  // Curve kind.
+  polyline: msg("Polyline"),
+  bezier: msg("Bézier"),
+  // Clone offset.
+  aligned: msg("Aligned"),
+  fixed: msg("Fixed"),
+  // Warp mode.
+  push: msg("Push"),
+  twist: msg("Twist"),
+  // Direction to target.
+  great_circle: msg("Great circle"),
+  rhumb_line: msg("Rhumb line"),
+};
+
+/**
+ * A schema variant as a label, in the interface language. Shared by the
+ * option bar and the inspector, so a variant is called one thing in both.
+ */
 export function variantLabel(name: string): string {
+  const known = VARIANT_LABELS[name];
+  if (known) return t(known);
   const words = name.replace(/_/g, " ");
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
@@ -78,6 +152,7 @@ function ToolOptions({
   sampling: boolean;
   onSample: (on: boolean) => void;
 }) {
+  const t = useT();
   const units = useUnits();
   const set = (property: string, value: PropertyValue) =>
     onChange({ ...state, values: { ...state.values, [property]: value } });
@@ -126,31 +201,32 @@ function ToolOptions({
       {eyedropper && (
         <button
           className={sampling ? "active" : ""}
+          data-feature="option:eyedropper"
           onClick={() => onSample(!sampling)}
           title={
             sampling
-              ? "Click the map to take the speed and direction from the field there."
-              : "Eyedropper: take the speed and direction from a point on the map. Only what is visible is sampled: a hidden layer contributes nothing."
+              ? t("Click the map to take the speed and direction from the field there.")
+              : t("Eyedropper: take the speed and direction from a point on the map. Only what is visible is sampled: a hidden layer contributes nothing.")
           }
-          aria-label={sampling ? "Sampling: click the map" : "Sample the field"}
+          aria-label={sampling ? t("Sampling: click the map") : t("Sample the field")}
         >
           <IconSvg icon={EYEDROPPER_ICON} />
         </button>
       )}
 
       {unitIsLive && firstSize === undefined && (
-        <label>
-          Shape in
+        <label data-feature="option:unit">
+          {t("Shape in")}
           <ToolSelect
             value={state.unit}
             onChange={(e) => {
               setUnit(unitOf(e.target.value));
               finishToolControl(e);
             }}
-            title={DRAWN_UNIT_TITLE}
+            title={t(DRAWN_UNIT_TITLE)}
           >
-            <option value="km">{units.distanceUnit} (on the ground)</option>
-            <option value="px">px (on the map)</option>
+            <option value="km">{t("{unit} (on the ground)", { unit: units.distanceUnit })}</option>
+            <option value="px">{t("px (on the map)")}</option>
           </ToolSelect>
         </label>
       )}
@@ -169,10 +245,7 @@ function unitOf(value: string): SizeUnit {
  * Shared by both places the unit is offered, so the two cannot come to explain
  * it differently.
  */
-const UNIT_TITLE =
-  "A size in pixels paints a shape on the map — the same size on screen at any latitude. " +
-  "Its ground size is fixed when the object is created. " +
-  "One unit for the whole tool, because the space it selects is one property of the object.";
+const UNIT_TITLE = msg("A size in pixels paints a shape on the map — the same size on screen at any latitude. Its ground size is fixed when the object is created. One unit for the whole tool, because the space it selects is one property of the object.");
 
 /**
  * The same question, for a tool whose shape is drawn rather than typed.
@@ -181,10 +254,7 @@ const UNIT_TITLE =
  * and its polygon is clicked out vertex by vertex. What the control still
  * chooses is the plane the shape lives in — on the chart or on the sea (M57).
  */
-const DRAWN_UNIT_TITLE =
-  "px draws the shape on the map: straight edges stay straight on the chart, at any latitude. " +
-  "A ground distance draws it on the ground, so it keeps its real proportions and bends with the projection. " +
-  "Fixed when the object is created and never changes afterwards.";
+const DRAWN_UNIT_TITLE = msg("px draws the shape on the map: straight edges stay straight on the chart, at any latitude. A ground distance draws it on the ground, so it keeps its real proportions and bends with the projection. Fixed when the object is created and never changes afterwards.");
 
 function Option({
   spec,
@@ -205,14 +275,16 @@ function Option({
   onValue: (value: PropertyValue) => void;
   onUnit: (unit: SizeUnit) => void;
 }) {
+  const t = useT();
   const units = useUnits();
   const value = state.values[spec.property] ?? spec.default;
+  const label = t(spec.label);
 
   switch (value.kind) {
     case "choice":
       return (
-        <label>
-          {spec.label}
+        <label data-feature={`option:${spec.property}`}>
+          {label}
           <ToolSelect
             value={value.index}
             onChange={(e) => {
@@ -231,7 +303,7 @@ function Option({
 
     case "bool":
       return (
-        <label>
+        <label data-feature={`option:${spec.property}`}>
           <input
             type="checkbox"
             checked={value.value}
@@ -240,7 +312,7 @@ function Option({
               finishToolControl(e);
             }}
           />
-          {spec.label}
+          {label}
         </label>
       );
 
@@ -250,8 +322,8 @@ function Option({
       // same call reads the input back.
       const shown = shownAngle(spec.unit, convention, value.degrees);
       return (
-        <label>
-          {spec.label}
+        <label data-feature={`option:${spec.property}`}>
+          {label}
           <NumberField
             min={0}
             max={360}
@@ -262,34 +334,34 @@ function Option({
               onValue({ kind: "angle", degrees: shownAngle(spec.unit, convention, degrees) })
             }
           />
-          {spec.unit === "direction" ? `° (${convention})` : "°"}
+          {spec.unit === "direction" ? (convention === "from" ? t("° (from)") : t("° (toward)")) : "°"}
         </label>
       );
     }
 
     case "offset":
-      return <label>{spec.label}
+      return <label data-feature={`option:${spec.property}`}>{label}
         {(["x", "y"] as const).map((axis) => <NumberField key={axis} step="any"
-          value={units.distanceFromKm(value[axis])} title={`${axis.toUpperCase()} displacement`}
+          value={units.distanceFromKm(value[axis])} title={axis === "x" ? t("X displacement") : t("Y displacement")}
           onCommit={(next) => onValue({...value, [axis]: units.distanceToKm(next)})} />)}
         {units.distanceUnit}
       </label>;
     case "position": {
       const armed = picking?.property === spec.property;
       return (
-        <div className="tool-position">
+        <div className="tool-position" data-feature={`option:${spec.property}`}>
           <label>
-            {spec.label}
+            {label}
             <NumberField
               step="any"
-              title="Longitude"
+              title={t("Longitude")}
               value={value.lon}
               onCommit={(lon) => onValue({ kind: "position", lon, lat: value.lat })}
             />
           </label>
           <NumberField
             step="any"
-            title="Latitude"
+            title={t("Latitude")}
             min={-90}
             max={90}
             value={value.lat}
@@ -297,12 +369,13 @@ function Option({
           />
           <button
             className={armed ? "active" : ""}
+            data-feature="option:pick-on-map"
             onClick={() =>
               onPick(armed ? null : { property: spec.property, label: spec.label })
             }
-            title={`Click the map to place ${spec.label.toLowerCase()}. Once placed, drag the marker to move it.`}
+            title={t("Click the map to place “{option}”. Once placed, drag the marker to move it.", { option: label })}
           >
-            {armed ? "Click the map…" : "Pick on map"}
+            {armed ? t("Click the map…") : t("Pick on map")}
           </button>
         </div>
       );
@@ -313,16 +386,19 @@ function Option({
       // the schema says so, and both ends are named.
       if (spec.slider) {
         return (
-          <label>
-            {spec.label}
+          <label data-feature={`option:${spec.property}`}>
+            {label}
             <CentredSlider
               value={value.value}
               min={spec.min ?? -100}
               max={spec.max ?? 100}
-              lowLabel={spec.slider.low_label}
-              highLabel={spec.slider.high_label}
+              lowLabel={t(spec.slider.low_label)}
+              highLabel={t(spec.slider.high_label)}
               reversed={spec.slider.reversed}
-              format={readoutFor(spec.slider, spec.unit)}
+              format={readoutFor(
+                { ...spec.slider, low_label: t(spec.slider.low_label), high_label: t(spec.slider.high_label) },
+                spec.unit,
+              )}
               onInput={(next) => onValue({ kind: "number", value: next })}
               onCommit={(next) => onValue({ kind: "number", value: next })}
             />
@@ -335,8 +411,8 @@ function Option({
       const isFraction = spec.min === 0 && spec.max === 1;
       if (isFraction) {
         return (
-          <label>
-            {spec.label}
+          <label data-feature={`option:${spec.property}`}>
+            {label}
             <input
               type="range"
               min={0}
@@ -352,8 +428,8 @@ function Option({
       // Convert only at the editor boundary; the tool keeps canonical m/s.
       if (spec.unit === "speed") {
         return (
-          <label>
-            {spec.label}
+          <label data-feature={`option:${spec.property}`}>
+            {label}
             <NumberField
               min={0}
               max={spec.max === null ? null : units.speedFromMps(spec.max)}
@@ -371,8 +447,8 @@ function Option({
       const ground = size && state.unit !== "px";
       const shown = (v: number) => ground ? units.distanceFromKm(v) : v;
       return (
-        <label>
-          {spec.label}
+        <label data-feature={`option:${spec.property}`}>
+          {label}
           {/*
             The bounds are the schema's, not a floor of 1: a modifier's amount
             is *signed* — intensify/reduce, diverge/converge, a turn either way
@@ -394,7 +470,8 @@ function Option({
               onUnit(unitOf(e.target.value));
               finishToolControl(e);
             }}
-              title={UNIT_TITLE}
+              title={t(UNIT_TITLE)}
+              data-feature="option:unit"
             >
               <option value="km">{units.distanceUnit}</option>
               <option value="px">px</option>

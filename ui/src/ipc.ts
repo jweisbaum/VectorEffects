@@ -9,6 +9,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { SelectionPreviewRequest } from "./generated/SelectionPreviewRequest";
 
 import { beginBusy } from "./busy";
+import { msg } from "./i18n";
 import { beginOpening } from "./project/opening";
 
 // Monotonic across this frontend session; the time seed also survives a reload.
@@ -96,36 +97,38 @@ export function isErrorPayload(value: unknown): value is AppErrorPayload {
  * Named rather than written twice: the progress bar shows only while this
  * label is in the busy set, so the two have to be the same string.
  */
-export const HISTORY_LABEL = "Fetching history";
+export const HISTORY_LABEL = msg("Fetching history");
 
 /**
  * The commands that can take seconds, and what the status bar's spinner says
- * while each runs. Everything else answers within a frame and is not shown:
- * a spinner that spins for every hit test spins forever.
+ * while each runs. English, marked with `msg`: the busy store keeps the key
+ * and the spinner translates it when it is shown. Everything else answers
+ * within a frame and is not shown: a spinner that spins for every hit test
+ * spins forever.
  */
 const LONG_RUNNING: Readonly<Record<string, string>> = {
-  import_grib: "Importing GRIB",
-  import_zarr: "Importing Zarr",
+  import_grib: msg("Importing GRIB"),
+  import_zarr: msg("Importing Zarr"),
   import_history: HISTORY_LABEL,
-  new_project_from_grib: "Opening GRIB",
-  new_project_from_zarr: "Opening Zarr",
-  import_image: "Importing image",
-  import_gis: "Importing GIS data",
-  set_chart_directory: "Reading charts",
-  open_project: "Opening project",
-  recover_autosave: "Recovering project",
-  save_project: "Saving",
-  save_project_as: "Saving",
-  export_grib: "Exporting GRIB",
-  export_zarr: "Exporting Zarr",
-  capture_region: "Copying the field",
-  paste_capture: "Pasting the field",
-  erase_stroke: "Erasing",
-  preview_capture: "Baking the macro",
-  finish_capture: "Saving the macro",
-  insert_macro: "Inserting the macro",
-  set_step_count: "Changing the duration",
-  mcp_register_client: "Adding the MCP service",
+  new_project_from_grib: msg("Opening GRIB"),
+  new_project_from_zarr: msg("Opening Zarr"),
+  import_image: msg("Importing image"),
+  import_gis: msg("Importing GIS data"),
+  set_chart_directory: msg("Reading charts"),
+  open_project: msg("Opening project"),
+  recover_autosave: msg("Recovering project"),
+  save_project: msg("Saving"),
+  save_project_as: msg("Saving"),
+  export_grib: msg("Exporting GRIB"),
+  export_zarr: msg("Exporting Zarr"),
+  capture_region: msg("Copying the field"),
+  paste_capture: msg("Pasting the field"),
+  erase_stroke: msg("Erasing"),
+  preview_capture: msg("Baking the macro"),
+  finish_capture: msg("Saving the macro"),
+  insert_macro: msg("Inserting the macro"),
+  set_step_count: msg("Changing the duration"),
+  mcp_register_client: msg("Adding the MCP service"),
 };
 
 /** The last component of a path, whichever way its separators lean. */
@@ -133,6 +136,12 @@ function fileName(path: unknown): string {
   const text = typeof path === "string" ? path : "";
   return text.split(/[\\/]/).filter((part) => part !== "").pop() ?? text;
 }
+
+/**
+ * What the loading page calls an autosave being recovered. The one opening
+ * title that is words rather than a file name, so the page translates it.
+ */
+export const RECOVERED_TITLE = msg("recovered work");
 
 /**
  * The commands that put a project on screen from files, and what the loading
@@ -147,7 +156,7 @@ const OPENING: Readonly<Record<string, (args: Record<string, unknown>) => string
   open_project: (args) => fileName(args.path),
   new_project_from_grib: (args) => fileName(args.path),
   new_project_from_zarr: (args) => fileName(args.path),
-  recover_autosave: () => "recovered work",
+  recover_autosave: () => RECOVERED_TITLE,
 };
 
 async function call<T>(command: string, args?: Record<string, unknown>): Promise<T> {
@@ -629,6 +638,8 @@ export const api = {
   /** The application's settings: shortcuts, display defaults, macros (M15). */
   appSettings: () => call<AppSettings>("app_settings", {}),
   setTheme: (theme: string) => call<AppSettings>("set_theme", { theme }),
+  /** The interface language (spec.md 5.6): one of `LANGUAGES` in `i18n`. */
+  setLanguage: (language: string) => call<AppSettings>("set_language", { language }),
   setCustomTheme: (custom: CustomTheme) => call<AppSettings>("set_custom_theme", { custom }),
   setGlyphAppearance: (style: GlyphStyle, setting: GlyphSetting) =>
     call<AppSettings>("set_glyph_appearance", { style, setting }),
