@@ -4,7 +4,8 @@ import type { AppSettings } from "../generated/AppSettings";
 import { LANGUAGES, language, setLanguage, useLanguage, useT } from "./index";
 
 /**
- * The interface language, in Settings → Appearance (spec.md 5.7). The switch is shown at once and saved behind it; a save that fails
+ * The interface language, on the start page and in Settings → Appearance
+ * (spec.md 5.7). The switch is shown at once and saved behind it; a save that fails
  * puts the previous language back, so what is on screen is what was saved.
  */
 export default function LanguagePicker({ onSettings }: { onSettings?: ((settings: AppSettings) => void) | undefined }) {

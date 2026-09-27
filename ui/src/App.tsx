@@ -604,7 +604,7 @@ function EditorApp() {
 
   if (!project) {
     return <UnitsProvider settings={settings}>
-      <StartScreen onOpened={setProject} onSettings={() => setShowSettings(true)} />
+      <StartScreen onOpened={setProject} onSettings={() => setShowSettings(true)} onPreferences={setSettings} />
       {settingsDialog}
     </UnitsProvider>;
   }

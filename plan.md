@@ -1,5 +1,10 @@
 # VectorEffects — Implementation Plan
 
+**2026-09-27: Language picker back on the start page.** It stays off the
+editor's title bar and remains in Settings → Appearance; the start page offers
+it beside Help and Settings, so a language can be chosen before opening a
+project.
+
 **2026-09-27: Prepare 0.1.18 Beta.** 0.1.17 was tagged but not published: its
 Windows frontend tests failed because the two i18n source-scanning tests built
 their root from `URL.pathname`, which is `/D:/…` on Windows. They use
