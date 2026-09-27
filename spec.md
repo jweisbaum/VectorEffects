@@ -1779,7 +1779,7 @@ meteorological readers.
 
 ### 5.8 Help search
 
-The Help menu in the title bar (and on the start page) holds a search. `Cmd`-`F`
+The Help menu in the editor's title bar holds a search; the start page has none. `Cmd`-`F`
 (`Ctrl`-`F` elsewhere) opens it with the field focused; with the help
 reference open, the same chord focuses the reference's own search.
 
@@ -1793,8 +1793,7 @@ Choosing a feature **shows where it is**: whatever hides it is undone first —
 a closed panel opens, a tool's option bar appears by selecting that tool,
 Settings opens at the right section — and a rectangle flashes around the
 control three times. Choosing a help page opens the reference at that page. A
-feature that cannot be shown here (an editor control on the start page) opens
-its help page instead.
+feature that cannot be shown on screen opens its help page instead.
 
 Every control that a search should find carries a `data-feature` id and is
 registered with a label, a description and synonyms; a test holds the registry

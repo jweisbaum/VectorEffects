@@ -1606,6 +1606,17 @@ export default function MapView({
       overlayScheduled.current = null;
     }
 
+    // The readout's zoom follows the camera in the frame that shows it, so a
+    // wheel, pinch, key or button zoom updates it at once and not on the next
+    // pointer move. Only a changed figure notifies: the readout re-renders
+    // when the number does, not every frame.
+    const zoomPercent = Math.round(
+      (cameraRef.current.pxPerDeg / minPxPerDeg(viewRef.current, projectionFor(cameraRef.current))) * 100,
+    );
+    if (readoutStore.current && readoutStore.current.get().zoomPercent !== zoomPercent) {
+      readoutStore.current.set({ zoomPercent });
+    }
+
     const frame = frameOf(stepRef.current);
     // The last frame fully on screen stands in for this one's missing tiles —
     // but never across the preview's boundary (M28): the document's tiles
@@ -5412,13 +5423,6 @@ export default function MapView({
       requestDraw();
     }
 
-    readoutStore.current?.set({
-      zoomPercent: Math.round(
-        (cameraRef.current.pxPerDeg /
-          minPxPerDeg(viewRef.current, projectionFor(cameraRef.current))) *
-          100,
-      ),
-    });
     sampleAt(unproject(cameraRef.current, viewRef.current, point));
   };
 

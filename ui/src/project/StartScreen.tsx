@@ -9,7 +9,6 @@ import NewProjectForm from "./NewProjectForm";
 import ConfirmDialog from "./ConfirmDialog";
 import type { AppSettings } from "../generated/AppSettings";
 import LanguagePicker from "../i18n/LanguagePicker";
-import HelpMenu from "../help/HelpMenu";
 import { useT } from "../i18n";
 import { pickGribToImport, pickProjectToOpen, pickZarrToImport } from "./dialogs";
 
@@ -96,7 +95,6 @@ export default function StartScreen({
         <header>
           <div className="start-header-controls">
             <LanguagePicker onSettings={onPreferences} />
-            <HelpMenu />
             {onSettings && <button className="start-settings" data-feature="start:settings" onClick={onSettings}>{t("Settings")}</button>}
           </div>
           <h1>VectorEffects</h1>
