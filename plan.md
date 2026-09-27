@@ -1,5 +1,10 @@
 # VectorEffects — Implementation Plan
 
+**2026-09-27: Prepare 0.1.19 Beta.** Language picker back on the start page;
+default layer, object, duplicate and project names in the interface language;
+the readout's zoom follows the camera every frame; no Help dropdown on the
+start page. Version manifests and lockfiles advance together.
+
 **2026-09-27: Language picker back on the start page.** It stays off the
 editor's title bar and remains in Settings → Appearance; the start page offers
 it beside Help and Settings, so a language can be chosen before opening a
