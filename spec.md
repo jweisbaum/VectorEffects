@@ -643,6 +643,14 @@ nothing at hours 1 and 2; an hourly file in a 3-hourly project is read at 0, 3,
 6 and its other messages are never shown; and past the file's last message
 there is nothing, for the rest of the timeline however long it is.
 
+**The one exception is a layer that says how long each of its times stands
+for** (§4.10, D73). A layer fetched from a daily or six-hourly product
+carries that period, and a step inside a field's period shows the field.
+It is the product's own statement of validity, not a hold: a day the
+product did not publish shows nothing, and so does every step past the
+last field's period. An imported file and a history layer have no period
+and keep the rule above exactly.
+
 **A step can be told which message to show.** The rule above is right and it
 leaves the user no way to say otherwise, so a step of an imported layer can be
 given one: click a mark on the layer's timeline row, `Shift`-click a run of
@@ -1158,6 +1166,15 @@ still apply to every field. The opt-in `ve-zarr` `history_download` example
 measures setup and reading separately against the real archives; faster
 setup helps short ranges most, while long transfers still depend on the
 connection and archive throughput.
+
+**A fetched layer may hold each time for its product's period.** The
+layer's provenance carries the period in hours — zero, for the two
+archives here, which are hourly — and the timeline's frame row, the map
+and the export all show a field on every step of its period. Steps that
+show the same field flatten to the same scene and share its tiles. The
+exported file therefore carries a daily field once per step of its day:
+that is what the period means, and a reader of the GRIB sees the same
+thing the map showed.
 
 **Times are UTC and land on the hour**, like every other time in the
 application (§3.6). The dialog says so on both labels: the control has no

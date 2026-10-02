@@ -682,13 +682,36 @@ pub enum LayerSource {
         start_unix_s: i64,
         /// Last hour asked for, in Unix seconds.
         end_unix_s: i64,
+        /// How long each fetched time stands for, in hours: 24 for a daily
+        /// product, 6 for a six-hourly one (spec.md 4.10).
+        ///
+        /// Zero is no period, which is what a history layer has and what a
+        /// file from before there were periods opens as: the layer then shows
+        /// a message only on its own step, as a forecast does (D48). Not
+        /// written when zero, so those layers serialise as they always did.
+        #[serde(default, skip_serializing_if = "is_zero")]
+        period_hours: u32,
     },
+}
+
+/// Whether a count is zero, for fields left out of the file when it is.
+fn is_zero(value: &u32) -> bool {
+    *value == 0
 }
 
 impl LayerSource {
     /// Whether this is the default, unwritten source.
     pub fn is_painted(&self) -> bool {
         matches!(self, Self::Painted)
+    }
+
+    /// How long each of a fetched layer's times stands for, in hours, if the
+    /// layer holds at all (spec.md 4.10).
+    pub fn period_hours(&self) -> Option<u32> {
+        match self {
+            Self::Zarr { period_hours, .. } if *period_hours > 0 => Some(*period_hours),
+            _ => None,
+        }
     }
 
     /// The file this layer reads, if it reads one.
@@ -959,9 +982,23 @@ impl Layer {
                 archive: archive.into(),
                 start_unix_s,
                 end_unix_s,
+                period_hours: 0,
             },
             ..Self::from_grib(name, path, raster, true)
         }
+    }
+
+    /// The same layer, holding each of its times for `hours` (spec.md 4.10).
+    ///
+    /// For a layer fetched from a product that says what span each of its
+    /// fields is valid for. Only a fetched layer has a period: on any other
+    /// source this changes nothing, because a forecast's message is for its
+    /// own hour and no other (D48).
+    pub fn holding(mut self, hours: u32) -> Self {
+        if let LayerSource::Zarr { period_hours, .. } = &mut self.source {
+            *period_hours = hours;
+        }
+        self
     }
 
     /// Whether the layer carries an imported field.
@@ -987,6 +1024,26 @@ impl Layer {
         self.frame_overrides = overrides;
     }
 
+    /// What the file itself shows at a step, before the user's overrides.
+    ///
+    /// The message valid at the step's own hour (spec.md 4.8, D48) — or, for
+    /// a fetched layer with a period, the field whose period contains that
+    /// hour (spec.md 4.10). This is the one place that choice is made:
+    /// everything that asks what a step shows asks here or asks
+    /// [`Self::imported_frame`], which is built on it.
+    pub fn file_frame(
+        &self,
+        settings: &crate::project::ProjectSettings,
+        step: u32,
+    ) -> Option<&crate::raster::RasterFrame> {
+        let sequence = self.raster.as_deref()?;
+        let hour = f64::from(settings.forecast_hour(step));
+        match self.source.period_hours() {
+            Some(period) => sequence.frame_within(hour, f64::from(period)),
+            None => sequence.frame_at(hour),
+        }
+    }
+
     /// The imported frame a step shows, after the user's overrides.
     ///
     /// Three answers, in order: an override naming a source step serves the
@@ -999,14 +1056,12 @@ impl Layer {
         settings: &crate::project::ProjectSettings,
         step: u32,
     ) -> Option<&crate::raster::RasterFrame> {
-        let sequence = self.raster.as_deref()?;
-        let at = |s: u32| sequence.frame_at(f64::from(settings.forecast_hour(s)));
         match self.frame_override(step) {
             Some(FrameOverride {
                 source: Some(s), ..
-            }) => at(s),
+            }) => self.file_frame(settings, s),
             Some(FrameOverride { source: None, .. }) => None,
-            None => at(step),
+            None => self.file_frame(settings, step),
         }
     }
 
@@ -1021,6 +1076,106 @@ mod tests {
     use super::*;
     use crate::schema::PropId;
     use crate::value::{Interpolation, PropValue};
+
+    fn fetched(offsets: &[f64], period_hours: u32) -> Layer {
+        use crate::raster::{RasterFrame, RasterGrid, RasterSequence};
+        let frames = offsets
+            .iter()
+            .map(|&h| RasterFrame {
+                offset_hours: h,
+                valid_unix_s: (h * 3600.0) as i64,
+                grid: std::sync::Arc::new(
+                    RasterGrid::new(2, 2, 0.0, 1.0, 1.0, 1.0, vec![[h as f32, 0.0]; 4]).unwrap(),
+                ),
+            })
+            .collect();
+        let sequence = RasterSequence::new(crate::project::FieldKind::Wind, frames).unwrap();
+        Layer::from_history(
+            "fetched",
+            "fetched.grib2".into(),
+            std::sync::Arc::new(sequence),
+            "test",
+            0,
+            0,
+        )
+        .holding(period_hours)
+    }
+
+    fn hourly(steps: u32) -> crate::project::ProjectSettings {
+        crate::project::ProjectSettings::new(
+            crate::project::FieldKind::Wind,
+            crate::project::Resolution::Deg1,
+            crate::project::StepHours::H1,
+            steps,
+        )
+    }
+
+    /// A six-hourly product on an hourly timeline holds for its six hours; the
+    /// same file with no period is the forecast it always was (D48).
+    #[test]
+    fn a_fetched_layer_holds_and_a_history_layer_does_not() {
+        let settings = hourly(24);
+        let shown = |layer: &Layer| -> Vec<Option<f64>> {
+            (0..14)
+                .map(|s| layer.imported_frame(&settings, s).map(|f| f.offset_hours))
+                .collect()
+        };
+        let held = fetched(&[0.0, 6.0], 6);
+        assert_eq!(held.source.period_hours(), Some(6));
+        let mut expected = vec![Some(0.0); 6];
+        expected.extend(vec![Some(6.0); 6]);
+        expected.extend(vec![None; 2]);
+        assert_eq!(shown(&held), expected);
+
+        let exact = fetched(&[0.0, 6.0], 0);
+        assert_eq!(exact.source.period_hours(), None);
+        let mut expected = vec![None; 14];
+        expected[0] = Some(0.0);
+        expected[6] = Some(6.0);
+        assert_eq!(shown(&exact), expected);
+    }
+
+    /// An override is resolved against the file (D59), and the file now holds:
+    /// a step pasted from inside a period shows that period's field, and a
+    /// hidden step is hidden while its neighbours go on holding.
+    #[test]
+    fn overrides_inside_a_period_read_the_held_file() {
+        let settings = hourly(24);
+        let mut layer = fetched(&[0.0, 6.0], 6);
+        layer.set_frame_overrides(vec![
+            FrameOverride {
+                step: 2,
+                source: Some(9),
+            },
+            FrameOverride {
+                step: 3,
+                source: None,
+            },
+            FrameOverride {
+                step: 4,
+                source: Some(20),
+            },
+        ]);
+        let at = |s: u32| layer.imported_frame(&settings, s).map(|f| f.offset_hours);
+        assert_eq!(at(1), Some(0.0));
+        assert_eq!(at(2), Some(6.0), "hour 9 is inside the second period");
+        assert_eq!(at(3), None, "hidden");
+        assert_eq!(at(4), None, "hour 20 is past the last period");
+        assert_eq!(at(5), Some(0.0));
+        // And what the file itself says is unchanged by any of them.
+        assert_eq!(
+            layer.file_frame(&settings, 3).map(|f| f.offset_hours),
+            Some(0.0)
+        );
+    }
+
+    /// Only a fetched layer has a period to set.
+    #[test]
+    fn holding_is_a_fetched_layer_s_and_nothing_else_s() {
+        let painted = Layer::new("paint").holding(24);
+        assert_eq!(painted.source.period_hours(), None);
+        assert!(painted.source.is_painted());
+    }
 
     #[test]
     fn step_ranges_order_their_endpoints() {

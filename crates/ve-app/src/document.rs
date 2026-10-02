@@ -510,23 +510,13 @@ fn tree_of(project: &Project, step: u32, backdrops: &crate::charts::Backdrops) -
                             .as_ref()
                             .map_or(0.0, |sequence| sequence.fastest_mps()),
                         covered_steps: (0..project.settings.step_count)
-                            .map(|s| {
-                                let hour = f64::from(project.settings.forecast_hour(s));
-                                layer
-                                    .raster
-                                    .as_ref()
-                                    .is_some_and(|seq| seq.frame_at(hour).is_some())
-                            })
+                            .map(|s| layer.file_frame(&project.settings, s).is_some())
                             .collect(),
                         steps: (0..project.settings.step_count)
                             .map(|s| {
-                                let hour = f64::from(project.settings.forecast_hour(s));
                                 let over = layer.frame_override(s);
                                 GribStepView {
-                                    in_file: layer
-                                        .raster
-                                        .as_ref()
-                                        .is_some_and(|seq| seq.frame_at(hour).is_some()),
+                                    in_file: layer.file_frame(&project.settings, s).is_some(),
                                     source: over.and_then(|o| o.source),
                                     hidden: over.is_some_and(|o| o.source.is_none()),
                                     shown: layer.imported_frame(&project.settings, s).is_some(),

@@ -671,3 +671,56 @@ fn speed_filter_write_cost() {
         started.elapsed().as_secs_f64() * 1000.0
     );
 }
+
+/// The timeline's frame row says what the map shows: a held field covers
+/// every step of its period (spec.md 4.10).
+#[test]
+fn a_held_layer_covers_every_step_of_its_period() {
+    use std::sync::Arc;
+    use ve_core::document::Layer;
+    use ve_core::raster::{RasterFrame, RasterGrid, RasterSequence};
+
+    let root = TempRoot::new("held-row");
+    let app = state(&root, 3, 6);
+
+    let frame = |h: f64| RasterFrame {
+        offset_hours: h,
+        valid_unix_s: (h * 3600.0) as i64,
+        grid: Arc::new(RasterGrid::new(2, 2, 0.0, 1.0, 1.0, 1.0, vec![[4.0, 0.0]; 4]).unwrap()),
+    };
+    let sequence =
+        Arc::new(RasterSequence::new(FieldKind::Wind, vec![frame(0.0), frame(6.0)]).unwrap());
+    let layer = |period: u32| {
+        Layer::from_history(
+            "six-hourly",
+            "x.grib2".into(),
+            Arc::clone(&sequence),
+            "test",
+            0,
+            0,
+        )
+        .holding(period)
+    };
+    {
+        let mut session = app.session.lock().expect("lock");
+        let open = session.require_open().expect("open");
+        open.project.layers.push(layer(6));
+        open.project.layers.push(layer(0));
+    }
+
+    let tree = document::tree(&app, 0).expect("tree");
+    let covered = |at: usize| {
+        tree.layers[at]
+            .grib
+            .as_ref()
+            .expect("a field layer")
+            .covered_steps
+            .clone()
+    };
+    // Steps at 0, 3, 6, 9, 12, 15 h. Held: 0-5 h and 6-11 h. Not held: 0 and 6.
+    assert_eq!(covered(1), [true, true, true, true, false, false]);
+    assert_eq!(covered(2), [true, false, true, false, false, false]);
+    let held = tree.layers[1].grib.as_ref().expect("a field layer");
+    assert!(held.steps[1].in_file && held.steps[1].shown);
+    assert!(!held.steps[4].in_file && !held.steps[4].shown);
+}

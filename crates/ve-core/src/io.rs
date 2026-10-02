@@ -1120,6 +1120,10 @@ mod tests {
 
         let json = to_canonical_json(&project).unwrap();
         assert!(json.contains("era5-wind"), "the archive is the provenance");
+        assert!(
+            !json.contains("period_hours"),
+            "a layer with no period is written exactly as it was before there were periods"
+        );
 
         let dir = TempDir::new();
         let path = dir.path("history.veproj");
@@ -1134,6 +1138,7 @@ mod tests {
                 archive: "era5-wind".to_owned(),
                 start_unix_s: 1_600_000_000,
                 end_unix_s: 1_600_086_400,
+                period_hours: 0,
             }
         );
         assert!(
@@ -1146,6 +1151,66 @@ mod tests {
         assert!(layer.is_grib());
         assert!(layer.source.raster_file().is_some());
         assert!(layer.visible, "a fetched layer is shown");
+    }
+
+    /// A fetched layer's period is provenance, so it is in the file; a file
+    /// from before there were periods has none and opens as no hold.
+    #[test]
+    fn a_fetched_layer_keeps_its_period_and_an_older_file_has_none() {
+        use crate::document::LayerSource;
+        use crate::raster::{RasterFrame, RasterGrid, RasterSequence};
+        use std::sync::Arc;
+
+        let grid = RasterGrid::new(2, 2, 0.0, 1.0, 1.0, 1.0, vec![[3.0, 4.0]; 4]).unwrap();
+        let sequence = RasterSequence::new(
+            FieldKind::Current,
+            vec![RasterFrame {
+                offset_hours: 0.0,
+                valid_unix_s: 1_700_000_000,
+                grid: Arc::new(grid),
+            }],
+        )
+        .unwrap();
+        let mut project = sample();
+        project.layers.push(
+            Layer::from_history(
+                "DUACS",
+                PathBuf::from("/nrt/duacs.grib2"),
+                Arc::new(sequence),
+                "duacs",
+                1_700_000_000,
+                1_700_086_400,
+            )
+            .holding(24),
+        );
+
+        let dir = TempDir::new();
+        let path = dir.path("held.veproj");
+        save(&project, &path).unwrap();
+        let loaded = load(&path).unwrap();
+        assert_eq!(loaded.layers[1].source.period_hours(), Some(24));
+
+        // The same layer as a version without periods wrote it: the key
+        // taken out wherever it is, and nothing else touched.
+        fn without_period(value: &mut serde_json::Value) -> u32 {
+            match value {
+                serde_json::Value::Object(map) => {
+                    let here = u32::from(map.remove("period_hours").is_some());
+                    here + map.values_mut().map(without_period).sum::<u32>()
+                }
+                serde_json::Value::Array(items) => items.iter_mut().map(without_period).sum(),
+                _ => 0,
+            }
+        }
+        let mut older: serde_json::Value =
+            serde_json::from_str(&to_canonical_json(&project).unwrap()).unwrap();
+        assert_eq!(without_period(&mut older), 1, "one layer has a period");
+        let reopened: Project = serde_json::from_value(older).unwrap();
+        assert_eq!(reopened.layers[1].source.period_hours(), None);
+        assert!(matches!(
+            reopened.layers[1].source,
+            LayerSource::Zarr { .. }
+        ));
     }
 
     /// The gradient a project is drawn with travels with the project, and a

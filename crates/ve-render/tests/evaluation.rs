@@ -1030,6 +1030,52 @@ fn a_step_shows_only_the_message_valid_at_its_own_hour() {
     assert_eq!(seen, vec![0.0, 3.0, 6.0, 0.0]);
 }
 
+/// A daily product on an hourly timeline (spec.md 4.10): every step of the
+/// day shows the day's field, the steps of one day flatten to the *same*
+/// scene — so they share tiles — and past the last day there is nothing.
+#[test]
+fn a_held_field_is_on_every_step_of_its_period() {
+    let frames = [0.0_f64, 24.0]
+        .iter()
+        .map(|&h| RasterFrame {
+            offset_hours: h,
+            valid_unix_s: (h * 3600.0) as i64,
+            grid: atlantic(5.0 + h as f32, 0.0),
+        })
+        .collect();
+    let sequence = Arc::new(RasterSequence::new(FieldKind::Wind, frames).unwrap());
+    let mut project = Project::new(
+        "daily on hourly",
+        ProjectSettings::new(FieldKind::Wind, Resolution::Deg1, StepHours::H1, 60),
+    );
+    project.layers[0] = ve_core::document::Layer::from_history(
+        "daily",
+        "daily.grib2".into(),
+        sequence,
+        "test",
+        0,
+        0,
+    )
+    .holding(24);
+
+    let at = ll(-30.0, 45.0);
+    let u_at = |step: u32| sample_scene(&flatten(&project, step), at).u;
+    assert_eq!(u_at(0), 5.0);
+    assert_eq!(u_at(13), 5.0);
+    assert_eq!(u_at(23), 5.0);
+    assert_eq!(u_at(24), 29.0);
+    assert_eq!(u_at(47), 29.0);
+    assert_eq!(u_at(48), 0.0, "past the last day there is no field");
+
+    let hash = |step: u32| ve_render::cache::scene_hash(&flatten(&project, step));
+    assert_eq!(
+        hash(0),
+        hash(23),
+        "one day is one scene, and one set of tiles"
+    );
+    assert_ne!(hash(23), hash(24));
+}
+
 #[test]
 fn a_hidden_grib_layer_contributes_nothing_and_a_missing_file_is_calm() {
     let mut project = Project::new(

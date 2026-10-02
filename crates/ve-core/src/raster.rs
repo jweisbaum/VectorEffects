@@ -513,6 +513,29 @@ impl RasterSequence {
             .filter(|frame| (frame.offset_hours - hour).abs() <= MATCH_TOLERANCE_HOURS)
     }
 
+    /// The frame whose own period contains a forecast hour, or `None`.
+    ///
+    /// For a layer fetched from a product that says how long each of its
+    /// times stands for (spec.md 4.10): a daily analysis is the field for its
+    /// day, so every step of that day shows it. The newest frame at or before
+    /// the hour answers, and only while the hour is inside that frame's own
+    /// period — so a day the product did not publish shows nothing, and so
+    /// does everything past the last frame's period. That last part is what
+    /// keeps [`Self::frame_at`]'s reasoning true here: nothing is held to the
+    /// end of a timeline.
+    ///
+    /// A period of zero or less is no period, and is the exact match.
+    pub fn frame_within(&self, hour: f64, period_hours: f64) -> Option<&RasterFrame> {
+        if period_hours <= 0.0 {
+            return self.frame_at(hour);
+        }
+        let after = self
+            .frames
+            .partition_point(|frame| frame.offset_hours <= hour + MATCH_TOLERANCE_HOURS);
+        let frame = self.frames.get(after.checked_sub(1)?)?;
+        (hour < frame.offset_hours + period_hours - MATCH_TOLERANCE_HOURS).then_some(frame)
+    }
+
     /// The fastest speed anywhere in the sequence, in m/s.
     ///
     /// What a speed filter's scale runs to (spec.md 4.8): a filter is set by
@@ -775,6 +798,70 @@ mod tests {
         // project showed a six-hour forecast for nine and a half days.
         assert_eq!(at(6.1), None);
         assert_eq!(at(240.0), None);
+    }
+
+    /// Three daily fields on an hourly timeline: each stands for its own day,
+    /// and the last stands for no longer than that (spec.md 4.10).
+    #[test]
+    fn a_frame_holds_for_its_own_period_and_no_longer() {
+        let s = sequence(&[0.0, 24.0, 48.0]);
+        let at = |hour: f64| s.frame_within(hour, 24.0).map(|frame| frame.offset_hours);
+        assert_eq!(at(0.0), Some(0.0));
+        assert_eq!(at(1.0), Some(0.0));
+        assert_eq!(at(23.0), Some(0.0));
+        assert_eq!(at(24.0), Some(24.0));
+        assert_eq!(at(47.0), Some(24.0));
+        assert_eq!(at(71.0), Some(48.0));
+        // Past the last day there is nothing, which is the failure D48 was
+        // written against and holding must not bring back.
+        assert_eq!(at(72.0), None);
+        assert_eq!(at(240.0), None);
+    }
+
+    /// A day the product did not publish is a day with nothing to show: the
+    /// day before does not run on into it.
+    #[test]
+    fn a_missing_day_is_not_filled_by_the_day_before() {
+        let s = sequence(&[0.0, 48.0]);
+        let at = |hour: f64| s.frame_within(hour, 24.0).map(|frame| frame.offset_hours);
+        assert_eq!(at(23.0), Some(0.0));
+        assert_eq!(at(24.0), None);
+        assert_eq!(at(47.0), None);
+        assert_eq!(at(48.0), Some(48.0));
+    }
+
+    /// An hourly product on a three-hourly timeline: a period no longer than
+    /// the spacing is the exact match, on every step.
+    #[test]
+    fn a_period_no_longer_than_the_spacing_is_the_exact_match() {
+        let s = sequence(&[0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+        for hour in [0.0, 3.0, 6.0, 9.0] {
+            assert_eq!(
+                s.frame_within(hour, 1.0).map(|frame| frame.offset_hours),
+                s.frame_at(hour).map(|frame| frame.offset_hours),
+                "hour {hour}"
+            );
+        }
+        // And no period at all is the exact match by definition.
+        let sparse = sequence(&[0.0, 3.0]);
+        assert_eq!(sparse.frame_within(1.0, 0.0).map(|f| f.offset_hours), None);
+        assert_eq!(
+            sparse.frame_within(3.0, 0.0).map(|f| f.offset_hours),
+            Some(3.0)
+        );
+    }
+
+    /// The boundaries survive the division that makes hours of seconds, and
+    /// nothing wider: a second before a boundary is still the earlier field.
+    #[test]
+    fn a_period_s_edges_survive_the_rounding_of_their_own_arithmetic() {
+        let s = sequence(&[0.0, 6.0]);
+        let at = |hour: f64| s.frame_within(hour, 6.0).map(|frame| frame.offset_hours);
+        assert_eq!(at(6.0 - 1e-9), Some(6.0));
+        assert_eq!(at(6.0 + 1e-9), Some(6.0));
+        assert_eq!(at(6.0 - 1.0 / 3600.0), Some(0.0));
+        assert_eq!(at(12.0 - 1e-9), None, "the end of a period is not in it");
+        assert_eq!(at(12.0 - 1.0 / 3600.0), Some(6.0));
     }
 
     /// Both sides are built from whole seconds, so the match has to survive the

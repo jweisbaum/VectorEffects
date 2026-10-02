@@ -245,6 +245,108 @@ fn wind_and_current_layers_export_as_two_message_pairs_per_step() {
     assert!((strongest(&decoded[3]) + 1.0).abs() < 0.1, "current v");
 }
 
+/// A held field is exported on every step of its period and on none after
+/// it (spec.md 4.10): a six-hourly wind on a three-hourly project of four
+/// steps is in the messages for 0 h and 3 h and is not in those for 6 h and
+/// 9 h, and the same layer with no period is in the first step's alone.
+#[test]
+fn a_held_field_is_exported_on_every_step_of_its_period_and_none_after() {
+    use std::sync::Arc;
+    use ve_core::document::Layer;
+    use ve_core::project::FieldKind;
+    use ve_core::raster::{RasterFrame, RasterGrid, RasterSequence};
+
+    let root = TempRoot::new("held-export");
+    let state = app(&root);
+    projects::create(
+        &state,
+        NewProjectRequest {
+            step_count: 4,
+            ..new_project("wind")
+        },
+        false,
+    )
+    .expect("create");
+    let base = {
+        let mut session = state.session.lock().expect("lock");
+        session.require_open().expect("open").project.clone()
+    };
+
+    // 7 m/s eastward over a patch of the Atlantic, valid at hour 0.
+    let grid = RasterGrid::new(41, 31, -60.0, 60.0, 1.0, 1.0, vec![[7.0, 0.0]; 41 * 31]).unwrap();
+    let sequence = Arc::new(
+        RasterSequence::new(
+            FieldKind::Wind,
+            vec![RasterFrame {
+                offset_hours: 0.0,
+                valid_unix_s: 0,
+                grid: Arc::new(grid),
+            }],
+        )
+        .unwrap(),
+    );
+    // Each step's u message: its hour, and the strongest eastward wind in
+    // it — or `None` where the message defines no value at all, which is
+    // what a step with no field exports (a bitmap of nothing).
+    let u_by_hour = |period: u32, name: &str| -> Vec<(u32, Option<f32>)> {
+        let mut project = base.clone();
+        project.layers.push(
+            Layer::from_history(
+                "fetched",
+                "x.grib2".into(),
+                Arc::clone(&sequence),
+                "test",
+                0,
+                0,
+            )
+            .holding(period),
+        );
+        let path = root.0.join(name);
+        export::run(&project, &request(&path), &AtomicBool::new(false), |_| {}).expect("export");
+        messages(&std::fs::read(&path).expect("read"))
+            .iter()
+            .filter(|m| m.discipline == 0 && m.category == 2 && m.number == 2)
+            .map(|m| {
+                let strongest = m
+                    .values
+                    .iter()
+                    .copied()
+                    .filter(|v| !v.is_nan())
+                    .fold(None, |best: Option<f32>, v| {
+                        Some(best.map_or(v, |b| b.max(v)))
+                    });
+                (m.forecast_hour, strongest)
+            })
+            .collect()
+    };
+    let seven = |value: Option<f32>| value.is_some_and(|v| (v - 7.0).abs() < 0.01);
+
+    let held = u_by_hour(6, "held.grib2");
+    assert_eq!(
+        held.iter().map(|(hour, _)| *hour).collect::<Vec<_>>(),
+        [0, 3, 6, 9],
+        "one u message per step"
+    );
+    assert!(
+        seven(held[0].1) && seven(held[1].1),
+        "inside the period: {held:?}"
+    );
+    assert_eq!(
+        (held[2].1, held[3].1),
+        (None, None),
+        "past the period there is no field to export: {held:?}"
+    );
+
+    let exact = u_by_hour(0, "exact.grib2");
+    assert_eq!(exact.len(), 4, "{exact:?}");
+    assert!(seven(exact[0].1), "{exact:?}");
+    assert_eq!(
+        (exact[1].1, exact[2].1, exact[3].1),
+        (None, None, None),
+        "with no period the field is on its own step only: {exact:?}"
+    );
+}
+
 #[test]
 fn components_are_not_transposed() {
     let root = TempRoot::new("uv");

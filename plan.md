@@ -3662,6 +3662,19 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M88 — A fetched layer holds for its product's period
+
+The first milestone of the near-real-time import
+(`docs/superpowers/specs/2026-10-02-near-real-time-data-design.md`), and
+the only one with nothing to fetch: six of the ten products are daily and
+two are six-hourly, and on an hourly timeline D48 would show each on one
+step in twenty-four. `LayerSource::Zarr` gains `period_hours`,
+`RasterSequence::frame_within` answers inside a field's own period, and
+`Layer::file_frame` is the one place that chooses between it and the exact
+match — the scene, the cache, the export and the timeline's frame row
+already ask the layer. Nothing is reachable from the interface yet; the
+next milestone adds the button. D73.
+
 ### M87 — How fast a feature moves
 
 **Asked for by the user, 2026-10-02**: a tool beside the dividers that
@@ -5571,6 +5584,7 @@ relitigated by accident.
 | D70 | Autosave is a three-way setting: off, recovery snapshots, or the file written in place; default recovery | "Auto-save" can mean the snapshot the app already takes or the project file itself. Offering both, with today's behaviour as the default, changes nothing for an existing install and lets a user who wants the file kept current have it (M25). Settled with the user 2026-09-05 |
 | D71 | A macro preview is a preview scene in the session, served by the tile pipeline under its own revision, never a document write | Hiding every layer to show the macro alone is a document write, and the history is locked while a capture runs for exactly the reason it must stay locked. A one-object project flattened by the same `flatten` and served by the same `protocol::serve` keeps every tile rule — one path, content-hashed keys, readiness by cache probe — and leaves the document untouched (M26). Proposed 2026-09-05 |
 | D72 | A capture's positions are keyframes in the session: visited steps are keyed, gaps interpolate by great circle, keys can be deleted | Holding the last position wherever the user did not drag made a moving system that was placed at 3 and 9 stand still until 9 and jump; keys with interpolation are what every other track does and what "jump forward and change the position" means. They stay session state — not document, not history — so a placement is still not an edit (M26). Proposed 2026-09-05 |
+| D73 | A fetched layer holds each of its times for the product's own period — an exception to D48, not a reversal | D48 refused to hold a forecast message forward because a message is a measurement for one hour, and holding it drew data for times it was never made for, worst past a short file's end. A daily analysis is different in kind: the product itself says it is the field for that day. So the period is provenance on the fetched layer, the lookup answers only inside a field's own period, a missing day stays empty, and nothing runs past the last period — every failure D48 named stays impossible. Imported files and history layers have no period and are untouched. The export carries the held field on each step, since it must agree with the map (invariant 3). Settled with the user 2026-10-02 (M88) |
 
 ### MCP service and invariant 5
 

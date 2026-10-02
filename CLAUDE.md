@@ -475,9 +475,14 @@ bug. The project file holds the GRIB's path and never its samples
 `import::attach_rasters` reads the file back on open.
 
 **A step the file has no message for has no raster**, not the previous one:
-`RasterSequence::frame_at` returns an `Option` and `flatten` pushes nothing
+`Layer::file_frame` returns an `Option` and `flatten` pushes nothing
 when it is `None` (spec §4.8, D48). A message is a measurement and does not
-hold the way a keyframe does.
+hold the way a keyframe does. **The one exception is a fetched layer with a
+period** (spec §4.10, D73): `LayerSource::Zarr::period_hours` says how long
+each time stands for, and `RasterSequence::frame_within` answers inside
+that period and nowhere past it. Ask the layer (`file_frame`,
+`imported_frame`), never the sequence: a caller that reaches for
+`frame_at` itself shows a held layer as empty.
 
 ### Changing GRIB output
 
