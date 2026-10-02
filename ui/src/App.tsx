@@ -77,7 +77,35 @@ function EditorApp() {
   } | null>(null);
   // The step and the selection live here because the map, the layer panel and
   // the inspector all need them.
-  const [step, setStep] = useState(0);
+  const [step, setStepRaw] = useState(0);
+  /**
+   * The earliest step the playhead may stand on, while a feature's speed is
+   * being measured (spec.md 10): from its first mark to its second, time only
+   * runs forward. Held here, at the one place every step change passes
+   * through — the ruler, the keys, playback, the MCP service — so none of
+   * them can step behind it. The ref is what `setStep` reads, because the
+   * floor and a step can change in the same tick.
+   */
+  const [stepFloor, setStepFloorState] = useState<number | null>(null);
+  const stepFloorRef = useRef<number | null>(null);
+  const setStepFloor = useCallback((floor: number | null) => {
+    stepFloorRef.current = floor;
+    setStepFloorState(floor);
+  }, []);
+  const setStep = useCallback(
+    (to: number) => setStepRaw(Math.max(stepFloorRef.current ?? 0, to)),
+    [],
+  );
+  /**
+   * Step 0 of a project just put on screen, or of none. A floor held for the
+   * project before it goes with it, and so does the half-placed measurement
+   * that held it.
+   */
+  const rewind = useCallback(() => {
+    mapRef.current?.endMeasuring();
+    setStepFloor(null);
+    setStepRaw(0);
+  }, [setStepFloor]);
   // Object ids, in the order they were selected. A list rather than one id
   // because transforms act on the whole selection about its collective
   // centroid (spec.md 8.2).
@@ -264,7 +292,7 @@ function EditorApp() {
 
   // A shorter timeline cannot leave the playhead past its end.
   useEffect(() => {
-    if (project && step > project.step_count - 1) setStep(Math.max(0, project.step_count - 1));
+    if (project && step > project.step_count - 1) setStepRaw(Math.max(0, project.step_count - 1));
   }, [project, step]);
 
   // An armed pick belongs to a selected object. Leaving it armed after the
@@ -428,13 +456,13 @@ function EditorApp() {
       setSelection([]);
       setShapeEditing(null);
       setActiveLayer(null);
-      setStep(0);
+      rewind();
       reportError(null);
       setProject(null);
     } catch (err) {
       report(err);
     }
-  }, [mayReplace]);
+  }, [mayReplace, rewind]);
 
   /**
    * Opens a path and puts the application into it.
@@ -448,11 +476,11 @@ function EditorApp() {
     setSelection([]);
     setShapeEditing(null);
     setActiveLayer(null);
-    setStep(0);
+    rewind();
     reportError(null);
     setProject(opened);
     return opened;
-  }, []);
+  }, [rewind]);
 
   const openProject = useCallback(async () => {
     // Ask about unsaved changes before the file dialog, not after: a user who
@@ -748,6 +776,7 @@ function EditorApp() {
           onSettings={setSettings}
           onRecording={setRecording}
           onStepChange={setStep}
+          onStepFloor={setStepFloor}
           onSelect={selectObjects}
           onViewport={setViewport}
           autoKey={autoKey}
@@ -812,6 +841,7 @@ function EditorApp() {
         onKeysSelected={onKeysSelected}
         settings={settings}
         capture={recording}
+        floor={stepFloor}
         onCapture={(mode) => mapRef.current?.setCapture(mode)}
         shapeEditing={shapeEditing}
         onShapeEditing={toggleShapeEditing}
@@ -861,7 +891,7 @@ function EditorApp() {
             setSelection([]);
             setShapeEditing(null);
             setActiveLayer(null);
-            setStep(0);
+            rewind();
             reportError(null);
             setProject(created);
           }}

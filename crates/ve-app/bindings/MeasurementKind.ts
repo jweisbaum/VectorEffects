@@ -8,4 +8,4 @@
  * on nothing, `ts-rs` included, so a type that crosses IPC is declared on this
  * side of the boundary and converted here.
  */
-export type MeasurementKind = "dividers" | "passage" | "rings";
+export type MeasurementKind = "dividers" | "passage" | "rings" | "motion";

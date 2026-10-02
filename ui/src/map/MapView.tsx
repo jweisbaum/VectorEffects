@@ -452,6 +452,7 @@ const CLEAR_MEASURE: Record<MeasurementKind, { label: string; title: string }> =
   dividers: { label: msg("Clear dividers"), title: msg("Clear every dividers measurement") },
   passage: { label: msg("Clear great circle / rhumb"), title: msg("Clear every great circle / rhumb measurement") },
   rings: { label: msg("Clear range rings"), title: msg("Clear every range rings measurement") },
+  motion: { label: msg("Clear feature speeds"), title: msg("Clear every feature speed measurement") },
 };
 
 /** Hit radius of a transform handle, in CSS pixels. */
@@ -526,6 +527,13 @@ export interface MapHandle extends PlaybackMap {
    */
   clearRegion(): void;
   /**
+   * Abandons a measurement half placed — an open chain, a lone first point,
+   * a feature's first mark and the timeline floor it holds (spec.md 10). The
+   * app calls it when the project under the map is replaced: a mark from the
+   * last project means nothing in this one.
+   */
+  endMeasuring(): void;
+  /**
    * `Cmd`-`C` with a region selected: captures the field inside it and says
    * so. False when there is no region, in which case the key means the
    * objects and the app copies them (spec.md 8.5).
@@ -574,6 +582,7 @@ export default function MapView({
   onSettings,
   onRecording,
   onStepChange,
+  onStepFloor,
   onSelect,
   onViewport,
   autoKey,
@@ -639,6 +648,12 @@ export default function MapView({
   onViewport: (tiles: TileAddress[]) => void;
   /** Whether a drag keys the current step rather than the base (spec.md 9.3). */
   autoKey: boolean;
+  /**
+   * The earliest step the playhead may stand on, or null for no limit
+   * (spec.md 10): a feature's speed is measured forward in time, so from its
+   * first mark until its second, or until it is abandoned, time only runs on.
+   */
+  onStepFloor: (step: number | null) => void;
 }) {
   const units = useUnits();
   const t = useT();
@@ -869,6 +884,14 @@ export default function MapView({
    * pointer-up to end it.
    */
   const openChain = useRef<number | null>(null);
+  /**
+   * The step a feature's first mark was placed at, while its second is
+   * awaited (spec.md 10). The mark itself is `pendingPoint`; this is *when*.
+   * State as well as a ref because the bar and the timeline's floor follow
+   * it, and the pointer handlers read it between renders.
+   */
+  const [motionFrom, setMotionFrom] = useState<number | null>(null);
+  const motionFromRef = useRef<number | null>(null);
   /**
    * The capture region being dragged, while a capture runs (spec.md 8.7).
    *
@@ -2359,9 +2382,24 @@ export default function MapView({
     if (openChain.current === null && pendingPoint.current === null) return false;
     openChain.current = null;
     pendingPoint.current = null;
+    motionFromRef.current = null;
+    setMotionFrom(null);
+    measurePreview.current = null;
     requestOverlay();
     return true;
   }, [requestOverlay]);
+
+  // The timeline's floor is the first mark's step, for exactly as long as
+  // there is a first mark (spec.md 10).
+  useEffect(() => {
+    onStepFloor(motionFrom);
+  }, [motionFrom, onStepFloor]);
+  useEffect(() => () => onStepFloor(null), [onStepFloor]);
+  // Leaving the tool leaves the mode: a timeline held to a floor by a mark
+  // that is no longer on screen would be locked with nothing to say why.
+  useEffect(() => {
+    if (motionFrom !== null && (tool !== MEASURE || measureKind !== "motion")) endMeasuring();
+  }, [motionFrom, tool, measureKind, endMeasuring]);
 
   /**
    * The Help search's reveal steps the map owns (spec.md 5.7): `tool:<id>`
@@ -2377,7 +2415,7 @@ export default function MapView({
     const offMeasure = onReveal("measure:", (step) => {
       pick(MEASURE);
       const kind = step.slice("measure:".length);
-      if (kind === "dividers" || kind === "passage" || kind === "rings") {
+      if (kind === "dividers" || kind === "passage" || kind === "rings" || kind === "motion") {
         if (kind !== measureKind) {
           endMeasuring();
           setMeasureKind(kind);
@@ -2846,6 +2884,7 @@ export default function MapView({
       present,
       bounds,
       clearRegion,
+      endMeasuring,
       copyRegion,
       pasteCapture,
       setCapture,
@@ -2854,6 +2893,7 @@ export default function MapView({
       isAligning,
     }),
     [
+      endMeasuring,
       beginAlign,
       bounds,
       clearRegion,
@@ -4789,6 +4829,31 @@ export default function MapView({
       }
 
       const pending = pendingPoint.current;
+
+      // A feature's speed is two marks at two times (spec.md 10): the first
+      // click holds the timeline to its step, and the second is taken only
+      // once the playhead has moved on — no time between them is no speed.
+      if (measureKind === "motion") {
+        const from = motionFromRef.current;
+        if (pending === null || from === null) {
+          // The last step has no later one to measure to; the bar says so.
+          if (stepRef.current >= lastStep) return;
+          pendingPoint.current = at;
+          motionFromRef.current = stepRef.current;
+          setMotionFrom(stepRef.current);
+          requestOverlay();
+          return;
+        }
+        if (stepRef.current <= from) return;
+        const steps: [number, number] = [from, stepRef.current];
+        endMeasuring();
+        void api
+          .addMeasurement({ kind: "motion", points: [pending, at], interval_km: 0, count: 0, steps })
+          .then(tookMeasurements)
+          .catch(() => undefined);
+        return;
+      }
+
       if (pending === null) {
         pendingPoint.current = at;
         requestOverlay();
@@ -5372,12 +5437,21 @@ export default function MapView({
           ? (measurementsRef.current.find((m) => m.id === openChain.current)?.handles.at(-1) ??
             null)
           : null);
-      if (from !== null && measureKind !== "rings") {
+      // A feature's speed has nothing to read out until the playhead has
+      // left the first mark's step: the line is there, the time is not.
+      const motionSteps: [number, number] | null =
+        measureKind === "motion" && openChain.current === null && motionFromRef.current !== null
+          ? [motionFromRef.current, stepRef.current]
+          : null;
+      const timeless =
+        measureKind === "motion" && (motionSteps === null || motionSteps[1] <= motionSteps[0]);
+      if (from !== null && measureKind !== "rings" && !timeless) {
         const leg: NewMeasurement = {
           kind: openChain.current !== null ? "dividers" : measureKind,
           points: [from, [geo.lon, geo.lat]],
           interval_km: 0,
           count: 0,
+          ...(motionSteps !== null ? { steps: motionSteps } : {}),
         };
         const flight = measurePreviewFlight.current;
         flight.queued = leg;
@@ -6777,7 +6851,7 @@ export default function MapView({
                   setMeasureKind(event.target.value as MeasurementKind);
                   releaseFocus(event);
                 }}
-                title={t("Dividers measure a chain leg by leg; a passage draws both ways of sailing between two points; range rings are geodesic circles about a centre")}
+                title={t("Dividers measure a chain leg by leg; a passage draws both ways of sailing between two points; range rings are geodesic circles about a centre; feature speed is how fast and which way something moved between two time steps")}
               >
                 {(Object.keys(MEASURE_LABELS) as MeasurementKind[]).map((kind) => (
                   <option key={kind} value={kind}>
@@ -6830,16 +6904,32 @@ export default function MapView({
               </>
             )}
             <span className="muted">
-              {pointsNeeded(measureKind) === 1
-                ? activeRings === null
-                  ? t("Click to place.")
-                  : t("Editing the last set placed. Click to place another.")
-                : openChain.current !== null
-                  ? t("Click to add a leg; Enter or Escape to finish.")
-                  : t("Click {count} points.", { count: pointsNeeded(measureKind) })}
+              {measureKind === "motion"
+                ? motionFrom === null
+                  ? step >= lastStep
+                    ? t("This is the last time step. Move to an earlier one to start.")
+                    : t("Click a feature to mark where it is at this time step.")
+                  : step > motionFrom
+                    ? t("Click where the feature is now. Escape cancels.")
+                    : t("Move to a later time step, then click where the feature has moved to. Escape cancels.")
+                : pointsNeeded(measureKind) === 1
+                  ? activeRings === null
+                    ? t("Click to place.")
+                    : t("Editing the last set placed. Click to place another.")
+                  : openChain.current !== null
+                    ? t("Click to add a leg; Enter or Escape to finish.")
+                    : t("Click {count} points.", { count: pointsNeeded(measureKind) })}
               {" "}
               {t("Alt-click a point to remove its measurement.")}
             </span>
+            {motionFrom !== null && (
+              <button
+                onClick={() => endMeasuring()}
+                title={t("Drop the first mark and let the timeline move freely again")}
+              >
+                {t("Cancel")}
+              </button>
+            )}
             <button
               disabled={!measurements.some((m) => m.kind === measureKind)}
               onClick={() => {
@@ -6920,7 +7010,7 @@ export default function MapView({
           aria-label={t("Measure")}
           aria-pressed={tool === MEASURE}
           data-feature="tool:measure"
-          title={t("Measure ({chord}) · dividers, a passage's two paths, or range rings · click to place, drag a point to move it, Enter or Escape to finish a chain", { chord: chord("measure") })}
+          title={t("Measure ({chord}) · dividers, a passage's two paths, range rings, or a feature's speed between two time steps · click to place, drag a point to move it, Enter or Escape to finish a chain", { chord: chord("measure") })}
         >
           <ToolIcon tool={MEASURE} />
         </button>

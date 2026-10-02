@@ -190,6 +190,46 @@ it("scrubs the ruler without starting text selection and stops on cancel", async
   } finally { await act(async () => root.unmount()); container.remove(); }
 });
 
+it("holds the playhead at a measurement's floor and dims what is before it", async () => {
+  // A feature's speed is measured forward in time (spec.md 10): from its
+  // first mark the ruler cannot be scrubbed behind that step.
+  backend.tree.mockResolvedValue({layers: []});
+  const project = {revision: 21, step_count:10, step_hours:1, start_unix_s:null} as ProjectSummary;
+  const move = vi.fn();
+  const container = document.createElement("div"); document.body.append(container);
+  const root = createRoot(container);
+  const render = (step: number, floor: number | null) => root.render(<Timeline project={project} step={step} onStepChange={move} selection={[]} onSelect={() => {}}
+    viewport={[]} playback={{prepare: () => ({ready:0,total:0,streaming:false}), present: () => false}} autoKey={false} onAutoKey={() => {}} onChanged={() => {}} onFramesSelected={() => {}}
+    onKeysSelected={() => {}} settings={null} capture={null} floor={floor} onCapture={() => {}} />);
+  try {
+    await act(async () => render(6, 4));
+    const ticks = [...container.querySelectorAll<HTMLElement>(".tl-ruler .tl-grid .tl-tick")];
+    expect(ticks.map((tick) => tick.classList.contains("tl-outside"))).toEqual(
+      [true, true, true, true, false, false, false, false, false, false],
+    );
+    expect(move).not.toHaveBeenCalled();
+
+    // A press at the ruler's left end asks for step 0 and gets the floor.
+    const ruler = container.querySelector<HTMLElement>(".tl-ruler .tl-grid")!;
+    await act(async () => ruler.dispatchEvent(new PointerEvent("pointerdown", {bubbles:true, cancelable:true, button:0, clientX:0})));
+    expect(move).toHaveBeenLastCalledWith(4);
+    await act(async () => window.dispatchEvent(new PointerEvent("pointerup")));
+
+    // A playhead found behind a floor is brought up to it.
+    move.mockClear();
+    await act(async () => render(2, 4));
+    expect(move).toHaveBeenLastCalledWith(4);
+
+    // And with the floor gone nothing is dimmed and the ruler is free again.
+    move.mockClear();
+    await act(async () => render(6, null));
+    expect(container.querySelectorAll(".tl-ruler .tl-grid .tl-tick.tl-outside").length).toBe(0);
+    await act(async () => ruler.dispatchEvent(new PointerEvent("pointerdown", {bubbles:true, cancelable:true, button:0, clientX:0})));
+    expect(move).toHaveBeenLastCalledWith(0);
+    await act(async () => window.dispatchEvent(new PointerEvent("pointerup")));
+  } finally { await act(async () => root.unmount()); container.remove(); }
+});
+
 it.each(["macro", "patch", "liquify"])("does not offer shape animation for a %s", async (tool) => {
   backend.tree.mockResolvedValue({ layers: [{id:1, name:"Layer", visible:true, locked:false, source:"painted", parameter:"wind", grib:null, image:null, gis:null,
     objects:[{id:2, name:"Capture", tool, tool_label:tool, active_here:true, start_step:0, end_step:9}]}]});

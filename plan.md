@@ -3662,6 +3662,44 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M87 — How fast a feature moves
+
+**Asked for by the user, 2026-10-02**: a tool beside the dividers that
+measures the average speed and direction of a feature. Click the feature,
+step forward in time — and only forward, until `Escape` or Cancel — click it
+again, and read the speed and the direction between the two clicks.
+
+A fourth mode of the measure tool, **Feature speed**, rather than a button
+of its own: the user was offered both and chose the mode, which is also
+what spec §10's "one tool" rule says. `Measurement::Motion` holds the two
+positions and the two steps; `average_speed_mps` is the great-circle
+distance over the steps between times the project's hours per step. No new
+command — `add_measurement` and `preview_measurement` take the two steps in
+`NewMeasurement::steps` — so it is saved, undone, dragged, alt-click-removed
+and cleared by the code the other three already use. The label is
+`25.0 kt · 090°` on the line, with `600 nm · 24 h` beside the second mark,
+and an arrowhead says which end is which. The direction is a course and is
+never turned into the project's wind convention (§10).
+
+**The timeline's floor is held in `App`**, in the one `setStep` every step
+change passes through, so the ruler, the step keys, playback and the MCP
+service's `view://step` cannot go behind it; `Timeline` takes it as `floor`
+to dim the earlier steps and loop from it, reusing what a capture's first
+step already did. `MapView` reports it with `onStepFloor` and gives it up on
+`Escape`, Cancel, a tool or mode change, and — through
+`MapHandle.endMeasuring` — when the project under the map is replaced.
+
+Tests: ten degrees of the equator in a day is 12.870 m/s and 25 kt by hand,
+across the antimeridian and over the pole (`annotation.rs`); the label, the
+preview, a drag, undo and redo, the unit preference, the refusals and a save
+and reopen (`tests/measurement.rs`); the arrowhead (`measure.test.ts`); the
+floor on the ruler (`Timeline.test.tsx`).
+
+**Not done:** the help page has no screenshot — the reference images are
+captured by hand or by `tools/webdriver/help.mjs`, and this page ships with
+text only. A measurement of more than two marks (a track with a speed per
+leg) was not asked for and is not built.
+
 ### M85 — A moving macro is pointed at where it is drawn
 
 **Found while diagnosing M84**, not reported: a macro that recorded

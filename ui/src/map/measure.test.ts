@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { MeasurementView } from "../generated/MeasurementView";
-import { handleUnder, pointsNeeded, projectPath } from "./measure";
+import { arrowHead, handleUnder, pointsNeeded, projectPath } from "./measure";
 import { project, type Camera, type Viewport } from "./camera";
 
 const view: Viewport = { width: 1000, height: 600 };
@@ -122,6 +122,44 @@ describe("pointsNeeded", () => {
     expect(pointsNeeded("dividers")).toBe(2);
     expect(pointsNeeded("passage")).toBe(2);
     expect(pointsNeeded("rings")).toBe(1);
+    // A feature's speed is two marks; the time between them is not a point.
+    expect(pointsNeeded("motion")).toBe(2);
+  });
+});
+
+describe("arrowHead", () => {
+  it("points along the path, short of the handle at its end", () => {
+    // A path running straight right: the tip is on the line, 5.5 px before
+    // the end where the handle sits, and the barbs are 10 px further back,
+    // 4.5 px either side.
+    const head = arrowHead([{ x: 0, y: 50 }, { x: 100, y: 50 }], 1);
+    expect(head).not.toBeNull();
+    const [tip, left, right] = head!;
+    expect(tip).toEqual({ x: 94.5, y: 50 });
+    expect(left.x).toBeCloseTo(84.5, 9);
+    expect(right.x).toBeCloseTo(84.5, 9);
+    expect(Math.abs(left.y - 50)).toBeCloseTo(4.5, 9);
+    expect(left.y + right.y).toBeCloseTo(100, 9);
+  });
+
+  it("takes its direction from where the path arrives, not from its chord", () => {
+    // Up, then right: the head lies along the last stretch.
+    const head = arrowHead([{ x: 0, y: 100 }, { x: 0, y: 0 }, { x: 60, y: 0 }], 1);
+    expect(head![0]).toEqual({ x: 54.5, y: 0 });
+    expect(head![1].x).toBeCloseTo(44.5, 9);
+  });
+
+  it("looks further back when the last vertices are too close to aim by", () => {
+    // A densified great circle ends in vertices a pixel apart.
+    const head = arrowHead([{ x: 0, y: 0 }, { x: 99, y: 0 }, { x: 100, y: 0 }], 1);
+    expect(head![0].x).toBeCloseTo(94.5, 9);
+    expect(head![0].y).toBeCloseTo(0, 9);
+  });
+
+  it("draws nothing on a path too short to carry one, or one that ends off the globe", () => {
+    expect(arrowHead([{ x: 0, y: 0 }, { x: 8, y: 0 }], 1)).toBeNull();
+    expect(arrowHead([{ x: 0, y: 0 }], 1)).toBeNull();
+    expect(arrowHead([{ x: 0, y: 0 }, { x: NaN, y: NaN }], 1)).toBeNull();
   });
 });
 

@@ -70,6 +70,8 @@ const features: Feature[] = [
     keywords: [msg("great circle"), msg("rhumb line"), msg("route")], topic: "measure", reveal: ["measure:passage"] },
   { id: "measure:rings", label: msg("Range rings"), description: msg("Draw rings of equal ground distance around a centre."),
     keywords: [msg("radius"), msg("distance"), msg("circles")], topic: "rings", reveal: ["measure:rings"] },
+  { id: "measure:motion", label: msg("Feature speed"), description: msg("Measure how fast and which way a feature moved between two time steps."),
+    keywords: [msg("speed"), msg("movement"), msg("track")], topic: "feature-speed", reveal: ["measure:motion"] },
   { id: "measure:interval", label: msg("Ring interval"), description: msg("The spacing between range rings."),
     keywords: [msg("spacing"), msg("distance")], topic: "rings", reveal: ["measure:rings"] },
   { id: "measure:ring-count", label: msg("Number of rings"), description: msg("How many range rings to draw."),

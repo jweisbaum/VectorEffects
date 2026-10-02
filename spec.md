@@ -4190,7 +4190,7 @@ A worker pool renders frames ahead of the playhead.
 
 These are overlays. They never contribute to the field and never appear in the
 GRIB output. They are saved in `Project.annotations` so a measurement survives
-save/reopen. One tool, `T`, with three modes:
+save/reopen. One tool, `T`, with four modes:
 
 **The leg being drawn reads out as it is drawn** (M29): from the first
 click, or the open chain's last point, to the pointer, the dividers show the
@@ -4203,21 +4203,42 @@ request in flight, the newest position waiting; nothing is stored by asking.
 | **Dividers** | Click a chain of points. Shows each segment's great-circle distance and initial bearing, plus a running total. The chain stays open until `Enter`, `Escape` or a tool change, so it is built click by click as the polygon is. Points are draggable. Distances use the global km/nm preference. |
 | **Great circle / rhumb line** | Pick two points; draws both paths simultaneously — the great circle solid, the rhumb dashed — labelled `GC` and `RL` with each distance, the great circle's *initial* bearing and the rhumb's constant one. |
 | **Range rings** | Pick a centre; draws N geodesic circles at a set interval, labelled. Interval and count are typed in the option bar and edit the set most recently placed or touched; the centre is a draggable handle. |
+| **Feature speed** | Click a feature — a low, a front, an eddy — at one time step, move to a later step, and click it again. Draws the great circle between the two marks with an arrowhead at the second, labelled with the average speed in the global speed unit and the course travelled; the distance and the elapsed hours are written beside the second mark. Both marks are draggable; the steps are not. |
+
+**A feature's speed is measured forward in time** (M87). From the first mark
+until the second, or until `Escape`, the bar's Cancel, a tool change or a
+change of mode abandons it, the playhead cannot go behind the first mark's
+step: the earlier steps are dimmed on the ruler, and scrubbing, the step keys,
+playback's loop and the MCP service's `view://step` all stop there. The floor
+is held where every step change passes — the application's one `setStep` — so
+no path can step behind it; the timeline is told of it only to dim the ruler
+and to start a loop from it. A second click on the first mark's own step is
+ignored, and the bar says to move on first: no time between the marks is no
+speed. A first click on the *last* step is ignored for the same reason. The
+measurement stores the two positions and the two **steps**; the project's
+hours per step, which never changes (§4.1), turns them into time, so the speed
+is the great-circle distance over `(to_step − from_step) × step_hours`. It is
+the speed of the straight run between the marks, which is what "average"
+says. Opening, creating or closing a project abandons a half-placed one and
+releases the floor with it.
 
 Each mode has an explicit clear action, there is a global "clear all
 measurements", and alt-clicking any handle removes the measurement it belongs
 to — which is what makes a single passage individually clearable.
 
-**One tool, not three.** They share a gesture (click points on the map), a
+**One tool, not four.** They share a gesture (click points on the map), a
 handle, an overlay and a clear action; what differs is how many points make a
-measurement and what is drawn through them. Three palette entries would be
-three ways of pointing at the same thing, and the shortcut table allocates one
-key (D54).
+measurement and what is drawn through them. Four palette entries would be
+four ways of pointing at the same thing, and the shortcut table allocates one
+key (D54). The feature speed was offered a button of its own and was put here
+instead, on the user's choice (M87): its gesture has time in it, but it is
+still two clicks on the map.
 
 **A bearing here is a course, never a wind.** It is a geometric bearing and is
 therefore *not* converted to the project's direction convention (§3.3). A
 project that names winds by where they come from must not show the reciprocal
-of a course.
+of a course. That holds for a feature's direction too: it is where the feature
+is heading.
 
 **A measurement does not bump the tile revision.** The revision addresses
 rendered tiles (§7.7) and a measurement changes no pixel of the field, so
@@ -4227,7 +4248,7 @@ command replaces the whole set, which is what makes a drag of one point one
 history entry and gives every edit — place, drag, extend, clear — the same
 inverse.
 
-**Distances are computed in Rust and arrive formatted.** The frontend projects
+**Distances and speeds are computed in Rust and arrive formatted.** The frontend projects
 polylines and strokes them; it measures nothing. The paths are densified to one
 vertex per degree of arc, spaced by distance rather than by parameter, so a
 label sits at the middle of the line and not at the middle of its bounding box.

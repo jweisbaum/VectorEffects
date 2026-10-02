@@ -222,6 +222,7 @@ export default function Timeline({
   onKeysSelected,
   settings,
   capture,
+  floor = null,
   hidden = false,
   onCapture,
   shapeEditing = null,
@@ -268,6 +269,13 @@ export default function Timeline({
    * have been.
    */
   capture: CaptureMode | null;
+  /**
+   * The earliest step the playhead may stand on, when something other than a
+   * capture holds one: a feature's speed being measured, between its first
+   * mark and its second (spec.md 10). The steps before it are dimmed and the
+   * ruler, the keys and playback all stop at it.
+   */
+  floor?: number | null;
   /** Put away: not drawn, but mounted, so playback goes on (M27). */
   hidden?: boolean;
 }) {
@@ -281,9 +289,12 @@ export default function Timeline({
   /**
    * The first step the playhead may stand on: the capture's first step
    * while one runs — the steps before it are out of the run and dimmed
-   * (spec.md 8.7, M26) — and step 0 otherwise.
+   * (spec.md 8.7, M26) — a measurement's floor while it holds one
+   * (spec.md 10), and step 0 otherwise.
    */
-  const firstStep = capturing ? Math.min(capture.first_step, last) : 0;
+  const firstStep = capturing
+    ? Math.min(capture.first_step, last)
+    : Math.min(Math.max(0, floor ?? 0), last);
   /** The last step playback reaches: the preview's run, or the timeline's. */
   const playLast = previewing ? Math.min(capture.last_step, last) : last;
   /**
@@ -425,8 +436,8 @@ export default function Timeline({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [previewing]);
   useEffect(() => {
-    if (capturing && step < firstStep) onStepChange(firstStep);
-  }, [capturing, firstStep, onStepChange, step]);
+    if (step < firstStep) onStepChange(firstStep);
+  }, [firstStep, onStepChange, step]);
 
   // Preparation continues while paused, and uploads drive their own next stage.
   // This timer only updates priorities/status, never gates presentation timing.
@@ -480,7 +491,7 @@ export default function Timeline({
 
   const stop = () => {
     setPlaying(false);
-    onStepChange(0);
+    onStepChange(firstStep);
   };
 
   // --- Tree and tracks ---
@@ -1284,7 +1295,7 @@ export default function Timeline({
                   // it began at: what the user has done and where it started.
                   capturing && capture.keys.includes(s) ? "tl-visited" : "",
                   capturing && capture.first_step === s ? "tl-capture-origin" : "",
-                  capturing && (s < firstStep || s > runEnd) ? "tl-outside" : "",
+                  (capturing ? s < firstStep || s > runEnd : s < firstStep) ? "tl-outside" : "",
                 ].join(" ")}
                 style={{ left: s * pxPerStep, width: pxPerStep }}
                 title={
@@ -1296,7 +1307,9 @@ export default function Timeline({
                         : capture.keys.includes(s)
                           ? t("{time} · region keyed here", { time: tickLabel(s) })
                           : t("{time} · region between its keys", { time: tickLabel(s) })
-                    : t(STATE_TITLES[states[s] ?? "empty"], { time: tickLabel(s) })
+                    : s < firstStep
+                      ? t("{time} · before the measurement's first mark", { time: tickLabel(s) })
+                      : t(STATE_TITLES[states[s] ?? "empty"], { time: tickLabel(s) })
                 }
               >
                 {s % every === 0 && <span className="tl-tick-label">{tickLabel(s)}</span>}

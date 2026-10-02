@@ -35,8 +35,8 @@ pub const MAX_RINGS: u32 = 50;
 
 /// What a measurement is.
 ///
-/// Three shapes, matching the three tools of spec.md 10. They are one enum and
-/// one list rather than three lists because everything above them treats them
+/// Four shapes, matching the four modes of spec.md 10. They are one enum and
+/// one list rather than four lists because everything above them treats them
 /// alike — placed, dragged, cleared, drawn — and the one place that does not,
 /// the per-tool clear, is a filter on the variant.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -77,6 +77,23 @@ pub enum Measurement {
         /// How many rings, capped at [`MAX_RINGS`].
         count: u32,
     },
+    /// Where a feature was at one time step and where it was at a later one.
+    ///
+    /// The one measurement with time in it: a low, a front or an eddy is
+    /// marked at two steps, and what is read off is how fast and which way it
+    /// travelled between them. The steps are stored rather than the hours
+    /// because the step is what the user stood on when they clicked; the
+    /// project's step length, which never changes, turns them into time.
+    Motion {
+        /// Where the feature was at `from_step`.
+        from: LonLat,
+        /// Where it was at `to_step`.
+        to: LonLat,
+        /// The step of the first mark.
+        from_step: u32,
+        /// The step of the second, which is later.
+        to_step: u32,
+    },
 }
 
 /// Which tool made a measurement, for the per-tool clear.
@@ -89,6 +106,8 @@ pub enum MeasurementKind {
     Passage,
     /// [`Measurement::Rings`].
     Rings,
+    /// [`Measurement::Motion`].
+    Motion,
 }
 
 /// A measurement with an identity, so it can be edited and cleared on its own.
@@ -159,6 +178,7 @@ impl Measurement {
             Self::Dividers { .. } => MeasurementKind::Dividers,
             Self::Passage { .. } => MeasurementKind::Passage,
             Self::Rings { .. } => MeasurementKind::Rings,
+            Self::Motion { .. } => MeasurementKind::Motion,
         }
     }
 
@@ -168,6 +188,7 @@ impl Measurement {
             Self::Dividers { points } => points.clone(),
             Self::Passage { from, to } => vec![*from, *to],
             Self::Rings { centre, .. } => vec![*centre],
+            Self::Motion { from, to, .. } => vec![*from, *to],
         }
     }
 
@@ -184,7 +205,7 @@ impl Measurement {
                     *point = to;
                 }
             }
-            Self::Passage { from, to: end } => match index {
+            Self::Passage { from, to: end } | Self::Motion { from, to: end, .. } => match index {
                 0 => *from = to,
                 1 => *end = to,
                 _ => {}
@@ -208,7 +229,37 @@ impl Measurement {
             Self::Rings {
                 count, interval_m, ..
             } => *count > 0 && *interval_m > 0.0,
+            // No time between the marks is no speed: a division by zero, and
+            // a feature that has not been given the chance to move.
+            Self::Motion {
+                from_step, to_step, ..
+            } => to_step > from_step,
         }
+    }
+
+    /// How many time steps a measurement spans, for the one kind that spans
+    /// any.
+    pub fn elapsed_steps(&self) -> Option<u32> {
+        match self {
+            Self::Motion {
+                from_step, to_step, ..
+            } => to_step.checked_sub(*from_step).filter(|steps| *steps > 0),
+            _ => None,
+        }
+    }
+
+    /// The average speed of a [`Self::Motion`] in metres per second, given
+    /// the project's hours per step.
+    ///
+    /// The great-circle distance over the elapsed time, so it is the speed of
+    /// the straight run between the two marks: a feature that wandered on the
+    /// way went faster than this, which is what "average" says.
+    pub fn average_speed_mps(&self, step_hours: u32) -> Option<f64> {
+        let Self::Motion { from, to, .. } = self else {
+            return None;
+        };
+        let seconds = f64::from(self.elapsed_steps()?) * f64::from(step_hours) * 3600.0;
+        (seconds > 0.0).then(|| from.distance_m(*to) / seconds)
     }
 
     /// The geometry and the numbers this measurement produces.
@@ -221,6 +272,10 @@ impl Measurement {
                 interval_m,
                 count,
             } => rings(*centre, *interval_m, *count),
+            // One leg of a chain, geometrically: the same great circle, the
+            // same initial bearing. What makes it a motion is the time, and
+            // that is not geometry.
+            Self::Motion { from, to, .. } => dividers(&[*from, *to]),
         }
     }
 }
@@ -423,6 +478,94 @@ mod tests {
         assert_eq!(absurd.measure().paths.len(), MAX_RINGS as usize);
     }
 
+    /// Ten degrees of the equator in a day, worked by hand: a degree of arc
+    /// on this sphere is 6 371 229 m x pi / 180 = 111 198.9 m, so the run is
+    /// 1 111 989 m, and over 86 400 s that is 12.870 m/s — 25 kt, since a
+    /// degree is sixty nautical miles and six hundred of them took a day.
+    #[test]
+    fn a_motion_is_distance_over_elapsed_time() {
+        let motion = Measurement::Motion {
+            from: ll(0.0, 0.0),
+            to: ll(10.0, 0.0),
+            from_step: 2,
+            to_step: 10,
+        };
+        assert!(motion.is_measurable());
+        assert_eq!(motion.elapsed_steps(), Some(8));
+        let speed = motion.average_speed_mps(3).expect("a speed");
+        assert!((speed - 12.870).abs() < 1e-3, "{speed}");
+
+        let measured = motion.measure();
+        assert_eq!(measured.paths.len(), 1);
+        assert!((measured.paths[0].distance_m - 1_111_989.0).abs() < 1.0);
+        let course = measured.paths[0].bearing_deg.expect("a course");
+        assert!((course - 90.0).abs() < 1e-9, "{course}");
+        assert_eq!(measured.handles, vec![ll(0.0, 0.0), ll(10.0, 0.0)]);
+    }
+
+    /// A feature that crosses the dateline went the short way, eastward, and
+    /// not three hundred and fifty-eight degrees back round the world.
+    #[test]
+    fn a_motion_across_the_antimeridian_goes_the_short_way() {
+        let motion = Measurement::Motion {
+            from: ll(179.0, 0.0),
+            to: ll(-179.0, 0.0),
+            from_step: 0,
+            to_step: 1,
+        };
+        let measured = motion.measure();
+        let degree = crate::geo::EARTH_RADIUS_M * std::f64::consts::PI / 180.0;
+        assert!((measured.paths[0].distance_m - 2.0 * degree).abs() < 1e-3);
+        let course = measured.paths[0].bearing_deg.expect("a course");
+        assert!((course - 90.0).abs() < 1e-6, "{course}");
+        // Two degrees in an hour.
+        let speed = motion.average_speed_mps(1).expect("a speed");
+        assert!((speed - 2.0 * degree / 3600.0).abs() < 1e-6, "{speed}");
+    }
+
+    /// Over the pole: from 89 N on the Greenwich meridian to 89 N on the
+    /// dateline is two degrees of arc straight across, setting out due north,
+    /// and nothing like the half-circle of the parallel between them.
+    #[test]
+    fn a_motion_over_the_pole_crosses_it() {
+        let motion = Measurement::Motion {
+            from: ll(0.0, 89.0),
+            to: ll(-180.0, 89.0),
+            from_step: 4,
+            to_step: 6,
+        };
+        let measured = motion.measure();
+        let degree = crate::geo::EARTH_RADIUS_M * std::f64::consts::PI / 180.0;
+        assert!((measured.paths[0].distance_m - 2.0 * degree).abs() < 1e-3);
+        let course = measured.paths[0].bearing_deg.expect("a course");
+        assert!(course.min(360.0 - course) < 1e-6, "{course}");
+        let speed = motion.average_speed_mps(6).expect("a speed");
+        assert!(
+            (speed - 2.0 * degree / (12.0 * 3600.0)).abs() < 1e-6,
+            "{speed}"
+        );
+    }
+
+    #[test]
+    fn a_motion_with_no_time_in_it_has_no_speed() {
+        for (from_step, to_step) in [(5, 5), (5, 3)] {
+            let motion = Measurement::Motion {
+                from: ll(0.0, 0.0),
+                to: ll(1.0, 0.0),
+                from_step,
+                to_step,
+            };
+            assert!(!motion.is_measurable());
+            assert_eq!(motion.elapsed_steps(), None);
+            assert_eq!(motion.average_speed_mps(3), None);
+        }
+        // And nothing but a motion has a speed at all.
+        let chain = Measurement::Dividers {
+            points: vec![ll(0.0, 0.0), ll(1.0, 0.0)],
+        };
+        assert_eq!(chain.average_speed_mps(3), None);
+    }
+
     #[test]
     fn moving_a_handle_moves_that_point_and_no_other() {
         let mut chain = Measurement::Dividers {
@@ -444,5 +587,16 @@ mod tests {
         };
         rings.move_handle(0, ll(6.0, 6.0));
         assert_eq!(rings.handles(), vec![ll(6.0, 6.0)]);
+
+        // Dragging a mark moves where the feature was, never when.
+        let mut motion = Measurement::Motion {
+            from: ll(0.0, 0.0),
+            to: ll(1.0, 0.0),
+            from_step: 1,
+            to_step: 4,
+        };
+        motion.move_handle(1, ll(2.0, 2.0));
+        assert_eq!(motion.handles(), vec![ll(0.0, 0.0), ll(2.0, 2.0)]);
+        assert_eq!(motion.elapsed_steps(), Some(3));
     }
 }

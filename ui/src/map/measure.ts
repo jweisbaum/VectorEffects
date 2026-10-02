@@ -172,6 +172,21 @@ export function drawMeasurements(
       }
       context.setLineDash([]);
 
+      // A feature's line says which way it went (spec.md 10): the two ends
+      // are the same mark, and only one of them is where it ended up.
+      const head = measurement.kind === "motion" ? arrowHead(screen, dpr) : null;
+      if (head !== null) {
+        context.fillStyle = mapColour("measure", 0.95);
+        for (const offset of copies) {
+          context.beginPath();
+          context.moveTo(head[0].x + offset, head[0].y);
+          context.lineTo(head[1].x + offset, head[1].y);
+          context.lineTo(head[2].x + offset, head[2].y);
+          context.closePath();
+          context.fill();
+        }
+      }
+
       const label = project(camera, view, {
         lon: path.label_at[0]!,
         lat: path.label_at[1]!,
@@ -239,6 +254,42 @@ export function drawMeasurements(
 }
 
 /**
+ * The arrowhead at the end of a screen path, as tip and two barbs, or null
+ * for a path too short to carry one.
+ *
+ * The tip stops short of the last vertex, because a handle is drawn there and
+ * would cover it; the direction is taken from the last stretch of the path
+ * long enough to have one, so a great circle's head points along the curve
+ * where it arrives rather than along the chord.
+ */
+export function arrowHead(
+  screen: readonly ScreenPoint[],
+  dpr: number,
+): [ScreenPoint, ScreenPoint, ScreenPoint] | null {
+  const end = screen[screen.length - 1];
+  if (end === undefined || !Number.isFinite(end.x) || !Number.isFinite(end.y)) return null;
+  const standoff = 5.5 * dpr;
+  const length = 10 * dpr;
+  const half = 4.5 * dpr;
+  for (let i = screen.length - 2; i >= 0; i--) {
+    const before = screen[i]!;
+    if (!Number.isFinite(before.x) || !Number.isFinite(before.y)) return null;
+    const reach = Math.hypot(end.x - before.x, end.y - before.y);
+    if (reach < standoff + length) continue;
+    const ux = (end.x - before.x) / reach;
+    const uy = (end.y - before.y) / reach;
+    const tip = { x: end.x - ux * standoff, y: end.y - uy * standoff };
+    const base = { x: tip.x - ux * length, y: tip.y - uy * length };
+    return [
+      tip,
+      { x: base.x - uy * half, y: base.y + ux * half },
+      { x: base.x + uy * half, y: base.y - ux * half },
+    ];
+  }
+  return null;
+}
+
+/**
  * Writes a label with a dark plate behind it.
  *
  * The map beneath is a colour ramp, so text on it is unreadable somewhere: a
@@ -274,6 +325,7 @@ export const MEASURE_LABELS: Record<MeasurementKind, string> = {
   dividers: msg("Dividers"),
   passage: msg("Great circle / rhumb"),
   rings: msg("Range rings"),
+  motion: msg("Feature speed"),
 };
 
 /** How many points a kind needs before it becomes a measurement. */
@@ -285,6 +337,8 @@ export function pointsNeeded(kind: MeasurementKind): number {
       return 2;
     case "rings":
       return 1;
+    case "motion":
+      return 2;
   }
 }
 

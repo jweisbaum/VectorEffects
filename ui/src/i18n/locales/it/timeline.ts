@@ -216,5 +216,6 @@ const catalogue: Record<string, string> = {
   "link": "collegare",
   "parent": "genitore",
   "attach": "agganciare",
+  "{time} · before the measurement's first mark": "{time} · prima del primo segno della misura",
 };
 export default catalogue;

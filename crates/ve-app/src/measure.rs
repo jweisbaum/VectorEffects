@@ -1,6 +1,7 @@
 //! The measurement tools (spec.md 10, M8).
 //!
-//! Dividers, a passage's two paths, and range rings. They are overlays: they
+//! Dividers, a passage's two paths, range rings, and the speed a feature moved
+//! at between two time steps. They are overlays: they
 //! contribute nothing to the field and never reach an exported GRIB. What they
 //! do reach is the project file, so a passage measured today is there tomorrow.
 //!
@@ -32,10 +33,27 @@ use ve_core::project::Annotations;
 use crate::commands::AppState;
 use crate::error::{AppError, Result};
 use crate::projects::with_session;
-use crate::settings::DistanceUnit;
+use crate::settings::{DistanceUnit, SpeedUnit};
 
 /// Metres in a nautical mile. Exact, by definition.
 const M_PER_NM: f64 = 1852.0;
+
+/// Metres in a statute mile. Exact, by definition.
+const M_PER_MILE: f64 = 1609.344;
+
+/// What a measurement is written in.
+///
+/// The two global unit preferences, and the project's hours per step — the
+/// one thing a feature's speed needs that a distance does not.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Readout {
+    /// The unit distances are shown in.
+    pub distance: DistanceUnit,
+    /// The unit speeds are shown in.
+    pub speed: SpeedUnit,
+    /// Hours between the project's time steps.
+    pub step_hours: u32,
+}
 
 /// Which tool made a measurement (spec.md 10).
 ///
@@ -53,6 +71,8 @@ pub enum MeasurementKind {
     Passage,
     /// Geodesic circles about a centre.
     Rings,
+    /// How fast and which way a feature moved between two time steps.
+    Motion,
 }
 
 impl MeasurementKind {
@@ -62,6 +82,7 @@ impl MeasurementKind {
             Self::Dividers => annotation::MeasurementKind::Dividers,
             Self::Passage => annotation::MeasurementKind::Passage,
             Self::Rings => annotation::MeasurementKind::Rings,
+            Self::Motion => annotation::MeasurementKind::Motion,
         }
     }
 
@@ -71,6 +92,7 @@ impl MeasurementKind {
             annotation::MeasurementKind::Dividers => Self::Dividers,
             annotation::MeasurementKind::Passage => Self::Passage,
             annotation::MeasurementKind::Rings => Self::Rings,
+            annotation::MeasurementKind::Motion => Self::Motion,
         }
     }
 }
@@ -133,7 +155,7 @@ pub struct MeasurementView {
 
 /// What a new measurement is made of.
 ///
-/// One request for all three tools, because the frontend places them with one
+/// One request for all four tools, because the frontend places them with one
 /// gesture handler and the fields a tool does not use are the fields it does
 /// not send. The alternative — three commands — would have three arms of the
 /// same match on the other side of the wire.
@@ -151,6 +173,11 @@ pub struct NewMeasurement {
     /// How many rings.
     #[serde(default)]
     pub count: u32,
+    /// The time steps the two points were placed at, for a feature's speed:
+    /// the second later than the first.
+    #[serde(default)]
+    #[ts(optional)]
+    pub steps: Option<[u32; 2]>,
 }
 
 /// Formats a distance in the global preferred unit.
@@ -158,6 +185,15 @@ fn distance(metres: f64, unit: DistanceUnit) -> String {
     match unit {
         DistanceUnit::Km => format!("{} km", figure(metres / 1000.0)),
         DistanceUnit::Nm => format!("{} nm", figure(metres / M_PER_NM)),
+    }
+}
+
+/// Formats a speed in the global preferred unit.
+fn speed(mps: f64, unit: SpeedUnit) -> String {
+    match unit {
+        SpeedUnit::Kt => format!("{} kt", figure(mps * 3600.0 / M_PER_NM)),
+        SpeedUnit::Mph => format!("{} mph", figure(mps * 3600.0 / M_PER_MILE)),
+        SpeedUnit::Kmh => format!("{} km/h", figure(mps * 3.6)),
     }
 }
 
@@ -227,12 +263,20 @@ fn label(
 }
 
 /// Everything the map needs to draw one measurement.
-fn view(annotation: &Annotation, unit: DistanceUnit) -> MeasurementView {
+fn view(annotation: &Annotation, readout: Readout) -> MeasurementView {
+    let unit = readout.distance;
     let measured = annotation.measurement.measure();
     let kind = MeasurementKind::of(annotation.measurement.kind());
     // Only a passage names its paths: it is the one measurement that draws two
     // answers to the same question.
     let named = kind == MeasurementKind::Passage;
+    // A feature's line is labelled with what was asked for — how fast, and
+    // which way — and the distance it was worked out from goes beside the
+    // last point with the time, where a chain's total would be.
+    let moved = annotation
+        .measurement
+        .average_speed_mps(readout.step_hours)
+        .zip(annotation.measurement.elapsed_steps());
     MeasurementView {
         id: annotation.id.raw(),
         kind,
@@ -243,13 +287,18 @@ fn view(annotation: &Annotation, unit: DistanceUnit) -> MeasurementView {
             .map(|path| MeasuredPathView {
                 kind: PathKind::of(path.kind),
                 points: path.path.iter().map(point).collect(),
-                label: label(
-                    PathKind::of(path.kind),
-                    path.distance_m,
-                    path.bearing_deg,
-                    named,
-                    unit,
-                ),
+                label: match (moved, path.bearing_deg) {
+                    (Some((mps, _)), Some(course)) => {
+                        format!("{} · {}", speed(mps, readout.speed), bearing(course))
+                    }
+                    _ => label(
+                        PathKind::of(path.kind),
+                        path.distance_m,
+                        path.bearing_deg,
+                        named,
+                        unit,
+                    ),
+                },
                 label_at: point(&path.label_at),
             })
             .collect(),
@@ -257,6 +306,16 @@ fn view(annotation: &Annotation, unit: DistanceUnit) -> MeasurementView {
             // A ring set's "total" is how far the outermost ring reaches, which
             // is a different sentence from a chain's running sum.
             MeasurementKind::Rings => format!("outer {}", distance(m, unit)),
+            // How far in how long: the two numbers the speed is the quotient
+            // of, so a reader can check it.
+            MeasurementKind::Motion => match moved {
+                Some((_, steps)) => format!(
+                    "{} · {} h",
+                    distance(m, unit),
+                    group(i64::from(steps) * i64::from(readout.step_hours))
+                ),
+                None => distance(m, unit),
+            },
             _ => format!("total {}", distance(m, unit)),
         }),
         total_at: measured.handles.last().map(point),
@@ -282,16 +341,29 @@ pub fn measurements(state: tauri::State<'_, AppState>) -> Result<Vec<Measurement
 /// Implementation of [`measurements`].
 pub fn measurements_of(state: &AppState) -> Result<Vec<MeasurementView>> {
     with_session(state, |session| {
-        let unit = session.settings.distance_unit;
+        let (distance, speed) = (session.settings.distance_unit, session.settings.speed_unit);
         let open = session.require_open()?;
-        Ok(open
-            .project
-            .annotations
-            .measurements
-            .iter()
-            .map(|annotation| view(annotation, unit))
-            .collect())
+        Ok(views(&open.project, distance, speed))
     })
+}
+
+/// Every measurement of a project, as the map draws them.
+fn views(
+    project: &ve_core::project::Project,
+    distance: DistanceUnit,
+    speed: SpeedUnit,
+) -> Vec<MeasurementView> {
+    let readout = Readout {
+        distance,
+        speed,
+        step_hours: project.settings.step_hours.hours(),
+    };
+    project
+        .annotations
+        .measurements
+        .iter()
+        .map(|annotation| view(annotation, readout))
+        .collect()
 }
 
 /// Writes a new set of measurements, as one undoable step.
@@ -305,18 +377,14 @@ fn write(
     edit: impl FnOnce(&mut Vec<Annotation>) -> Result<()>,
 ) -> Result<Vec<MeasurementView>> {
     with_session(state, |session| {
-        let unit = session.settings.distance_unit;
+        let (distance, speed) = (session.settings.distance_unit, session.settings.speed_unit);
         let open = session.require_open()?;
         let before = open.project.annotations.clone();
         let mut measurements = before.measurements.clone();
         edit(&mut measurements)?;
         let after = Annotations::of(measurements);
         if after == before {
-            return Ok(before
-                .measurements
-                .iter()
-                .map(|annotation| view(annotation, unit))
-                .collect());
+            return Ok(views(&open.project, distance, speed));
         }
 
         let command = ve_core::command::Command::SetAnnotations { before, after };
@@ -330,13 +398,7 @@ fn write(
         // away every rendered tile because someone dropped a pair of dividers
         // on the map.
         let open = session.require_open()?;
-        Ok(open
-            .project
-            .annotations
-            .measurements
-            .iter()
-            .map(|annotation| view(annotation, unit))
-            .collect())
+        Ok(views(&open.project, distance, speed))
     })
 }
 
@@ -366,28 +428,44 @@ pub fn measurement_added(
 
 /// The measurement a leg being drawn would be, read out as the placed one
 /// will read (spec.md 10, M29): the dividers' distance and bearing follow
-/// the pointer from the first click to the second. Nothing is stored; the settings lock supplies the display unit, and it is the same `view` the committed measurement gets,
-/// so what the pointer shows is exactly what the click will keep.
+/// the pointer from the first click to the second, and a feature's speed
+/// follows it once the playhead has moved on from the first mark. Nothing is
+/// stored; the session supplies the display units and the project's hours per
+/// step, and it is the same `view` the committed measurement gets, so what the
+/// pointer shows is exactly what the click will keep.
 #[tauri::command]
 pub fn preview_measurement(
     state: tauri::State<'_, AppState>,
     measurement: NewMeasurement,
 ) -> Result<MeasurementView> {
-    let unit = with_session(&state, |session| Ok(session.settings.distance_unit))?;
-    measurement_preview(measurement, unit)
+    let readout = readout_of(&state)?;
+    measurement_preview(measurement, readout)
+}
+
+/// What the open project's measurements are written in.
+pub fn readout_of(state: &AppState) -> Result<Readout> {
+    with_session(state, |session| {
+        let (distance, speed) = (session.settings.distance_unit, session.settings.speed_unit);
+        let open = session.require_open()?;
+        Ok(Readout {
+            distance,
+            speed,
+            step_hours: open.project.settings.step_hours.hours(),
+        })
+    })
 }
 
 /// Implementation of [`preview_measurement`].
 pub fn measurement_preview(
     measurement: NewMeasurement,
-    unit: DistanceUnit,
+    readout: Readout,
 ) -> Result<MeasurementView> {
     Ok(view(
         &Annotation {
             id: Id::from_raw(0),
             measurement: placed(measurement)?,
         },
-        unit,
+        readout,
     ))
 }
 
@@ -423,6 +501,26 @@ fn placed(measurement: NewMeasurement) -> Result<Measurement> {
                 centre: *centre,
                 interval_m: interval(measurement.interval_km)?,
                 count: measurement.count.clamp(1, MAX_RINGS),
+            }
+        }
+        MeasurementKind::Motion => {
+            let [from, to] = points.as_slice() else {
+                return Err(bad("a feature's speed is two points"));
+            };
+            // Refused rather than measured as nothing: with no time between
+            // the marks there is no speed to show, and a caller that sends
+            // them the wrong way round would get a feature travelling
+            // backwards through a forecast.
+            let Some([from_step, to_step]) = measurement.steps.filter(|[a, b]| b > a) else {
+                return Err(bad(
+                    "a feature's speed needs two time steps, the second later",
+                ));
+            };
+            Measurement::Motion {
+                from: *from,
+                to: *to,
+                from_step,
+                to_step,
             }
         }
     };
@@ -656,6 +754,17 @@ mod tests {
         );
         // A ring has no bearing, so its label has no course on the end.
         assert!(!label(PathKind::Ring, 1000.0, None, false, DistanceUnit::Km).contains('°'));
+    }
+
+    /// One metre per second in each unit, against the definitions: 3 600 m in
+    /// the hour is 3.6 km, 1.944 nautical miles of 1 852 m, and 2.237 statute
+    /// miles of 1 609.344 m.
+    #[test]
+    fn a_speed_is_written_in_the_preferred_unit() {
+        assert_eq!(speed(1.0, SpeedUnit::Kmh), "3.60 km/h");
+        assert_eq!(speed(1.0, SpeedUnit::Kt), "1.94 kt");
+        assert_eq!(speed(1.0, SpeedUnit::Mph), "2.24 mph");
+        assert_eq!(speed(10.0, SpeedUnit::Kt), "19.4 kt");
     }
 
     #[test]

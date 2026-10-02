@@ -69,6 +69,7 @@ fn dividers(points: Vec<[f64; 2]>) -> NewMeasurement {
         points,
         interval_km: 0.0,
         count: 0,
+        steps: None,
     }
 }
 
@@ -83,7 +84,7 @@ fn a_leg_previews_as_it_will_be_placed() {
     open(&state);
     let previewed = measure::measurement_preview(
         dividers(vec![[0.0, 0.0], [10.0, 0.0]]),
-        ve_app::settings::DistanceUnit::Nm,
+        measure::readout_of(&state).expect("readout"),
     )
     .expect("preview");
     assert!(
@@ -137,6 +138,7 @@ fn a_chain_measures_its_legs_and_extends() {
             points: vec![[0.0, 40.0], [30.0, 50.0]],
             interval_km: 0.0,
             count: 0,
+            steps: None,
         },
     )
     .expect("place a passage");
@@ -161,6 +163,7 @@ fn a_passage_draws_both_paths_and_names_them() {
             points: vec![[-73.78, 40.64], [4.9, 52.3]],
             interval_km: 0.0,
             count: 0,
+            steps: None,
         },
     )
     .expect("place a passage");
@@ -198,6 +201,7 @@ fn rings_take_an_interval_and_a_count() {
             points: vec![[-30.0, 45.0]],
             interval_km: 100.0,
             count: 3,
+            steps: None,
         },
     )
     .expect("place rings");
@@ -217,6 +221,106 @@ fn rings_take_an_interval_and_a_count() {
     // silently ignored.
     assert!(measure::rings_set(&state, id, 0.0, 3).is_err());
     assert!(measure::rings_set(&state, id, f64::NAN, 3).is_err());
+}
+
+fn motion(points: Vec<[f64; 2]>, steps: [u32; 2]) -> NewMeasurement {
+    NewMeasurement {
+        kind: MeasurementKind::Motion,
+        points,
+        interval_km: 0.0,
+        count: 0,
+        steps: Some(steps),
+    }
+}
+
+/// A feature's speed, against a number a navigator can check without a
+/// computer: ten degrees of the equator is 600 nm, eight steps of this
+/// project's three hours is a day, and 600 nm in a day is 25 kt. Due east,
+/// so the course is 090 — a course, whatever the project calls its winds.
+#[test]
+fn a_feature_speed_is_distance_over_the_steps_between() {
+    let root = TempRoot::new("motion");
+    let state = app(&root);
+    open(&state);
+
+    let views = measure::measurement_added(&state, motion(vec![[0.0, 0.0], [10.0, 0.0]], [1, 9]))
+        .expect("place");
+    assert_eq!(views.len(), 1);
+    assert_eq!(views[0].kind, MeasurementKind::Motion);
+    assert_eq!(views[0].paths.len(), 1);
+    assert_eq!(views[0].paths[0].label, "25.0 kt · 090°");
+    assert_eq!(views[0].total.as_deref(), Some("600 nm · 24 h"));
+    assert_eq!(views[0].handles, vec![[0.0, 0.0], [10.0, 0.0]]);
+
+    // The pointer's readout is the one the click keeps.
+    let previewed = measure::measurement_preview(
+        motion(vec![[0.0, 0.0], [10.0, 0.0]], [1, 9]),
+        measure::readout_of(&state).expect("readout"),
+    )
+    .expect("preview");
+    assert_eq!(previewed.paths[0].label, views[0].paths[0].label);
+    assert_eq!(previewed.total, views[0].total);
+
+    // Dragging the second mark half way back halves the speed and leaves the
+    // time alone: the marks say where, the steps say when.
+    let id = views[0].id;
+    let dragged = measure::handle_moved(&state, id, 1, [5.0, 0.0]).expect("drag");
+    assert_eq!(dragged[0].paths[0].label, "12.5 kt · 090°");
+    assert_eq!(dragged[0].total.as_deref(), Some("300 nm · 24 h"));
+
+    // It is an edit like any other: undone, redone, and its own to clear.
+    edit::undo_for_test(&state).expect("undo the drag");
+    edit::undo_for_test(&state).expect("undo the placing");
+    assert!(measure::measurements_of(&state).expect("read").is_empty());
+    edit::redo_for_test(&state).expect("redo");
+    assert_eq!(measure::measurements_of(&state).expect("read").len(), 1);
+    let left = measure::measurements_cleared(&state, Some(MeasurementKind::Motion)).expect("clear");
+    assert!(left.is_empty());
+}
+
+/// The speed follows the unit preference, not a unit of its own.
+#[test]
+fn a_feature_speed_is_shown_in_the_preferred_units() {
+    let root = TempRoot::new("motion-units");
+    let state = app(&root);
+    open(&state);
+    ve_app::settings::display_units_set(
+        &state,
+        ve_app::settings::DistanceUnit::Km,
+        ve_app::settings::SpeedUnit::Kmh,
+    )
+    .expect("units");
+
+    // One degree of the equator in one three-hour step: 111.2 km in 3 h.
+    let views = measure::measurement_added(&state, motion(vec![[0.0, 0.0], [1.0, 0.0]], [0, 1]))
+        .expect("place");
+    assert_eq!(views[0].paths[0].label, "37.1 km/h · 090°");
+    assert_eq!(views[0].total.as_deref(), Some("111 km · 3 h"));
+}
+
+/// No time between the marks is no speed, and a second mark *earlier* than
+/// the first is a feature travelling backwards through the forecast.
+#[test]
+fn a_feature_speed_needs_a_later_step() {
+    let root = TempRoot::new("motion-refused");
+    let state = app(&root);
+    open(&state);
+
+    for steps in [Some([3, 3]), Some([3, 2]), None] {
+        let refused = measure::measurement_added(
+            &state,
+            NewMeasurement {
+                steps,
+                ..motion(vec![[0.0, 0.0], [10.0, 0.0]], [0, 1])
+            },
+        );
+        assert!(refused.is_err(), "{steps:?} was accepted");
+    }
+    assert!(measure::measurements_of(&state).expect("read").is_empty());
+    // Nor can one be extended: it has two ends.
+    let placed = measure::measurement_added(&state, motion(vec![[0.0, 0.0], [10.0, 0.0]], [0, 1]))
+        .expect("place");
+    assert!(measure::measurement_extended(&state, placed[0].id, [20.0, 0.0]).is_err());
 }
 
 /// Dragging a point is one history entry, and undo puts it back where the drag
@@ -265,6 +369,7 @@ fn clearing_is_per_tool_and_global() {
             points: vec![[0.0, 10.0], [20.0, 20.0]],
             interval_km: 0.0,
             count: 0,
+            steps: None,
         },
     )
     .expect("passage");
@@ -275,6 +380,7 @@ fn clearing_is_per_tool_and_global() {
             points: vec![[40.0, 40.0]],
             interval_km: 50.0,
             count: 2,
+            steps: None,
         },
     )
     .expect("rings");
@@ -314,9 +420,15 @@ fn measurements_survive_a_round_trip() {
             points: vec![[10.0, -20.0]],
             interval_km: 125.5,
             count: 4,
+            steps: None,
         },
     )
     .expect("rings");
+    measure::measurement_added(
+        &state,
+        motion(vec![[170.0, -40.0], [-175.0, -42.5]], [0, 1]),
+    )
+    .expect("motion");
     let before = measure::measurements_of(&state).expect("read");
 
     let path = root.0.join("measured.veproj");
@@ -344,6 +456,8 @@ fn measurements_survive_a_round_trip() {
             a.paths.iter().map(|p| p.label.clone()).collect::<Vec<_>>(),
             b.paths.iter().map(|p| p.label.clone()).collect::<Vec<_>>(),
         );
+        // A feature's steps reach the file too: its total carries the hours.
+        assert_eq!(a.total, b.total);
     }
 }
 
@@ -411,6 +525,7 @@ fn measurements_never_reach_an_export() {
             points: vec![[-73.78, 40.64], [4.9, 52.3]],
             interval_km: 0.0,
             count: 0,
+            steps: None,
         },
     )
     .expect("passage");
@@ -423,6 +538,7 @@ fn measurements_never_reach_an_export() {
             points: vec![[0.0, 0.0]],
             interval_km: 500.0,
             count: 4,
+            steps: None,
         },
     )
     .expect("rings");

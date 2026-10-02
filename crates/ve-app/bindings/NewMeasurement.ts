@@ -4,7 +4,7 @@ import type { MeasurementKind } from "./MeasurementKind";
 /**
  * What a new measurement is made of.
  *
- * One request for all three tools, because the frontend places them with one
+ * One request for all four tools, because the frontend places them with one
  * gesture handler and the fields a tool does not use are the fields it does
  * not send. The alternative — three commands — would have three arms of the
  * same match on the other side of the wire.
@@ -26,4 +26,9 @@ interval_km: number,
 /**
  * How many rings.
  */
-count: number, };
+count: number, 
+/**
+ * The time steps the two points were placed at, for a feature's speed:
+ * the second later than the first.
+ */
+steps?: [number, number], };

@@ -1858,6 +1858,21 @@ mod tests {
                     count: 3,
                 },
             },
+            crate::annotation::Annotation {
+                id: crate::id::Id::from_raw(33),
+                measurement: crate::annotation::Measurement::Motion {
+                    from: LonLat {
+                        lon: HOSTILE[2],
+                        lat: -12.508_890_379_193_765,
+                    },
+                    to: LonLat {
+                        lon: -12.508_890_379_193_765,
+                        lat: 45.123_456_789_012_34,
+                    },
+                    from_step: 1,
+                    to_step: 5,
+                },
+            },
         ];
 
         let mut rect = Object::new(ToolKind::ShapeFill, "rect", 24);

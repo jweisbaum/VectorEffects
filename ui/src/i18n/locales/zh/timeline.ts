@@ -216,5 +216,6 @@ const catalogue: Record<string, string> = {
   "link": "链接",
   "parent": "父对象",
   "attach": "附加",
+  "{time} · before the measurement's first mark": "{time} · 早于测量的第一个标记",
 };
 export default catalogue;
