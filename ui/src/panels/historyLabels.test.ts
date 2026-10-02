@@ -33,6 +33,17 @@ describe("translateHistoryLabel", () => {
     expect(translateHistoryLabel("Delete layer")).toBe("Eliminar capa");
   });
 
+  /** The near-real-time batch is a label of its own, not a file being imported. */
+  it("does not read an import's own label as a file's name", () => {
+    setLanguage("es");
+    expect(translateHistoryLabel("Import near-real-time data")).toBe(
+      "Importar datos en tiempo casi real",
+    );
+    expect(translateHistoryLabel("Import history")).toBe("Importar datos históricos");
+    // A file's name is still a name.
+    expect(translateHistoryLabel("Import gfs.grib2")).toBe("Importar gfs.grib2");
+  });
+
   it("passes a label it does not know through unchanged", () => {
     setLanguage("es");
     expect(translateHistoryLabel("Frobnicate the widget")).toBe("Frobnicate the widget");

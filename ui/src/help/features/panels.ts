@@ -4,7 +4,7 @@ import type { Feature } from "../features";
 const LEFT = ["panel:left"];
 const PROPERTIES = ["panel:properties"];
 
-/** The layer panel, the properties panel, the history list and the history import. */
+/** The layer panel, the properties panel, the history list, the history import and the near-real-time import. */
 const features: Feature[] = [
   // The layer panel.
   { id: "layers:add", label: msg("Add a layer"), description: msg("Adds an empty painted layer on top of the stack."),
@@ -19,6 +19,8 @@ const features: Feature[] = [
     keywords: [msg("shapefile"), msg("route"), msg("track")], topic: "imports", reveal: LEFT },
   { id: "layers:import-history", label: msg("Import history"), description: msg("Downloads past hours of wind and currents from the ERA5 and GlobCurrent archives."),
     keywords: [msg("calendar"), msg("download"), msg("past weather"), msg("archive")], topic: "history", reveal: LEFT },
+  { id: "layers:import-nrt", label: msg("Near-real-time data"), description: msg("Downloads the last days of observed wind and currents from the Copernicus Marine Service, up to now."),
+    keywords: [msg("satellite"), msg("download"), msg("latest data"), msg("recent weather"), msg("observations")], topic: "nrt", reveal: LEFT },
   { id: "layers:list", label: msg("Layers"), description: msg("The stack of layers, top first; click one to make it the active layer."),
     keywords: [msg("active layer"), msg("stack")], topic: "layers", reveal: LEFT },
   { id: "layers:visibility", label: msg("Show or hide a layer"), description: msg("The eye beside a layer shows or hides it on the map and in the export."),
@@ -89,5 +91,19 @@ const features: Feature[] = [
     keywords: [msg("data source")], topic: "history", reveal: [...LEFT, "layers:history-import"] },
   { id: "history-import:import", label: msg("Import"), description: msg("Starts the download; one layer is added per archive."),
     keywords: [msg("fetch"), msg("download")], topic: "history", reveal: [...LEFT, "layers:history-import"] },
+
+  // The near-real-time import dialog.
+  { id: "nrt-import:dialog", label: msg("Near-real-time data"), description: msg("Chooses how many days and which products to download."),
+    keywords: [msg("download"), msg("latest data"), msg("recent weather")], topic: "nrt", reveal: [...LEFT, "layers:nrt-import"] },
+  { id: "nrt-import:days", label: msg("Days"), description: msg("How many days back from today the download starts."),
+    keywords: [msg("date range"), msg("how far back")], topic: "nrt", reveal: [...LEFT, "layers:nrt-import"] },
+  { id: "nrt-import:set-start", label: msg("Set the timeline's start"), description: msg("Sets the project's first step to the start of the period."),
+    keywords: [msg("start time"), msg("timeline date")], topic: "nrt", reveal: [...LEFT, "layers:nrt-import"] },
+  { id: "nrt-import:extend", label: msg("Lengthen the timeline"), description: msg("Adds steps so the timeline reaches the present; shown when the days asked for need more steps than the project has."),
+    keywords: [msg("duration"), msg("more steps")], topic: "nrt", reveal: [...LEFT, "layers:nrt-import"] },
+  { id: "nrt-import:products", label: msg("Products"), description: msg("Which products to download: MULTIOBS and DUACS currents, L4 wind."),
+    keywords: [msg("data source"), msg("satellite")], topic: "nrt", reveal: [...LEFT, "layers:nrt-import"] },
+  { id: "nrt-import:import", label: msg("Import"), description: msg("Starts the download; one layer is added per product."),
+    keywords: [msg("fetch"), msg("download")], topic: "nrt", reveal: [...LEFT, "layers:nrt-import"] },
 ];
 export default features;

@@ -1,0 +1,301 @@
+{
+  "id": "MULTIOBS_GLO_PHY_MYNRT_015_003",
+  "type": "Collection",
+  "stac_version": "1.0.0",
+  "stac_extensions": [
+    "https://stac-extensions.github.io/scientific/v1.0.0/schema.json"
+  ],
+  "title": "Global Total (COPERNICUS-GLOBCURRENT), Ekman and Geostrophic currents at the Surface and 15m",
+  "description": "This product is a  L4 REP and NRT global total velocity field at 0m and 15m together wiht its individual components (geostrophy and Ekman) and related uncertainties. It consists of the zonal and meridional velocity at a 1h frequency and at 1/4 degree regular grid. The total velocity fields are obtained by combining CMEMS  satellite Geostrophic surface currents and modelled Ekman currents at the surface and 15m depth (using ERA5 wind stress in REP and ERA5* in NRT). 1 hourly product, daily and monthly means are available. This product has been initiated in the frame of CNES/CLS projects. Then it has been consolidated during the Globcurrent project (funded by the ESA User Element Program).\n\n**References:**\n\n* Rio, M.-H., S. Mulet, and N. Picot: Beyond GOCE for the ocean circulation estimate: Synergetic use of altimetry, gravimetry, and in situ data provides new insight into geostrophic and Ekman currents, Geophys. Res. Lett., 41, doi:10.1002/2014GL061773, 2014.\n",
+  "license": "proprietary",
+  "providers": [
+    {
+      "name": "CLS (France)",
+      "roles": [
+        "producer"
+      ]
+    },
+    {
+      "name": "Copernicus Marine Service",
+      "roles": [
+        "host",
+        "processor"
+      ],
+      "url": "https://marine.copernicus.eu"
+    }
+  ],
+  "keywords": [
+    "oceanographic-geographical-features",
+    "numerical-model",
+    "satellite-observation",
+    "in-situ-observation",
+    "eastward-sea-water-velocity",
+    "northward-sea-water-velocity",
+    "eastward-sea-water-velocity-due-to-ekman-drift",
+    "northward-sea-water-velocity-due-to-ekman-drift",
+    "sea-water-x-velocity-due-to-tide",
+    "sea-water-y-velocity-due-to-tide",
+    "multi-year",
+    "near-real-time",
+    "weather-climate-and-seasonal-forecasting",
+    "coastal-marine-environment",
+    "marine-safety",
+    "marine-resources",
+    "global-ocean",
+    "level-4",
+    "none"
+  ],
+  "links": [
+    {
+      "rel": "root",
+      "href": "../catalog.stac.json",
+      "title": "Copernicus Marine Data Store",
+      "type": "application/json"
+    },
+    {
+      "rel": "parent",
+      "href": "../catalog.stac.json",
+      "title": "Copernicus Marine Data Store",
+      "type": "application/json"
+    },
+    {
+      "rel": "item",
+      "href": "cmems_obs-mob_glo_phy-cur_my_0.25deg_P1D-m_202411/dataset.stac.json",
+      "title": "Multi-year, daily",
+      "type": "application/json"
+    },
+    {
+      "rel": "item",
+      "href": "cmems_obs-mob_glo_phy-cur_my_0.25deg_P1M-m_202411/dataset.stac.json",
+      "title": "Multi-year, monthly",
+      "type": "application/json"
+    },
+    {
+      "rel": "item",
+      "href": "cmems_obs-mob_glo_phy-cur_my_0.25deg_PT1H-i_202411/dataset.stac.json",
+      "title": "Multi-year, hourly",
+      "type": "application/json"
+    },
+    {
+      "rel": "item",
+      "href": "cmems_obs-mob_glo_phy-cur_nrt_0.25deg_P1D-m_202411/dataset.stac.json",
+      "title": "Near-real-time, daily",
+      "type": "application/json"
+    },
+    {
+      "rel": "item",
+      "href": "cmems_obs-mob_glo_phy-cur_nrt_0.25deg_P1M-m_202411/dataset.stac.json",
+      "title": "Near-real-time, monthly",
+      "type": "application/json"
+    },
+    {
+      "rel": "item",
+      "href": "cmems_obs-mob_glo_phy-cur_nrt_0.25deg_PT1H-i_202411/dataset.stac.json",
+      "title": "Near-real-time, hourly",
+      "type": "application/json"
+    },
+    {
+      "rel": "license",
+      "href": "https://marine.copernicus.eu/user-corner/service-commitments-and-licence",
+      "title": "Copernicus Marine Service Commitments and Licence",
+      "type": "text/html"
+    },
+    {
+      "rel": "cite-as",
+      "href": "https://doi.org/10.48670/mds-00327",
+      "title": "10.48670/mds-00327",
+      "type": "text/html"
+    },
+    {
+      "rel": "alternative",
+      "href": "https://data.marine.copernicus.eu/product/MULTIOBS_GLO_PHY_MYNRT_015_003",
+      "title": "Product page",
+      "type": "text/html"
+    },
+    {
+      "rel": "describedby",
+      "href": "https://documentation.marine.copernicus.eu/PUM/CMEMS-MOB-PUM-015-003.pdf",
+      "title": "Product User Manual",
+      "type": "application/pdf",
+      "ref": "CMEMS-MOB-PUM-015-003",
+      "createdAt": "2013-02-15",
+      "updatedAt": "2024-07-26T15:49:56.154Z"
+    },
+    {
+      "rel": "describedby",
+      "href": "https://documentation.marine.copernicus.eu/QUID/CMEMS-MOB-QUID-015-003.pdf",
+      "title": "Quality Information Document",
+      "type": "application/pdf",
+      "ref": "CMEMS-MOB-QUID-015-003",
+      "createdAt": "2013-02-15",
+      "updatedAt": "2024-07-31T13:15:42.237Z"
+    },
+    {
+      "rel": "describedby",
+      "href": "https://documentation.marine.copernicus.eu/SQO/CMEMS-MOB-SQO-015-003.pdf",
+      "title": "Synthesis Quality Overview",
+      "type": "application/pdf",
+      "ref": "CMEMS-MOB-SQO-015-003",
+      "createdAt": "2023-11-30",
+      "updatedAt": "2024-07-26T15:59:28.543Z"
+    }
+  ],
+  "extent": {
+    "spatial": {
+      "bbox": [
+        [
+          -179.875,
+          -89.875,
+          179.875,
+          89.875
+        ]
+      ]
+    },
+    "temporal": {
+      "interval": [
+        [
+          "1993-01-01T00:00:00Z",
+          "2026-10-01T23:00:00Z"
+        ]
+      ]
+    }
+  },
+  "assets": {
+    "thumbnail": {
+      "href": "https://mdl-metadata.s3.waw3-1.cloudferro.com/metadata/thumbnails/MULTIOBS_GLO_PHY_MYNRT_015_003.jpg",
+      "type": "image/jpeg",
+      "roles": [
+        "thumbnail"
+      ],
+      "title": "Global Total (COPERNICUS-GLOBCURRENT), Ekman and Geostrophic currents at the Surface and 15m thumbnail"
+    }
+  },
+  "properties": {
+    "altId": "74de7cdc-9ac8-4f63-8d32-56fc497b62a8",
+    "providerMetadata": {
+      "source": "cmems",
+      "type": "csw",
+      "url": "https://csw.marine.copernicus.eu/geonetwork/csw-MYOCEAN-CORE-PRODUCTS/eng/csw?service=CSW&version=2.0.2&request=GetRecordById&id=74de7cdc-9ac8-4f63-8d32-56fc497b62a8&elementsetname=full&outputSchema=http://www.isotc211.org/2005/gmd"
+    },
+    "thumbnailMeta": {
+      "creationDate": "2023-11-27T12:21:16.875Z",
+      "layerId": "MULTIOBS_GLO_PHY_MYNRT_015_003/cmems_obs_mob_glo_phy-cur_my_0.25deg_P1M-m_202311/sea_water_velocity",
+      "time": 1656633600000,
+      "elevation": 0,
+      "basemapId": "light",
+      "overlays": {
+        "tags": [
+          {
+            "name": "GlobCurrent"
+          }
+        ]
+      },
+      "crs": "epsg:4326",
+      "valueMin": 0,
+      "valueMax": 1.455,
+      "valueClamp": true,
+      "logScale": false,
+      "style": "default",
+      "colormapId": "speed",
+      "colormapInvert": false,
+      "colormapStops": null
+    },
+    "creationDate": "2023-11-30",
+    "modifiedDate": "2024-11-26",
+    "contacts": [
+      {
+        "name": "",
+        "organisationName": "MULTIOBS-CLS-TOULOUSE-FR",
+        "responsiblePartyRole": "resourceProvider",
+        "email": ""
+      }
+    ],
+    "projection": "regular",
+    "assimilatedData": [
+      "None"
+    ],
+    "formats": [
+      "NetCDF-4"
+    ],
+    "updateFrequencies": {
+      "daily": "16:00 UTC; The 6th of the following month at 16:00 UTC",
+      "biannually": null
+    },
+    "featureTypes": [
+      "Grid"
+    ],
+    "indicatorFamilies": [],
+    "geoExtent": {
+      "type": "envelope",
+      "coordinates": [
+        [
+          -179.875,
+          89.875
+        ],
+        [
+          179.875,
+          -89.875
+        ]
+      ]
+    },
+    "geoResolution": {
+      "row": {
+        "magnitude": 0.25,
+        "units": "degree"
+      },
+      "column": {
+        "magnitude": 0.25,
+        "units": "degree"
+      }
+    },
+    "tempExtentBegin": "1993-01-01",
+    "tempResolutions": [
+      "Hourly",
+      "Daily",
+      "Monthly"
+    ],
+    "vertExtentMin": -15,
+    "vertExtentMax": 0,
+    "vertLevels": 2,
+    "rank": 9505,
+    "useCases": [],
+    "areas": [
+      "Global Ocean"
+    ],
+    "times": [
+      "Past"
+    ],
+    "sources": [
+      "In-situ observations",
+      "Numerical models",
+      "Satellite observations"
+    ],
+    "colors": [
+      "Blue Ocean"
+    ],
+    "communities": [
+      "Policy & governance",
+      "Science & innovation",
+      "Extremes, hazards & safety",
+      "Coastal services",
+      "Natural resources & energy",
+      "Trade & marine navigation"
+    ],
+    "processingLevel": "Level 4",
+    "mainVariables": [
+      "Velocity"
+    ],
+    "allVariables": [
+      "Eastward sea water velocity",
+      "Eastward sea water velocity due to ekman drift",
+      "Northward sea water velocity",
+      "Northward sea water velocity due to ekman drift",
+      "Sea water x velocity due to tide",
+      "Sea water y velocity due to tide"
+    ],
+    "directives": [],
+    "isStaging": false,
+    "admp_updated": "2026-10-02T15:17:26.181669Z"
+  },
+  "sci:doi": "10.48670/mds-00327"
+}

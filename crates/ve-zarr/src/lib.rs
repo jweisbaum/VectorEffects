@@ -19,6 +19,7 @@
 //! here with their tests; the archives, their quirks and the reasoning about
 //! provisional hours are the same in both.
 
+pub mod arco;
 pub mod blosc;
 pub mod codec;
 pub mod era5;
@@ -27,15 +28,18 @@ pub mod export;
 pub mod globcurrent;
 pub mod http;
 mod parallel;
+pub mod product;
 pub mod regrid;
 pub mod routing;
 pub mod source;
+pub mod stac;
 pub mod store;
 pub mod time;
 
 pub use era5::{DEFAULT_STORE_URL, Era5Store};
 pub use error::{Result, ZarrError};
 pub use globcurrent::GlobCurrentStore;
+pub use product::Product;
 pub use source::{Field, FieldSource, NI, NJ, POINTS_PER_STEP, Step, Variable};
 pub use time::Utc;
 

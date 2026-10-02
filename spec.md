@@ -1181,11 +1181,73 @@ application (§3.6). The dialog says so on both labels: the control has no
 timezone of its own, and reading it as local time would shift every fetched
 hour silently.
 
-**This is the one path that reaches the network for *data*** (invariant 5).
-It runs when the button is pressed and at no other moment: no timer, no
-startup check, no refresh. Everything it needs afterwards is on disk. The
-only other thing that ever fetches is the OpenStreetMap background of §5.4,
-which is a picture and not data, and is fetched only while it is switched on.
+**This and the near-real-time import below are the two paths that reach the
+network for *data*** (invariant 5). Each runs when its button is pressed and
+at no other moment: no timer, no startup check, no refresh. Everything
+needed afterwards is on disk. The only other thing that ever fetches is the
+OpenStreetMap background of §5.4, which is a picture and not data, and is
+fetched only while it is switched on.
+
+#### Near-real-time products (M89)
+
+A second button, beside the calendar, asks a different question: not a range
+of past hours but **the last N days up to now**. It reads the near-real-time
+products rather than the archives, and what comes back is one layer per
+product, made by the same pipeline — fetched once, written to a GRIB2 file
+in the data directory, read back as an imported layer. The design is
+`docs/superpowers/specs/2026-10-02-near-real-time-data-design.md`; ten
+products are planned and three are here: Copernicus Marine's MULTIOBS total
+surface current (hourly), DUACS geostrophic current (daily) and L4 wind
+(hourly).
+
+**The period starts at 00:00 UTC, N days before today, and ends on the
+current hour.** A midnight, so a daily product has whole days and the
+timeline's labels begin on one. The number of days is bounded by what 240
+steps of the project's own step can hold, counted to the current hour: nine
+days on an hourly project, twenty-nine on a three-hourly one.
+
+**The timeline can be set to the period**, by two options that are ticked
+when the dialog opens. One sets, or moves, the timeline's start to the
+period's start — the period's, not the first time fetched, because every
+layer counts from it. The other lengthens the timeline when the period needs
+more steps than the project has; it never shortens one. Unticked, the first
+field still lands on step 0 (§4.8), the labels are left alone and the fetch
+stops at the timeline's end. The layers, the start and the length arrive as
+one history entry.
+
+**Only the times a step can show are fetched, each once.** A product is
+walked at the coarser of its own period and the project's step: a daily
+product at its midnights however fine the timeline, an hourly one at every
+third hour on a three-hourly timeline. The dialog states the number of
+downloads and the approximate size on disk before the button is pressed.
+
+**Each layer holds its times for the product's period** (D73): a DUACS
+field is on every step of its day.
+
+**A product trails the present, and that is not a failure.** Each is about a
+day behind, so the newest steps are usually empty; the layer holds what
+there was. **A product that cannot be fetched does not stop the others**:
+what arrived is imported and what did not is named in the status bar.
+Nothing arriving at all is an error and adds nothing.
+
+**Every layer counts from the period's start.** The importer rebases a file
+onto its own first message (§4.8), so a product missing the period's first
+time would land a day early and disagree with the layer beside it. Its file
+is therefore written with an empty message at the period's start: nothing
+is shown there, and everything after it is where it belongs.
+
+**A store's address is read from the catalogue, not written down.** The
+Marine Data Store moves a dataset to a new bucket and a new version suffix
+when it is reissued, and publishes a STAC catalogue saying where each is.
+The import reads two small documents to find the store, holds the answer to
+the Marine Data Store's own host — a dataset listed anywhere else is refused,
+since the offline check cannot see an address read at run time — and falls
+back to the last address known to work if the catalogue cannot be read or
+the store it names will not open.
+Everything is anonymous; the credit Copernicus Marine asks for is shown in
+the dialog. Fields arrive on their own grids — 0.25° and 0.125°,
+cell-centred — and are put on the history import's 0.25° grid by the same
+bilinear step GlobCurrent already takes.
 
 ### 4.11 Backdrops: charts and GIS data
 

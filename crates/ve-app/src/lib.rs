@@ -24,6 +24,7 @@ pub mod mcp;
 pub mod measure;
 pub mod merge;
 pub mod names;
+pub mod nrt;
 pub mod opening;
 pub mod palette;
 pub mod paths;
@@ -222,6 +223,7 @@ pub fn run() -> anyhow::Result<()> {
                 settings::chart_status,
                 zarr::new_project_from_zarr,
                 history::import_history,
+                nrt::import_nrt,
                 document::document_tree,
                 document::object_properties,
                 document::set_object_property,

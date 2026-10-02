@@ -1,6 +1,7 @@
 /** History entries: the labels the backend writes for each edit, as the History panel shows them. */
 const catalogue: Record<string, string> = {
   "Import history": "Historische gegevens importeren",
+  "Import near-real-time data": "Bijna-realtimegegevens importeren",
   "Add layer": "Laag toevoegen",
   "Delete layer": "Laag verwijderen",
   "Rename layer": "Laag hernoemen",

@@ -3662,6 +3662,58 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M89 — The last N days, up to now: three Copernicus products
+
+The second milestone of the near-real-time import and the first that can be
+seen: a button beside the calendar opens a dialog asking for a number of
+days, whether to set the timeline to the period, and which products.
+MULTIOBS, DUACS and the L4 hourly wind are here; the other seven of the ten
+arrive with their own readers (the design's §8).
+
+`ve_zarr::arco` is one reader for any Copernicus time-chunked store —
+`globcurrent.rs` generalised: the scale, the offset, the fill, the grid and
+the time axis's epoch and unit come from the store, and an `ArcoSpec` says
+which two arrays are `u` and `v`. `ve_zarr::stac` finds a store through the
+public catalogue, held to the catalogue's own documents as fixtures;
+`ve_zarr::Product` is what each product *is*. `ve_app::nrt` works the period
+out from the clock and hands each product to `history`'s pipeline, which
+gained an `Origin` and a source passed in and is otherwise unchanged.
+
+**Decided here.** The Copernicus reader lives in `ve-zarr` rather than a
+new crate: it is a Zarr reader over a host that crate already names, and a
+separate crate waits for the first reader that is not. No schema bump for
+`period_hours`. A product missing the period's first time gets an empty
+first message so every layer counts from the same hour. One product failing
+does not stop the others.
+
+**Measured, against the live stores, 2026-10-02:** each product opens
+through the catalogue in 2 to 4 s and was 20 to 21 h behind; one time is
+1.4 s for MULTIOBS and 7 s for the two 0.125° products. Three days of all
+three on a three-hourly project, in the application: 68 downloads, 307 s,
+one request retried. **What the object store refused** before that: the
+first runs lost DUACS and the wind to "connection closed before message
+completed" and 408s under a burst of some seventy chunk requests. Three
+things fixed it, all in `ve_zarr::http`: HTTP/1.1 rather than HTTP/2, six
+requests in flight per store, and every request — the range reads a chunk
+is actually fetched by, not only whole reads — tried again on a transport
+failure or a "not now" status, with doubling pauses and the cause in the
+message.
+These settings are the Marine Data Store's alone — HTTP/1.1, the cap of
+eight, the five-second idle pool — because applied to ERA5 on Google, which
+is read as many small range requests multiplexed over one connection, they
+doubled an hour's time. Retries apply everywhere. **Measured after that**,
+`history_download <archive> 4 4`, `main`'s binary and this branch's run
+turn and turn about on the same evening: ERA5 read 23 / 12 / 9 s on `main`
+against 35 / 131 / 10 s here, GlobCurrent 37 / 58 / 3 s against 4 / 3 /
+46 s. The fast runs are equal and the slow ones are the network's — both
+binaries stalled for tens of seconds on different runs — so the one real
+difference is that a stalled request here waits out its timeout and is
+tried again where before it failed the import.
+
+**Not done:** the other seven products; a region; a refresh. The hourly
+wind is large — about eight megabytes fetched per hour of field — and the
+dialog says so in megabytes rather than limiting it.
+
 ### M88 — A fetched layer holds for its product's period
 
 The first milestone of the near-real-time import

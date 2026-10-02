@@ -54,7 +54,9 @@ fn history_origin(source: &ve_core::document::LayerSource) -> Option<HistoryOrig
         // A project may name an archive a later version added; the identifier
         // is what the file holds and is shown when nothing here knows it.
         label: ve_zarr::Archive::parse(archive)
-            .map_or_else(|| archive.clone(), |found| found.label().to_owned()),
+            .map(|found| found.label().to_owned())
+            .or_else(|| ve_zarr::Product::parse(archive).map(|found| found.label().to_owned()))
+            .unwrap_or_else(|| archive.clone()),
         archive: archive.clone(),
         start_unix_s: *start_unix_s,
         end_unix_s: *end_unix_s,
@@ -502,7 +504,11 @@ fn tree_of(project: &Project, step: u32, backdrops: &crate::charts::Backdrops) -
                         },
                         loaded: layer.raster.is_some(),
                         frame_count: layer.raster.as_ref().map_or(0, |r| r.frames.len() as u32),
-                        span_hours: layer.raster.as_ref().map_or(0.0, |r| r.span_hours()),
+                        // A held layer's last field stands for its period
+                        // (spec.md 4.10), so that is part of what it spans.
+                        span_hours: layer.raster.as_ref().map_or(0.0, |r| {
+                            r.span_hours() + f64::from(layer.source.period_hours().unwrap_or(0))
+                        }),
                         speed_min_mps: layer.speed_range.map(|b| b.min_mps),
                         speed_max_mps: layer.speed_range.map(|b| b.max_mps),
                         speed_ceiling_mps: layer

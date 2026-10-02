@@ -28,6 +28,8 @@ const catalogue: Record<string, string> = {
 
   // Long-running work, as the status bar's spinner names it.
   "Fetching history": "Descargando datos históricos",
+  "Importing near-real-time data": "Importando datos en tiempo casi real",
+  "Opening the products": "Abriendo los productos",
   "Importing GRIB": "Importando GRIB",
   "Importing Zarr": "Importando Zarr",
   "Opening GRIB": "Abriendo GRIB",

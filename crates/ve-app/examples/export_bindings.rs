@@ -105,6 +105,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ve_app::measure::MeasuredPathView::export_all(&cfg)?;
     ve_app::measure::MeasurementView::export_all(&cfg)?;
     ve_app::measure::NewMeasurement::export_all(&cfg)?;
+    ve_app::nrt::NrtRequest::export_all(&cfg)?;
+    ve_app::nrt::NrtOutcome::export_all(&cfg)?;
+    ve_app::nrt::NrtSkipped::export_all(&cfg)?;
     ve_app::autosave::Autosave::export_all(&cfg)?;
     ve_app::settings::AppSettings::export_all(&cfg)?;
     ve_app::settings::GlyphStyle::export_all(&cfg)?;

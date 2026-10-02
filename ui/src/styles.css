@@ -1100,6 +1100,15 @@ body {
   overflow-y: auto;
 }
 
+/* --- The near-real-time dialog (spec 4.10, M89) ------------------------ */
+
+/* The history dialog's sibling and laid out by its rules; what is added is
+   the products' two headings and the credit line under them. */
+.nrt-import .nrt-group { display: flex; flex-direction: column; }
+.nrt-import .nrt-group + .nrt-group { margin-top: 6px; }
+.nrt-import .nrt-group-heading { color: var(--muted); font-size: 11px; }
+.nrt-import .nrt-credit { margin-top: 8px; font-size: 11px; }
+
 /* Palette previews stay visible both in the theme list and its closed control. */
 .theme-picker { position: relative; width: 320px; max-width: 100%; margin: 6px 0; }
 .theme-picker > label { margin-bottom: 4px; }

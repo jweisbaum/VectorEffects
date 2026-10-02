@@ -48,7 +48,9 @@ stop and raise it rather than working around it.
    socket-level test over the packaged app arrives with M10.
    **Two exceptions, both added on the user's instruction.** The history
    import of spec §4.10 reads the ERA5 and GlobCurrent archives over HTTPS
-   when the user asks it to (M38); it lives in `ve-zarr`. The OpenStreetMap
+   when the user asks it to (M38); it lives in `ve-zarr`, and so does the
+   near-real-time import beside it (M89), which reads Copernicus Marine's
+   catalogue and stores when its button is pressed. The OpenStreetMap
    background of spec §5.4 fetches raster tiles while, and only while, the
    user has that box ticked; it lives in `ve-osm`. The offline check names
    those two crates and those hosts and allows them nowhere else, so a new
@@ -106,7 +108,8 @@ crates/
                custom URI scheme, autosave (`autosave`: a snapshot of unsaved
                work every 60 s or 50 edits, offered back on the start screen). `image` decodes and georeferences
                the picture layers of spec 4.9; `measure` is the measurement
-               tools of spec 10
+               tools of spec 10; `nrt` fetches the last days of observed
+               products through `history`'s own pipeline (spec 4.10)
 ui/            React + TypeScript + Vite frontend (npm workspace member)
                  project/  start screen, native dialogs, display formatting
                  map/      camera, projections, tiles, WebGL renderer, shaders

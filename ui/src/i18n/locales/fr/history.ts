@@ -1,6 +1,7 @@
 /** History entries: the labels the backend writes for each edit, as the History panel shows them. */
 const catalogue: Record<string, string> = {
   "Import history": "Importer des données historiques",
+  "Import near-real-time data": "Importer des données en temps quasi réel",
   "Add layer": "Ajouter un calque",
   "Delete layer": "Supprimer le calque",
   "Rename layer": "Renommer le calque",

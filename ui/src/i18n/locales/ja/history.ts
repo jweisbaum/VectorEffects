@@ -1,6 +1,7 @@
 /** History entries: the labels the backend writes for each edit, as the History panel shows them. */
 const catalogue: Record<string, string> = {
   "Import history": "過去データの読み込み",
+  "Import near-real-time data": "準リアルタイムデータの読み込み",
   "Add layer": "レイヤーを追加",
   "Delete layer": "レイヤーを削除",
   "Rename layer": "レイヤー名を変更",

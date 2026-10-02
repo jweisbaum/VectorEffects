@@ -62,6 +62,8 @@ import type { ExportZarrRequest } from "./generated/ExportZarrRequest";
 import type { ExportZarrResult } from "./generated/ExportZarrResult";
 import type { Autosave } from "./generated/Autosave";
 import type { MeasurementKind } from "./generated/MeasurementKind";
+import type { NrtOutcome } from "./generated/NrtOutcome";
+import type { NrtRequest } from "./generated/NrtRequest";
 import type { MeasurementView } from "./generated/MeasurementView";
 import type { NewMeasurement } from "./generated/NewMeasurement";
 import type { ChartStatus } from "./generated/ChartStatus";
@@ -100,6 +102,13 @@ export function isErrorPayload(value: unknown): value is AppErrorPayload {
 export const HISTORY_LABEL = msg("Fetching history");
 
 /**
+ * What the status bar calls a near-real-time fetch (spec 4.10, M89). Named
+ * for the reason `HISTORY_LABEL` is: its progress bar shows while this label
+ * is in the busy set.
+ */
+export const NRT_LABEL = msg("Importing near-real-time data");
+
+/**
  * The commands that can take seconds, and what the status bar's spinner says
  * while each runs. English, marked with `msg`: the busy store keeps the key
  * and the spinner translates it when it is shown. Everything else answers
@@ -110,6 +119,7 @@ const LONG_RUNNING: Readonly<Record<string, string>> = {
   import_grib: msg("Importing GRIB"),
   import_zarr: msg("Importing Zarr"),
   import_history: HISTORY_LABEL,
+  import_nrt: NRT_LABEL,
   new_project_from_grib: msg("Opening GRIB"),
   new_project_from_zarr: msg("Opening Zarr"),
   import_image: msg("Importing image"),
@@ -521,6 +531,13 @@ export const api = {
       endUnixS,
       setStartTime,
     }),
+  /**
+   * Fetches the last days of the products asked for, up to now, one layer
+   * each (spec 4.10, M89). Like `importHistory` it reaches the network, and
+   * only because the user asked. A product that could not be fetched is in
+   * the outcome's `skipped` while the others still arrive.
+   */
+  importNrt: (request: NrtRequest) => call<NrtOutcome>("import_nrt", { request }),
   removeLayer: (layer: number) => call<ProjectSummary>("remove_layer", { layer }),
   /** Renames the project: a document write, undoable (M25). */
   renameProject: (name: string) => call<ProjectSummary>("rename_project", { name }),

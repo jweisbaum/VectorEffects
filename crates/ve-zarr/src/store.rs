@@ -147,7 +147,7 @@ pub fn read_time_axis(store: &ReadableStorage, path: &str, expected_len: u64) ->
         .and_then(|v| v.as_str())
         .ok_or_else(|| ZarrError::Layout("the time axis has no units attribute".into()))?
         .to_string();
-    let epoch = parse_epoch(&units)?;
+    let (epoch, unit) = parse_time_units(&units)?;
     let base = epoch.hours_since_unix_epoch();
 
     // `DataType` is opaque here; its name is the stable thing to dispatch on.
@@ -184,14 +184,53 @@ pub fn read_time_axis(store: &ReadableStorage, path: &str, expected_len: u64) ->
         )));
     };
 
-    let mut times = Vec::with_capacity(raw.len());
-    for (i, h) in raw.into_iter().enumerate() {
-        if !h.is_finite() || h.fract() != 0.0 {
-            return Err(ZarrError::Layout(format!(
-                "time axis entry {i} is {h}, not a whole number of hours"
-            )));
+    hours_from_axis(base, unit, &raw)
+}
+
+/// What one count of a time axis is worth.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TimeUnit {
+    /// Hours, which is what ERA5 and GlobCurrent count in.
+    Hours,
+    /// Seconds: the Copernicus L4 wind.
+    Seconds,
+    /// Days: the DUACS sea-level product.
+    Days,
+}
+
+impl TimeUnit {
+    /// A count in this unit as whole hours, or `None` if it is not one.
+    ///
+    /// Exact arithmetic on purpose: a count of seconds times `1.0 / 3600.0`
+    /// is a whole number only by luck, and "is this a whole hour" is the
+    /// question that decides whether a store is read at all.
+    fn hours(self, count: f64) -> Option<i64> {
+        if !count.is_finite() || count.fract() != 0.0 {
+            return None;
         }
-        times.push(base + h as i64);
+        let count = count as i64;
+        match self {
+            Self::Hours => Some(count),
+            Self::Seconds => (count % 3600 == 0).then_some(count / 3600),
+            Self::Days => count.checked_mul(24),
+        }
+    }
+}
+
+/// Turns a time axis's raw counts into hours since the Unix epoch.
+///
+/// `base` is the axis's own epoch in those hours. Every entry has to land on
+/// a whole hour and the axis has to increase: an index into it is a time, and
+/// an axis that failed either would make every index mean something else.
+pub fn hours_from_axis(base: i64, unit: TimeUnit, raw: &[f64]) -> Result<Vec<i64>> {
+    let mut times = Vec::with_capacity(raw.len());
+    for (i, count) in raw.iter().enumerate() {
+        let hours = unit.hours(*count).ok_or_else(|| {
+            ZarrError::Layout(format!(
+                "time axis entry {i} is {count} {unit:?}, not a whole number of hours"
+            ))
+        })?;
+        times.push(base + hours);
     }
     if times.windows(2).any(|w| w[1] <= w[0]) {
         return Err(ZarrError::Layout(
@@ -201,14 +240,22 @@ pub fn read_time_axis(store: &ReadableStorage, path: &str, expected_len: u64) ->
     Ok(times)
 }
 
-/// Parses the CF `units` string, which must be in whole hours.
+/// Parses a CF `units` string into its epoch and what it counts in.
 ///
-/// Anything else -- minutes, seconds, a different calendar's epoch -- would
-/// change what every index means, so it is rejected rather than guessed at.
-pub fn parse_epoch(units: &str) -> Result<Utc> {
-    let rest = units.strip_prefix("hours since ").ok_or_else(|| {
+/// Hours, seconds and days are read; anything else -- minutes, months, a
+/// different calendar -- would change what every index means, so it is
+/// refused by name rather than guessed at.
+pub fn parse_time_units(units: &str) -> Result<(Utc, TimeUnit)> {
+    let (unit, rest) = [
+        ("hours since ", TimeUnit::Hours),
+        ("seconds since ", TimeUnit::Seconds),
+        ("days since ", TimeUnit::Days),
+    ]
+    .into_iter()
+    .find_map(|(prefix, unit)| Some((unit, units.strip_prefix(prefix)?)))
+    .ok_or_else(|| {
         ZarrError::Layout(format!(
-            "the time axis is measured in {units:?}; this reader requires whole hours"
+            "the time axis is measured in {units:?}; this reader takes hours, seconds or days"
         ))
     })?;
     // A trailing UTC offset is fine; any other offset would shift the epoch.
@@ -216,14 +263,87 @@ pub fn parse_epoch(units: &str) -> Result<Utc> {
     let rest = rest
         .strip_suffix("+00:00")
         .or_else(|| rest.strip_suffix('Z'))
-        .unwrap_or(rest);
-    Utc::parse(rest.trim())
-        .ok_or_else(|| ZarrError::Layout(format!("could not parse the time epoch {rest:?}")))
+        .unwrap_or(rest)
+        .trim();
+    // An epoch with no time of day is midnight.
+    let parsed = if rest.contains(['T', ' ']) {
+        Utc::parse(rest)
+    } else {
+        Utc::parse(&format!("{rest}T00"))
+    };
+    let epoch = parsed
+        .ok_or_else(|| ZarrError::Layout(format!("could not parse the time epoch {rest:?}")))?;
+    Ok((epoch, unit))
+}
+
+/// Parses the CF `units` string, which must be in whole hours.
+///
+/// Anything else -- minutes, seconds, a different calendar's epoch -- would
+/// change what every index means, so it is rejected rather than guessed at.
+pub fn parse_epoch(units: &str) -> Result<Utc> {
+    match parse_time_units(units) {
+        Ok((epoch, TimeUnit::Hours)) => Ok(epoch),
+        Ok(_) => Err(ZarrError::Layout(format!(
+            "the time axis is measured in {units:?}; this reader requires whole hours"
+        ))),
+        Err(err) => Err(err),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The two Copernicus encodings this reads besides hours: the L4 wind
+    /// counts seconds from 1990 and DUACS counts days from 1950.
+    #[test]
+    fn seconds_and_days_parse_with_their_units() {
+        let (epoch, unit) = parse_time_units("seconds since 1990-01-01").expect("seconds");
+        assert_eq!(
+            (epoch.year, epoch.month, epoch.day, epoch.hour),
+            (1990, 1, 1, 0)
+        );
+        assert_eq!(unit, TimeUnit::Seconds);
+        let (epoch, unit) = parse_time_units("days since 1950-01-01").expect("days");
+        assert_eq!(
+            (epoch.year, epoch.month, epoch.day, epoch.hour),
+            (1950, 1, 1, 0)
+        );
+        assert_eq!(unit, TimeUnit::Days);
+        let (_, unit) = parse_time_units("hours since 1950-01-01 00:00:00").expect("hours");
+        assert_eq!(unit, TimeUnit::Hours);
+        assert!(parse_time_units("minutes since 1959-01-01 00:00:00").is_err());
+        assert!(parse_time_units("fortnights since 1959-01-01").is_err());
+    }
+
+    /// 2026-10-01T00Z by hand, two ways. From 1970 to 1990 is twenty years
+    /// with five leap days, 7 305 days; from 1990 to 2026-10-01 is thirty-six
+    /// years with nine leap days and 273 days of 2026, 13 422 days. So the
+    /// hour is (7 305 + 13 422) x 24 = 497 448 after the Unix epoch, which is
+    /// 13 422 x 86 400 seconds after 1990 and 28 032 days after 1950.
+    #[test]
+    fn an_axis_in_seconds_or_days_lands_on_the_same_hour() {
+        let since_1990 = 7_305 * 24;
+        let since_1950 = -7_305 * 24;
+        assert_eq!(
+            hours_from_axis(since_1990, TimeUnit::Seconds, &[1_159_660_800.0]).expect("seconds"),
+            vec![497_448]
+        );
+        assert_eq!(
+            hours_from_axis(since_1950, TimeUnit::Days, &[28_032.0]).expect("days"),
+            vec![497_448]
+        );
+        assert_eq!(
+            hours_from_axis(since_1950, TimeUnit::Hours, &[672_768.0]).expect("hours"),
+            vec![497_448]
+        );
+        // Half an hour, in any unit, is not a time this application has.
+        assert!(hours_from_axis(since_1990, TimeUnit::Seconds, &[1_800.0]).is_err());
+        assert!(hours_from_axis(since_1950, TimeUnit::Hours, &[0.5]).is_err());
+        assert!(hours_from_axis(since_1950, TimeUnit::Days, &[f64::NAN]).is_err());
+        // And an axis that goes backwards is not an axis.
+        assert!(hours_from_axis(0, TimeUnit::Hours, &[2.0, 1.0]).is_err());
+    }
 
     #[test]
     fn the_era5_epoch_parses() {

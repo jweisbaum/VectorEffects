@@ -1,0 +1,324 @@
+{
+  "id": "WIND_GLO_PHY_L4_NRT_012_004",
+  "type": "Collection",
+  "stac_version": "1.0.0",
+  "stac_extensions": [
+    "https://stac-extensions.github.io/scientific/v1.0.0/schema.json"
+  ],
+  "title": "Global Ocean Hourly Sea Surface Wind and Stress from Scatterometer and Model",
+  "description": "For the Global Ocean - The product contains hourly Level-4 sea surface wind and stress fields at 0.125 degrees horizontal spatial resolution. Scatterometer observations for Metop-B and Metop-C ASCAT and their collocated European Centre for Medium-Range Weather Forecasts (ECMWF) operational model variables are used to calculate temporally-averaged difference fields. These fields are used to correct for persistent biases in hourly ECMWF operational model fields. The product provides stress-equivalent wind and stress variables as well as their divergence and curl. The applied bias corrections, the standard deviation of the differences (for wind and stress fields) and difference of variances (for divergence and curl fields) are included in the product.",
+  "license": "proprietary",
+  "providers": [
+    {
+      "name": "KNMI (The Netherlands)",
+      "roles": [
+        "producer"
+      ]
+    },
+    {
+      "name": "Copernicus Marine Service",
+      "roles": [
+        "host",
+        "processor"
+      ],
+      "url": "https://marine.copernicus.eu"
+    }
+  ],
+  "keywords": [
+    "oceanographic-geographical-features",
+    "numerical-model",
+    "satellite-observation",
+    "eastward-wind",
+    "northward-wind",
+    "surface-downward-eastward-stress",
+    "surface-downward-northward-stress",
+    "stress-curl",
+    "stress-divergence",
+    "air-density",
+    "wind-curl",
+    "wind-divergence",
+    "near-real-time",
+    "coastal-marine-environment",
+    "marine-safety",
+    "weather-climate-and-seasonal-forecasting",
+    "marine-resources",
+    "global-ocean",
+    "level-4"
+  ],
+  "links": [
+    {
+      "rel": "root",
+      "href": "../catalog.stac.json",
+      "title": "Copernicus Marine Data Store",
+      "type": "application/json"
+    },
+    {
+      "rel": "parent",
+      "href": "../catalog.stac.json",
+      "title": "Copernicus Marine Data Store",
+      "type": "application/json"
+    },
+    {
+      "rel": "item",
+      "href": "cmems_obs-wind_glo_phy_nrt_l4_0.125deg_PT1H_202207/dataset.stac.json",
+      "title": "All data",
+      "type": "application/json"
+    },
+    {
+      "rel": "license",
+      "href": "https://marine.copernicus.eu/user-corner/service-commitments-and-licence",
+      "title": "Copernicus Marine Service Commitments and Licence",
+      "type": "text/html"
+    },
+    {
+      "rel": "cite-as",
+      "href": "https://doi.org/10.48670/moi-00305",
+      "title": "10.48670/moi-00305",
+      "type": "text/html"
+    },
+    {
+      "rel": "alternative",
+      "href": "https://data.marine.copernicus.eu/product/WIND_GLO_PHY_L4_NRT_012_004",
+      "title": "Product page",
+      "type": "text/html"
+    },
+    {
+      "rel": "describedby",
+      "href": "https://documentation.marine.copernicus.eu/PUM/CMEMS-WIND-PUM-012-004-006.pdf",
+      "title": "Product User Manual",
+      "type": "application/pdf",
+      "ref": "CMEMS-WIND-PUM-012-004-006",
+      "createdAt": "2023-11-30",
+      "updatedAt": "2024-07-26T15:01:39.39Z"
+    },
+    {
+      "rel": "describedby",
+      "href": "https://documentation.marine.copernicus.eu/QUID/CMEMS-WIND-QUID-012-004-006.pdf",
+      "title": "Quality Information Document",
+      "type": "application/pdf",
+      "ref": "CMEMS-WIND-QUID-012-004-006",
+      "createdAt": "2023-11-30",
+      "updatedAt": "2024-07-31T13:01:26.205Z"
+    },
+    {
+      "rel": "describedby",
+      "href": "https://documentation.marine.copernicus.eu/SQO/CMEMS-WIND-SQO-012-004-006.pdf",
+      "title": "Synthesis Quality Overview",
+      "type": "application/pdf",
+      "ref": "CMEMS-WIND-SQO-012-004-006",
+      "createdAt": "2026-02-13",
+      "updatedAt": "2026-02-13T10:33:42.037475Z"
+    }
+  ],
+  "extent": {
+    "spatial": {
+      "bbox": [
+        [
+          -179.9375,
+          -89.9375,
+          179.9375,
+          89.9375
+        ]
+      ]
+    },
+    "temporal": {
+      "interval": [
+        [
+          "2020-07-01T00:00:00Z",
+          "2026-10-01T23:00:00Z"
+        ]
+      ]
+    }
+  },
+  "assets": {
+    "thumbnail": {
+      "href": "https://mdl-metadata.s3.waw3-1.cloudferro.com/metadata/thumbnails/WIND_GLO_PHY_L4_NRT_012_004.jpg",
+      "type": "image/jpeg",
+      "roles": [
+        "thumbnail"
+      ],
+      "title": "Global Ocean Hourly Sea Surface Wind and Stress from Scatterometer and Model thumbnail"
+    }
+  },
+  "properties": {
+    "altId": "63ee69f1-2628-43aa-9b22-b21749d160ba",
+    "providerMetadata": {
+      "source": "cmems",
+      "type": "csw",
+      "url": "https://csw.marine.copernicus.eu/geonetwork/csw-MYOCEAN-CORE-PRODUCTS/eng/csw?service=CSW&version=2.0.2&request=GetRecordById&id=63ee69f1-2628-43aa-9b22-b21749d160ba&elementsetname=full&outputSchema=http://www.isotc211.org/2005/gmd"
+    },
+    "thumbnailMeta": {
+      "creationDate": "2023-06-18T06:37:19.450Z",
+      "layerId": "WIND_GLO_PHY_L4_NRT_012_004/cmems_obs-wind_glo_phy_nrt_l4_0.125deg_PT1H_202207/wind",
+      "time": 1593561600000,
+      "elevation": null,
+      "basemapId": "dark",
+      "overlays": {
+        "tags": [
+          {
+            "name": "Wind"
+          }
+        ]
+      },
+      "crs": "epsg:4326",
+      "valueMin": 0,
+      "valueMax": 37.04999828338623,
+      "valueClamp": true,
+      "logScale": false,
+      "style": "default",
+      "colormapId": "speed",
+      "colormapInvert": false
+    },
+    "creationDate": "2012-08-26",
+    "modifiedDate": "2024-06-18",
+    "contacts": [
+      {
+        "name": "",
+        "organisationName": "SIW-KNMI-DEBILT-NL",
+        "responsiblePartyRole": "resourceProvider",
+        "email": ""
+      }
+    ],
+    "projection": "WGS 84 (EPSG:4326)",
+    "assimilatedData": [],
+    "formats": [
+      "NetCDF-4"
+    ],
+    "updateFrequencies": {
+      "daily": "15:00"
+    },
+    "featureTypes": [
+      "Grid"
+    ],
+    "indicatorFamilies": [],
+    "geoExtent": {
+      "type": "envelope",
+      "coordinates": [
+        [
+          -180,
+          90
+        ],
+        [
+          180,
+          -90
+        ]
+      ]
+    },
+    "geoResolution": {
+      "row": {
+        "magnitude": 0.125,
+        "units": "degree"
+      },
+      "column": {
+        "magnitude": 0.125,
+        "units": "degree"
+      }
+    },
+    "tempExtentBegin": "",
+    "tempResolutions": [
+      "Hourly"
+    ],
+    "vertExtentMin": 0,
+    "vertExtentMax": 0,
+    "rank": 14000,
+    "useCases": [
+      {
+        "title": "Cerulean Information Factory (CIF): a set of tools to support safety and the Green Transition for the Blue Economy",
+        "imageSrc": "https://marine.copernicus.eu/sites/default/files/media/image/use_case/Picture3.png",
+        "href": "https://marine.copernicus.eu/services/use-cases/cerulean-information-factory-cif-set-tools-support-safety-and-green-transition"
+      },
+      {
+        "title": "Enhancing Coastal Monitoring through Copernicus Data Integration",
+        "imageSrc": "https://marine.copernicus.eu/sites/default/files/media/image/use_case/MeckPom_small_2024-08-06_Sentinel-2_L2A_True_color.jpg",
+        "href": "https://marine.copernicus.eu/services/use-cases/enhancing-coastal-monitoring-through-copernicus-data-integration"
+      },
+      {
+        "title": "Pilot Demonstration of Coastal Ocean Noise Operational Service to support the EU Marine Strategy Framework Directive in the Mediterranean sea",
+        "imageSrc": "https://marine.copernicus.eu/sites/default/files/media/image/use_case/baselineSoundMap-May2023-63HzTOB-P10.png",
+        "href": "https://marine.copernicus.eu/services/use-cases/pilot-demonstration-coastal-ocean-noise-operational-service-support-eu-marine"
+      },
+      {
+        "title": "Coastal Ocean Noise Service in support to the impact assessment of Offshore Windfarms in the Mediterranean Sea",
+        "imageSrc": "https://marine.copernicus.eu/sites/default/files/media/image/use_case/mapModeling_UseCase1_Baseline_P10_F125_Stats.png",
+        "href": "https://marine.copernicus.eu/services/use-cases/coastal-ocean-noise-service-support-impact-assessment-offshore-windfarms"
+      },
+      {
+        "title": "CEOS: Ocean Variables Enabling Research and Applications for GEO (COVERAGE)",
+        "imageSrc": "https://marine.copernicus.eu/sites/default/files/media/image/use_case/nasa-jet-propulsion-laboratory.illustration_1.png",
+        "href": "https://marine.copernicus.eu/services/use-cases/ceos-ocean-variables-enabling-research-and-applications-geo-coverage"
+      },
+      {
+        "title": "Prepare Ships: Increased Safety and Efficiency in Shipping",
+        "imageSrc": "https://marine.copernicus.eu/sites/default/files/media/image/use_case/overview_RISE_2.jpg",
+        "href": "https://marine.copernicus.eu/services/use-cases/prepare-ships-increased-safety-and-efficiency-shipping"
+      },
+      {
+        "title": "Supporting NOAA OceanWatch Monitor",
+        "imageSrc": "https://marine.copernicus.eu/sites/default/files/media/image/2024-08/recent_ssh.png",
+        "href": "https://marine.copernicus.eu/services/use-cases/supporting-noaa-oceanwatch-monitor"
+      },
+      {
+        "title": "Reducing ship's fuel consumption thanks to better marine coatings",
+        "imageSrc": "https://marine.copernicus.eu/sites/default/files/media/image/use_case/vessel.jpg",
+        "href": "https://marine.copernicus.eu/services/use-cases/reducing-ships-fuel-consumption-thanks-better-marine-coatings"
+      },
+      {
+        "title": "DATA.awi.de: a one-stop shop portal",
+        "imageSrc": "https://marine.copernicus.eu/sites/default/files/media/image/use_case/alfred-wegener-institute-helmholtz-centre-polar-and-marine-r.company_contact_image.png",
+        "href": "https://marine.copernicus.eu/services/use-cases/dataawide-one-stop-shop-portal"
+      },
+      {
+        "title": "Met-ocean conditions in support to German RWE offshore wind farm operator",
+        "imageSrc": "https://marine.copernicus.eu/sites/default/files/media/image/use_case/UC82-image1-.jpg",
+        "href": "https://marine.copernicus.eu/services/use-cases/met-ocean-conditions-support-german-rwe-offshore-wind-farm-operator"
+      },
+      {
+        "title": "Monitoring oil spills in the North Sea",
+        "imageSrc": "https://marine.copernicus.eu/sites/default/files/media/image/use_case/UC4-imag1-Europe_SouthArne_1_cp_Hess_Corporation.jpg",
+        "href": "https://marine.copernicus.eu/services/use-cases/monitoring-oil-spills-north-sea"
+      }
+    ],
+    "areas": [
+      "Global Ocean"
+    ],
+    "times": [
+      "Present",
+      "Past"
+    ],
+    "sources": [
+      "Numerical models",
+      "Satellite observations"
+    ],
+    "colors": [
+      "Blue Ocean"
+    ],
+    "communities": [
+      "Policy & governance",
+      "Science & innovation",
+      "Extremes, hazards & safety",
+      "Coastal services",
+      "Natural resources & energy",
+      "Trade & marine navigation"
+    ],
+    "processingLevel": "Level 4",
+    "mainVariables": [
+      "Wind"
+    ],
+    "allVariables": [
+      "Air density",
+      "Eastward wind",
+      "Northward wind",
+      "Stress curl",
+      "Stress divergence",
+      "Surface downward eastward stress",
+      "Surface downward northward stress",
+      "Wind curl",
+      "Wind divergence"
+    ],
+    "directives": [],
+    "crs": "EPSG:4326",
+    "isStaging": false,
+    "admp_updated": "2026-10-02T10:11:33.051386Z"
+  },
+  "sci:doi": "10.48670/moi-00305"
+}

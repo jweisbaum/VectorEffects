@@ -1,0 +1,1820 @@
+{
+  "id": "cmems_obs-wind_glo_phy_nrt_l4_0.125deg_PT1H_202207",
+  "type": "Feature",
+  "stac_version": "1.0.0",
+  "stac_extensions": [
+    "https://stac-extensions.github.io/datacube/v2.1.0/schema.json"
+  ],
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+      [
+        [
+          -179.9375,
+          -89.9375
+        ],
+        [
+          -179.9375,
+          89.9375
+        ],
+        [
+          179.9375,
+          89.9375
+        ],
+        [
+          179.9375,
+          -89.9375
+        ],
+        [
+          -179.9375,
+          -89.9375
+        ]
+      ]
+    ]
+  },
+  "bbox": [
+    -179.9375,
+    -89.9375,
+    179.9375,
+    89.9375
+  ],
+  "properties": {
+    "datetime": null,
+    "start_datetime": "2020-07-01T00:00:00Z",
+    "end_datetime": "2026-10-01T23:00:00Z",
+    "Conventions": "CF-1.6, ACDD-1.3",
+    "date_created": "2022-06-23T01:30:26",
+    "date_modified": "2022-06-23T01:30:26",
+    "geospatial_lat_max": 89.9375,
+    "geospatial_lat_min": -89.9375,
+    "geospatial_lat_resolution": "0.125",
+    "geospatial_lat_units": "degrees_north",
+    "geospatial_lon_max": 179.9375,
+    "geospatial_lon_min": -179.9375,
+    "geospatial_lon_resolution": "0.125",
+    "geospatial_lon_units": "degrees_east",
+    "history": "N/A",
+    "institution": "Royal Netherlands Meteorological Institute (KNMI)",
+    "instrument": "ASCAT, ASCAT",
+    "instrument_vocabulary": "CEOS",
+    "keywords": "ocean winds, wind speed, wind direction, wind stress, divergence, vorticity",
+    "model": "ECMWF Operational model",
+    "platform": "Metop-B, Metop-C",
+    "platform_vocabulary": "CEOS",
+    "processing_level": "L4",
+    "project": "Copernicus Marine Service Wind Thematic Assembly Centre",
+    "references": "Copernicus Marine Service Product User Manual CMEMS-TAC-WIND-PUM-012-004, Trindade et al. (2020) doi:10.1109/TGRS.2019.2946019",
+    "summary": "Global ocean 10-m stress-equivalent wind and surface wind stress fields based on the ECMWF operational model winds, bias-corrected using scatterometer observations",
+    "time_coverage_end": "2020-07-01T00:00:00",
+    "time_coverage_start": "2020-07-01T00:00:00",
+    "title": " Global Ocean - Wind and Stress - Hourly - From Scatterometer and Model",
+    "cube:dimensions": {
+      "time": {
+        "type": "temporal",
+        "extent": [
+          "2020-07-01T00:00:00Z",
+          "2026-10-01T23:00:00Z"
+        ],
+        "step": "PT1H"
+      },
+      "latitude": {
+        "type": "spatial",
+        "axis": "y",
+        "extent": [
+          -89.9375,
+          89.9375
+        ],
+        "step": 0.125,
+        "reference_system": 4326
+      },
+      "longitude": {
+        "type": "spatial",
+        "axis": "x",
+        "extent": [
+          -179.9375,
+          179.9375
+        ],
+        "step": 0.125,
+        "reference_system": 4326
+      }
+    },
+    "cube:variables": {
+      "air_density": {
+        "id": "air_density",
+        "dimensions": [
+          "time",
+          "latitude",
+          "longitude"
+        ],
+        "type": "data",
+        "unit": "kg m-3",
+        "standardName": "air_density",
+        "abbreviation": "air_density",
+        "name": {
+          "en": "Air density at 10 m"
+        },
+        "unitConversion": null,
+        "missingValue": -32767,
+        "offset": 0,
+        "scale": 0.001,
+        "valueMin": 1.152999997138977,
+        "valueMax": 1.5690001249313354,
+        "valueDiffMax": 0.2080000638961792,
+        "valueDiffRelMax": 25,
+        "valueClamp": true,
+        "hasLogScale": true,
+        "logScale": false,
+        "colormapId": "viridis",
+        "colormapInvert": false,
+        "colormapDiffId": "balance",
+        "colormapDiffInvert": false,
+        "valueColor": false
+      },
+      "eastward_stress": {
+        "id": "eastward_stress",
+        "dimensions": [
+          "time",
+          "latitude",
+          "longitude"
+        ],
+        "type": "data",
+        "unit": "N m-2",
+        "standardName": "surface_downward_eastward_stress",
+        "abbreviation": "eastward_stress",
+        "name": {
+          "en": "Surface wind stress eastward component"
+        },
+        "unitConversion": null,
+        "missingValue": -2147483647,
+        "offset": 0,
+        "scale": 0.01,
+        "valueMin": -1.53,
+        "valueMax": 1.53,
+        "valueDiffMax": 1.53,
+        "valueDiffRelMax": 25,
+        "valueClamp": true,
+        "hasLogScale": false,
+        "logScale": false,
+        "colormapId": "balance",
+        "colormapInvert": false,
+        "colormapDiffId": "balance",
+        "colormapDiffInvert": false,
+        "valueColor": false
+      },
+      "eastward_stress_bias": {
+        "id": "eastward_stress_bias",
+        "dimensions": [
+          "time",
+          "latitude",
+          "longitude"
+        ],
+        "type": "data",
+        "unit": "N m-2",
+        "standardName": "surface_downward_eastward_stress_bias",
+        "abbreviation": "eastward_stress_bias",
+        "name": {
+          "en": "Scatterometer-model bias of surface wind stress eastward component"
+        },
+        "unitConversion": null,
+        "missingValue": -2147483647,
+        "offset": 0,
+        "scale": 0.01,
+        "valueMin": -0.03,
+        "valueMax": 0.03,
+        "valueDiffMax": 0.03,
+        "valueDiffRelMax": 25,
+        "valueClamp": true,
+        "hasLogScale": false,
+        "logScale": false,
+        "colormapId": "balance",
+        "colormapInvert": false,
+        "colormapDiffId": "balance",
+        "colormapDiffInvert": false,
+        "valueColor": false
+      },
+      "eastward_stress_sdd": {
+        "id": "eastward_stress_sdd",
+        "dimensions": [
+          "time",
+          "latitude",
+          "longitude"
+        ],
+        "type": "data",
+        "unit": "N m-2",
+        "standardName": "surface_downward_eastward_stress_standard_deviation_of_differences",
+        "abbreviation": "eastward_stress_sdd",
+        "name": {
+          "en": "Standard deviation of differences of surface wind stress eastward component"
+        },
+        "unitConversion": null,
+        "missingValue": -2147483647,
+        "offset": 0,
+        "scale": 0.01,
+        "valueMin": 0.01,
+        "valueMax": 0.08,
+        "valueDiffMax": 0.035,
+        "valueDiffRelMax": 25,
+        "valueClamp": true,
+        "hasLogScale": true,
+        "logScale": false,
+        "colormapId": "viridis",
+        "colormapInvert": false,
+        "colormapDiffId": "balance",
+        "colormapDiffInvert": false,
+        "valueColor": false
+      },
+      "eastward_wind": {
+        "id": "eastward_wind",
+        "dimensions": [
+          "time",
+          "latitude",
+          "longitude"
+        ],
+        "type": "data",
+        "unit": "m s-1",
+        "standardName": "eastward_wind",
+        "abbreviation": "eastward_wind",
+        "name": {
+          "en": "Stress-equivalent wind eastward component at 10 m"
+        },
+        "unitConversion": null,
+        "missingValue": -32767,
+        "offset": 0,
+        "scale": 0.01,
+        "valueMin": -37.04999828338623,
+        "valueMax": 37.04999828338623,
+        "valueDiffMax": 37.04999828338623,
+        "valueDiffRelMax": 25,
+        "valueClamp": true,
+        "hasLogScale": false,
+        "logScale": false,
+        "colormapId": "balance",
+        "colormapInvert": false,
+        "colormapDiffId": "balance",
+        "colormapDiffInvert": false,
+        "valueColor": false
+      },
+      "eastward_wind_bias": {
+        "id": "eastward_wind_bias",
+        "dimensions": [
+          "time",
+          "latitude",
+          "longitude"
+        ],
+        "type": "data",
+        "unit": "m s-1",
+        "standardName": "eastward_wind_bias",
+        "abbreviation": "eastward_wind_bias",
+        "name": {
+          "en": "Scatterometer-model bias of stress-equivalent wind eastward component at 10 m"
+        },
+        "unitConversion": null,
+        "missingValue": -32767,
+        "offset": 0,
+        "scale": 0.01,
+        "valueMin": -0.9300000071525574,
+        "valueMax": 0.9300000071525574,
+        "valueDiffMax": 0.9300000071525574,
+        "valueDiffRelMax": 25,
+        "valueClamp": true,
+        "hasLogScale": false,
+        "logScale": false,
+        "colormapId": "balance",
+        "colormapInvert": false,
+        "colormapDiffId": "balance",
+        "colormapDiffInvert": false,
+        "valueColor": false
+      },
+      "eastward_wind_sdd": {
+        "id": "eastward_wind_sdd",
+        "dimensions": [
+          "time",
+          "latitude",
+          "longitude"
+        ],
+        "type": "data",
+        "unit": "m s-1",
+        "standardName": "eastward_wind_standard_deviation_of_differences",
+        "abbreviation": "eastward_wind_sdd",
+        "name": {
+          "en": "Standard deviation of differences of stress-equivalent wind eastward component at 10 m"
+        },
+        "unitConversion": null,
+        "missingValue": -32767,
+        "offset": 0,
+        "scale": 0.01,
+        "valueMin": 0.550000011920929,
+        "valueMax": 2.169999837875366,
+        "valueDiffMax": 0.8099999129772186,
+        "valueDiffRelMax": 25,
+        "valueClamp": true,
+        "hasLogScale": true,
+        "logScale": false,
+        "colormapId": "viridis",
+        "colormapInvert": false,
+        "colormapDiffId": "balance",
+        "colormapDiffInvert": false,
+        "valueColor": false
+      },
+      "northward_stress": {
+        "id": "northward_stress",
+        "dimensions": [
+          "time",
+          "latitude",
+          "longitude"
+        ],
+        "type": "data",
+        "unit": "N m-2",
+        "standardName": "surface_downward_northward_stress",
+        "abbreviation": "northward_stress",
+        "name": {
+          "en": "Surface wind stress northward component"
+        },
+        "unitConversion": null,
+        "missingValue": -2147483647,
+        "offset": 0,
+        "scale": 0.01,
+        "valueMin": -1.53,
+        "valueMax": 1.53,
+        "valueDiffMax": 1.53,
+        "valueDiffRelMax": 25,
+        "valueClamp": true,
+        "hasLogScale": false,
+        "logScale": false,
+        "colormapId": "balance",
+        "colormapInvert": false,
+        "colormapDiffId": "balance",
+        "colormapDiffInvert": false,
+        "valueColor": false
+      },
+      "northward_stress_bias": {
+        "id": "northward_stress_bias",
+        "dimensions": [
+          "time",
+          "latitude",
+          "longitude"
+        ],
+        "type": "data",
+        "unit": "N m-2",
+        "standardName": "surface_downward_northward_stress_bias",
+        "abbreviation": "northward_stress_bias",
+        "name": {
+          "en": "Scatterometer-model bias of surface wind stress northward component"
+        },
+        "unitConversion": null,
+        "missingValue": -2147483647,
+        "offset": 0,
+        "scale": 0.01,
+        "valueMin": -0.02,
+        "valueMax": 0.02,
+        "valueDiffMax": 0.02,
+        "valueDiffRelMax": 25,
+        "valueClamp": true,
+        "hasLogScale": false,
+        "logScale": false,
+        "colormapId": "balance",
+        "colormapInvert": false,
+        "colormapDiffId": "balance",
+        "colormapDiffInvert": false,
+        "valueColor": false
+      },
+      "northward_stress_sdd": {
+        "id": "northward_stress_sdd",
+        "dimensions": [
+          "time",
+          "latitude",
+          "longitude"
+        ],
+        "type": "data",
+        "unit": "N m-2",
+        "standardName": "surface_downward_northward_stress_standard_deviation_of_differences",
+        "abbreviation": "northward_stress_sdd",
+        "name": {
+          "en": "Standard deviation of differences of surface wind stress northward component"
+        },
+        "unitConversion": null,
+        "missingValue": -2147483647,
+        "offset": 0,
+        "scale": 0.01,
+        "valueMin": 0.01,
+        "valueMax": 0.07,
+        "valueDiffMax": 0.030000000000000002,
+        "valueDiffRelMax": 25,
+        "valueClamp": true,
+        "hasLogScale": true,
+        "logScale": false,
+        "colormapId": "viridis",
+        "colormapInvert": false,
+        "colormapDiffId": "balance",
+        "colormapDiffInvert": false,
+        "valueColor": false
+      },
+      "northward_wind": {
+        "id": "northward_wind",
+        "dimensions": [
+          "time",
+          "latitude",
+          "longitude"
+        ],
+        "type": "data",
+        "unit": "m s-1",
+        "standardName": "northward_wind",
+        "abbreviation": "northward_wind",
+        "name": {
+          "en": "Stress-equivalent wind northward component at 10 m"
+        },
+        "unitConversion": null,
+        "missingValue": -32767,
+        "offset": 0,
+        "scale": 0.01,
+        "valueMin": -37.04999828338623,
+        "valueMax": 37.04999828338623,
+        "valueDiffMax": 37.04999828338623,
+        "valueDiffRelMax": 25,
+        "valueClamp": true,
+        "hasLogScale": false,
+        "logScale": false,
+        "colormapId": "balance",
+        "colormapInvert": false,
+        "colormapDiffId": "balance",
+        "colormapDiffInvert": false,
+        "valueColor": false
+      },
+      "northward_wind_bias": {
+        "id": "northward_wind_bias",
+        "dimensions": [
+          "time",
+          "latitude",
+          "longitude"
+        ],
+        "type": "data",
+        "unit": "m s-1",
+        "standardName": "northward_wind_bias",
+        "abbreviation": "northward_wind_bias",
+        "name": {
+          "en": "Scatterometer-model bias of stress-equivalent wind northward component at 10 m"
+        },
+        "unitConversion": null,
+        "missingValue": -32767,
+        "offset": 0,
+        "scale": 0.01,
+        "valueMin": -0.8399999737739563,
+        "valueMax": 0.8399999737739563,
+        "valueDiffMax": 0.8399999737739563,
+        "valueDiffRelMax": 25,
+        "valueClamp": true,
+        "hasLogScale": false,
+        "logScale": false,
+        "colormapId": "balance",
+        "colormapInvert": false,
+        "colormapDiffId": "balance",
+        "colormapDiffInvert": false,
+        "valueColor": false
+      },
+      "northward_wind_sdd": {
+        "id": "northward_wind_sdd",
+        "dimensions": [
+          "time",
+          "latitude",
+          "longitude"
+        ],
+        "type": "data",
+        "unit": "m s-1",
+        "standardName": "northward_wind_standard_deviation_of_differences",
+        "abbreviation": "northward_wind_sdd",
+        "name": {
+          "en": "Standard deviation of differences of stress-equivalent wind northward component at 10 m"
+        },
+        "unitConversion": null,
+        "missingValue": -32767,
+        "offset": 0,
+        "scale": 0.01,
+        "valueMin": 0.6800000071525574,
+        "valueMax": 2.3899998664855957,
+        "valueDiffMax": 0.8549999296665192,
+        "valueDiffRelMax": 25,
+        "valueClamp": true,
+        "hasLogScale": true,
+        "logScale": false,
+        "colormapId": "viridis",
+        "colormapInvert": false,
+        "colormapDiffId": "balance",
+        "colormapDiffInvert": false,
+        "valueColor": false
+      },
+      "number_of_observations": {
+        "id": "number_of_observations",
+        "dimensions": [
+          "time",
+          "latitude",
+          "longitude"
+        ],
+        "type": "data",
+        "unit": "1",
+        "standardName": "number_of_observations",
+        "abbreviation": "number_of_observations",
+        "name": {
+          "en": "Number of observations used for scatterometer-model bias"
+        },
+        "unitConversion": null,
+        "missingValue": -32767,
+        "offset": null,
+        "scale": null,
+        "valueMin": 27,
+        "valueMax": 69,
+        "valueDiffMax": 21,
+        "valueDiffRelMax": 25,
+        "valueClamp": true,
+        "hasLogScale": true,
+        "logScale": false,
+        "colormapId": "viridis",
+        "colormapInvert": false,
+        "colormapDiffId": "balance",
+        "colormapDiffInvert": false,
+        "valueColor": false
+      },
+      "number_of_observations_divcurl": {
+        "id": "number_of_observations_divcurl",
+        "dimensions": [
+          "time",
+          "latitude",
+          "longitude"
+        ],
+        "type": "data",
+        "unit": "1",
+        "standardName": "number_of_observations",
+        "abbreviation": "number_of_observations_divcurl",
+        "name": {
+          "en": "Number of observations used for scatterometer-model divergence and curl bias"
+        },
+        "unitConversion": null,
+        "missingValue": -32767,
+        "offset": null,
+        "scale": null,
+        "valueMin": 10,
+        "valueMax": 65,
+        "valueDiffMax": 27.5,
+        "valueDiffRelMax": 25,
+        "valueClamp": true,
+        "hasLogScale": true,
+        "logScale": false,
+        "colormapId": "viridis",
+        "colormapInvert": false,
+        "colormapDiffId": "balance",
+        "colormapDiffInvert": false,
+        "valueColor": false
+      },
+      "stress_curl": {
+        "id": "stress_curl",
+        "dimensions": [
+          "time",
+          "latitude",
+          "longitude"
+        ],
+        "type": "data",
+        "unit": "N m-3",
+        "standardName": "vertical_component_of_surface_downward_stress_curl",
+        "abbreviation": "stress_curl",
+        "name": {
+          "en": "Curl of surface wind stress"
+        },
+        "unitConversion": null,
+        "missingValue": -2147483647,
+        "offset": 0,
+        "scale": 1e-10,
+        "valueMin": -2.5226e-06,
+        "valueMax": 2.1812e-06,
+        "valueDiffMax": 2.3519000000000003e-06,
+        "valueDiffRelMax": 25,
+        "valueClamp": true,
+        "hasLogScale": false,
+        "logScale": false,
+        "colormapId": "viridis",
+        "colormapInvert": false,
+        "colormapDiffId": "balance",
+        "colormapDiffInvert": false,
+        "valueColor": false
+      },
+      "stress_curl_bias": {
+        "id": "stress_curl_bias",
+        "dimensions": [
+          "time",
+          "latitude",
+          "longitude"
+        ],
+        "type": "data",
+        "unit": "N m-3",
+        "standardName": "vertical_component_of_surface_downward_stress_curl_bias",
+        "abbreviation": "stress_curl_bias",
+        "name": {
+          "en": "Scatterometer-model bias of curl of surface wind stress"
+        },
+        "unitConversion": null,
+        "missingValue": -2147483647,
+        "offset": 0,
+        "scale": 1e-10,
+        "valueMin": -5.091e-07,
+        "valueMax": 5.091e-07,
+        "valueDiffMax": 5.091e-07,
+        "valueDiffRelMax": 25,
+        "valueClamp": true,
+        "hasLogScale": false,
+        "logScale": false,
+        "colormapId": "balance",
+        "colormapInvert": false,
+        "colormapDiffId": "balance",
+        "colormapDiffInvert": false,
+        "valueColor": false
+      },
+      "stress_curl_dv": {
+        "id": "stress_curl_dv",
+        "dimensions": [
+          "time",
+          "latitude",
+          "longitude"
+        ],
+        "type": "data",
+        "unit": "N2 m-6",
+        "standardName": "vertical_component_of_surface_downward_stress_curl_difference_of_variances",
+        "abbreviation": "stress_curl_dv",
+        "name": {
+          "en": "Difference of scatterometer and model variances of curl of surface wind stress"
+        },
+        "unitConversion": null,
+        "missingValue": -2147483647,
+        "offset": 0,
+        "scale": 1e-15,
+        "valueMin": -1.0850000000000001e-12,
+        "valueMax": 5.266e-12,
+        "valueDiffMax": 3.1755000000000004e-12,
+        "valueDiffRelMax": 25,
+        "valueClamp": true,
+        "hasLogScale": false,
+        "logScale": false,
+        "colormapId": "viridis",
+        "colormapInvert": false,
+        "colormapDiffId": "balance",
+        "colormapDiffInvert": false,
+        "valueColor": false
+      },
+      "stress_divergence": {
+        "id": "stress_divergence",
+        "dimensions": [
+          "time",
+          "latitude",
+          "longitude"
+        ],
+        "type": "data",
+        "unit": "N m-3",
+        "standardName": "divergence_of_surface_downward_stress",
+        "abbreviation": "stress_divergence",
+        "name": {
+          "en": "Divergence of surface wind stress"
+        },
+        "unitConversion": null,
+        "missingValue": -2147483647,
+        "offset": 0,
+        "scale": 1e-10,
+        "valueMin": -2.1856e-06,
+        "valueMax": 1.9623259999999777e-06,
+        "valueDiffMax": 2.0739629999999886e-06,
+        "valueDiffRelMax": 25,
+        "valueClamp": true,
+        "hasLogScale": false,
+        "logScale": false,
+        "colormapId": "viridis",
+        "colormapInvert": false,
+        "colormapDiffId": "balance",
+        "colormapDiffInvert": false,
+        "valueColor": false
+      },
+      "stress_divergence_bias": {
+        "id": "stress_divergence_bias",
+        "dimensions": [
+          "time",
+          "latitude",
+          "longitude"
+        ],
+        "type": "data",
+        "unit": "N m-3",
+        "standardName": "divergence_of_surface_downward_stress_bias",
+        "abbreviation": "stress_divergence_bias",
+        "name": {
+          "en": "Scatterometer-model bias of divergence of surface wind stress"
+        },
+        "unitConversion": null,
+        "missingValue": -2147483647,
+        "offset": 0,
+        "scale": 1e-10,
+        "valueMin": -4.885000000000001e-07,
+        "valueMax": 4.885000000000001e-07,
+        "valueDiffMax": 4.885000000000001e-07,
+        "valueDiffRelMax": 25,
+        "valueClamp": true,
+        "hasLogScale": false,
+        "logScale": false,
+        "colormapId": "balance",
+        "colormapInvert": false,
+        "colormapDiffId": "balance",
+        "colormapDiffInvert": false,
+        "valueColor": false
+      },
+      "stress_divergence_dv": {
+        "id": "stress_divergence_dv",
+        "dimensions": [
+          "time",
+          "latitude",
+          "longitude"
+        ],
+        "type": "data",
+        "unit": "N2 m-6",
+        "standardName": "divergence_of_surface_downward_stress_difference_of_variances",
+        "abbreviation": "stress_divergence_dv",
+        "name": {
+          "en": "Difference of scatterometer and model variances of divergence of surface wind stress"
+        },
+        "unitConversion": null,
+        "missingValue": -2147483647,
+        "offset": 0,
+        "scale": 1e-15,
+        "valueMin": -4.9000000000000006e-14,
+        "valueMax": 4.463000000000001e-12,
+        "valueDiffMax": 2.2560000000000005e-12,
+        "valueDiffRelMax": 25,
+        "valueClamp": true,
+        "hasLogScale": false,
+        "logScale": false,
+        "colormapId": "viridis",
+        "colormapInvert": false,
+        "colormapDiffId": "balance",
+        "colormapDiffInvert": false,
+        "valueColor": false
+      },
+      "wind_curl": {
+        "id": "wind_curl",
+        "dimensions": [
+          "time",
+          "latitude",
+          "longitude"
+        ],
+        "type": "data",
+        "unit": "s-1",
+        "standardName": "atmosphere_relative_vorticity",
+        "abbreviation": "wind_curl",
+        "name": {
+          "en": "Curl of stress-equivalent wind at 10 m"
+        },
+        "unitConversion": null,
+        "missingValue": -2147483647,
+        "offset": 0,
+        "scale": 1e-07,
+        "valueMin": -9.23e-05,
+        "valueMax": 8.68e-05,
+        "valueDiffMax": 8.955e-05,
+        "valueDiffRelMax": 25,
+        "valueClamp": true,
+        "hasLogScale": false,
+        "logScale": false,
+        "colormapId": "viridis",
+        "colormapInvert": false,
+        "colormapDiffId": "balance",
+        "colormapDiffInvert": false,
+        "valueColor": false
+      },
+      "wind_curl_bias": {
+        "id": "wind_curl_bias",
+        "dimensions": [
+          "time",
+          "latitude",
+          "longitude"
+        ],
+        "type": "data",
+        "unit": "s-1",
+        "standardName": "atmosphere_relative_vorticity_bias",
+        "abbreviation": "wind_curl_bias",
+        "name": {
+          "en": "Scatterometer-model bias of curl of stress-equivalent wind at 10 m"
+        },
+        "unitConversion": null,
+        "missingValue": -2147483647,
+        "offset": 0,
+        "scale": 1e-07,
+        "valueMin": -1.82e-05,
+        "valueMax": 1.82e-05,
+        "valueDiffMax": 1.82e-05,
+        "valueDiffRelMax": 25,
+        "valueClamp": true,
+        "hasLogScale": false,
+        "logScale": false,
+        "colormapId": "balance",
+        "colormapInvert": false,
+        "colormapDiffId": "balance",
+        "colormapDiffInvert": false,
+        "valueColor": false
+      },
+      "wind_curl_dv": {
+        "id": "wind_curl_dv",
+        "dimensions": [
+          "time",
+          "latitude",
+          "longitude"
+        ],
+        "type": "data",
+        "unit": "s-2",
+        "standardName": "atmosphere_relative_vorticity_difference_of_variances",
+        "abbreviation": "wind_curl_dv",
+        "name": {
+          "en": "Difference of scatterometer and model variances of curl of stress-equivalent wind at 10 m"
+        },
+        "unitConversion": null,
+        "missingValue": -2147483647,
+        "offset": 0,
+        "scale": 1e-11,
+        "valueMin": -7.999999999999999e-10,
+        "valueMax": 6.399999999999999e-09,
+        "valueDiffMax": 3.5999999999999996e-09,
+        "valueDiffRelMax": 25,
+        "valueClamp": true,
+        "hasLogScale": false,
+        "logScale": false,
+        "colormapId": "viridis",
+        "colormapInvert": false,
+        "colormapDiffId": "balance",
+        "colormapDiffInvert": false,
+        "valueColor": false
+      },
+      "wind_divergence": {
+        "id": "wind_divergence",
+        "dimensions": [
+          "time",
+          "latitude",
+          "longitude"
+        ],
+        "type": "data",
+        "unit": "s-1",
+        "standardName": "divergence_of_wind",
+        "abbreviation": "wind_divergence",
+        "name": {
+          "en": "Divergence of stress-equivalent wind at 10 m"
+        },
+        "unitConversion": null,
+        "missingValue": -2147483647,
+        "offset": 0,
+        "scale": 1e-07,
+        "valueMin": -0.00010939999999999999,
+        "valueMax": 9.63e-05,
+        "valueDiffMax": 0.00010284999999999999,
+        "valueDiffRelMax": 25,
+        "valueClamp": true,
+        "hasLogScale": false,
+        "logScale": false,
+        "colormapId": "viridis",
+        "colormapInvert": false,
+        "colormapDiffId": "balance",
+        "colormapDiffInvert": false,
+        "valueColor": false
+      },
+      "wind_divergence_bias": {
+        "id": "wind_divergence_bias",
+        "dimensions": [
+          "time",
+          "latitude",
+          "longitude"
+        ],
+        "type": "data",
+        "unit": "s-1",
+        "standardName": "divergence_of_wind_bias",
+        "abbreviation": "wind_divergence_bias",
+        "name": {
+          "en": "Scatterometer-model bias of divergence of stress-equivalent wind at 10 m"
+        },
+        "unitConversion": null,
+        "missingValue": -2147483647,
+        "offset": 0,
+        "scale": 1e-07,
+        "valueMin": -2.09e-05,
+        "valueMax": 2.09e-05,
+        "valueDiffMax": 2.09e-05,
+        "valueDiffRelMax": 25,
+        "valueClamp": true,
+        "hasLogScale": false,
+        "logScale": false,
+        "colormapId": "balance",
+        "colormapInvert": false,
+        "colormapDiffId": "balance",
+        "colormapDiffInvert": false,
+        "valueColor": false
+      },
+      "wind_divergence_dv": {
+        "id": "wind_divergence_dv",
+        "dimensions": [
+          "time",
+          "latitude",
+          "longitude"
+        ],
+        "type": "data",
+        "unit": "s-2",
+        "standardName": "divergence_of_wind_difference_of_variances",
+        "abbreviation": "wind_divergence_dv",
+        "name": {
+          "en": "Difference of scatterometer and model variances of divergence of stress-equivalent wind at 10 m"
+        },
+        "unitConversion": null,
+        "missingValue": -2147483647,
+        "offset": 0,
+        "scale": 1e-11,
+        "valueMin": 2.2999999999999998e-10,
+        "valueMax": 6.849999999999999e-09,
+        "valueDiffMax": 3.3099999999999995e-09,
+        "valueDiffRelMax": 25,
+        "valueClamp": true,
+        "hasLogScale": true,
+        "logScale": false,
+        "colormapId": "viridis",
+        "colormapInvert": false,
+        "colormapDiffId": "balance",
+        "colormapDiffInvert": false,
+        "valueColor": false
+      }
+    },
+    "admp_in_preparation": false,
+    "admp_updated": "2026-10-02T13:07:48.782102Z",
+    "admp_released_date": null,
+    "admp_retired_date": null,
+    "admp_valid_start_index": 34636,
+    "admp_valid_start_date": "2024-06-13T04:00:00.000000000Z",
+    "admp_sample_period": "hour",
+    "admp_updating_start_date": null,
+    "admp_updated_data": "2026-10-02T13:07:45.961Z",
+    "admp_title": "All data"
+  },
+  "links": [
+    {
+      "rel": "root",
+      "href": "../../catalog.stac.json",
+      "title": "Copernicus Marine Data Store",
+      "type": "application/json"
+    },
+    {
+      "rel": "parent",
+      "href": "../product.stac.json",
+      "title": "WIND_GLO_PHY_L4_NRT_012_004",
+      "type": "application/json"
+    },
+    {
+      "rel": "collection",
+      "href": "../product.stac.json",
+      "title": "WIND_GLO_PHY_L4_NRT_012_004",
+      "type": "application/json"
+    }
+  ],
+  "assets": {
+    "native": {
+      "id": "native",
+      "href": "https://s3.waw3-1.cloudferro.com/mdl-native-04/native/WIND_GLO_PHY_L4_NRT_012_004/cmems_obs-wind_glo_phy_nrt_l4_0.125deg_PT1H_202207",
+      "type": "application/x-netcdf",
+      "roles": [
+        "data"
+      ],
+      "title": "Native dataset",
+      "description": "The original, non-ARCO version of this dataset, as published by the data provider."
+    },
+    "wmts": {
+      "id": "wmts",
+      "href": "https://wmts.marine.copernicus.eu/teroWmts/WIND_GLO_PHY_L4_NRT_012_004/cmems_obs-wind_glo_phy_nrt_l4_0.125deg_PT1H_202207?service=WMTS&request=GetCapabilities",
+      "type": "application/xml",
+      "roles": [
+        "visual"
+      ],
+      "title": "OGC Web Map Tile Service (WMTS)",
+      "description": "Georeferenced map tiles using the OGC WMTS standard."
+    },
+    "timeChunked": {
+      "id": "timeChunked",
+      "href": "https://s3.waw3-1.cloudferro.com/mdl-arco-time-050/arco/WIND_GLO_PHY_L4_NRT_012_004/cmems_obs-wind_glo_phy_nrt_l4_0.125deg_PT1H_202207/timeChunked.zarr",
+      "type": "application/vnd+zarr",
+      "roles": [
+        "data"
+      ],
+      "title": "Time-chunked dataset in Zarr",
+      "description": "An ARCO version of this dataset with a small chunk size in the temporal dimension.\n    \nNote that the link (`href`) associated to this asset is the base directory\nof this dataset, but it cannot be accessed directly.\n\nTo download this dataset or part of it, \nuse a library such as [xarray](https://docs.xarray.dev/).",
+      "xarray:open_kwargs": {
+        "consolidated": true
+      },
+      "viewDims": {
+        "time": {
+          "chunkLen": {
+            "air_density": 1,
+            "eastward_stress": 1,
+            "eastward_stress_bias": 1,
+            "eastward_stress_sdd": 1,
+            "eastward_wind": 1,
+            "eastward_wind_bias": 1,
+            "eastward_wind_sdd": 1,
+            "northward_stress": 1,
+            "northward_stress_bias": 1,
+            "northward_stress_sdd": 1,
+            "northward_wind": 1,
+            "northward_wind_bias": 1,
+            "northward_wind_sdd": 1,
+            "number_of_observations": 1,
+            "number_of_observations_divcurl": 1,
+            "stress_curl": 1,
+            "stress_curl_bias": 1,
+            "stress_curl_dv": 1,
+            "stress_divergence": 1,
+            "stress_divergence_bias": 1,
+            "stress_divergence_dv": 1,
+            "wind_curl": 1,
+            "wind_curl_bias": 1,
+            "wind_curl_dv": 1,
+            "wind_divergence": 1,
+            "wind_divergence_bias": 1,
+            "wind_divergence_dv": 1
+          },
+          "len": 54816,
+          "units": "milliseconds since 1970-01-01 00:00:00Z (no leap seconds)",
+          "validStartIndex": 34636,
+          "validStartDate": "2024-06-13T04:00:00.000000000Z",
+          "coords": {
+            "type": "minMaxStep",
+            "min": 1593561600000,
+            "max": 1790895600000,
+            "step": 3600000,
+            "len": 54816
+          }
+        },
+        "latitude": {
+          "chunkLen": {
+            "air_density": 512,
+            "eastward_stress": 512,
+            "eastward_stress_bias": 512,
+            "eastward_stress_sdd": 512,
+            "eastward_wind": 512,
+            "eastward_wind_bias": 512,
+            "eastward_wind_sdd": 512,
+            "northward_stress": 512,
+            "northward_stress_bias": 512,
+            "northward_stress_sdd": 512,
+            "northward_wind": 512,
+            "northward_wind_bias": 512,
+            "northward_wind_sdd": 512,
+            "number_of_observations": 512,
+            "number_of_observations_divcurl": 512,
+            "stress_curl": 512,
+            "stress_curl_bias": 512,
+            "stress_curl_dv": 512,
+            "stress_divergence": 512,
+            "stress_divergence_bias": 512,
+            "stress_divergence_dv": 512,
+            "wind_curl": 512,
+            "wind_curl_bias": 512,
+            "wind_curl_dv": 512,
+            "wind_divergence": 512,
+            "wind_divergence_bias": 512,
+            "wind_divergence_dv": 512
+          },
+          "len": 1440,
+          "units": "degrees_north",
+          "coords": {
+            "type": "minMaxStep",
+            "min": -89.9375,
+            "max": 89.9375,
+            "step": 0.125,
+            "len": 1440
+          }
+        },
+        "longitude": {
+          "chunkLen": {
+            "air_density": 1024,
+            "eastward_stress": 1024,
+            "eastward_stress_bias": 1024,
+            "eastward_stress_sdd": 1024,
+            "eastward_wind": 1024,
+            "eastward_wind_bias": 1024,
+            "eastward_wind_sdd": 1024,
+            "northward_stress": 1024,
+            "northward_stress_bias": 1024,
+            "northward_stress_sdd": 1024,
+            "northward_wind": 1024,
+            "northward_wind_bias": 1024,
+            "northward_wind_sdd": 1024,
+            "number_of_observations": 1024,
+            "number_of_observations_divcurl": 1024,
+            "stress_curl": 1024,
+            "stress_curl_bias": 1024,
+            "stress_curl_dv": 1024,
+            "stress_divergence": 1024,
+            "stress_divergence_bias": 1024,
+            "stress_divergence_dv": 1024,
+            "wind_curl": 1024,
+            "wind_curl_bias": 1024,
+            "wind_curl_dv": 1024,
+            "wind_divergence": 1024,
+            "wind_divergence_bias": 1024,
+            "wind_divergence_dv": 1024
+          },
+          "len": 2880,
+          "units": "degrees_east",
+          "coords": {
+            "type": "minMaxStep",
+            "min": -179.9375,
+            "max": 179.9375,
+            "step": 0.125,
+            "len": 2880
+          }
+        }
+      },
+      "viewVariables": {
+        "air_density": {
+          "dtype": "<i2",
+          "itemSize": 2,
+          "chunkSize": 776722.9629629629
+        },
+        "eastward_stress": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1553445.9259259258
+        },
+        "eastward_stress_bias": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1553445.9259259258
+        },
+        "eastward_stress_sdd": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1553445.9259259258
+        },
+        "eastward_wind": {
+          "dtype": "<i2",
+          "itemSize": 2,
+          "chunkSize": 776722.9629629629
+        },
+        "eastward_wind_bias": {
+          "dtype": "<i2",
+          "itemSize": 2,
+          "chunkSize": 776722.9629629629
+        },
+        "eastward_wind_sdd": {
+          "dtype": "<i2",
+          "itemSize": 2,
+          "chunkSize": 776722.9629629629
+        },
+        "northward_stress": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1553445.9259259258
+        },
+        "northward_stress_bias": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1553445.9259259258
+        },
+        "northward_stress_sdd": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1553445.9259259258
+        },
+        "northward_wind": {
+          "dtype": "<i2",
+          "itemSize": 2,
+          "chunkSize": 776722.9629629629
+        },
+        "northward_wind_bias": {
+          "dtype": "<i2",
+          "itemSize": 2,
+          "chunkSize": 776722.9629629629
+        },
+        "northward_wind_sdd": {
+          "dtype": "<i2",
+          "itemSize": 2,
+          "chunkSize": 776722.9629629629
+        },
+        "number_of_observations": {
+          "dtype": "<i2",
+          "itemSize": 2,
+          "chunkSize": 776722.9629629629
+        },
+        "number_of_observations_divcurl": {
+          "dtype": "<i2",
+          "itemSize": 2,
+          "chunkSize": 776722.9629629629
+        },
+        "stress_curl": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1553445.9259259258
+        },
+        "stress_curl_bias": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1553445.9259259258
+        },
+        "stress_curl_dv": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1553445.9259259258
+        },
+        "stress_divergence": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1553445.9259259258
+        },
+        "stress_divergence_bias": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1553445.9259259258
+        },
+        "stress_divergence_dv": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1553445.9259259258
+        },
+        "wind_curl": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1553445.9259259258
+        },
+        "wind_curl_bias": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1553445.9259259258
+        },
+        "wind_curl_dv": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1553445.9259259258
+        },
+        "wind_divergence": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1553445.9259259258
+        },
+        "wind_divergence_bias": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1553445.9259259258
+        },
+        "wind_divergence_dv": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1553445.9259259258
+        }
+      },
+      "isAggregated": false
+    },
+    "downsampled4": {
+      "id": "downsampled4",
+      "href": "https://s3.waw3-1.cloudferro.com/mdl-arco-time-050/arco/WIND_GLO_PHY_L4_NRT_012_004/cmems_obs-wind_glo_phy_nrt_l4_0.125deg_PT1H_202207/downsampled4.zarr",
+      "type": "application/vnd+zarr",
+      "roles": [
+        "data",
+        "downsampled"
+      ],
+      "title": "Downsampled dataset (by 4) in Zarr",
+      "description": "An ARCO version of this dataset, downsampled in the spatial dimensions by 4.\n    \nNote that the link (`href`) associated to this asset is the base directory\nof this dataset, but it cannot be accessed directly.\n\nTo download this dataset or part of it, \nuse a library such as [xarray](https://docs.xarray.dev/).",
+      "xarray:open_kwargs": {
+        "consolidated": true
+      },
+      "viewDims": {
+        "time": {
+          "chunkLen": {
+            "air_density": 1,
+            "eastward_stress": 1,
+            "eastward_stress_bias": 1,
+            "eastward_stress_sdd": 1,
+            "eastward_wind": 1,
+            "eastward_wind_bias": 1,
+            "eastward_wind_sdd": 1,
+            "northward_stress": 1,
+            "northward_stress_bias": 1,
+            "northward_stress_sdd": 1,
+            "northward_wind": 1,
+            "northward_wind_bias": 1,
+            "northward_wind_sdd": 1,
+            "number_of_observations": 1,
+            "number_of_observations_divcurl": 1,
+            "stress_curl": 1,
+            "stress_curl_bias": 1,
+            "stress_curl_dv": 1,
+            "stress_divergence": 1,
+            "stress_divergence_bias": 1,
+            "stress_divergence_dv": 1,
+            "wind_curl": 1,
+            "wind_curl_bias": 1,
+            "wind_curl_dv": 1,
+            "wind_divergence": 1,
+            "wind_divergence_bias": 1,
+            "wind_divergence_dv": 1
+          },
+          "len": 54816,
+          "units": "milliseconds since 1970-01-01 00:00:00Z (no leap seconds)",
+          "validStartIndex": 34636,
+          "validStartDate": "2024-06-13T04:00:00.000000000Z",
+          "coords": {
+            "type": "minMaxStep",
+            "min": 1593561600000,
+            "max": 1790895600000,
+            "step": 3600000,
+            "len": 54816
+          }
+        },
+        "latitude": {
+          "chunkLen": {
+            "air_density": 360,
+            "eastward_stress": 360,
+            "eastward_stress_bias": 360,
+            "eastward_stress_sdd": 360,
+            "eastward_wind": 360,
+            "eastward_wind_bias": 360,
+            "eastward_wind_sdd": 360,
+            "northward_stress": 360,
+            "northward_stress_bias": 360,
+            "northward_stress_sdd": 360,
+            "northward_wind": 360,
+            "northward_wind_bias": 360,
+            "northward_wind_sdd": 360,
+            "number_of_observations": 360,
+            "number_of_observations_divcurl": 360,
+            "stress_curl": 360,
+            "stress_curl_bias": 360,
+            "stress_curl_dv": 360,
+            "stress_divergence": 360,
+            "stress_divergence_bias": 360,
+            "stress_divergence_dv": 360,
+            "wind_curl": 360,
+            "wind_curl_bias": 360,
+            "wind_curl_dv": 360,
+            "wind_divergence": 360,
+            "wind_divergence_bias": 360,
+            "wind_divergence_dv": 360
+          },
+          "len": 360,
+          "units": "degrees_north",
+          "coords": {
+            "type": "minMaxStep",
+            "min": -89.9375,
+            "max": 89.5625,
+            "step": 0.5,
+            "len": 360
+          }
+        },
+        "longitude": {
+          "chunkLen": {
+            "air_density": 720,
+            "eastward_stress": 720,
+            "eastward_stress_bias": 720,
+            "eastward_stress_sdd": 720,
+            "eastward_wind": 720,
+            "eastward_wind_bias": 720,
+            "eastward_wind_sdd": 720,
+            "northward_stress": 720,
+            "northward_stress_bias": 720,
+            "northward_stress_sdd": 720,
+            "northward_wind": 720,
+            "northward_wind_bias": 720,
+            "northward_wind_sdd": 720,
+            "number_of_observations": 720,
+            "number_of_observations_divcurl": 720,
+            "stress_curl": 720,
+            "stress_curl_bias": 720,
+            "stress_curl_dv": 720,
+            "stress_divergence": 720,
+            "stress_divergence_bias": 720,
+            "stress_divergence_dv": 720,
+            "wind_curl": 720,
+            "wind_curl_bias": 720,
+            "wind_curl_dv": 720,
+            "wind_divergence": 720,
+            "wind_divergence_bias": 720,
+            "wind_divergence_dv": 720
+          },
+          "len": 720,
+          "units": "degrees_east",
+          "coords": {
+            "type": "minMaxStep",
+            "min": -179.9375,
+            "max": 179.5625,
+            "step": 0.5,
+            "len": 720
+          }
+        }
+      },
+      "viewVariables": {
+        "air_density": {
+          "dtype": "<i2",
+          "itemSize": 2,
+          "chunkSize": 776722.9629629629
+        },
+        "eastward_stress": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1553445.9259259258
+        },
+        "eastward_stress_bias": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1553445.9259259258
+        },
+        "eastward_stress_sdd": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1553445.9259259258
+        },
+        "eastward_wind": {
+          "dtype": "<i2",
+          "itemSize": 2,
+          "chunkSize": 776722.9629629629
+        },
+        "eastward_wind_bias": {
+          "dtype": "<i2",
+          "itemSize": 2,
+          "chunkSize": 776722.9629629629
+        },
+        "eastward_wind_sdd": {
+          "dtype": "<i2",
+          "itemSize": 2,
+          "chunkSize": 776722.9629629629
+        },
+        "northward_stress": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1553445.9259259258
+        },
+        "northward_stress_bias": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1553445.9259259258
+        },
+        "northward_stress_sdd": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1553445.9259259258
+        },
+        "northward_wind": {
+          "dtype": "<i2",
+          "itemSize": 2,
+          "chunkSize": 776722.9629629629
+        },
+        "northward_wind_bias": {
+          "dtype": "<i2",
+          "itemSize": 2,
+          "chunkSize": 776722.9629629629
+        },
+        "northward_wind_sdd": {
+          "dtype": "<i2",
+          "itemSize": 2,
+          "chunkSize": 776722.9629629629
+        },
+        "number_of_observations": {
+          "dtype": "<i2",
+          "itemSize": 2,
+          "chunkSize": 776722.9629629629
+        },
+        "number_of_observations_divcurl": {
+          "dtype": "<i2",
+          "itemSize": 2,
+          "chunkSize": 776722.9629629629
+        },
+        "stress_curl": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1553445.9259259258
+        },
+        "stress_curl_bias": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1553445.9259259258
+        },
+        "stress_curl_dv": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1553445.9259259258
+        },
+        "stress_divergence": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1553445.9259259258
+        },
+        "stress_divergence_bias": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1553445.9259259258
+        },
+        "stress_divergence_dv": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1553445.9259259258
+        },
+        "wind_curl": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1553445.9259259258
+        },
+        "wind_curl_bias": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1553445.9259259258
+        },
+        "wind_curl_dv": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1553445.9259259258
+        },
+        "wind_divergence": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1553445.9259259258
+        },
+        "wind_divergence_bias": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1553445.9259259258
+        },
+        "wind_divergence_dv": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1553445.9259259258
+        }
+      },
+      "isAggregated": true
+    },
+    "geoChunked": {
+      "id": "geoChunked",
+      "href": "https://s3.waw3-1.cloudferro.com/mdl-arco-geo-050/arco/WIND_GLO_PHY_L4_NRT_012_004/cmems_obs-wind_glo_phy_nrt_l4_0.125deg_PT1H_202207/geoChunked.zarr",
+      "type": "application/vnd+zarr",
+      "roles": [
+        "data"
+      ],
+      "title": "Geo-chunked dataset in Zarr",
+      "description": "An ARCO version of this dataset with a small chunk size in the spatial dimensions.\n    \nNote that the link (`href`) associated to this asset is the base directory\nof this dataset, but it cannot be accessed directly.\n\nTo download this dataset or part of it, \nuse a library such as [xarray](https://docs.xarray.dev/).",
+      "xarray:open_kwargs": {
+        "consolidated": true
+      },
+      "viewDims": {
+        "time": {
+          "chunkLen": {
+            "air_density": 4948,
+            "eastward_stress": 4948,
+            "eastward_stress_bias": 4948,
+            "eastward_stress_sdd": 4948,
+            "eastward_wind": 4948,
+            "eastward_wind_bias": 4948,
+            "eastward_wind_sdd": 4948,
+            "northward_stress": 4948,
+            "northward_stress_bias": 4948,
+            "northward_stress_sdd": 4948,
+            "northward_wind": 4948,
+            "northward_wind_bias": 4948,
+            "northward_wind_sdd": 4948,
+            "number_of_observations": 4948,
+            "number_of_observations_divcurl": 4948,
+            "stress_curl": 4948,
+            "stress_curl_bias": 4948,
+            "stress_curl_dv": 4948,
+            "stress_divergence": 4948,
+            "stress_divergence_bias": 4948,
+            "stress_divergence_dv": 4948,
+            "wind_curl": 4948,
+            "wind_curl_bias": 4948,
+            "wind_curl_dv": 4948,
+            "wind_divergence": 4948,
+            "wind_divergence_bias": 4948,
+            "wind_divergence_dv": 4948
+          },
+          "len": 54816,
+          "units": "milliseconds since 1970-01-01 00:00:00Z (no leap seconds)",
+          "validStartIndex": 34636,
+          "validStartDate": "2024-06-13T04:00:00.000000000Z",
+          "coords": {
+            "type": "minMaxStep",
+            "min": 1593561600000,
+            "max": 1790895600000,
+            "step": 3600000,
+            "len": 54816
+          }
+        },
+        "latitude": {
+          "chunkLen": {
+            "air_density": 8,
+            "eastward_stress": 8,
+            "eastward_stress_bias": 8,
+            "eastward_stress_sdd": 8,
+            "eastward_wind": 8,
+            "eastward_wind_bias": 8,
+            "eastward_wind_sdd": 8,
+            "northward_stress": 8,
+            "northward_stress_bias": 8,
+            "northward_stress_sdd": 8,
+            "northward_wind": 8,
+            "northward_wind_bias": 8,
+            "northward_wind_sdd": 8,
+            "number_of_observations": 8,
+            "number_of_observations_divcurl": 8,
+            "stress_curl": 8,
+            "stress_curl_bias": 8,
+            "stress_curl_dv": 8,
+            "stress_divergence": 8,
+            "stress_divergence_bias": 8,
+            "stress_divergence_dv": 8,
+            "wind_curl": 8,
+            "wind_curl_bias": 8,
+            "wind_curl_dv": 8,
+            "wind_divergence": 8,
+            "wind_divergence_bias": 8,
+            "wind_divergence_dv": 8
+          },
+          "len": 1440,
+          "units": "degrees_north",
+          "coords": {
+            "type": "minMaxStep",
+            "min": -89.9375,
+            "max": 89.9375,
+            "step": 0.125,
+            "len": 1440
+          }
+        },
+        "longitude": {
+          "chunkLen": {
+            "air_density": 8,
+            "eastward_stress": 8,
+            "eastward_stress_bias": 8,
+            "eastward_stress_sdd": 8,
+            "eastward_wind": 8,
+            "eastward_wind_bias": 8,
+            "eastward_wind_sdd": 8,
+            "northward_stress": 8,
+            "northward_stress_bias": 8,
+            "northward_stress_sdd": 8,
+            "northward_wind": 8,
+            "northward_wind_bias": 8,
+            "northward_wind_sdd": 8,
+            "number_of_observations": 8,
+            "number_of_observations_divcurl": 8,
+            "stress_curl": 8,
+            "stress_curl_bias": 8,
+            "stress_curl_dv": 8,
+            "stress_divergence": 8,
+            "stress_divergence_bias": 8,
+            "stress_divergence_dv": 8,
+            "wind_curl": 8,
+            "wind_curl_bias": 8,
+            "wind_curl_dv": 8,
+            "wind_divergence": 8,
+            "wind_divergence_bias": 8,
+            "wind_divergence_dv": 8
+          },
+          "len": 2880,
+          "units": "degrees_east",
+          "coords": {
+            "type": "minMaxStep",
+            "min": -179.9375,
+            "max": 179.9375,
+            "step": 0.125,
+            "len": 2880
+          }
+        }
+      },
+      "viewVariables": {
+        "air_density": {
+          "dtype": "<i2",
+          "itemSize": 2,
+          "chunkSize": 745110.5882352941
+        },
+        "eastward_stress": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1490221.1764705882
+        },
+        "eastward_stress_bias": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1490221.1764705882
+        },
+        "eastward_stress_sdd": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1490221.1764705882
+        },
+        "eastward_wind": {
+          "dtype": "<i2",
+          "itemSize": 2,
+          "chunkSize": 745110.5882352941
+        },
+        "eastward_wind_bias": {
+          "dtype": "<i2",
+          "itemSize": 2,
+          "chunkSize": 745110.5882352941
+        },
+        "eastward_wind_sdd": {
+          "dtype": "<i2",
+          "itemSize": 2,
+          "chunkSize": 745110.5882352941
+        },
+        "northward_stress": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1490221.1764705882
+        },
+        "northward_stress_bias": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1490221.1764705882
+        },
+        "northward_stress_sdd": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1490221.1764705882
+        },
+        "northward_wind": {
+          "dtype": "<i2",
+          "itemSize": 2,
+          "chunkSize": 745110.5882352941
+        },
+        "northward_wind_bias": {
+          "dtype": "<i2",
+          "itemSize": 2,
+          "chunkSize": 745110.5882352941
+        },
+        "northward_wind_sdd": {
+          "dtype": "<i2",
+          "itemSize": 2,
+          "chunkSize": 745110.5882352941
+        },
+        "number_of_observations": {
+          "dtype": "<i2",
+          "itemSize": 2,
+          "chunkSize": 745110.5882352941
+        },
+        "number_of_observations_divcurl": {
+          "dtype": "<i2",
+          "itemSize": 2,
+          "chunkSize": 745110.5882352941
+        },
+        "stress_curl": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1490221.1764705882
+        },
+        "stress_curl_bias": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1490221.1764705882
+        },
+        "stress_curl_dv": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1490221.1764705882
+        },
+        "stress_divergence": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1490221.1764705882
+        },
+        "stress_divergence_bias": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1490221.1764705882
+        },
+        "stress_divergence_dv": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1490221.1764705882
+        },
+        "wind_curl": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1490221.1764705882
+        },
+        "wind_curl_bias": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1490221.1764705882
+        },
+        "wind_curl_dv": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1490221.1764705882
+        },
+        "wind_divergence": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1490221.1764705882
+        },
+        "wind_divergence_bias": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1490221.1764705882
+        },
+        "wind_divergence_dv": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1490221.1764705882
+        }
+      },
+      "isAggregated": false
+    }
+  },
+  "collection": "WIND_GLO_PHY_L4_NRT_012_004"
+}

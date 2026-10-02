@@ -28,7 +28,7 @@ import type { CSSProperties } from "react";
 import { stillPasteChord } from "./chords";
 import type { FieldKindName } from "./kind";
 import { listen } from "@tauri-apps/api/event";
-import { api, HISTORY_LABEL, IpcError } from "./ipc";
+import { api, HISTORY_LABEL, IpcError, NRT_LABEL } from "./ipc";
 import { reportError, retryError, setMcpActivity, shown, useHint } from "./hint";
 import { isBusy, useBusy } from "./busy";
 import type { HistoryProgress } from "./generated/HistoryProgress";
@@ -905,7 +905,16 @@ function EditorApp() {
 
       <div className="statusbar" data-feature="shell:statusbar">
         <BusySpinner />
-        <HistoryProgressBar />
+        <FetchProgressBar
+          busyLabel={HISTORY_LABEL}
+          event="history://progress"
+          waiting={msg("Opening the archives")}
+        />
+        <FetchProgressBar
+          busyLabel={NRT_LABEL}
+          event="nrt://progress"
+          waiting={msg("Opening the products")}
+        />
         {info && (
           <>
             <span className="muted">v{info.version}</span>
@@ -1011,7 +1020,8 @@ function BusySpinner() {
 }
 
 /**
- * How far a history fetch has got (spec.md 4.10, M38).
+ * How far a fetch has got (spec.md 4.10, M38): the history import's, or the
+ * near-real-time import's (M89), which reports the same way.
  *
  * A fetch is minutes of network with nothing else to look at, and a spinner
  * that only turns cannot tell a slow archive from a stalled one. The backend
@@ -1020,25 +1030,38 @@ function BusySpinner() {
  *
  * It is bounded by the busy store rather than by the last event: an import
  * that fails leaves its final progress behind, and the bar has to go when the
- * command does, whichever way it ended.
+ * command does, whichever way it ended. That is also what tells the two
+ * imports' bars apart — each shows only while its own command's label is in
+ * the busy set, and listens only to its own event.
  *
  * Its own component, and its own subscription, so a progress event re-renders
  * this bar and not the shell.
  */
-function HistoryProgressBar() {
+function FetchProgressBar({
+  busyLabel,
+  event,
+  waiting,
+}: {
+  /** The command's entry in `LONG_RUNNING`: the bar shows while it is busy. */
+  busyLabel: string;
+  /** The event the backend reports on; its payload is a `HistoryProgress`. */
+  event: string;
+  /** What to say before the first report lands. English, via `msg`. */
+  waiting: string;
+}) {
   const t = useT();
   const busy = useBusy();
   const [progress, setProgress] = useState<HistoryProgress | null>(null);
-  const running = busy.labels.includes(HISTORY_LABEL);
+  const running = busy.labels.includes(busyLabel);
 
   useEffect(() => {
-    const pending = listen<HistoryProgress>("history://progress", (event) => {
-      setProgress(event.payload);
+    const pending = listen<HistoryProgress>(event, (report) => {
+      setProgress(report.payload);
     });
     return () => {
       void pending.then((unlisten) => unlisten());
     };
-  }, []);
+  }, [event]);
 
   // Cleared on the way out, so the next fetch does not open on the last
   // one's bar before its first event lands.
@@ -1051,7 +1074,7 @@ function HistoryProgressBar() {
   const percent = total > 0 ? Math.round(((progress?.done ?? 0) / total) * 100) : 0;
   const label =
     progress === null
-      ? t("Opening the archives")
+      ? t(waiting)
       : `${progress.archive} · ${progress.done}/${progress.total}`;
   return (
     <span className="history-progress" title={label} aria-label={label}>

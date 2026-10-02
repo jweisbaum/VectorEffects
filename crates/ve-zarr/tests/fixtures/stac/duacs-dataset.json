@@ -1,0 +1,947 @@
+{
+  "id": "cmems_obs-sl_glo_phy-ssh_nrt_allsat-l4-duacs-0.125deg_P1D_202506",
+  "type": "Feature",
+  "stac_version": "1.0.0",
+  "stac_extensions": [
+    "https://stac-extensions.github.io/datacube/v2.1.0/schema.json"
+  ],
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+      [
+        [
+          -179.9375,
+          -89.9375
+        ],
+        [
+          -179.9375,
+          89.9375
+        ],
+        [
+          179.9375,
+          89.9375
+        ],
+        [
+          179.9375,
+          -89.9375
+        ],
+        [
+          -179.9375,
+          -89.9375
+        ]
+      ]
+    ]
+  },
+  "bbox": [
+    -179.9375,
+    -89.9375,
+    179.9375,
+    89.9375
+  ],
+  "properties": {
+    "datetime": null,
+    "start_datetime": "2024-07-01T00:00:00Z",
+    "end_datetime": "2026-10-02T00:00:00Z",
+    "Conventions": "CF-1.6",
+    "Metadata_Conventions": "Unidata Dataset Discovery v1.0",
+    "cdm_data_type": "Grid",
+    "comment": "Sea Surface Height measured by Altimetry and derived variables",
+    "contact": "servicedesk.cmems@mercator-ocean.eu",
+    "creator_email": "servicedesk.cmems@mercator-ocean.eu",
+    "creator_name": "CMEMS - Sea Level Thematic Assembly Center",
+    "creator_url": "http://marine.copernicus.eu",
+    "date_created": "2025-04-17T20:03:50Z",
+    "date_issued": "2025-04-17T20:03:50Z",
+    "date_modified": "2025-04-17T20:03:50Z",
+    "geospatial_lat_max": 89.9375,
+    "geospatial_lat_min": -89.9375,
+    "geospatial_lat_resolution": 0.125,
+    "geospatial_lat_units": "degrees_north",
+    "geospatial_lon_max": 179.9375,
+    "geospatial_lon_min": -179.9375,
+    "geospatial_lon_resolution": 0.125,
+    "geospatial_lon_units": "degrees_east",
+    "geospatial_vertical_max": 0,
+    "geospatial_vertical_min": 0,
+    "geospatial_vertical_positive": "down",
+    "geospatial_vertical_resolution": "point",
+    "geospatial_vertical_units": "m",
+    "history": "2025-04-17 20:03:53Z: Creation",
+    "institution": "CLS, CNES",
+    "keywords": "Oceans > Ocean Topography > Sea Surface Height",
+    "keywords_vocabulary": "NetCDF COARDS Climate and Forecast Standard Names",
+    "originalLicense": "http://marine.copernicus.eu/web/27-service-commitments-and-licence.php",
+    "platform": "Altika Drifting Phase, Cryosat-2 New Orbit, Haiyang-2B, Jason-3 Interleaved, Sentinel-3A, Sentinel-3B, Sentinel-6A, SWOT nadir 28days",
+    "processing_level": "L4",
+    "product_version": "vNov2024",
+    "project": "SSALTO/DUACS",
+    "references": "http://marine.copernicus.eu",
+    "software_version": "4.0.2_DUACS_DT2024_baseline",
+    "source": "Altimetry measurements",
+    "ssalto_duacs_comment": "Sentinel-6A is the reference mission used for the altimeter inter-calibration processing",
+    "standard_name_vocabulary": "NetCDF Climate and Forecast (CF) Metadata Convention Standard Name Table v37",
+    "summary": "SSALTO/DUACS Near-Real-Time Level-4 sea surface height and derived variables measured by multi-satellite altimetry observations over Global Ocean.",
+    "time_coverage_duration": "P1D",
+    "time_coverage_end": "2024-11-30T12:00:00Z",
+    "time_coverage_resolution": "P1D",
+    "time_coverage_start": "2024-11-29T12:00:00Z",
+    "title": "NRT merged all satellites Global Ocean Gridded SSALTO/DUACS Sea Surface Height L4 product and derived variables",
+    "cube:dimensions": {
+      "time": {
+        "type": "temporal",
+        "extent": [
+          "2024-07-01T00:00:00Z",
+          "2026-10-02T00:00:00Z"
+        ],
+        "step": "P1D"
+      },
+      "latitude": {
+        "type": "spatial",
+        "axis": "y",
+        "extent": [
+          -89.9375,
+          89.9375
+        ],
+        "step": 0.125,
+        "reference_system": 4326
+      },
+      "longitude": {
+        "type": "spatial",
+        "axis": "x",
+        "extent": [
+          -179.9375,
+          179.9375
+        ],
+        "step": 0.125,
+        "reference_system": 4326
+      },
+      "nv": {
+        "type": "other",
+        "extent": [
+          0,
+          1
+        ],
+        "step": 1,
+        "unit": "1"
+      }
+    },
+    "cube:variables": {
+      "adt": {
+        "id": "adt",
+        "dimensions": [
+          "time",
+          "latitude",
+          "longitude"
+        ],
+        "type": "data",
+        "unit": "m",
+        "standardName": "sea_surface_height_above_geoid",
+        "abbreviation": "adt",
+        "name": {
+          "en": "Absolute dynamic topography"
+        },
+        "unitConversion": null,
+        "missingValue": -2147483647,
+        "offset": null,
+        "scale": 0.0001,
+        "valueMin": -1.3134000000000001,
+        "valueMax": 1.3644,
+        "valueDiffMax": 1.3389000000000002,
+        "valueDiffRelMax": 25,
+        "valueClamp": true,
+        "hasLogScale": false,
+        "logScale": false,
+        "colormapId": "viridis",
+        "colormapInvert": false,
+        "colormapDiffId": "balance",
+        "colormapDiffInvert": false,
+        "valueColor": false
+      },
+      "err_sla": {
+        "id": "err_sla",
+        "dimensions": [
+          "time",
+          "latitude",
+          "longitude"
+        ],
+        "type": "data",
+        "unit": "m",
+        "standardName": "sea_surface_height_above_sea_level standard_error",
+        "abbreviation": "err_sla",
+        "name": {
+          "en": "Formal mapping error"
+        },
+        "unitConversion": null,
+        "missingValue": -2147483647,
+        "offset": null,
+        "scale": 0.0001,
+        "valueMin": 0,
+        "valueMax": 0.038,
+        "valueDiffMax": 0.019,
+        "valueDiffRelMax": 25,
+        "valueClamp": true,
+        "hasLogScale": true,
+        "logScale": false,
+        "colormapId": "rainbow",
+        "colormapInvert": false,
+        "colormapDiffId": "balance",
+        "colormapDiffInvert": false,
+        "valueColor": false
+      },
+      "err_ugosa": {
+        "id": "err_ugosa",
+        "dimensions": [
+          "time",
+          "latitude",
+          "longitude"
+        ],
+        "type": "data",
+        "unit": "m/s",
+        "standardName": "surface_geostrophic_eastward_sea_water_velocity_assuming_sea_level_for_geoid standard_error",
+        "abbreviation": "err_ugosa",
+        "name": {
+          "en": "Formal mapping error on zonal geostrophic velocity anomalies"
+        },
+        "unitConversion": null,
+        "missingValue": -2147483647,
+        "offset": null,
+        "scale": 0.0001,
+        "valueMin": -0.2604,
+        "valueMax": 0.2604,
+        "valueDiffMax": 0.2604,
+        "valueDiffRelMax": 25,
+        "valueClamp": true,
+        "hasLogScale": false,
+        "logScale": false,
+        "colormapId": "balance",
+        "colormapInvert": false,
+        "colormapDiffId": "balance",
+        "colormapDiffInvert": false,
+        "valueColor": false
+      },
+      "err_vgosa": {
+        "id": "err_vgosa",
+        "dimensions": [
+          "time",
+          "latitude",
+          "longitude"
+        ],
+        "type": "data",
+        "unit": "m/s",
+        "standardName": "surface_geostrophic_northward_sea_water_velocity_assuming_sea_level_for_geoid standard_error",
+        "abbreviation": "err_vgosa",
+        "name": {
+          "en": "Formal mapping error on meridional geostrophic velocity anomalies"
+        },
+        "unitConversion": null,
+        "missingValue": -2147483647,
+        "offset": null,
+        "scale": 0.0001,
+        "valueMin": -0.2604,
+        "valueMax": 0.2604,
+        "valueDiffMax": 0.2604,
+        "valueDiffRelMax": 25,
+        "valueClamp": true,
+        "hasLogScale": false,
+        "logScale": false,
+        "colormapId": "balance",
+        "colormapInvert": false,
+        "colormapDiffId": "balance",
+        "colormapDiffInvert": false,
+        "valueColor": false
+      },
+      "flag_ice": {
+        "id": "flag_ice",
+        "dimensions": [
+          "time",
+          "latitude",
+          "longitude"
+        ],
+        "type": "data",
+        "standardName": "status_flag",
+        "abbreviation": "flag_ice",
+        "name": {
+          "en": "Ice Flag for a 15% criterion of ice concentration"
+        },
+        "unitConversion": null,
+        "missingValue": -2147483647,
+        "offset": null,
+        "scale": null,
+        "valueMin": 0,
+        "valueMax": 1,
+        "valueDiffMax": 0.5,
+        "valueDiffRelMax": 25,
+        "valueClamp": true,
+        "flagMeanings": [
+          "data_on_sea",
+          "data_on_ice"
+        ],
+        "flagValues": [
+          0,
+          1
+        ],
+        "hasLogScale": false,
+        "logScale": false,
+        "colormapId": "rainbow",
+        "colormapInvert": false,
+        "colormapDiffId": "balance",
+        "colormapDiffInvert": false,
+        "valueColor": false
+      },
+      "sla": {
+        "id": "sla",
+        "dimensions": [
+          "time",
+          "latitude",
+          "longitude"
+        ],
+        "type": "data",
+        "unit": "m",
+        "standardName": "sea_surface_height_above_sea_level",
+        "abbreviation": "sla",
+        "name": {
+          "en": "Sea level anomaly"
+        },
+        "unitConversion": null,
+        "missingValue": -2147483647,
+        "offset": null,
+        "scale": 0.0001,
+        "valueMin": -0.066,
+        "valueMax": 0.3216,
+        "valueDiffMax": 0.1938,
+        "valueDiffRelMax": 25,
+        "valueClamp": true,
+        "hasLogScale": false,
+        "logScale": false,
+        "colormapId": "plasma",
+        "colormapInvert": false,
+        "colormapDiffId": "balance",
+        "colormapDiffInvert": false,
+        "valueColor": false
+      },
+      "ugos": {
+        "id": "ugos",
+        "dimensions": [
+          "time",
+          "latitude",
+          "longitude"
+        ],
+        "type": "data",
+        "unit": "m/s",
+        "standardName": "surface_geostrophic_eastward_sea_water_velocity",
+        "abbreviation": "ugos",
+        "name": {
+          "en": "Absolute geostrophic velocity: zonal component"
+        },
+        "unitConversion": null,
+        "missingValue": -2147483647,
+        "offset": null,
+        "scale": 0.0001,
+        "valueMin": -1.3215,
+        "valueMax": 1.3215,
+        "valueDiffMax": 1.3215,
+        "valueDiffRelMax": 25,
+        "valueClamp": true,
+        "hasLogScale": false,
+        "logScale": false,
+        "colormapId": "balance",
+        "colormapInvert": false,
+        "colormapDiffId": "balance",
+        "colormapDiffInvert": false,
+        "valueColor": false
+      },
+      "ugosa": {
+        "id": "ugosa",
+        "dimensions": [
+          "time",
+          "latitude",
+          "longitude"
+        ],
+        "type": "data",
+        "unit": "m/s",
+        "standardName": "surface_geostrophic_eastward_sea_water_velocity_assuming_sea_level_for_geoid",
+        "abbreviation": "ugosa",
+        "name": {
+          "en": "Geostrophic velocity anomalies: zonal component"
+        },
+        "unitConversion": null,
+        "missingValue": -2147483647,
+        "offset": null,
+        "scale": 0.0001,
+        "valueMin": -0.9951,
+        "valueMax": 0.9951,
+        "valueDiffMax": 0.9951,
+        "valueDiffRelMax": 25,
+        "valueClamp": true,
+        "hasLogScale": false,
+        "logScale": false,
+        "colormapId": "balance",
+        "colormapInvert": false,
+        "colormapDiffId": "balance",
+        "colormapDiffInvert": false,
+        "valueColor": false
+      },
+      "vgos": {
+        "id": "vgos",
+        "dimensions": [
+          "time",
+          "latitude",
+          "longitude"
+        ],
+        "type": "data",
+        "unit": "m/s",
+        "standardName": "surface_geostrophic_northward_sea_water_velocity",
+        "abbreviation": "vgos",
+        "name": {
+          "en": "Absolute geostrophic velocity: meridian component"
+        },
+        "unitConversion": null,
+        "missingValue": -2147483647,
+        "offset": null,
+        "scale": 0.0001,
+        "valueMin": -1.3215,
+        "valueMax": 1.3215,
+        "valueDiffMax": 1.3215,
+        "valueDiffRelMax": 25,
+        "valueClamp": true,
+        "hasLogScale": false,
+        "logScale": false,
+        "colormapId": "balance",
+        "colormapInvert": false,
+        "colormapDiffId": "balance",
+        "colormapDiffInvert": false,
+        "valueColor": false
+      },
+      "vgosa": {
+        "id": "vgosa",
+        "dimensions": [
+          "time",
+          "latitude",
+          "longitude"
+        ],
+        "type": "data",
+        "unit": "m/s",
+        "standardName": "surface_geostrophic_northward_sea_water_velocity_assuming_sea_level_for_geoid",
+        "abbreviation": "vgosa",
+        "name": {
+          "en": "Geostrophic velocity anomalies: meridian component"
+        },
+        "unitConversion": null,
+        "missingValue": -2147483647,
+        "offset": null,
+        "scale": 0.0001,
+        "valueMin": -0.9951,
+        "valueMax": 0.9951,
+        "valueDiffMax": 0.9951,
+        "valueDiffRelMax": 25,
+        "valueClamp": true,
+        "hasLogScale": false,
+        "logScale": false,
+        "colormapId": "balance",
+        "colormapInvert": false,
+        "colormapDiffId": "balance",
+        "colormapDiffInvert": false,
+        "valueColor": false
+      }
+    },
+    "admp_in_preparation": false,
+    "admp_released_date": "2025-06-25T13:00:00.000Z",
+    "admp_retired_date": null,
+    "admp_title": "0.125 degree",
+    "admp_updated": "2026-10-02T01:56:55.409184Z",
+    "admp_sample_period": "day",
+    "admp_updating_start_date": null,
+    "admp_updated_data": "2026-10-02T01:56:50.589Z"
+  },
+  "links": [
+    {
+      "rel": "root",
+      "href": "../../catalog.stac.json",
+      "title": "Copernicus Marine Data Store",
+      "type": "application/json"
+    },
+    {
+      "rel": "parent",
+      "href": "../product.stac.json",
+      "title": "SEALEVEL_GLO_PHY_L4_NRT_008_046",
+      "type": "application/json"
+    },
+    {
+      "rel": "collection",
+      "href": "../product.stac.json",
+      "title": "SEALEVEL_GLO_PHY_L4_NRT_008_046",
+      "type": "application/json"
+    }
+  ],
+  "assets": {
+    "native": {
+      "id": "native",
+      "href": "https://s3.waw3-1.cloudferro.com/mdl-native-07/native/SEALEVEL_GLO_PHY_L4_NRT_008_046/cmems_obs-sl_glo_phy-ssh_nrt_allsat-l4-duacs-0.125deg_P1D_202506",
+      "type": "application/x-netcdf",
+      "roles": [
+        "data"
+      ],
+      "title": "Native dataset",
+      "description": "The original, non-ARCO version of this dataset, as published by the data provider."
+    },
+    "wmts": {
+      "id": "wmts",
+      "href": "https://wmts.marine.copernicus.eu/teroWmts/SEALEVEL_GLO_PHY_L4_NRT_008_046/cmems_obs-sl_glo_phy-ssh_nrt_allsat-l4-duacs-0.125deg_P1D_202506?service=WMTS&request=GetCapabilities",
+      "type": "application/xml",
+      "roles": [
+        "visual"
+      ],
+      "title": "OGC Web Map Tile Service (WMTS)",
+      "description": "Georeferenced map tiles using the OGC WMTS standard."
+    },
+    "timeChunked": {
+      "id": "timeChunked",
+      "href": "https://s3.waw3-1.cloudferro.com/mdl-arco-time-045/arco/SEALEVEL_GLO_PHY_L4_NRT_008_046/cmems_obs-sl_glo_phy-ssh_nrt_allsat-l4-duacs-0.125deg_P1D_202506/timeChunked.zarr",
+      "type": "application/vnd+zarr",
+      "roles": [
+        "data"
+      ],
+      "title": "Time-chunked dataset in Zarr",
+      "description": "An ARCO version of this dataset with a small chunk size in the temporal dimension.\n    \nNote that the link (`href`) associated to this asset is the base directory\nof this dataset, but it cannot be accessed directly.\n\nTo download this dataset or part of it, \nuse a library such as [xarray](https://docs.xarray.dev/).",
+      "xarray:open_kwargs": {
+        "consolidated": true
+      },
+      "viewDims": {
+        "time": {
+          "chunkLen": {
+            "adt": 1,
+            "err_sla": 1,
+            "err_ugosa": 1,
+            "err_vgosa": 1,
+            "flag_ice": 1,
+            "sla": 1,
+            "ugos": 1,
+            "ugosa": 1,
+            "vgos": 1,
+            "vgosa": 1
+          },
+          "len": 824,
+          "units": "milliseconds since 1970-01-01 00:00:00Z (no leap seconds)",
+          "coords": {
+            "type": "minMaxStep",
+            "min": 1719792000000,
+            "max": 1790899200000,
+            "step": 86400000,
+            "len": 824
+          }
+        },
+        "latitude": {
+          "chunkLen": {
+            "adt": 512,
+            "err_sla": 512,
+            "err_ugosa": 512,
+            "err_vgosa": 512,
+            "flag_ice": 512,
+            "sla": 512,
+            "ugos": 512,
+            "ugosa": 512,
+            "vgos": 512,
+            "vgosa": 512
+          },
+          "len": 1440,
+          "units": "degrees_north",
+          "coords": {
+            "type": "minMaxStep",
+            "min": -89.9375,
+            "max": 89.9375,
+            "step": 0.125,
+            "len": 1440
+          }
+        },
+        "longitude": {
+          "chunkLen": {
+            "adt": 1024,
+            "err_sla": 1024,
+            "err_ugosa": 1024,
+            "err_vgosa": 1024,
+            "flag_ice": 1024,
+            "sla": 1024,
+            "ugos": 1024,
+            "ugosa": 1024,
+            "vgos": 1024,
+            "vgosa": 1024
+          },
+          "len": 2880,
+          "units": "degrees_east",
+          "coords": {
+            "type": "minMaxStep",
+            "min": -179.9375,
+            "max": 179.9375,
+            "step": 0.125,
+            "len": 2880
+          }
+        },
+        "nv": {
+          "chunkLen": {},
+          "len": 2,
+          "units": "1",
+          "coords": {
+            "type": "minMaxStep",
+            "min": 0,
+            "max": 1,
+            "step": 1,
+            "len": 2
+          }
+        }
+      },
+      "viewVariables": {
+        "adt": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1553445.9259259258
+        },
+        "err_sla": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1553445.9259259258
+        },
+        "err_ugosa": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1553445.9259259258
+        },
+        "err_vgosa": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1553445.9259259258
+        },
+        "flag_ice": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1553445.9259259258
+        },
+        "sla": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1553445.9259259258
+        },
+        "ugos": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1553445.9259259258
+        },
+        "ugosa": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1553445.9259259258
+        },
+        "vgos": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1553445.9259259258
+        },
+        "vgosa": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1553445.9259259258
+        }
+      },
+      "isAggregated": false
+    },
+    "downsampled4": {
+      "id": "downsampled4",
+      "href": "https://s3.waw3-1.cloudferro.com/mdl-arco-time-045/arco/SEALEVEL_GLO_PHY_L4_NRT_008_046/cmems_obs-sl_glo_phy-ssh_nrt_allsat-l4-duacs-0.125deg_P1D_202506/downsampled4.zarr",
+      "type": "application/vnd+zarr",
+      "roles": [
+        "data",
+        "downsampled"
+      ],
+      "title": "Downsampled dataset (by 4) in Zarr",
+      "description": "An ARCO version of this dataset, downsampled in the spatial dimensions by 4.\n    \nNote that the link (`href`) associated to this asset is the base directory\nof this dataset, but it cannot be accessed directly.\n\nTo download this dataset or part of it, \nuse a library such as [xarray](https://docs.xarray.dev/).",
+      "xarray:open_kwargs": {
+        "consolidated": true
+      },
+      "viewDims": {
+        "time": {
+          "chunkLen": {
+            "adt": 1,
+            "err_sla": 1,
+            "err_ugosa": 1,
+            "err_vgosa": 1,
+            "flag_ice": 1,
+            "sla": 1,
+            "ugos": 1,
+            "ugosa": 1,
+            "vgos": 1,
+            "vgosa": 1
+          },
+          "len": 824,
+          "units": "milliseconds since 1970-01-01 00:00:00Z (no leap seconds)",
+          "coords": {
+            "type": "minMaxStep",
+            "min": 1719792000000,
+            "max": 1790899200000,
+            "step": 86400000,
+            "len": 824
+          }
+        },
+        "latitude": {
+          "chunkLen": {
+            "adt": 360,
+            "err_sla": 360,
+            "err_ugosa": 360,
+            "err_vgosa": 360,
+            "flag_ice": 360,
+            "sla": 360,
+            "ugos": 360,
+            "ugosa": 360,
+            "vgos": 360,
+            "vgosa": 360
+          },
+          "len": 360,
+          "units": "degrees_north",
+          "coords": {
+            "type": "minMaxStep",
+            "min": -89.9375,
+            "max": 89.5625,
+            "step": 0.5,
+            "len": 360
+          }
+        },
+        "longitude": {
+          "chunkLen": {
+            "adt": 720,
+            "err_sla": 720,
+            "err_ugosa": 720,
+            "err_vgosa": 720,
+            "flag_ice": 720,
+            "sla": 720,
+            "ugos": 720,
+            "ugosa": 720,
+            "vgos": 720,
+            "vgosa": 720
+          },
+          "len": 720,
+          "units": "degrees_east",
+          "coords": {
+            "type": "minMaxStep",
+            "min": -179.9375,
+            "max": 179.5625,
+            "step": 0.5,
+            "len": 720
+          }
+        },
+        "nv": {
+          "chunkLen": {},
+          "len": 2,
+          "units": "1",
+          "coords": {
+            "type": "minMaxStep",
+            "min": 0,
+            "max": 1,
+            "step": 1,
+            "len": 2
+          }
+        }
+      },
+      "viewVariables": {
+        "adt": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1553445.9259259258
+        },
+        "err_sla": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1553445.9259259258
+        },
+        "err_ugosa": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1553445.9259259258
+        },
+        "err_vgosa": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1553445.9259259258
+        },
+        "flag_ice": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1553445.9259259258
+        },
+        "sla": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1553445.9259259258
+        },
+        "ugos": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1553445.9259259258
+        },
+        "ugosa": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1553445.9259259258
+        },
+        "vgos": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1553445.9259259258
+        },
+        "vgosa": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1553445.9259259258
+        }
+      },
+      "isAggregated": true
+    },
+    "geoChunked": {
+      "id": "geoChunked",
+      "href": "https://s3.waw3-1.cloudferro.com/mdl-arco-geo-045/arco/SEALEVEL_GLO_PHY_L4_NRT_008_046/cmems_obs-sl_glo_phy-ssh_nrt_allsat-l4-duacs-0.125deg_P1D_202506/geoChunked.zarr",
+      "type": "application/vnd+zarr",
+      "roles": [
+        "data"
+      ],
+      "title": "Geo-chunked dataset in Zarr",
+      "description": "An ARCO version of this dataset with a small chunk size in the spatial dimensions.\n    \nNote that the link (`href`) associated to this asset is the base directory\nof this dataset, but it cannot be accessed directly.\n\nTo download this dataset or part of it, \nuse a library such as [xarray](https://docs.xarray.dev/).",
+      "xarray:open_kwargs": {
+        "consolidated": true
+      },
+      "viewDims": {
+        "time": {
+          "chunkLen": {
+            "adt": 150,
+            "err_sla": 150,
+            "err_ugosa": 150,
+            "err_vgosa": 150,
+            "flag_ice": 150,
+            "sla": 150,
+            "ugos": 150,
+            "ugosa": 150,
+            "vgos": 150,
+            "vgosa": 150
+          },
+          "len": 824,
+          "units": "milliseconds since 1970-01-01 00:00:00Z (no leap seconds)",
+          "coords": {
+            "type": "minMaxStep",
+            "min": 1719792000000,
+            "max": 1790899200000,
+            "step": 86400000,
+            "len": 824
+          }
+        },
+        "latitude": {
+          "chunkLen": {
+            "adt": 32,
+            "err_sla": 32,
+            "err_ugosa": 32,
+            "err_vgosa": 32,
+            "flag_ice": 32,
+            "sla": 32,
+            "ugos": 32,
+            "ugosa": 32,
+            "vgos": 32,
+            "vgosa": 32
+          },
+          "len": 1440,
+          "units": "degrees_north",
+          "coords": {
+            "type": "minMaxStep",
+            "min": -89.9375,
+            "max": 89.9375,
+            "step": 0.125,
+            "len": 1440
+          }
+        },
+        "longitude": {
+          "chunkLen": {
+            "adt": 64,
+            "err_sla": 64,
+            "err_ugosa": 64,
+            "err_vgosa": 64,
+            "flag_ice": 64,
+            "sla": 64,
+            "ugos": 64,
+            "ugosa": 64,
+            "vgos": 64,
+            "vgosa": 64
+          },
+          "len": 2880,
+          "units": "degrees_east",
+          "coords": {
+            "type": "minMaxStep",
+            "min": -179.9375,
+            "max": 179.9375,
+            "step": 0.125,
+            "len": 2880
+          }
+        },
+        "nv": {
+          "chunkLen": {},
+          "len": 2,
+          "units": "1",
+          "coords": {
+            "type": "minMaxStep",
+            "min": 0,
+            "max": 1,
+            "step": 1,
+            "len": 2
+          }
+        }
+      },
+      "viewVariables": {
+        "adt": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1445647.0588235294
+        },
+        "err_sla": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1445647.0588235294
+        },
+        "err_ugosa": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1445647.0588235294
+        },
+        "err_vgosa": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1445647.0588235294
+        },
+        "flag_ice": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1445647.0588235294
+        },
+        "sla": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1445647.0588235294
+        },
+        "ugos": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1445647.0588235294
+        },
+        "ugosa": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1445647.0588235294
+        },
+        "vgos": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1445647.0588235294
+        },
+        "vgosa": {
+          "dtype": "<i4",
+          "itemSize": 4,
+          "chunkSize": 1445647.0588235294
+        }
+      },
+      "isAggregated": false
+    }
+  },
+  "collection": "SEALEVEL_GLO_PHY_L4_NRT_008_046"
+}

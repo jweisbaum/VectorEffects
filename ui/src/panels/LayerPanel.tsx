@@ -6,6 +6,7 @@ import type { DocumentTree } from "../generated/DocumentTree";
 import type { ProjectSummary } from "../generated/ProjectSummary";
 import type { ImageLayerView } from "../generated/ImageLayerView";
 import type { GisLayerView } from "../generated/GisLayerView";
+import type { NrtRequest } from "../generated/NrtRequest";
 import {
   isGeoRaster,
   pickGisToImport,
@@ -18,6 +19,8 @@ import { CalendarIcon } from "./CalendarIcon";
 import { AlignIcon } from "./AlignIcon";
 import { EyeIcon } from "./EyeIcon";
 import HistoryImportDialog, { type HistoryChoice } from "./HistoryImportDialog";
+import NrtImportDialog from "./NrtImportDialog";
+import { SatelliteDishIcon } from "./SatelliteDishIcon";
 import { dropSide, layerDropIndex, objectDropIndex } from "./reorder";
 import { KIND_LABELS, KINDS, type FieldKindName, kindOf } from "../kind";
 import SpeedFilter from "./SpeedFilter";
@@ -170,6 +173,9 @@ export default function LayerPanel({
   const [historyOpen, setHistoryOpen] = useState(false);
   // The Help search opens the dialog to show one of its controls.
   useEffect(() => onReveal("layers:history-import", () => setHistoryOpen(true)), []);
+  /** Whether the near-real-time dialog is up (M89). */
+  const [nrtOpen, setNrtOpen] = useState(false);
+  useEffect(() => onReveal("layers:nrt-import", () => setNrtOpen(true)), []);
   const opening = useRef<number | null>(project.image_token);
   opening.current = project.image_token;
   useEffect(() => {
@@ -301,6 +307,35 @@ export default function LayerPanel({
         if (opening.current === token) onChanged(summary);
       }).catch((err: unknown) => {
         if (opening.current === token) reportError(String(err), null, () => importHistory(choice));
+      });
+  };
+
+  /**
+   * Fetches the last days of observed data, up to now, and lands one layer
+   * per product (spec.md 4.10, M89). Reaches the network, and only from this
+   * button.
+   *
+   * A product that could not be fetched does not fail the import: the others
+   * arrive, and the ones that did not are named in the status bar. There is
+   * no retry on that line — repeating the request would fetch the products
+   * that did arrive a second time and add their layers again.
+   */
+  const importNrt = (request: NrtRequest) => {
+    const token = project.image_token;
+    if (opening.current !== token) return;
+    setNrtOpen(false);
+    setError(null);
+    void api.importNrt(request).then((outcome) => {
+        if (opening.current !== token) return;
+        onChanged(outcome.project);
+        if (outcome.skipped.length > 0) {
+          // The product's name and the reader's reason are the backend's
+          // words, shown as written; only the sentence around them is ours.
+          const list = outcome.skipped.map((s) => `${s.product}: ${s.why}`).join("; ");
+          reportError(t("Not fetched — {list}", { list }));
+        }
+      }).catch((err: unknown) => {
+        if (opening.current === token) reportError(String(err), null, () => importNrt(request));
       });
   };
 
@@ -581,12 +616,21 @@ export default function LayerPanel({
         </button>
         <button
           className="import-grib icon-button"
-          title={t("Import past hours from the ERA5 and GlobCurrent archives as layers. This is the only action that reaches the network.")}
+          title={t("Import past hours from the ERA5 and GlobCurrent archives as layers. This reaches the network.")}
           aria-label={t("Import history")}
           data-feature="layers:import-history"
           onClick={() => setHistoryOpen(true)}
         >
           <CalendarIcon />
+        </button>
+        <button
+          className="import-grib icon-button"
+          title={t("Fetch the last days of observed wind and currents, up to now, as layers. This reaches the network.")}
+          aria-label={t("Near-real-time data")}
+          data-feature="layers:import-nrt"
+          onClick={() => setNrtOpen(true)}
+        >
+          <SatelliteDishIcon />
         </button>
       </header>
 
@@ -596,6 +640,15 @@ export default function LayerPanel({
           now={Date.now() / 1000}
           onImport={importHistory}
           onClose={() => setHistoryOpen(false)}
+        />
+      )}
+
+      {nrtOpen && (
+        <NrtImportDialog
+          project={project}
+          now={Date.now() / 1000}
+          onImport={importNrt}
+          onClose={() => setNrtOpen(false)}
         />
       )}
 

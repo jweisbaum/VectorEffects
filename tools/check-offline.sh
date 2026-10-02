@@ -51,7 +51,8 @@ hits=$(grep -rnE 'https?://' ui/src ui/index.html 2>/dev/null \
 [ -n "$hits" ] && report "absolute URL in frontend source" "$hits"
 
 # Two crates are allowed to name a remote host, and only two. `ve-zarr` reads
-# the ERA5 and GlobCurrent archives for the history import of spec 4.10;
+# the ERA5 and GlobCurrent archives for the history import of spec 4.10, and
+# the Copernicus Marine near-real-time products for the import beside it;
 # `ve-osm` fetches OpenStreetMap raster tiles for the map background of spec
 # 5.4. Both only when the user asks: a history import is an action, and the
 # tiles are fetched only while the view checkbox is on. Everywhere else a URL
@@ -63,7 +64,10 @@ hits=$(find crates -name '*.rs' -not -path 'crates/ve-zarr/*' -not -path 'crates
 [ -n "$hits" ] && report "absolute URL in rust source" "$hits"
 
 # And in those crates, only the hosts they exist to read.
-ARCHIVES='storage\.googleapis\.com/gcp-public-data-arco-era5|s3\.waw3-1\.cloudferro\.com/mdl-arco-time'
+# The Copernicus Marine object store holds both the stores (`mdl-arco-time`)
+# and the catalogue that says where each one currently is (`mdl-metadata`),
+# which the near-real-time import reads first (spec 4.10, M89).
+ARCHIVES='storage\.googleapis\.com/gcp-public-data-arco-era5|s3\.waw3-1\.cloudferro\.com/mdl-arco-time|s3\.waw3-1\.cloudferro\.com/mdl-metadata'
 hits=$(find crates/ve-zarr -name '*.rs' -exec grep -nHE 'https?://' {} + 2>/dev/null \
   | grep -vE "$COMMENT" | grep -vE "$ALLOW" | grep -vE "$ARCHIVES" || true)
 [ -n "$hits" ] && report "unexpected remote host in ve-zarr" "$hits"

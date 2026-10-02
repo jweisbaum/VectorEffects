@@ -504,11 +504,8 @@ fn fetch_to_file(
     request: &HistoryRequest,
     wanted: &[i64],
     directory: &Path,
-    mut on_step: impl FnMut(u32),
+    on_step: impl FnMut(u32),
 ) -> Result<PathBuf> {
-    use std::io::{BufWriter, Write};
-    use std::sync::atomic::{AtomicBool, Ordering};
-
     let started = std::time::Instant::now();
     let source = Arc::<dyn ve_zarr::FieldSource>::from(
         archive
@@ -523,13 +520,59 @@ fn fetch_to_file(
         elapsed_s = format!("{:.1}", started.elapsed().as_secs_f64()),
         "history archive opened"
     );
+    fetch_source_to_file(
+        &Origin {
+            id: archive.id(),
+            label: archive.label(),
+        },
+        &source,
+        (request.start_unix_s, request.end_unix_s),
+        wanted,
+        false,
+        directory,
+        on_step,
+    )
+}
+
+/// What a fetch is of: enough to name its file, its log lines and its layer.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Origin<'a> {
+    /// The identifier the document keeps.
+    pub id: &'a str,
+    /// What a person calls it.
+    pub label: &'a str,
+}
+
+/// The body of [`fetch_to_file`], for any source: a history archive or a
+/// near-real-time product (`crate::nrt`).
+///
+/// `range` is the span asked for, which names the file. `pad_first` writes
+/// an empty message at the first wanted time when the source has nothing
+/// there. The importer rebases a file onto its own first message (spec.md
+/// 4.8), so a file that began a day late would land a day early; the empty
+/// message keeps the origin where the timeline's is. The history import
+/// leaves it off and keeps the behaviour it has always had.
+pub(crate) fn fetch_source_to_file(
+    origin: &Origin<'_>,
+    source: &Arc<dyn ve_zarr::FieldSource>,
+    range: (i64, i64),
+    wanted: &[i64],
+    pad_first: bool,
+    directory: &Path,
+    mut on_step: impl FnMut(u32),
+) -> Result<PathBuf> {
+    use std::io::{BufWriter, Write};
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let started = std::time::Instant::now();
+    let (start_unix_s, end_unix_s) = range;
     // Every hour the archive holds in the range, by hour. Asked for as a
     // range rather than hour by hour because that is the call that knows the
     // store's coverage, and its refusal names what the store actually has —
     // which is the message worth showing when a range is out of reach.
     let held: std::collections::BTreeMap<i64, ve_zarr::Step> = source
-        .steps_in_range(at_hour(request.start_unix_s), at_hour(request.end_unix_s))
-        .doing("read the times held by", format!("\"{}\"", archive.label()))?
+        .steps_in_range(at_hour(start_unix_s), at_hour(end_unix_s))
+        .doing("read the times held by", format!("\"{}\"", origin.label))?
         .into_iter()
         .map(|step| (step.valid_time.hours_since_unix_epoch(), step))
         .collect();
@@ -548,27 +591,30 @@ fn fetch_to_file(
     // archive has no hour for is simply not in here, and that step then shows
     // nothing — which is what a step with no message means everywhere else
     // (spec.md 4.8, D48).
-    let plan: Vec<(u32, ve_zarr::Step)> = wanted
+    let mut plan: Vec<(u32, Option<ve_zarr::Step>)> = wanted
         .iter()
         .filter_map(|unix_s| {
             let hour = unix_s.div_euclid(HOUR);
             let step = held.get(&hour)?;
             let forecast_hour = u32::try_from(hour - anchor).ok()?;
-            Some((forecast_hour, *step))
+            Some((forecast_hour, Some(*step)))
         })
         .collect();
     if plan.is_empty() {
         return Err(bad_range(&format!(
             "{} holds no step of that range",
-            archive.label()
+            origin.label
         )));
     }
+    // A step with no source is the empty message that holds the origin.
+    if pad_first && plan[0].0 != 0 {
+        plan.insert(0, (0, None));
+    }
+    let variables = source.variables();
 
     let path = directory.join(format!(
         "{}-{}-{}.grib2",
-        archive.id(),
-        request.start_unix_s,
-        request.end_unix_s
+        origin.id, start_unix_s, end_unix_s
     ));
     let mut out = BufWriter::with_capacity(
         1 << 20,
@@ -581,11 +627,11 @@ fn fetch_to_file(
     let workers = FETCHES_AT_ONCE.min(plan.len());
     let mut bytes_written = 0usize;
 
-    let label = archive.label();
+    let label = origin.label;
     let outcome = std::thread::scope(|scope| -> Result<()> {
         for _ in 0..workers {
             let tx = tx.clone();
-            let (next, stop, plan, source) = (&next, &stop, &plan, &source);
+            let (next, stop, plan, source, variables) = (&next, &stop, &plan, source, &variables);
             scope.spawn(move || {
                 loop {
                     if stop.load(Ordering::Relaxed) {
@@ -595,15 +641,17 @@ fn fetch_to_file(
                     let Some((forecast_hour, step)) = plan.get(position) else {
                         return;
                     };
-                    let built = source
-                        .read_step(step)
-                        .doing(
+                    let fields = match step {
+                        Some(step) => source.read_step(step).doing(
                             "read",
                             format!(
                                 "{} from \"{label}\"",
                                 spelled(step.valid_time.hours_since_unix_epoch() * HOUR)
                             ),
-                        )
+                        ),
+                        None => Ok(variables.iter().map(|v| empty_field(*v)).collect()),
+                    };
+                    let built = fields
                         .and_then(|fields| encode_hour(GRID, reference, *forecast_hour, &fields));
                     let failed = built.is_err();
                     if tx.send((position, built)).is_err() {
@@ -643,7 +691,7 @@ fn fetch_to_file(
                 // otherwise, and a log that says an import began and nothing
                 // more cannot be told from one that hung.
                 tracing::info!(
-                    archive = archive.id(),
+                    archive = origin.id,
                     step = expected,
                     of = plan.len(),
                     elapsed_s = format!("{:.1}", started.elapsed().as_secs_f64()),
@@ -665,7 +713,7 @@ fn fetch_to_file(
     drop(out);
 
     tracing::info!(
-        archive = archive.id(),
+        archive = origin.id,
         steps = plan.len(),
         bytes = bytes_written,
         elapsed_s = format!("{:.1}", started.elapsed().as_secs_f64()),
@@ -673,6 +721,15 @@ fn fetch_to_file(
         "history archive written"
     );
     Ok(path)
+}
+
+/// A field with no value anywhere, on the common grid.
+fn empty_field(variable: Variable) -> Field {
+    Field {
+        variable,
+        u: vec![f32::NAN; ve_zarr::POINTS_PER_STEP],
+        v: vec![f32::NAN; ve_zarr::POINTS_PER_STEP],
+    }
 }
 
 /// Writes one hour's fields as GRIB2 messages.
@@ -728,6 +785,25 @@ fn components(field: &Field) -> [(Parameter, &[f32]); 2] {
 /// The grid is a regular 0.25 degree lat/lon lattice, which is what the app
 /// samples natively, so nothing is resampled.
 fn history_layer(archive: Archive, path: &Path, request: &HistoryRequest) -> Result<Layer> {
+    fetched_layer(
+        &Origin {
+            id: archive.id(),
+            label: archive.label(),
+        },
+        path,
+        (request.start_unix_s, request.end_unix_s),
+        0,
+    )
+}
+
+/// The layer a fetched file is read back as, holding each of its times for
+/// `period_hours` (zero for a history archive, which holds nothing).
+pub(crate) fn fetched_layer(
+    origin: &Origin<'_>,
+    path: &Path,
+    range: (i64, i64),
+    period_hours: u32,
+) -> Result<Layer> {
     let imported = ve_grib::import::read_file(path, None)?;
     for skipped in &imported.skipped {
         tracing::warn!(
@@ -743,17 +819,18 @@ fn history_layer(archive: Archive, path: &Path, request: &HistoryRequest) -> Res
         .next()
         .ok_or_else(|| AppError::Doing {
             doing: "find a wind or current field in what",
-            what: format!("\"{}\" sent back", archive.label()),
+            what: format!("\"{}\" sent back", origin.label),
             why: "the file it wrote holds no message this build can read".to_owned(),
         })?;
     Ok(Layer::from_history(
-        archive.label(),
+        origin.label,
         path.to_path_buf(),
         Arc::new(sequence),
-        archive.id(),
-        request.start_unix_s,
-        request.end_unix_s,
-    ))
+        origin.id,
+        range.0,
+        range.1,
+    )
+    .holding(period_hours))
 }
 
 /// The hour a Unix time falls in.

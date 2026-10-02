@@ -53,6 +53,9 @@ const EXACT: readonly string[] = [
   msg("Place the image"),
   msg("Delete object"),
   msg("Import history"),
+  // Exact, and so tried before the `Import {name}` pattern would take it as
+  // a file called "near-real-time data".
+  msg("Import near-real-time data"),
   msg("Transform"),
   // `label_for` in transform.rs, for a single object.
   msg("Move"),

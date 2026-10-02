@@ -28,6 +28,8 @@ const catalogue: Record<string, string> = {
 
   // Long-running work, as the status bar's spinner names it.
   "Fetching history": "過去データを取得中",
+  "Importing near-real-time data": "準リアルタイムデータを読み込み中",
+  "Opening the products": "プロダクトを開いています",
   "Importing GRIB": "GRIB を読み込み中",
   "Importing Zarr": "Zarr を読み込み中",
   "Opening GRIB": "GRIB を開いています",

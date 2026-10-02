@@ -1,0 +1,437 @@
+//! A vector field out of any Copernicus Marine time-chunked store.
+//!
+//! The Marine Data Store publishes every product the same way: scaled
+//! integers on a cell-centred global grid, `(time, latitude, longitude)` or
+//! `(time, depth, latitude, longitude)`, with the scale, the offset, the
+//! fill value and the time axis's epoch in the store's own metadata. So one
+//! reader, told which two arrays are `u` and `v`, reads all of them; what
+//! differs between products is in [`ArcoSpec`] and in the store.
+//!
+//! [`crate::globcurrent`] is the particular reader this generalises. It
+//! stays, because the history import merges two datasets through it.
+//!
+//! Every field is regridded onto the common 0.25 degree grid
+//! ([`crate::regrid`]): a product published at 0.125 degree has four cells
+//! meeting at each of that grid's nodes, exactly as GlobCurrent's do.
+
+use std::ops::Range;
+
+use zarrs::array::ArraySubset;
+
+use crate::error::{Result, ZarrError};
+use crate::parallel::try_join;
+use crate::regrid::{CellGrid, to_era5_grid};
+use crate::source::{Field, FieldSource, Step, Variable, step_at_hour, steps_between};
+use crate::store::{ReadArray, open_array, open_http, read_axis_f32, read_err, read_time_axis};
+use crate::time::Utc;
+
+/// What distinguishes one product's store from another's.
+#[derive(Debug, Clone, Copy)]
+pub struct ArcoSpec {
+    /// Short name, for logs and messages.
+    pub name: &'static str,
+    /// What the two arrays are the components of.
+    pub variable: Variable,
+    /// The eastward component's array.
+    pub u_path: &'static str,
+    /// The northward component's array.
+    pub v_path: &'static str,
+    /// A depth axis and the value wanted on it, for a store that has one:
+    /// GlobCurrent keeps the surface and 15 m down in one array.
+    pub level: Option<(&'static str, f32)>,
+}
+
+/// How a store packs its values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Packed {
+    I16,
+    I32,
+}
+
+/// An open handle on one time-chunked store.
+pub struct ArcoStore {
+    spec: ArcoSpec,
+    u: ReadArray,
+    v: ReadArray,
+    /// Index along the depth axis, for a store that has one.
+    level: Option<u64>,
+    grid: CellGrid,
+    packed: Packed,
+    scale: f32,
+    offset: f32,
+    fill: i64,
+    /// Hours since the Unix epoch, sorted.
+    times: Vec<i64>,
+}
+
+impl std::fmt::Debug for ArcoStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ArcoStore")
+            .field("name", &self.spec.name)
+            .field("steps", &self.times.len())
+            .field(
+                "coverage",
+                &self.coverage().map(|(a, b)| (a.to_iso(), b.to_iso())),
+            )
+            .finish()
+    }
+}
+
+/// One packed value in physical units, or NaN where the store has none.
+pub fn unpack(raw: i64, fill: i64, scale: f32, offset: f32) -> f32 {
+    if raw == fill {
+        f32::NAN
+    } else {
+        raw as f32 * scale + offset
+    }
+}
+
+/// The grid two coordinate axes describe.
+///
+/// Read off the store rather than assumed, because the products are not all
+/// on one grid; checked, because the regridder takes a regular grid that
+/// spans the circle and would quietly put a field in the wrong place on
+/// anything else.
+pub fn cell_grid_of(lat: &[f32], lon: &[f32]) -> Result<CellGrid> {
+    let spacing = |axis: &[f32], what: &str| -> Result<f64> {
+        let (Some(&first), Some(&last)) = (axis.first(), axis.last()) else {
+            return Err(ZarrError::Layout(format!("the {what} axis is empty")));
+        };
+        if axis.len() < 2 {
+            return Err(ZarrError::Layout(format!(
+                "the {what} axis has one entry, which is not a grid"
+            )));
+        }
+        let step = (f64::from(last) - f64::from(first)) / (axis.len() - 1) as f64;
+        // A hundredth of a cell: far more than `f32` rounding on a coordinate,
+        // far less than a row out of place.
+        let even = axis.iter().enumerate().all(|(i, &value)| {
+            (f64::from(value) - (f64::from(first) + step * i as f64)).abs() <= step.abs() * 0.01
+        });
+        if step == 0.0 || !even {
+            return Err(ZarrError::Layout(format!(
+                "the {what} axis is not evenly spaced"
+            )));
+        }
+        Ok(step)
+    };
+    let dlat = spacing(lat, "latitude")?;
+    let dlon = spacing(lon, "longitude")?;
+    if dlon <= 0.0 || (dlon * lon.len() as f64 - 360.0).abs() > dlon * 0.01 {
+        return Err(ZarrError::Layout(format!(
+            "the longitude axis spans {} degrees, not the whole circle",
+            dlon * lon.len() as f64
+        )));
+    }
+    Ok(CellGrid {
+        lat0: f64::from(lat[0]),
+        dlat,
+        nlat: lat.len(),
+        lon0: f64::from(lon[0]),
+        dlon,
+        nlon: lon.len(),
+    })
+}
+
+/// Reads a numeric attribute, with a default.
+fn attr_f32(array: &ReadArray, key: &str, default: f32) -> Result<f32> {
+    match array.attributes().get(key) {
+        None => Ok(default),
+        Some(v) => v
+            .as_f64()
+            .map(|x| x as f32)
+            .ok_or_else(|| ZarrError::Layout(format!("attribute {key} is not a number: {v}"))),
+    }
+}
+
+impl ArcoStore {
+    /// Opens a store and validates its layout against `spec`.
+    pub fn open(url: &str, spec: ArcoSpec) -> Result<Self> {
+        let name = spec.name;
+        let store = open_http(url)?;
+        let (u, v) = try_join(
+            || open_array(&store, spec.u_path),
+            || open_array(&store, spec.v_path),
+        )?;
+        if u.shape() != v.shape() {
+            return Err(ZarrError::Layout(format!(
+                "{name} u and v have different shapes: {:?} vs {:?}",
+                u.shape(),
+                v.shape()
+            )));
+        }
+        let dimensions = if spec.level.is_some() { 4 } else { 3 };
+        if u.shape().len() != dimensions {
+            return Err(ZarrError::Layout(format!(
+                "{name} {} has shape {:?}, expected {dimensions} dimensions",
+                spec.u_path,
+                u.shape()
+            )));
+        }
+
+        let dtype = format!("{:?}", u.data_type()).to_ascii_lowercase();
+        let packed = if dtype.contains("int16") {
+            Packed::I16
+        } else if dtype.contains("int32") {
+            Packed::I32
+        } else {
+            return Err(ZarrError::Layout(format!(
+                "{name} is stored as {dtype}; this reader takes scaled int16 or int32"
+            )));
+        };
+        if format!("{:?}", v.data_type()).to_ascii_lowercase() != dtype {
+            return Err(ZarrError::Layout(format!(
+                "{name} u and v are stored as different types"
+            )));
+        }
+
+        let scale = attr_f32(&u, "scale_factor", 1.0)?;
+        let offset = attr_f32(&u, "add_offset", 0.0)?;
+        if (
+            attr_f32(&v, "scale_factor", 1.0)?,
+            attr_f32(&v, "add_offset", 0.0)?,
+        ) != (scale, offset)
+        {
+            return Err(ZarrError::Layout(format!(
+                "{name} u and v are scaled differently"
+            )));
+        }
+        let fill = match (packed, u.fill_value().as_ne_bytes()) {
+            (Packed::I16, [a, b]) => i64::from(i16::from_ne_bytes([*a, *b])),
+            (Packed::I32, [a, b, c, d]) => i64::from(i32::from_ne_bytes([*a, *b, *c, *d])),
+            (_, other) => {
+                return Err(ZarrError::Layout(format!(
+                    "{name} fill value is {} bytes, which does not match its type",
+                    other.len()
+                )));
+            }
+        };
+
+        let steps = u.shape()[0];
+        let ((lat, lon), times) = try_join(
+            || {
+                try_join(
+                    || read_axis_f32(&store, "/latitude", "the latitude coordinate"),
+                    || read_axis_f32(&store, "/longitude", "the longitude coordinate"),
+                )
+            },
+            || read_time_axis(&store, "/time", steps),
+        )?;
+        let grid = cell_grid_of(&lat, &lon)?;
+        let rows_and_columns = &u.shape()[dimensions - 2..];
+        if rows_and_columns != [grid.nlat as u64, grid.nlon as u64] {
+            return Err(ZarrError::Layout(format!(
+                "{name} arrays are {rows_and_columns:?} but its axes are {} x {}",
+                grid.nlat, grid.nlon
+            )));
+        }
+
+        let level = match spec.level {
+            None => None,
+            Some((path, wanted)) => {
+                let axis = read_axis_f32(&store, path, "the depth coordinate")?;
+                if u.shape()[1] != axis.len() as u64 {
+                    return Err(ZarrError::Layout(format!(
+                        "{name} depth axis has {} entries but the arrays have {}",
+                        axis.len(),
+                        u.shape()[1]
+                    )));
+                }
+                let at = axis.iter().position(|&e| e == wanted).ok_or_else(|| {
+                    ZarrError::Layout(format!(
+                        "{name} has no level at {wanted}; its depth axis is {axis:?}"
+                    ))
+                })?;
+                Some(at as u64)
+            }
+        };
+
+        Ok(Self {
+            spec,
+            u,
+            v,
+            level,
+            grid,
+            packed,
+            scale,
+            offset,
+            fill,
+            times,
+        })
+    }
+
+    /// The grid the store publishes on.
+    pub fn native_grid(&self) -> CellGrid {
+        self.grid
+    }
+
+    /// One component at one step, on the store's own grid, in physical units
+    /// with NaN where masked.
+    fn read_native(&self, array: &ReadArray, index: u64, name: &str) -> Result<Vec<f32>> {
+        // One range per dimension: this time, this level if there is one,
+        // and the whole of every row and column.
+        let mut ranges: Vec<Range<u64>> = Vec::with_capacity(4);
+        ranges.push(index..index + 1);
+        if let Some(level) = self.level {
+            ranges.push(level..level + 1);
+        }
+        ranges.push(0..self.grid.nlat as u64);
+        ranges.push(0..self.grid.nlon as u64);
+        let subset = ArraySubset::new_with_ranges(&ranges);
+        let what = format!("the {} {name} field", self.spec.name);
+        let raw: Vec<i64> = match self.packed {
+            Packed::I16 => array
+                .retrieve_array_subset::<Vec<i16>>(&subset)
+                .map_err(read_err(&what))?
+                .into_iter()
+                .map(i64::from)
+                .collect(),
+            Packed::I32 => array
+                .retrieve_array_subset::<Vec<i32>>(&subset)
+                .map_err(read_err(&what))?
+                .into_iter()
+                .map(i64::from)
+                .collect(),
+        };
+        if raw.len() != self.grid.len() {
+            return Err(ZarrError::Layout(format!(
+                "{what} at step {index} holds {} values, expected {}",
+                raw.len(),
+                self.grid.len()
+            )));
+        }
+        Ok(raw
+            .into_iter()
+            .map(|r| unpack(r, self.fill, self.scale, self.offset))
+            .collect())
+    }
+}
+
+impl FieldSource for ArcoStore {
+    fn name(&self) -> &'static str {
+        self.spec.name
+    }
+
+    fn variables(&self) -> Vec<Variable> {
+        vec![self.spec.variable]
+    }
+
+    fn coverage(&self) -> Option<(Utc, Utc)> {
+        Some((
+            Utc::from_hours_since_unix_epoch(*self.times.first()?),
+            Utc::from_hours_since_unix_epoch(*self.times.last()?),
+        ))
+    }
+
+    fn step_at(&self, time: Utc) -> Option<Step> {
+        step_at_hour(&self.times, time)
+    }
+
+    fn steps_in_range(&self, start: Utc, end: Utc) -> Result<Vec<Step>> {
+        steps_between(&self.times, start, end, self.spec.name)
+    }
+
+    fn read_step(&self, step: &Step) -> Result<Vec<Field>> {
+        let (u, v) = try_join(
+            || self.read_native(&self.u, step.index, "u"),
+            || self.read_native(&self.v, step.index, "v"),
+        )?;
+        let u = to_era5_grid(self.grid, &u);
+        let v = to_era5_grid(self.grid, &v);
+        // A field with nothing in it is an unwritten chunk, not a calm.
+        if u.iter().all(|x| x.is_nan()) || v.iter().all(|x| x.is_nan()) {
+            return Err(ZarrError::Layout(format!(
+                "the {} field at {} is entirely masked; it is probably not written yet",
+                self.spec.name,
+                step.valid_time.to_iso()
+            )));
+        }
+        Ok(vec![Field {
+            variable: self.spec.variable,
+            u,
+            v,
+        }])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn axis(first: f32, step: f32, count: usize) -> Vec<f32> {
+        (0..count).map(|i| first + step * i as f32).collect()
+    }
+
+    /// The two grids these stores are published on, read off their axes.
+    #[test]
+    fn a_grid_is_read_off_its_axes() {
+        let eighth = cell_grid_of(&axis(-89.9375, 0.125, 1440), &axis(-179.9375, 0.125, 2880))
+            .expect("the 0.125 degree grid");
+        assert_eq!(
+            eighth,
+            CellGrid {
+                lat0: -89.9375,
+                dlat: 0.125,
+                nlat: 1440,
+                lon0: -179.9375,
+                dlon: 0.125,
+                nlon: 2880,
+            }
+        );
+        let quarter = cell_grid_of(&axis(-89.875, 0.25, 720), &axis(-179.875, 0.25, 1440))
+            .expect("the 0.25 degree grid");
+        assert_eq!(quarter, CellGrid::GLOBCURRENT);
+    }
+
+    /// An axis that is not evenly spaced, or does not go all the way round,
+    /// is not a grid the regridder can be handed.
+    #[test]
+    fn an_irregular_or_partial_grid_is_refused() {
+        let mut lat = axis(-89.875, 0.25, 720);
+        for value in lat.iter_mut().skip(360) {
+            *value += 0.25;
+        }
+        assert!(cell_grid_of(&lat, &axis(-179.875, 0.25, 1440)).is_err());
+        // Half the circle.
+        assert!(cell_grid_of(&axis(-89.875, 0.25, 720), &axis(-179.875, 0.25, 720)).is_err());
+        assert!(cell_grid_of(&[0.0], &axis(-179.875, 0.25, 1440)).is_err());
+    }
+
+    #[test]
+    fn a_packed_value_is_scaled_and_a_fill_is_missing() {
+        assert!(unpack(-32767, -32767, 0.01, 0.0).is_nan());
+        assert!((unpack(1234, -32767, 0.01, 0.0) - 12.34).abs() < 1e-6);
+        assert!((unpack(-5000, -2_147_483_647, 1e-4, 0.0) + 0.5).abs() < 1e-7);
+        assert!((unpack(10, 0, 2.0, 1.0) - 21.0).abs() < 1e-6);
+    }
+
+    /// The regrid, by the property that defines it rather than by its own
+    /// formula: a field that *is* its longitude comes out as the longitude at
+    /// every node, and a constant field comes out constant. Checked on the
+    /// 0.125 degree grid, which is the one new to this reader.
+    #[test]
+    fn a_finer_grid_regrids_to_the_place_each_node_is() {
+        let grid =
+            cell_grid_of(&axis(-89.9375, 0.125, 1440), &axis(-179.9375, 0.125, 2880)).unwrap();
+        let lon_field: Vec<f32> = (0..grid.nlat)
+            .flat_map(|_| (0..grid.nlon).map(|i| -179.9375 + 0.125 * i as f32))
+            .collect();
+        let out = to_era5_grid(grid, &lon_field);
+        let node = |lat: f64, lon: f64| {
+            let j = ((90.0 - lat) / 0.25).round() as usize;
+            let i = (lon / 0.25).round() as usize;
+            out[j * crate::source::NI as usize + i]
+        };
+        assert!((node(0.0, 10.0) - 10.0).abs() < 1e-3, "{}", node(0.0, 10.0));
+        assert!(
+            (node(45.0, 350.0) + 10.0).abs() < 1e-3,
+            "{}",
+            node(45.0, 350.0)
+        );
+        assert!((node(-60.0, 179.75) - 179.75).abs() < 1e-3);
+        assert!((node(-60.0, 180.25) + 179.75).abs() < 1e-3);
+
+        let constant = to_era5_grid(grid, &vec![3.5; grid.len()]);
+        assert!(constant.iter().all(|v| (v - 3.5).abs() < 1e-6));
+    }
+}
