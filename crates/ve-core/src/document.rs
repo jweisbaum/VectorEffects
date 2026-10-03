@@ -553,6 +553,17 @@ pub struct Layer {
     /// maintains, so the lookup is a binary search.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub frame_overrides: Vec<FrameOverride>,
+    /// The step the file's first message lands on (spec.md 4.8, M91).
+    ///
+    /// Zero, which is where an import puts it, unless the layer has been
+    /// aligned with the timeline's valid times: a file whose first message
+    /// is three hours after the timeline's start lands it on step 1 of a
+    /// three-hourly project. Negative when the file begins before the
+    /// timeline does, and the messages before step 0 are simply not shown.
+    /// A step count and never a time, so the file's own times are not
+    /// repeated here (invariant 2).
+    #[serde(default, skip_serializing_if = "is_zero_i32")]
+    pub lead_steps: i32,
 }
 
 /// One step's answer to "which of the file's messages does this show?".
@@ -696,6 +707,11 @@ pub enum LayerSource {
 
 /// Whether a count is zero, for fields left out of the file when it is.
 fn is_zero(value: &u32) -> bool {
+    *value == 0
+}
+
+/// The same, for a signed count.
+fn is_zero_i32(value: &i32) -> bool {
     *value == 0
 }
 
@@ -930,6 +946,7 @@ impl Layer {
             raster: None,
             speed_range: None,
             frame_overrides: Vec::new(),
+            lead_steps: 0,
             erased: Vec::new(),
         }
     }
@@ -955,6 +972,7 @@ impl Layer {
             raster: Some(raster),
             speed_range: None,
             frame_overrides: Vec::new(),
+            lead_steps: 0,
             erased: Vec::new(),
         }
     }
@@ -1037,7 +1055,10 @@ impl Layer {
         step: u32,
     ) -> Option<&crate::raster::RasterFrame> {
         let sequence = self.raster.as_deref()?;
-        let hour = f64::from(settings.forecast_hour(step));
+        // The file's first message is on step `lead_steps`; a step before it
+        // is before the file begins.
+        let file_step = u32::try_from(i64::from(step) - i64::from(self.lead_steps)).ok()?;
+        let hour = f64::from(settings.forecast_hour(file_step));
         match self.source.period_hours() {
             Some(period) => sequence.frame_within(hour, f64::from(period)),
             None => sequence.frame_at(hour),
@@ -1167,6 +1188,37 @@ mod tests {
             layer.file_frame(&settings, 3).map(|f| f.offset_hours),
             Some(0.0)
         );
+    }
+
+    /// A file aligned a step late shows its first message on step 1 and
+    /// nothing on step 0; aligned a step early, its first message is before
+    /// the timeline and its second is on step 0 (spec.md 4.8, M91).
+    #[test]
+    fn a_lead_moves_where_the_file_s_messages_land() {
+        let settings = hourly(6);
+        let mut layer = fetched(&[0.0, 1.0, 2.0], 0);
+        let shown = |layer: &Layer| -> Vec<Option<f64>> {
+            (0..6)
+                .map(|s| layer.imported_frame(&settings, s).map(|f| f.offset_hours))
+                .collect()
+        };
+        assert_eq!(
+            shown(&layer),
+            [Some(0.0), Some(1.0), Some(2.0), None, None, None]
+        );
+        layer.lead_steps = 1;
+        assert_eq!(
+            shown(&layer),
+            [None, Some(0.0), Some(1.0), Some(2.0), None, None]
+        );
+        layer.lead_steps = -1;
+        assert_eq!(
+            shown(&layer),
+            [Some(1.0), Some(2.0), None, None, None, None]
+        );
+        // A lead further back than the file reaches leaves nothing at all.
+        layer.lead_steps = -3;
+        assert_eq!(shown(&layer), [None; 6]);
     }
 
     /// Only a fetched layer has a period to set.

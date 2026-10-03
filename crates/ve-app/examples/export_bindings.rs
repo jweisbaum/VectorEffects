@@ -97,6 +97,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     LayerNode::export_all(&cfg)?;
     GribLayerInfo::export_all(&cfg)?;
     ve_app::document::GribStepView::export_all(&cfg)?;
+    ve_app::document::LayerAlignment::export_all(&cfg)?;
     ve_app::frames::FrameClipboardState::export_all(&cfg)?;
     ve_app::capture::CaptureState::export_all(&cfg)?;
     ve_app::image::ImageLayerView::export_all(&cfg)?;

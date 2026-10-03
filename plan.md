@@ -3662,6 +3662,27 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M91 — A file's times against the timeline's
+
+Asked for by the user, 2026-10-02: when the timeline has a start time,
+check that GRIB, Zarr and near-real-time layers are aligned with its valid
+times; mark the ones that are not (a highlighted row and a tooltip in the
+timeline), block nothing, and offer a small button beside the name that
+lines the layer up, undoably.
+
+`Layer::lead_steps` is the step the file's first message lands on, zero
+until aligned; `Layer::file_frame` subtracts it, so the scene, the cache,
+the export and the frame row all follow. `GribLayerInfo::misaligned` says
+by how much and which lead would fix it, when the offset is a whole number
+of steps; `align_layer` pushes `Command::SetLayerLead`. Nothing changes for
+a timeline without a start.
+
+**Tests:** a file three hours late on a three-hourly project is marked,
+aligned to lead 1 (its frame row shifts), undone and redone; an early file
+aligns to −1; an hour's offset is marked but refused; nothing is marked
+without a disagreement. The timeline's row, tooltip and button in
+`Timeline.test.tsx`.
+
 ### M90 — ASCAT: the day's passes merged into one wind
 
 The third milestone of the near-real-time import. `ve_zarr::ascat` reads

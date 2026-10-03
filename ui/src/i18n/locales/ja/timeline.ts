@@ -217,5 +217,17 @@ const catalogue: Record<string, string> = {
   "parent": "親",
   "attach": "取り付け",
   "{time} · before the measurement's first mark": "{time} · 計測の最初の印より前",
+  "Align {layer} with the timeline": "{layer} をタイムラインに合わせる",
+  "Cannot align exactly: {offset} h is not a whole number of {step} h steps": "正確に合わせられません: {offset} 時間は {step} 時間ステップの整数倍ではありません",
+  "Move the fields to the steps whose times they are valid for": "フィールドを、その有効時刻に当たるステップへ移動します",
+  "Align a layer with the timeline": "レイヤーをタイムラインに合わせる",
+  "Shown beside a layer whose file's times disagree with the timeline's; moves its fields to the steps whose times they are valid for.": "ファイルの時刻がタイムラインと一致しないレイヤーの横に表示され、フィールドをその有効時刻に当たるステップへ移動します。",
+  "valid time": "有効時刻",
+  "misaligned": "ずれ",
+  "offset": "ずれ量",
+  "Align layer with the timeline": "レイヤーをタイムラインに合わせる",
+  "{layer}: its first field lands on step {lead} ({step} UTC) but is valid at {first} UTC — {offset} h off": "{layer}: 最初のフィールドはステップ {lead}（{step} UTC）にありますが、有効時刻は {first} UTC です — {offset} 時間のずれ",
+  "{layer}: its first field is on step {lead}, aligned to a start time the timeline no longer has": "{layer}: 最初のフィールドはステップ {lead} にあり、タイムラインにもうない開始時刻に合わせられています",
+  "Put the first field back on the first step": "最初のフィールドを最初のステップに戻します",
 };
 export default catalogue;

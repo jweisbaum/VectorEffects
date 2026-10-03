@@ -539,6 +539,8 @@ export const api = {
    */
   importNrt: (request: NrtRequest) => call<NrtOutcome>("import_nrt", { request }),
   removeLayer: (layer: number) => call<ProjectSummary>("remove_layer", { layer }),
+  /** Puts a file's first message on the step whose time it is valid for (spec.md 4.8, M91). */
+  alignLayer: (layer: number) => call<ProjectSummary>("align_layer", { layer }),
   /** Renames the project: a document write, undoable (M25). */
   renameProject: (name: string) => call<ProjectSummary>("rename_project", { name }),
   renameLayer: (layer: number, name: string) =>

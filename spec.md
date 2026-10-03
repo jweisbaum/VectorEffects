@@ -651,6 +651,21 @@ product did not publish shows nothing, and so does every step past the
 last field's period. An imported file and a history layer have no period
 and keep the rule above exactly.
 
+**A file is marked when its times disagree with the timeline's** (M91).
+When the timeline has a start time, every layer read from a file — an
+imported GRIB, a local Zarr store, a history or near-real-time fetch —
+carries valid times of its own, and the step its first message lands on
+has a time of its own too. When the two differ, the timeline highlights the
+layer's row and says by how much in its tooltip. Nothing is blocked: the
+layer shows and exports where it is, because the user may want it there.
+Beside the name is a small button that moves the file's messages to the
+steps whose times they are valid for, by changing the step its first
+message lands on (`lead_steps`, a count and never a time); it is one
+undoable step, and it is offered only when a step lands on the file's time
+exactly — an hourly file on a three-hourly timeline has nowhere to go, and
+the button says so. A file that begins before the timeline aligns to a
+negative lead, and the messages before step 0 are simply not shown.
+
 **A step can be told which message to show.** The rule above is right and it
 leaves the user no way to say otherwise, so a step of an imported layer can be
 given one: click a mark on the layer's timeline row, `Shift`-click a run of

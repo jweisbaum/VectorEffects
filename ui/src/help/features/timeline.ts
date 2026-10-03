@@ -20,6 +20,8 @@ const features: Feature[] = [
     keywords: [msg("current frame"), msg("forecast hour"), msg("time")], topic: "animation", reveal: dock },
   { id: "timeline:playhead", label: msg("Playhead"), description: msg("The step being viewed and edited; drag along the ruler to scrub."),
     keywords: [msg("current frame"), msg("scrub"), msg("cursor")], topic: "animation", reveal: dock },
+  { id: "timeline:align-layer", label: msg("Align a layer with the timeline"), description: msg("Shown beside a layer whose file's times disagree with the timeline's; moves its fields to the steps whose times they are valid for."),
+    keywords: [msg("valid time"), msg("misaligned"), msg("offset")], topic: "imports", reveal: ["panel:bottom"] },
   { id: "timeline:readiness", label: msg("Readiness strip"), description: msg("The ruler shows which steps are rendered for the current view; click or drag it to move the playhead."),
     keywords: [msg("ruler"), msg("rendered"), msg("buffering"), msg("scrub")], topic: "animation", reveal: dock },
   { id: "timeline:steps", label: msg("Number of steps"), description: msg("How many time steps the project has."),

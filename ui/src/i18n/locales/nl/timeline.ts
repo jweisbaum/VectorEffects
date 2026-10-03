@@ -217,5 +217,17 @@ const catalogue: Record<string, string> = {
   "parent": "bovenliggend",
   "attach": "vastmaken",
   "{time} · before the measurement's first mark": "{time} · vóór de eerste markering van de meting",
+  "Align {layer} with the timeline": "{layer} uitlijnen met de tijdlijn",
+  "Cannot align exactly: {offset} h is not a whole number of {step} h steps": "Kan niet precies uitlijnen: {offset} h is geen geheel aantal stappen van {step} h",
+  "Move the fields to the steps whose times they are valid for": "De velden verplaatsen naar de stappen waarvoor hun tijden gelden",
+  "Align a layer with the timeline": "Een laag uitlijnen met de tijdlijn",
+  "Shown beside a layer whose file's times disagree with the timeline's; moves its fields to the steps whose times they are valid for.": "Staat naast een laag waarvan de bestandstijden niet met de tijdlijn overeenkomen; verplaatst de velden naar de stappen waarvoor hun tijden gelden.",
+  "valid time": "geldigheidstijd",
+  "misaligned": "niet uitgelijnd",
+  "offset": "verschuiving",
+  "Align layer with the timeline": "Laag uitlijnen met de tijdlijn",
+  "{layer}: its first field lands on step {lead} ({step} UTC) but is valid at {first} UTC — {offset} h off": "{layer}: het eerste veld valt op stap {lead} ({step} UTC) maar geldt voor {first} UTC — {offset} h verschoven",
+  "{layer}: its first field is on step {lead}, aligned to a start time the timeline no longer has": "{layer}: het eerste veld staat op stap {lead}, uitgelijnd op een begintijd die de tijdlijn niet meer heeft",
+  "Put the first field back on the first step": "Het eerste veld terugzetten op de eerste stap",
 };
 export default catalogue;

@@ -24,6 +24,7 @@ import type { DocumentTree } from "../generated/DocumentTree";
 import { actionFor, chordOf } from "../settings/bindings";
 import type { InterpolationView } from "../generated/InterpolationView";
 import type { ObjectTracks } from "../generated/ObjectTracks";
+import type { LayerNode } from "../generated/LayerNode";
 import type { ProjectSummary } from "../generated/ProjectSummary";
 import type { PropertyValue } from "../generated/PropertyValue";
 import type { RenderProgress } from "../generated/RenderProgress";
@@ -1095,6 +1096,35 @@ export default function Timeline({
   const tickLabel = (s: number) =>
     utcLabel(s, project.step_hours, project.start_unix_s) ?? forecastLabel(s, project.step_hours);
 
+  /** An offset in hours as a person reads one: whole, or to two places. */
+  const hoursText = (hours: number) => String(Math.round(hours * 100) / 100);
+  /** A UTC instant to the minute, as the tooltip shows it. */
+  const minuteText = (unixS: number) => new Date(unixS * 1000).toISOString().slice(0, 16).replace("T", " ");
+
+  /**
+   * What a misaligned layer's row says when hovered (spec.md 4.8, M91): which
+   * step its first field lands on, the time that step has, and the time the
+   * field is actually valid for — or, on a timeline with no start, that the
+   * field was moved for a start time it no longer has.
+   */
+  const misalignedTitle = (layer: LayerNode): string | undefined => {
+    const off = layer.grib?.misaligned;
+    if (!off) return undefined;
+    if (off.undated) {
+      return t("{layer}: its first field is on step {lead}, aligned to a start time the timeline no longer has", {
+        layer: layer.name,
+        lead: off.lead_steps,
+      });
+    }
+    return t("{layer}: its first field lands on step {lead} ({step} UTC) but is valid at {first} UTC — {offset} h off", {
+      layer: layer.name,
+      lead: off.lead_steps,
+      step: minuteText(off.step_unix_s),
+      first: minuteText(off.first_valid_unix_s),
+      offset: hoursText(off.offset_hours),
+    });
+  };
+
   return (
     <div className={capturing ? "timeline tl-capturing" : "timeline"} hidden={hidden}>
       {constantMotion && <ConstantMotionDialog segment={constantMotion} onClose={() => setConstantMotion(null)} onDone={(summary) => run(Promise.resolve(summary))} />}
@@ -1383,8 +1413,43 @@ export default function Timeline({
         */}
         {[...(tree?.layers ?? [])].reverse().map((layer) => (
           <div key={layer.id} className="tl-layer">
-            <div className="tl-row tl-layer-row">
-              <div className="tl-labels">{layer.name}</div>
+            {/*
+              A file whose times disagree with the timeline's is marked, and
+              nothing more (spec.md 4.8, M91): the layer shows and exports
+              where it is, and the small button is the one-click way to put
+              its first message on the step whose time it is valid for.
+            */}
+            <div
+              className={`tl-row tl-layer-row${layer.grib?.misaligned ? " tl-misaligned" : ""}`}
+              title={misalignedTitle(layer)}
+            >
+              <div className="tl-labels">
+                <span className="tl-layer-name">{layer.name}</span>
+                {layer.grib?.misaligned && (
+                  <button
+                    className="tl-align"
+                    data-feature="timeline:align-layer"
+                    disabled={layer.grib.misaligned.aligned_lead === null}
+                    aria-label={t("Align {layer} with the timeline", { layer: layer.name })}
+                    title={
+                      layer.grib.misaligned.aligned_lead === null
+                        ? t("Cannot align exactly: {offset} h is not a whole number of {step} h steps", {
+                            offset: hoursText(layer.grib.misaligned.offset_hours),
+                            step: project.step_hours,
+                          })
+                        : layer.grib.misaligned.undated
+                          ? t("Put the first field back on the first step")
+                          : t("Move the fields to the steps whose times they are valid for")
+                    }
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      run(api.alignLayer(layer.id));
+                    }}
+                  >
+                    ⇥
+                  </button>
+                )}
+              </div>
               <div className="tl-grid" style={{ width: gridWidth }}>
                 {/*
                   Which steps an imported field has a message for (spec.md 4.8).

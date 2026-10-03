@@ -103,6 +103,16 @@ pub enum Command {
         /// New overrides.
         after: Vec<crate::document::FrameOverride>,
     },
+    /// Moves which step an imported file's first message lands on (spec.md
+    /// 4.8, M91): how a layer is aligned with the timeline's valid times.
+    SetLayerLead {
+        /// Target layer.
+        layer: crate::id::Id,
+        /// Previous lead, in steps.
+        before: i32,
+        /// New lead, in steps.
+        after: i32,
+    },
     /// Locks or unlocks a layer.
     SetLayerLocked {
         /// Target layer.
@@ -376,6 +386,7 @@ impl Command {
                     "Clear the speed filter".into()
                 }
             }
+            Self::SetLayerLead { .. } => "Align layer with the timeline".into(),
             Self::SetLayerParameter { after, .. } => match after {
                 crate::project::FieldKind::Wind => "Layer holds wind".into(),
                 crate::project::FieldKind::Current => "Layer holds current".into(),
@@ -486,6 +497,10 @@ impl Command {
             }
             Self::SetLayerSpeedRange { layer, after, .. } => {
                 layer_mut(project, *layer)?.speed_range = *after;
+                Ok(())
+            }
+            Self::SetLayerLead { layer, after, .. } => {
+                layer_mut(project, *layer)?.lead_steps = *after;
                 Ok(())
             }
             Self::SetLayerLocked { layer, after, .. } => {
@@ -684,6 +699,10 @@ impl Command {
             }
             Self::SetLayerSpeedRange { layer, before, .. } => {
                 layer_mut(project, *layer)?.speed_range = *before;
+                Ok(())
+            }
+            Self::SetLayerLead { layer, before, .. } => {
+                layer_mut(project, *layer)?.lead_steps = *before;
                 Ok(())
             }
             Self::SetLayerLocked { layer, before, .. } => {
@@ -1082,6 +1101,31 @@ mod tests {
             PropValue::F32(v) => v,
             other => panic!("speed is {other:?}"),
         }
+    }
+
+    /// Aligning a layer is one undoable step whose inverse puts the lead
+    /// back exactly (spec.md 4.8, M91).
+    #[test]
+    fn a_layer_lead_applies_and_undoes() {
+        let (mut project, _, _) = project_with_two();
+        let layer = project.layers[0].id;
+        let mut command = Command::SetLayerLead {
+            layer,
+            before: 0,
+            after: 2,
+        };
+        command.apply(&mut project).unwrap();
+        assert_eq!(project.layers[0].lead_steps, 2);
+        command.undo(&mut project).unwrap();
+        assert_eq!(project.layers[0].lead_steps, 0);
+        let mut back = Command::SetLayerLead {
+            layer,
+            before: 0,
+            after: -1,
+        };
+        back.apply(&mut project).unwrap();
+        assert_eq!(project.layers[0].lead_steps, -1);
+        assert_eq!(back.label(), "Align layer with the timeline");
     }
 
     #[test]

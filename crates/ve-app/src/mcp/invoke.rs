@@ -147,6 +147,7 @@ pub const TABLE: &[(&str, Handler)] = &[
     command!(set_layer_visible, crate::document::set_layer_visible, { layer: u64, visible: bool }),
     command!(set_layer_parameter, crate::document::set_layer_parameter, { layer: u64, parameter: String }),
     command!(set_layer_speed_range, crate::document::set_layer_speed_range, { layer: u64, min_mps: Option<f32>, max_mps: Option<f32>, gesture: Option<String> }),
+    command!(align_layer, crate::document::align_layer, { layer: u64 }),
     command!(set_layer_locked, crate::document::set_layer_locked, { layer: u64, locked: bool }),
     command!(move_layer, crate::document::move_layer, { from: usize, to: usize }),
     command!(rename_object, crate::document::rename_object, { object: u64, name: String }),

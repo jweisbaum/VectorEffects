@@ -1184,11 +1184,16 @@ mod tests {
             .holding(24),
         );
 
+        // And a lead, which is a step count, travels the same way.
+        project.layers[1].lead_steps = -2;
+
         let dir = TempDir::new();
         let path = dir.path("held.veproj");
         save(&project, &path).unwrap();
         let loaded = load(&path).unwrap();
         assert_eq!(loaded.layers[1].source.period_hours(), Some(24));
+        assert_eq!(loaded.layers[1].lead_steps, -2);
+        assert_eq!(loaded.layers[0].lead_steps, 0);
 
         // The same layer as a version without periods wrote it: the key
         // taken out wherever it is, and nothing else touched.
@@ -1205,6 +1210,12 @@ mod tests {
         let mut older: serde_json::Value =
             serde_json::from_str(&to_canonical_json(&project).unwrap()).unwrap();
         assert_eq!(without_period(&mut older), 1, "one layer has a period");
+        assert!(
+            !to_canonical_json(&load(&path).unwrap())
+                .unwrap()
+                .contains("\"lead_steps\":0"),
+            "a lead of zero is not written"
+        );
         let reopened: Project = serde_json::from_value(older).unwrap();
         assert_eq!(reopened.layers[1].source.period_hours(), None);
         assert!(matches!(

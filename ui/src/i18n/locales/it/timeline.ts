@@ -217,5 +217,17 @@ const catalogue: Record<string, string> = {
   "parent": "genitore",
   "attach": "agganciare",
   "{time} · before the measurement's first mark": "{time} · prima del primo segno della misura",
+  "Align {layer} with the timeline": "Allinea {layer} alla linea temporale",
+  "Cannot align exactly: {offset} h is not a whole number of {step} h steps": "Impossibile allineare esattamente: {offset} h non è un numero intero di passi da {step} h",
+  "Move the fields to the steps whose times they are valid for": "Sposta i campi sui passi alle cui ore sono validi",
+  "Align a layer with the timeline": "Allinea un livello alla linea temporale",
+  "Shown beside a layer whose file's times disagree with the timeline's; moves its fields to the steps whose times they are valid for.": "Mostrato accanto a un livello le cui ore del file non coincidono con quelle della linea temporale; sposta i campi sui passi alle cui ore sono validi.",
+  "valid time": "ora di validità",
+  "misaligned": "disallineato",
+  "offset": "scarto",
+  "Align layer with the timeline": "Allinea livello alla linea temporale",
+  "{layer}: its first field lands on step {lead} ({step} UTC) but is valid at {first} UTC — {offset} h off": "{layer}: il primo campo cade sul passo {lead} ({step} UTC) ma è valido alle {first} UTC — {offset} h di scarto",
+  "{layer}: its first field is on step {lead}, aligned to a start time the timeline no longer has": "{layer}: il primo campo è sul passo {lead}, allineato a un'ora d'inizio che la linea temporale non ha più",
+  "Put the first field back on the first step": "Riporta il primo campo sul primo passo",
 };
 export default catalogue;

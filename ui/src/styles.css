@@ -1837,6 +1837,22 @@ body {
 /* A followed track's keys are dormant: the value comes from the link. */
 .tl-row.tl-track.following .tl-key { opacity: 0.35; }
 .tl-layer-row .tl-labels { color: var(--muted); font-weight: 600; }
+/* A file whose times disagree with the timeline's (spec.md 4.8, M91). */
+.tl-layer-row.tl-misaligned .tl-labels { color: var(--warning); }
+/* The name gives way to the button, not the other way round. */
+.tl-layer-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tl-align {
+  flex: none;
+  padding: 0 5px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--warning);
+  background: transparent;
+  border: 1px solid var(--warning);
+  border-radius: 3px;
+  cursor: pointer;
+}
+.tl-align:disabled { opacity: 0.45; cursor: default; }
 .tl-object-row.selected .tl-labels { color: var(--accent); }
 .tl-disclose {
   background: none;

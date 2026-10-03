@@ -217,5 +217,17 @@ const catalogue: Record<string, string> = {
   "parent": "أصل",
   "attach": "إرفاق",
   "{time} · before the measurement's first mark": "{time} · قبل العلامة الأولى للقياس",
+  "Align {layer} with the timeline": "محاذاة {layer} مع الخط الزمني",
+  "Cannot align exactly: {offset} h is not a whole number of {step} h steps": "تعذّرت المحاذاة بدقة: {offset} ساعة ليست عددًا صحيحًا من خطوات {step} ساعة",
+  "Move the fields to the steps whose times they are valid for": "نقل الحقول إلى الخطوات التي تصلح لأوقاتها",
+  "Align a layer with the timeline": "محاذاة طبقة مع الخط الزمني",
+  "Shown beside a layer whose file's times disagree with the timeline's; moves its fields to the steps whose times they are valid for.": "يظهر بجانب طبقة لا تتفق أوقات ملفها مع الخط الزمني؛ وينقل حقولها إلى الخطوات التي تصلح لأوقاتها.",
+  "valid time": "وقت الصلاحية",
+  "misaligned": "غير متحاذٍ",
+  "offset": "فارق",
+  "Align layer with the timeline": "محاذاة الطبقة مع الخط الزمني",
+  "{layer}: its first field lands on step {lead} ({step} UTC) but is valid at {first} UTC — {offset} h off": "{layer}: يقع حقلها الأول على الخطوة {lead} ({step} UTC) لكنه صالح عند {first} UTC — بفارق {offset} ساعة",
+  "{layer}: its first field is on step {lead}, aligned to a start time the timeline no longer has": "{layer}: حقلها الأول على الخطوة {lead}، محاذًى لوقت بدء لم يعد للخط الزمني",
+  "Put the first field back on the first step": "إعادة الحقل الأول إلى الخطوة الأولى",
 };
 export default catalogue;

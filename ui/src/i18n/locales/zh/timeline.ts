@@ -217,5 +217,17 @@ const catalogue: Record<string, string> = {
   "parent": "父对象",
   "attach": "附加",
   "{time} · before the measurement's first mark": "{time} · 早于测量的第一个标记",
+  "Align {layer} with the timeline": "将 {layer} 与时间轴对齐",
+  "Cannot align exactly: {offset} h is not a whole number of {step} h steps": "无法精确对齐：{offset} 小时不是 {step} 小时步长的整数倍",
+  "Move the fields to the steps whose times they are valid for": "将字段移到其有效时间对应的步",
+  "Align a layer with the timeline": "将图层与时间轴对齐",
+  "Shown beside a layer whose file's times disagree with the timeline's; moves its fields to the steps whose times they are valid for.": "显示在文件时间与时间轴不一致的图层旁；将其字段移到其有效时间对应的步。",
+  "valid time": "有效时间",
+  "misaligned": "未对齐",
+  "offset": "偏移",
+  "Align layer with the timeline": "图层与时间轴对齐",
+  "{layer}: its first field lands on step {lead} ({step} UTC) but is valid at {first} UTC — {offset} h off": "{layer}：第一个字段位于第 {lead} 步（{step} UTC），但其有效时间为 {first} UTC — 相差 {offset} 小时",
+  "{layer}: its first field is on step {lead}, aligned to a start time the timeline no longer has": "{layer}：第一个字段位于第 {lead} 步，是按时间轴已不再有的起始时间对齐的",
+  "Put the first field back on the first step": "将第一个字段放回第一步",
 };
 export default catalogue;

@@ -235,6 +235,7 @@ pub fn run() -> anyhow::Result<()> {
                 document::set_layer_visible,
                 document::set_layer_parameter,
                 document::set_layer_speed_range,
+                document::align_layer,
                 document::set_layer_locked,
                 document::move_layer,
                 document::rename_object,

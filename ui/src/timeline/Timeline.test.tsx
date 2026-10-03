@@ -9,12 +9,14 @@ import type { PlaybackMap } from "./preparation";
 const backend = vi.hoisted(() => ({
   tree: vi.fn(async () => ({ layers: [] as import("../generated/LayerNode").LayerNode[] })),
   tracks: vi.fn(), setKey: vi.fn(), setRange: vi.fn(),
+  align: vi.fn(async () => ({ revision: 23, step_count: 10, step_hours: 3, start_unix_s: 1_790_812_800 })),
   renderAhead: vi.fn(async () => {}), readiness: vi.fn(async () => ({
   revision: 7, steps: Array.from({ length: 10 }, (_, step) => ({ step, ready: 1, total: 1 })),
 })) }));
 vi.mock("../ipc", () => ({ api: {
   renderAhead: backend.renderAhead, frameReadiness: backend.readiness,
   documentTree: backend.tree, objectTracks: backend.tracks, setKeyframe: backend.setKey, setActiveRange: backend.setRange,
+  alignLayer: backend.align,
 } }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: async () => () => {} }));
 const Timeline = (await import("./Timeline")).default;
@@ -300,4 +302,48 @@ it("shows relative displacement as one position-style track with shared keys", a
     await act(async()=>container.querySelector<HTMLButtonElement>(".tl-key-here")!.click());
     expect(backend.setKey).toHaveBeenLastCalledWith(2,"DisplacementPosition",3);
   } finally {await act(async()=>root.unmount());container.remove();backend.tree.mockResolvedValue({layers:[]});}
+});
+
+/**
+ * A file whose times disagree with the timeline's is marked and nothing
+ * more (spec.md 4.8, M91): the row is highlighted, the tooltip says by how
+ * much, and the small button beside the name asks the backend to align it —
+ * unless no step lands on the file's time, when it is there but disabled.
+ */
+it("marks a misaligned layer and offers to align it", async () => {
+  const steps = Array.from({ length: 10 }, (_, s) => ({ in_file: s < 3, source: null, hidden: false, shown: s < 3 }));
+  const grib = (misaligned: import("../generated/LayerAlignment").LayerAlignment | null) => ({
+    path: "x.grib2", history: null, field_kind: "wind", loaded: true, frame_count: 3, span_hours: 6,
+    speed_min_mps: null, speed_max_mps: null, speed_ceiling_mps: 9, covered_steps: steps.map((s) => s.in_file), steps, misaligned,
+  });
+  const layer = (id: number, name: string, misaligned: import("../generated/LayerAlignment").LayerAlignment | null) => ({
+    id, name, visible: true, locked: false, objects: [], image: null, gis: null, source: "raster", parameter: "wind", grib: grib(misaligned),
+  });
+  backend.tree.mockResolvedValue({ layers: [
+    layer(1, "Late", { first_valid_unix_s: 1_790_823_600, step_unix_s: 1_790_812_800, offset_hours: 3, aligned_lead: 1, lead_steps: 0, undated: false }),
+    layer(2, "Odd", { first_valid_unix_s: 1_790_816_400, step_unix_s: 1_790_812_800, offset_hours: 1, aligned_lead: null, lead_steps: 0, undated: false }),
+    layer(3, "Fine", null),
+  ] } as unknown as { layers: import("../generated/LayerNode").LayerNode[] });
+  const project = {revision: 22, step_count: 10, step_hours: 3, start_unix_s: 1_790_812_800} as ProjectSummary;
+  const changed = vi.fn();
+  const container = document.createElement("div"); document.body.append(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(<Timeline project={project} step={0} onStepChange={() => {}} selection={[]} onSelect={() => {}}
+      viewport={[]} playback={{prepare: () => ({ready:0,total:0,streaming:false}), present: () => false}} autoKey={false} onAutoKey={() => {}} onChanged={changed} onFramesSelected={() => {}}
+      onKeysSelected={() => {}} settings={null} capture={null} onCapture={() => {}} />));
+    // The timeline lists the top of the stack first.
+    const rows = [...container.querySelectorAll<HTMLElement>(".tl-layer-row")].reverse();
+    expect(rows.map((row) => row.classList.contains("tl-misaligned"))).toEqual([true, true, false]);
+    expect(rows[0]!.title).toContain("step 0 (2026-10-01 00:00 UTC)");
+    expect(rows[0]!.title).toContain("valid at 2026-10-01 03:00 UTC");
+
+    expect(rows[0]!.title).toContain("3 h off");
+    const buttons = rows.map((row) => row.querySelector<HTMLButtonElement>(".tl-align"));
+    expect(buttons.map((b) => b?.disabled ?? "absent")).toEqual([false, true, "absent"]);
+    expect(buttons[1]!.title).toContain("1 h is not a whole number of 3 h steps");
+    await act(async () => buttons[0]!.click());
+    expect(backend.align).toHaveBeenCalledWith(1);
+    expect(changed).toHaveBeenCalled();
+  } finally { await act(async () => root.unmount()); container.remove(); }
 });

@@ -260,6 +260,124 @@ pub struct GribLayerInfo {
     /// the *file* says; this is what the map will draw, and the timeline
     /// needs both to tell a message from a pasted one.
     pub steps: Vec<GribStepView>,
+    /// How the file's times sit against the timeline's, when the timeline
+    /// has a start time and they disagree (spec.md 4.8, M91). `None` when
+    /// the timeline has no start, the file could not be read, or the two
+    /// agree.
+    pub misaligned: Option<LayerAlignment>,
+}
+
+/// A file whose first message is not at the time of the step it lands on.
+///
+/// Nothing is blocked by it — the layer shows and exports where it is — but
+/// a forecast that the labels put three hours from where it was made for
+/// is worth a mark, and the step count that would put it right is worked
+/// out here so the one-click fix and the panel's wording agree.
+#[derive(Debug, Clone, PartialEq, Serialize, TS, JsonSchema)]
+#[ts(export, export_to = "LayerAlignment.ts")]
+pub struct LayerAlignment {
+    /// When the file's first message is valid, Unix seconds.
+    pub first_valid_unix_s: i64,
+    /// The time of the step that message lands on, Unix seconds.
+    pub step_unix_s: i64,
+    /// How far the file is ahead of the step, in hours: positive when its
+    /// messages are later than the labels say.
+    pub offset_hours: f64,
+    /// The lead that would align it, when the offset is a whole number of
+    /// steps; `None` when no step lands on the file's time exactly.
+    pub aligned_lead: Option<i32>,
+    /// The step the file's first message lands on now.
+    pub lead_steps: i32,
+    /// The layer was moved off step 0 and the timeline no longer has a start
+    /// time to say why. Nothing is aligned with anything then, and the fix is
+    /// to put the first message back on step 0, which is where an undated
+    /// timeline puts every file (spec.md 4.8).
+    pub undated: bool,
+}
+
+/// Where a layer's file sits against the timeline, if it has a file and
+/// the timeline has a start (spec.md 4.8, M91).
+fn alignment_of(
+    layer: &ve_core::document::Layer,
+    settings: &ve_core::project::ProjectSettings,
+) -> Option<LayerAlignment> {
+    let first = layer.raster.as_ref()?.frames.first()?;
+    let step_s = i64::from(settings.step_hours.hours()) * 3600;
+    // An undated timeline aligns nothing — unless a lead is left over from a
+    // start it no longer has, which would otherwise sit there unseen.
+    let Some(start) = settings.start_unix_s else {
+        return (layer.lead_steps != 0).then(|| LayerAlignment {
+            first_valid_unix_s: first.valid_unix_s,
+            step_unix_s: first.valid_unix_s,
+            offset_hours: f64::from(layer.lead_steps) * step_s as f64 / 3600.0,
+            aligned_lead: Some(0),
+            lead_steps: layer.lead_steps,
+            undated: true,
+        });
+    };
+    let step_unix_s = start + i64::from(layer.lead_steps) * step_s;
+    let offset_s = first.valid_unix_s - step_unix_s;
+    if offset_s == 0 {
+        return None;
+    }
+    let aligned_lead = (offset_s % step_s == 0)
+        .then(|| i32::try_from(i64::from(layer.lead_steps) + offset_s / step_s).ok())
+        .flatten();
+    Some(LayerAlignment {
+        first_valid_unix_s: first.valid_unix_s,
+        step_unix_s,
+        offset_hours: offset_s as f64 / 3600.0,
+        aligned_lead,
+        lead_steps: layer.lead_steps,
+        undated: false,
+    })
+}
+
+/// A layer's step-keyed edits, moved with its lead.
+///
+/// A hidden message, a pasted run and an erasure on one step all name a
+/// timeline step, and what the user meant by each was a *message* — the bad
+/// one they hid, the one they pasted from, the one they rubbed out. So when
+/// the messages move, these move with them, by the same number of steps;
+/// any that would leave the timeline go (spec.md 4.8, M91).
+fn shifted_with_lead(
+    layer: &ve_core::document::Layer,
+    by: i64,
+    step_count: u32,
+) -> (
+    Vec<ve_core::document::FrameOverride>,
+    Vec<ve_core::document::RasterErasure>,
+) {
+    let on_timeline = |step: u32| {
+        u32::try_from(i64::from(step) + by)
+            .ok()
+            .filter(|s| *s < step_count)
+    };
+    let overrides = layer
+        .frame_overrides
+        .iter()
+        .filter_map(|o| {
+            Some(ve_core::document::FrameOverride {
+                step: on_timeline(o.step)?,
+                source: match o.source {
+                    Some(source) => Some(on_timeline(source)?),
+                    None => None,
+                },
+            })
+        })
+        .collect();
+    let erased = layer
+        .erased
+        .iter()
+        .filter_map(|e| {
+            let mut moved = e.clone();
+            if let Some(step) = e.step {
+                moved.step = Some(on_timeline(step)?);
+            }
+            Some(moved)
+        })
+        .collect();
+    (overrides, erased)
 }
 
 /// The whole document, for the panel.
@@ -518,6 +636,7 @@ fn tree_of(project: &Project, step: u32, backdrops: &crate::charts::Backdrops) -
                         covered_steps: (0..project.settings.step_count)
                             .map(|s| layer.file_frame(&project.settings, s).is_some())
                             .collect(),
+                        misaligned: alignment_of(layer, &project.settings),
                         steps: (0..project.settings.step_count)
                             .map(|s| {
                                 let over = layer.frame_override(s);
@@ -1146,6 +1265,69 @@ pub fn set_layer_speed_range(
     gesture: Option<String>,
 ) -> Result<ProjectSummary> {
     layer_speed_range(&state, layer, min_mps, max_mps, gesture)
+}
+
+/// Lines a layer's file up with the timeline's valid times (spec.md 4.8,
+/// M91): its first message moves to the step whose time it is valid for.
+///
+/// One undoable step. Refused, with the offset, when no step lands on the
+/// file's time exactly — a one-hour file on a three-hourly timeline has
+/// nowhere to go — and a no-op when the layer is already aligned.
+#[tauri::command]
+pub fn align_layer(state: tauri::State<'_, AppState>, layer: u64) -> Result<ProjectSummary> {
+    layer_aligned(&state, layer)
+}
+
+/// Implementation of [`align_layer`].
+pub fn layer_aligned(state: &AppState, layer: u64) -> Result<ProjectSummary> {
+    apply_with(state, None, |project| {
+        let found = project
+            .layer(object_id(layer))
+            .ok_or_else(|| missing_layer(layer))?;
+        let Some(alignment) = alignment_of(found, &project.settings) else {
+            return Err(AppError::BadOption {
+                field: "layer",
+                value: "the layer is already aligned with the timeline, or has no times".to_owned(),
+            });
+        };
+        let after = alignment.aligned_lead.ok_or_else(|| AppError::BadOption {
+            field: "layer",
+            value: format!(
+                "the file is {} h off the timeline, which is not a whole number of {} h steps",
+                alignment.offset_hours,
+                project.settings.step_hours.hours()
+            ),
+        })?;
+        let by = i64::from(after) - i64::from(found.lead_steps);
+        let (overrides, erased) = shifted_with_lead(found, by, project.settings.step_count);
+        let mut commands = vec![Command::SetLayerLead {
+            layer: found.id,
+            before: found.lead_steps,
+            after,
+        }];
+        if overrides != found.frame_overrides {
+            commands.push(Command::SetFrameOverrides {
+                layer: found.id,
+                before: found.frame_overrides.clone(),
+                after: overrides,
+            });
+        }
+        if erased != found.erased {
+            commands.push(Command::SetRasterErasures {
+                layer: found.id,
+                before: found.erased.clone(),
+                after: erased,
+            });
+        }
+        Ok(if commands.len() == 1 {
+            commands.remove(0)
+        } else {
+            Command::Batch {
+                label: "Align layer with the timeline".to_owned(),
+                commands,
+            }
+        })
+    })
 }
 
 /// Implementation of [`set_layer_speed_range`].

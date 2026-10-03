@@ -217,5 +217,17 @@ const catalogue: Record<string, string> = {
   "parent": "übergeordnet",
   "attach": "anhängen",
   "{time} · before the measurement's first mark": "{time} · vor der ersten Markierung der Messung",
+  "Align {layer} with the timeline": "{layer} an der Zeitleiste ausrichten",
+  "Cannot align exactly: {offset} h is not a whole number of {step} h steps": "Keine genaue Ausrichtung möglich: {offset} h ist keine ganze Zahl von {step}-h-Schritten",
+  "Move the fields to the steps whose times they are valid for": "Die Felder auf die Schritte verschieben, für deren Zeiten sie gelten",
+  "Align a layer with the timeline": "Eine Ebene an der Zeitleiste ausrichten",
+  "Shown beside a layer whose file's times disagree with the timeline's; moves its fields to the steps whose times they are valid for.": "Erscheint neben einer Ebene, deren Dateizeiten nicht zur Zeitleiste passen; verschiebt ihre Felder auf die Schritte, für deren Zeiten sie gelten.",
+  "valid time": "Gültigkeitszeit",
+  "misaligned": "versetzt",
+  "offset": "Versatz",
+  "Align layer with the timeline": "Ebene an der Zeitleiste ausrichten",
+  "{layer}: its first field lands on step {lead} ({step} UTC) but is valid at {first} UTC — {offset} h off": "{layer}: Das erste Feld liegt auf Schritt {lead} ({step} UTC), gilt aber für {first} UTC — {offset} h versetzt",
+  "{layer}: its first field is on step {lead}, aligned to a start time the timeline no longer has": "{layer}: Das erste Feld liegt auf Schritt {lead}, ausgerichtet an einer Startzeit, die die Zeitleiste nicht mehr hat",
+  "Put the first field back on the first step": "Das erste Feld wieder auf den ersten Schritt legen",
 };
 export default catalogue;

@@ -22,6 +22,7 @@ const f32Mps = (knots: number) => Math.fround(mpsFromKnots(knots));
 function grib(lowKt: number, highKt: number): GribLayerInfo {
   return {
     history: null,
+    misaligned: null,
   path: "/forecast.grib2",
     field_kind: "wind",
     loaded: true,

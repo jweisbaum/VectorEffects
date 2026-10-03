@@ -217,5 +217,17 @@ const catalogue: Record<string, string> = {
   "parent": "parent",
   "attach": "attacher",
   "{time} · before the measurement's first mark": "{time} · avant la première marque de la mesure",
+  "Align {layer} with the timeline": "Aligner {layer} sur la chronologie",
+  "Cannot align exactly: {offset} h is not a whole number of {step} h steps": "Impossible d’aligner exactement : {offset} h n’est pas un nombre entier de pas de {step} h",
+  "Move the fields to the steps whose times they are valid for": "Déplacer les champs vers les pas dont ils portent l’heure",
+  "Align a layer with the timeline": "Aligner un calque sur la chronologie",
+  "Shown beside a layer whose file's times disagree with the timeline's; moves its fields to the steps whose times they are valid for.": "Affiché près d’un calque dont les heures du fichier ne concordent pas avec celles de la chronologie ; déplace ses champs vers les pas dont ils portent l’heure.",
+  "valid time": "heure de validité",
+  "misaligned": "désaligné",
+  "offset": "décalage",
+  "Align layer with the timeline": "Aligner le calque sur la chronologie",
+  "{layer}: its first field lands on step {lead} ({step} UTC) but is valid at {first} UTC — {offset} h off": "{layer} : son premier champ tombe sur le pas {lead} ({step} UTC) mais vaut pour {first} UTC — décalage de {offset} h",
+  "{layer}: its first field is on step {lead}, aligned to a start time the timeline no longer has": "{layer} : son premier champ est sur le pas {lead}, aligné sur une heure de début que la chronologie n’a plus",
+  "Put the first field back on the first step": "Remettre le premier champ sur le premier pas",
 };
 export default catalogue;
