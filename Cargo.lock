@@ -5615,6 +5615,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "ve-hdf5"
+version = "0.1.19"
+dependencies = [
+ "flate2",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "ve-osm"
 version = "0.1.19"
 dependencies = [
@@ -5653,6 +5661,7 @@ dependencies = [
  "thiserror 2.0.20",
  "tracing",
  "url",
+ "ve-hdf5",
  "zarrs",
  "zarrs_storage",
  "zstd",

@@ -103,7 +103,7 @@ describe("a day-long hourly project with no date", () => {
 
   it("offers the eight products, all ticked", async () => {
     await open(project);
-    expect(products()).toHaveLength(8);
+    expect(products()).toHaveLength(9);
     expect(products().every((box) => box.checked)).toBe(true);
     const text = feature("products")?.textContent ?? "";
     expect(text).toContain("Copernicus MULTIOBS");
@@ -118,6 +118,7 @@ describe("a day-long hourly project with no date", () => {
     expect(text).toContain("OSTIA (Met Office)");
     expect(text).toContain("NOAA National Centers for Environmental Information");
     expect(text).toContain("from NOAA CoastWatch");
+    expect(text).toContain("NOAA Blended Seawinds");
     // The attribution the licence asks for, as it words it.
     expect(text).toContain("Generated using E.U. Copernicus Marine Service Information");
   });
@@ -148,7 +149,17 @@ describe("a day-long hourly project with no date", () => {
     await click(importButton());
     expect(sent).toEqual([
       {
-        products: ["multiobs", "duacs", "wind-l4", "ascat", "ccmp", "oisst", "geopolar", "ostia"],
+        products: [
+          "multiobs",
+          "duacs",
+          "wind-l4",
+          "ascat",
+          "ccmp",
+          "seawinds",
+          "oisst",
+          "geopolar",
+          "ostia",
+        ],
         days: 3,
         set_start_time: true,
         extend_timeline: true,
@@ -166,16 +177,17 @@ describe("a day-long hourly project with no date", () => {
   });
 
   /**
-   * Lengthened to 88 steps: 88 + 4 + 88 + 4 + 15 + 3 × 4 = 211 downloads
-   * and 722.3, so 722 MB. Left at 24: 24 + 1 + 24 + 1 + 4 + 3 × 1 = 57 and
-   * 195.5, so 196 MB — the steps past the timeline's end are not fetched,
-   * so the cost has to follow the box.
+   * Lengthened to 88 steps: 88 + 4 + 88 + 4 + 15 + 4 + 3 × 4 = 215
+   * downloads and 785.3, so 785 MB. Left at 24: 24 + 1 + 24 + 1 + 4 + 1 +
+   * 3 × 1 = 58 and 212.3, so 212 MB — the steps past the timeline's end are
+   * not fetched, so the cost has to follow the box. (`nrtRange.test.ts`
+   * works the sums.)
    */
   it("prices what the timeline will show", async () => {
     await open(project);
-    expect(dialog().textContent).toContain("211 downloads, about 722 MB on disk.");
+    expect(dialog().textContent).toContain("215 downloads, about 785 MB on disk.");
     await click(checkbox("extend"));
-    expect(dialog().textContent).toContain("57 downloads, about 196 MB on disk.");
+    expect(dialog().textContent).toContain("58 downloads, about 212 MB on disk.");
     await click(importButton());
     expect(sent[0]?.extend_timeline).toBe(false);
   });
@@ -191,6 +203,7 @@ describe("a day-long hourly project with no date", () => {
       "wind-l4",
       "ascat",
       "ccmp",
+      "seawinds",
       "oisst",
       "geopolar",
       "ostia",

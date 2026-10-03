@@ -3662,10 +3662,49 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M96 — NOAA Blended Seawinds
+
+The seventh milestone of the near-real-time import. `ve_zarr::seawinds` is
+a `FieldSource` over CoastWatch's directory of day files: the index read
+once for the days it lists, four six-hourly steps per day, and a day's file
+fetched once — single-flight across the import's workers, let go when its
+four steps are read — and read with `ve-hdf5`. `Product::Seawinds` joins
+the dialog under Wind, with CoastWatch's credit; the cost line counts its
+day files as the downloads they are (`timesPerDownload`). The ERDDAP
+store's latitude-limited regrid is shared rather than repeated.
+
+**Measured live, 2026-10-03:** the index lists 2023-01-01 to the day
+before; the newest field (2026-10-02 18Z) is 67.5 % defined — ocean, ice
+free — with a mean of 7.5 m/s, read in 15 s, nearly all of it the download.
+A day can be missing upstream (28 September was), which holds like any
+missing day.
+
+### M95 — An HDF5 reader
+
+The sixth milestone of the near-real-time import, the user's ruling of
+2026-10-02: "Write a rust library." `ve-hdf5` reads what NetCDF-4 writes and
+no more — superblocks 0–3, version 1 and 2 object headers with
+continuations, old-style and new-style groups, compact and dense links and
+attributes (fractal heap with indirect blocks, v2 B-tree with internal
+nodes), variable-length strings from the global heap, and datasets compact,
+contiguous or chunked behind a version 1 B-tree with deflate, shuffle and
+Fletcher-32. The version 4 layout's indexes, SZIP and other compressions,
+huge heap objects and shared messages are refused by name. It reads from
+memory and links no C library; it reaches no network.
+
+**Tested against the reference library, not against itself:** h5py wrote
+the fixtures (`tests/fixtures/make.py`) from formulas the tests recompute,
+in both the netCDF-4 layout and the old superblock-0 one; flipping bytes
+across every fixture is an error and never a panic. The three files the
+products ship — Blended Seawinds, OSTIA and CMC — read value for value as
+h5py reads them (`tests/real_files.rs`, `#[ignore]`d for their 44 MB):
+OSTIA's 26 million values in 0.74 s in release.
+
 ### M94 — The near-real-time import for an agent
 
 The ninth milestone of the import's design (6–8, the HDF5 reader, Blended
-Seawinds and CMC, were set aside by the user on 2026-10-03). Two MCP tools:
+Seawinds and CMC, were set aside by the user on 2026-10-03 and taken up the
+same day as M95 onwards). Two MCP tools:
 `nrt_products`, which lists the eight products with their field, period and
 credit and the present moment, without reaching the network; and
 `import_nrt`, which takes product ids and a number of days and relays the

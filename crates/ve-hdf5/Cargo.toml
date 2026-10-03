@@ -1,0 +1,17 @@
+[package]
+name = "ve-hdf5"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "A reader for the HDF5 files NetCDF-4 is written in, in pure Rust. Reaches no network and links no C library."
+
+[dependencies]
+thiserror = { workspace = true }
+# Deflate is the one compression NetCDF-4 writes. The same crate ve-grib
+# uses, on its pure-Rust backend.
+flate2 = { workspace = true }
+
+[lints]
+workspace = true

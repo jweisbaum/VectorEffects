@@ -1691,7 +1691,8 @@ async fn nrt_products_are_listed_and_a_bad_import_is_refused() {
     assert_eq!(
         ids,
         [
-            "multiobs", "duacs", "wind-l4", "ascat", "ccmp", "oisst", "geopolar", "ostia"
+            "multiobs", "duacs", "wind-l4", "ascat", "ccmp", "seawinds", "oisst", "geopolar",
+            "ostia"
         ]
     );
     let field = |id: &str| {
@@ -1703,6 +1704,7 @@ async fn nrt_products_are_listed_and_a_bad_import_is_refused() {
     };
     assert_eq!(field("duacs").as_deref(), Some("current"));
     assert_eq!(field("ccmp").as_deref(), Some("wind"));
+    assert_eq!(field("seawinds").as_deref(), Some("wind"));
     assert_eq!(field("ostia").as_deref(), Some("sst"));
     assert!(listed["now"].as_str().is_some_and(|now| now.ends_with('Z')));
 

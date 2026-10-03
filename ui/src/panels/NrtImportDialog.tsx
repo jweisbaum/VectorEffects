@@ -37,6 +37,7 @@ import {
   GEOPOLAR_CREDIT,
   OISST_CREDIT,
   NRT_GROUPS,
+  SEAWINDS_CREDIT,
   NRT_PRODUCTS,
   clampDays,
   costOf,
@@ -170,6 +171,7 @@ export default function NrtImportDialog({
           <span className="muted nrt-credit">{CCMP_CREDIT}</span>
           <span className="muted nrt-credit">{OISST_CREDIT}</span>
           <span className="muted nrt-credit">{GEOPOLAR_CREDIT}</span>
+          <span className="muted nrt-credit">{SEAWINDS_CREDIT}</span>
         </fieldset>
 
         {/*

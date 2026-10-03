@@ -31,7 +31,7 @@ fn every_product_opens_and_its_newest_field_is_plausible() {
         / 3600;
     for product in Product::ALL
         .into_iter()
-        .filter(|p| *p != Product::Ccmp && !p.variable().is_scalar())
+        .filter(|p| ![Product::Ccmp, Product::Seawinds].contains(p) && !p.variable().is_scalar())
     {
         let began = std::time::Instant::now();
         let source = product.open().expect("the product opens");
@@ -189,6 +189,47 @@ fn ccmp_opens_and_its_newest_field_is_plausible() {
     assert!((0.8..0.92).contains(&fraction), "{fraction}");
     assert!((2.0..15.0).contains(&mean), "{mean}");
     assert!(field.u[0].is_nan(), "nothing at the north pole");
+}
+
+/// Blended Seawinds from NOAA CoastWatch: the directory lists recent days,
+/// and the newest day's last field is a wind over nearly the whole globe —
+/// the product blends every satellite and fills the gaps between swaths.
+#[test]
+#[ignore = "reaches the network; set VE_TEST_NRT=1"]
+fn seawinds_opens_and_its_newest_field_is_plausible() {
+    if std::env::var("VE_TEST_NRT").is_err() {
+        println!("VE_TEST_NRT is not set; nothing fetched");
+        return;
+    }
+    let began = std::time::Instant::now();
+    let source = Product::Seawinds.open().expect("Blended Seawinds opens");
+    let (first, last) = source.coverage().expect("coverage");
+    println!(
+        "seawinds: {} to {}, opened in {:.1} s",
+        first.to_iso(),
+        last.to_iso(),
+        began.elapsed().as_secs_f64()
+    );
+    let began = std::time::Instant::now();
+    let step = source.step_at(last).expect("the newest step");
+    let field = &source.read_step(&step).expect("the newest field")[0];
+    let speeds: Vec<f32> = field
+        .u
+        .iter()
+        .zip(&field.v)
+        .filter(|(u, v)| u.is_finite() && v.is_finite())
+        .map(|(u, v)| u.hypot(*v))
+        .collect();
+    let mean = speeds.iter().sum::<f32>() / speeds.len() as f32;
+    println!(
+        "  {} defined, mean {mean:.2} m/s, read in {:.1} s",
+        speeds.len(),
+        began.elapsed().as_secs_f64()
+    );
+    // Ocean only, and not under sea ice: well over half the nodes.
+    let fraction = speeds.len() as f64 / field.u.len() as f64;
+    assert!((0.5..0.8).contains(&fraction), "{fraction}");
+    assert!((3.0..15.0).contains(&mean), "{mean}");
 }
 
 /// The three SST products: each opens, its newest day is within a few days,

@@ -7,6 +7,7 @@ members = [
     "crates/ve-zarr",
     "crates/ve-chart",
     "crates/ve-osm",
+    "crates/ve-hdf5",
     "crates/ve-app",
     "tools/basemap-builder",
     "tools/icon-grid-builder",
@@ -23,6 +24,7 @@ repository = "https://github.com/jweisbaum/VectorEffects"
 ve-core = { path = "crates/ve-core" }
 ve-grib = { path = "crates/ve-grib" }
 ve-render = { path = "crates/ve-render" }
+ve-hdf5 = { path = "crates/ve-hdf5" }
 ve-zarr = { path = "crates/ve-zarr" }
 ve-chart = { path = "crates/ve-chart" }
 ve-osm = { path = "crates/ve-osm" }

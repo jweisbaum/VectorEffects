@@ -263,19 +263,24 @@ impl ErddapStore {
         }
     }
 
-    /// Onto the common grid, empty beyond the latitudes the dataset reaches.
     fn regrid(&self, values: &[f32]) -> Vec<f32> {
-        let mut out = to_era5_grid(self.grid, values);
-        let half = self.grid.dlat.abs() / 2.0;
-        let ni = out.len() / NJ as usize;
-        for j in 0..NJ as usize {
-            let lat = 90.0 - j as f64 * 0.25;
-            if lat > self.lat_range.1 + half + 1e-9 || lat < self.lat_range.0 - half - 1e-9 {
-                out[j * ni..(j + 1) * ni].fill(f32::NAN);
-            }
-        }
-        out
+        regrid_within(self.grid, self.lat_range, values)
     }
+}
+
+/// Onto the common grid, empty beyond the latitudes a dataset reaches:
+/// `lat_range` is its southernmost and northernmost cell centres.
+pub(crate) fn regrid_within(grid: CellGrid, lat_range: (f64, f64), values: &[f32]) -> Vec<f32> {
+    let mut out = to_era5_grid(grid, values);
+    let half = grid.dlat.abs() / 2.0;
+    let ni = out.len() / NJ as usize;
+    for j in 0..NJ as usize {
+        let lat = 90.0 - j as f64 * 0.25;
+        if lat > lat_range.1 + half + 1e-9 || lat < lat_range.0 - half - 1e-9 {
+            out[j * ni..(j + 1) * ni].fill(f32::NAN);
+        }
+    }
+    out
 }
 
 impl FieldSource for ErddapStore {

@@ -34,6 +34,7 @@ mod parallel;
 pub mod product;
 pub mod regrid;
 pub mod routing;
+pub mod seawinds;
 pub mod source;
 pub mod stac;
 pub mod store;

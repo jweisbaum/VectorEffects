@@ -59,6 +59,11 @@ export interface NrtProduct {
   periodHours: number;
   /** Roughly what one fetched time takes on disk, for the cost line. */
   megabytesPerTime: number;
+  /**
+   * How many of its times one download brings: Blended Seawinds files a
+   * day's four times together. One when left out.
+   */
+  timesPerDownload?: number;
 }
 
 /** The products, in the order the import reads them. */
@@ -102,6 +107,15 @@ export const NRT_PRODUCTS: readonly NrtProduct[] = [
     detail: msg("10 m wind, 6-hourly, 0.25°, to 78° N and S"),
     periodHours: 6,
     megabytesPerTime: 3.7,
+  },
+  {
+    id: "seawinds",
+    group: "wind",
+    label: "NOAA Blended Seawinds",
+    detail: msg("10 m wind from every scatterometer and radiometer, 6-hourly, 0.25°"),
+    periodHours: 6,
+    megabytesPerTime: 4.2,
+    timesPerDownload: 4,
   },
   // Sea-surface temperature (M93): display only, one value per point rather
   // than two components, so about half a vector product's size per time.
@@ -163,6 +177,8 @@ export const OISST_CREDIT =
   "NOAA OI SST V2.1 data provided by the NOAA National Centers for Environmental Information";
 /** Geo-Polar Blended's credit, as NOAA CoastWatch asks for it. Not translated. OSTIA is a Copernicus product and is covered by `COPERNICUS_CREDIT`. */
 export const GEOPOLAR_CREDIT = "NOAA Geo-Polar Blended SST, from NOAA CoastWatch";
+/** Blended Seawinds' credit, as `ve_zarr::Product::credit` words it. Not translated. */
+export const SEAWINDS_CREDIT = "NOAA Blended Seawinds, from NOAA CoastWatch";
 
 /** The span an import covers and what the timeline needs to show it. */
 export interface NrtPeriod {
@@ -238,18 +254,28 @@ export function wantedTimes(
   stepCount: number,
   productPeriodHours: number,
 ): number {
+  return wantedTimeList(period, stepHours, stepCount, productPeriodHours).length;
+}
+
+/** The times `wantedTimes` counts, in Unix seconds. */
+function wantedTimeList(
+  period: NrtPeriod,
+  stepHours: number,
+  stepCount: number,
+  productPeriodHours: number,
+): number[] {
   const step = Math.max(1, Math.trunc(stepHours)) * HOUR;
   const stride = Math.max(step, productPeriodHours * HOUR);
   const timelineEnd = period.startUnixS + stepCount * step;
-  let count = 0;
+  const times: number[] = [];
   for (
     let time = period.startUnixS;
     time <= period.endUnixS && time < timelineEnd;
     time += stride
   ) {
-    count += 1;
+    times.push(time);
   }
-  return count;
+  return times;
 }
 
 /** What an import will fetch: how many downloads, and roughly how much disk. */
@@ -278,9 +304,13 @@ export function costOf(
   let megabytes = 0;
   for (const product of NRT_PRODUCTS) {
     if (!productIds.includes(product.id)) continue;
-    const times = wantedTimes(period, stepHours, stepCount, product.periodHours);
-    downloads += times;
-    megabytes += times * product.megabytesPerTime;
+    const times = wantedTimeList(period, stepHours, stepCount, product.periodHours);
+    // A file of several times is one download however many of them are
+    // wanted: count the files the times fall in, which on a timeline
+    // coarser than the product is one per time.
+    const span = (product.timesPerDownload ?? 1) * product.periodHours * HOUR;
+    downloads += new Set(times.map((time) => Math.floor(time / span))).size;
+    megabytes += times.length * product.megabytesPerTime;
   }
   return { downloads, megabytes: Math.round(megabytes) };
 }

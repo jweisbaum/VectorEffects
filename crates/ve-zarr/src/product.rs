@@ -25,6 +25,10 @@ pub enum Product {
     /// Cross-Calibrated Multi-Platform wind at 10 m, near-real-time
     /// (version 2.1 NRT), six-hourly, from a NOAA ERDDAP server.
     Ccmp,
+    /// NOAA's Blended Seawinds, near-real-time: 10 m wind blended from
+    /// every scatterometer and radiometer, six-hourly at 0.25 degree, one
+    /// NetCDF-4 file a day from NOAA CoastWatch ([`crate::seawinds`]).
+    Seawinds,
     /// NOAA's daily Optimum Interpolation SST, version 2.1, preliminary
     /// days included: 0.25 degree, from a NOAA ERDDAP server.
     Oisst,
@@ -50,12 +54,13 @@ struct Home {
 
 impl Product {
     /// Every product, in the order the dialog lists them.
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
         Self::Multiobs,
         Self::Duacs,
         Self::WindL4,
         Self::Ascat,
         Self::Ccmp,
+        Self::Seawinds,
         Self::Oisst,
         Self::GeoPolar,
         Self::Ostia,
@@ -69,6 +74,7 @@ impl Product {
             Self::WindL4 => "wind-l4",
             Self::Ascat => "ascat",
             Self::Ccmp => "ccmp",
+            Self::Seawinds => "seawinds",
             Self::Oisst => "oisst",
             Self::GeoPolar => "geopolar",
             Self::Ostia => "ostia",
@@ -83,6 +89,7 @@ impl Product {
             Self::WindL4 => "Copernicus L4 hourly wind",
             Self::Ascat => "ASCAT Metop-B/C wind",
             Self::Ccmp => "CCMP NRT wind",
+            Self::Seawinds => "NOAA Blended Seawinds",
             Self::Oisst => "NOAA OISST sea-surface temperature",
             Self::GeoPolar => "NOAA Geo-Polar Blended sea-surface temperature",
             Self::Ostia => "OSTIA sea-surface temperature",
@@ -98,7 +105,7 @@ impl Product {
     pub fn variable(self) -> Variable {
         match self {
             Self::Multiobs | Self::Duacs => Variable::SurfaceCurrent,
-            Self::WindL4 | Self::Ascat | Self::Ccmp => Variable::Wind10m,
+            Self::WindL4 | Self::Ascat | Self::Ccmp | Self::Seawinds => Variable::Wind10m,
             Self::Oisst | Self::GeoPolar | Self::Ostia => Variable::SeaSurfaceTemperature,
         }
     }
@@ -109,7 +116,7 @@ impl Product {
         match self {
             Self::Multiobs | Self::WindL4 => 1,
             Self::Duacs | Self::Ascat | Self::Oisst | Self::GeoPolar | Self::Ostia => 24,
-            Self::Ccmp => 6,
+            Self::Ccmp | Self::Seawinds => 6,
         }
     }
 
@@ -121,6 +128,7 @@ impl Product {
                 "NOAA OI SST V2.1 data provided by the NOAA National Centers for Environmental Information"
             }
             Self::GeoPolar => "NOAA Geo-Polar Blended SST, from NOAA CoastWatch",
+            Self::Seawinds => "NOAA Blended Seawinds, from NOAA CoastWatch",
             Self::Multiobs | Self::Duacs | Self::WindL4 | Self::Ascat | Self::Ostia => {
                 "Generated using E.U. Copernicus Marine Service Information"
             }
@@ -235,7 +243,9 @@ impl Product {
             },
             // Four datasets, opened through `ASCAT_PASSES`; and not
             // Copernicus at all.
-            Self::Ascat | Self::Ccmp | Self::Oisst | Self::GeoPolar => return None,
+            Self::Ascat | Self::Ccmp | Self::Seawinds | Self::Oisst | Self::GeoPolar => {
+                return None;
+            }
         })
     }
 
@@ -280,7 +290,9 @@ impl Product {
                 time_path: None,
                 daily: true,
             },
-            Self::Ascat | Self::Ccmp | Self::Oisst | Self::GeoPolar => return None,
+            Self::Ascat | Self::Ccmp | Self::Seawinds | Self::Oisst | Self::GeoPolar => {
+                return None;
+            }
         })
     }
 
@@ -324,6 +336,11 @@ impl Product {
                     .collect::<Result<Vec<_>>>()
             })?;
             return Ok(Box::new(crate::ascat::AscatStore::new(members)?));
+        }
+        if self == Self::Seawinds {
+            return Ok(Box::new(crate::seawinds::SeawindsStore::open(Box::new(
+                crate::erddap::Http::new()?,
+            ))?));
         }
         let erddap = match self {
             Self::Ccmp => Some(Self::CCMP),

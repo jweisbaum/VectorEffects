@@ -104,6 +104,10 @@ crates/
                a tile. Reaches no network and links no C library
   ve-osm/      OpenStreetMap raster tiles (spec 5.4). **Fetches**, and is
                one of the two crates allowed to — see invariant 5
+  ve-hdf5/     The HDF5 that NetCDF-4 files are written in, read from
+               memory (spec §4.10, M95): what NetCDF-4 writes, and an
+               error naming anything else. Reaches no network and links
+               no C library; `ve-zarr` reads Blended Seawinds with it
   ve-app/      Tauri app: IPC commands, app state, background workers,
                custom URI scheme, autosave (`autosave`: a snapshot of unsaved
                work every 60 s or 50 edits, offered back on the start screen). `image` decodes and georeferences
@@ -119,8 +123,8 @@ package.json   Root npm workspace: owns the Tauri CLI and every script
 ```
 
 **Dependency direction:** `ve-app` → everything; `ve-render` → `ve-core`;
-`ve-grib` → `ve-core`. Never the reverse, and `ve-core` depends on none of
-them.
+`ve-grib` → `ve-core`; `ve-zarr` → `ve-hdf5`. Never the reverse, and
+`ve-core` and `ve-hdf5` depend on none of them.
 
 ---
 

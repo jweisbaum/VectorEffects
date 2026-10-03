@@ -1211,11 +1211,12 @@ products rather than the archives, and what comes back is one layer per
 product, made by the same pipeline — fetched once, written to a GRIB2 file
 in the data directory, read back as an imported layer. The design is
 `docs/superpowers/specs/2026-10-02-near-real-time-data-design.md`; ten
-products are planned and eight are here: Copernicus Marine's MULTIOBS total
+products are planned and nine are here: Copernicus Marine's MULTIOBS total
 surface current (hourly), DUACS geostrophic current (daily), L4 wind
 (hourly), ASCAT scatterometer wind from Metop-B and Metop-C (daily), CCMP
-NRT wind (six-hourly), and sea-surface temperature from NOAA OISST, NOAA
-Geo-Polar Blended and the Met Office's OSTIA (daily).
+NRT wind and NOAA Blended Seawinds (six-hourly), and sea-surface
+temperature from NOAA OISST, NOAA Geo-Polar Blended and the Met Office's
+OSTIA (daily).
 
 **ASCAT is four datasets read as one** (M90): each satellite's ascending
 and descending passes are published apart, each a band of ocean with gaps
@@ -1241,6 +1242,21 @@ was written. A redirect to any other host is not followed, so the host read
 is the one the offline check names. A server that does not answer is given
 ten seconds to connect, so an unreachable one costs the import about a
 minute and a half of retries before the product is named as skipped.
+
+**Blended Seawinds is a file a day, read as HDF5** (M95, M96). NOAA
+CoastWatch publishes it as one NetCDF-4 file per day — its four six-hourly
+fields of both components, about 18 MB — in a directory whose index is the
+only catalogue, and there is no subsetting service in front of it. So the
+index is read once for the days it lists, and a day's file is fetched whole
+the first time any of its steps is read and shared by the rest: the import
+reads several steps at once, and four downloads of one file would be most
+of its time. NetCDF-4 is HDF5 inside, which `ve-hdf5` reads — a reader
+written for this, in Rust with no C library, of the parts of the format
+NetCDF-4 writes (chunked, deflated and shuffled data; compact and dense
+groups and attributes) and nothing else: an unsupported compression or
+layout is refused by name. A day the index does not list is a day missing,
+as for any product. The directory reaches back to 2023; the host is NOAA
+CoastWatch's, and the offline check names the one directory on it.
 
 **Sea-surface temperature is a display-only layer** (M93). It makes no
 field, reaches no scene, no render-cache key and no export, and cannot be
