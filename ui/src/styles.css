@@ -663,6 +663,9 @@ body {
   font: inherit;
 }
 .start-implications { margin: 0.9rem 0 1.1rem; font-size: 12px; line-height: 1.6; }
+/* Room above Create project on the start page, so it does not sit on the
+   last field. The new-project dialog's own button is left as it is. */
+.start-panel .start-new button.primary { margin-top: 12px; }
 .warn-note { color: var(--warning); }
 
 .start-panel button,
