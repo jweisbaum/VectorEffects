@@ -71,7 +71,11 @@ hits=$(find crates -name '*.rs' -not -path 'crates/ve-zarr/*' -not -path 'crates
 # NOAA's West Coast and CoastWatch ERDDAPs serve OISST and Geo-Polar SST (M93).
 # CoastWatch's data directory holds Blended Seawinds, a NetCDF-4 file a day
 # (M96): the one directory on that host, not the host.
-ARCHIVES='storage\.googleapis\.com/gcp-public-data-arco-era5|s3\.waw3-1\.cloudferro\.com/mdl-arco-time|s3\.waw3-1\.cloudferro\.com/mdl-metadata|oceanwatch\.pifsc\.noaa\.gov/erddap|coastwatch\.pfeg\.noaa\.gov/erddap|coastwatch\.noaa\.gov/erddap|coastwatch\.noaa\.gov/data/pub0015/coastwatch/blended/wind/'
+# CMC SST (M97) is listed by NASA's catalogue and downloaded from PO.DAAC's
+# archive with the person's Earthdata token; the archive redirects to a
+# signed address on its CloudFront distribution, which is followed without
+# the token, and a redirect to NASA's login page means the token was refused.
+ARCHIVES='storage\.googleapis\.com/gcp-public-data-arco-era5|s3\.waw3-1\.cloudferro\.com/mdl-arco-time|s3\.waw3-1\.cloudferro\.com/mdl-metadata|oceanwatch\.pifsc\.noaa\.gov/erddap|coastwatch\.pfeg\.noaa\.gov/erddap|coastwatch\.noaa\.gov/erddap|coastwatch\.noaa\.gov/data/pub0015/coastwatch/blended/wind/|cmr\.earthdata\.nasa\.gov/search/granules|archive\.podaac\.earthdata\.nasa\.gov/|[a-z0-9]+\.cloudfront\.net/|urs\.earthdata\.nasa\.gov/oauth'
 hits=$(find crates/ve-zarr -name '*.rs' -exec grep -nHE 'https?://' {} + 2>/dev/null \
   | grep -vE "$COMMENT" | grep -vE "$ALLOW" | grep -vE "$ARCHIVES" || true)
 [ -n "$hits" ] && report "unexpected remote host in ve-zarr" "$hits"

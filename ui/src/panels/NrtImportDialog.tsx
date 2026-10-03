@@ -22,16 +22,18 @@
  * layer panel is a stacking context of its own, and a modal belongs to the
  * window, not to the panel whose button opened it.
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 
 import NumberField from "../NumberField";
 import type { NrtRequest } from "../generated/NrtRequest";
 import type { ProjectSummary } from "../generated/ProjectSummary";
 import { useT } from "../i18n";
+import { api } from "../ipc";
 import { formatUtcHour } from "./historyRange";
 import {
   CCMP_CREDIT,
+  CMC_CREDIT,
   COPERNICUS_CREDIT,
   DEFAULT_DAYS,
   GEOPOLAR_CREDIT,
@@ -68,6 +70,15 @@ export default function NrtImportDialog({
   // or on none; keeping the old start is the choice that has to be made.
   const [setStartTime, setSetStartTime] = useState(true);
   const [extend, setExtend] = useState(true);
+  // Whether a NASA Earthdata token is set: CMC is offered only then. Not
+  // known until asked, and treated as unset until the answer comes.
+  const [earthdata, setEarthdata] = useState(false);
+  useEffect(() => {
+    void api.earthdataStatus().then(setEarthdata).catch(() => setEarthdata(false));
+  }, []);
+  const available = (id: string) =>
+    earthdata || NRT_PRODUCTS.find((p) => p.id === id)?.needsEarthdata !== true;
+  const wanted = chosen.filter(available);
 
   // The hour may have turned since the dialog opened, and with it the most
   // days a timeline takes; what is asked for is held to what can be.
@@ -77,8 +88,8 @@ export default function NrtImportDialog({
   const canExtend = period.steps > project.step_count;
   const extending = canExtend && extend;
   const stepCount = extending ? Math.max(project.step_count, period.steps) : project.step_count;
-  const cost = costOf(chosen, period, project.step_hours, stepCount);
-  const ready = chosen.length > 0;
+  const cost = costOf(wanted, period, project.step_hours, stepCount);
+  const ready = wanted.length > 0;
 
   const toggle = (id: string) =>
     setChosen((held) => (held.includes(id) ? held.filter((x) => x !== id) : [...held, id]));
@@ -153,14 +164,21 @@ export default function NrtImportDialog({
             <div key={group.id} className="nrt-group">
               <span className="nrt-group-heading">{t(group.heading)}</span>
               {NRT_PRODUCTS.filter((product) => product.group === group.id).map((product) => (
-                <label key={product.id} className="check">
+                <label key={product.id} className="check" data-product={product.id}>
                   <input
                     type="checkbox"
-                    checked={chosen.includes(product.id)}
+                    checked={wanted.includes(product.id)}
+                    disabled={!available(product.id)}
                     onChange={() => toggle(product.id)}
                   />
                   <span>
-                    {t(product.label)} <span className="muted">— {t(product.detail)}</span>
+                    {t(product.label)}{" "}
+                    <span className="muted">
+                      —{" "}
+                      {available(product.id)
+                        ? t(product.detail)
+                        : t("needs a NASA Earthdata token — Settings")}
+                    </span>
                   </span>
                 </label>
               ))}
@@ -172,6 +190,7 @@ export default function NrtImportDialog({
           <span className="muted nrt-credit">{OISST_CREDIT}</span>
           <span className="muted nrt-credit">{GEOPOLAR_CREDIT}</span>
           <span className="muted nrt-credit">{SEAWINDS_CREDIT}</span>
+          <span className="muted nrt-credit">{CMC_CREDIT}</span>
         </fieldset>
 
         {/*
@@ -197,7 +216,7 @@ export default function NrtImportDialog({
             onClick={() => {
               if (!ready) return;
               onImport({
-                products: NRT_PRODUCTS.map((p) => p.id).filter((id) => chosen.includes(id)),
+                products: NRT_PRODUCTS.map((p) => p.id).filter((id) => wanted.includes(id)),
                 days: asked,
                 set_start_time: setStartTime,
                 extend_timeline: extending,

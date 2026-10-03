@@ -64,6 +64,9 @@ macro_rules! command {
 /// different managed state, or `async` — so the exclusions and the mechanics
 /// agree rather than the list papering over a signature.
 pub const EXCLUDED: &[&str] = &[
+    // A NASA credential is the person's to enter, in Settings: an agent is
+    // told whether one is set (`earthdata_status`) and never handles it.
+    "set_earthdata_token",
     // The beta gate and the facts the shell reads about itself.
     "beta_status",
     "app_info",
@@ -151,6 +154,7 @@ pub const TABLE: &[(&str, Handler)] = &[
     command!(align_layer, crate::document::align_layer, { layer: u64 }),
     command!(sample_temperature, crate::sst::sample_temperature, { step: u32, lon: f64, lat: f64 }),
     command!(set_temperature_unit, crate::settings::set_temperature_unit, { temperature_unit: crate::settings::TemperatureUnit }),
+    command!(earthdata_status, crate::earthdata::earthdata_status, {}),
     command!(set_layer_locked, crate::document::set_layer_locked, { layer: u64, locked: bool }),
     command!(move_layer, crate::document::move_layer, { from: usize, to: usize }),
     command!(rename_object, crate::document::rename_object, { object: u64, name: String }),

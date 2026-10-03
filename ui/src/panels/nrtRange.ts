@@ -64,6 +64,8 @@ export interface NrtProduct {
    * day's four times together. One when left out.
    */
   timesPerDownload?: number;
+  /** Fetched with the person's NASA Earthdata token, set in Settings (CMC). */
+  needsEarthdata?: boolean;
 }
 
 /** The products, in the order the import reads them. */
@@ -143,6 +145,15 @@ export const NRT_PRODUCTS: readonly NrtProduct[] = [
     periodHours: 24,
     megabytesPerTime: 1.9,
   },
+  {
+    id: "cmc",
+    group: "sst",
+    label: "CMC",
+    detail: msg("daily, read at 0.25° from 0.1°"),
+    periodHours: 24,
+    megabytesPerTime: 1.9,
+    needsEarthdata: true,
+  },
 ];
 
 /**
@@ -177,6 +188,8 @@ export const OISST_CREDIT =
   "NOAA OI SST V2.1 data provided by the NOAA National Centers for Environmental Information";
 /** Geo-Polar Blended's credit, as NOAA CoastWatch asks for it. Not translated. OSTIA is a Copernicus product and is covered by `COPERNICUS_CREDIT`. */
 export const GEOPOLAR_CREDIT = "NOAA Geo-Polar Blended SST, from NOAA CoastWatch";
+/** CMC's credit, as `ve_zarr::Product::credit` words it. Not translated. */
+export const CMC_CREDIT = "CMC SST, from the Canadian Meteorological Centre through NASA PO.DAAC";
 /** Blended Seawinds' credit, as `ve_zarr::Product::credit` words it. Not translated. */
 export const SEAWINDS_CREDIT = "NOAA Blended Seawinds, from NOAA CoastWatch";
 

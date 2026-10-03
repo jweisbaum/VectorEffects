@@ -38,6 +38,10 @@ pub enum Product {
     /// The Met Office's OSTIA SST analysis, daily, through Copernicus
     /// Marine: its 0.2 degree copy of the 0.05 degree field.
     Ostia,
+    /// The Canadian Meteorological Centre's SST analysis, daily at 0.1
+    /// degree, from NASA PO.DAAC: the one product that needs a login, a
+    /// NASA Earthdata token ([`crate::cmc`]).
+    Cmc,
 }
 
 /// Where one product is in the Marine Data Store.
@@ -54,7 +58,7 @@ struct Home {
 
 impl Product {
     /// Every product, in the order the dialog lists them.
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::Multiobs,
         Self::Duacs,
         Self::WindL4,
@@ -64,6 +68,7 @@ impl Product {
         Self::Oisst,
         Self::GeoPolar,
         Self::Ostia,
+        Self::Cmc,
     ];
 
     /// The identifier the frontend sends and the document stores.
@@ -78,6 +83,7 @@ impl Product {
             Self::Oisst => "oisst",
             Self::GeoPolar => "geopolar",
             Self::Ostia => "ostia",
+            Self::Cmc => "cmc",
         }
     }
 
@@ -93,6 +99,7 @@ impl Product {
             Self::Oisst => "NOAA OISST sea-surface temperature",
             Self::GeoPolar => "NOAA Geo-Polar Blended sea-surface temperature",
             Self::Ostia => "OSTIA sea-surface temperature",
+            Self::Cmc => "CMC sea-surface temperature",
         }
     }
 
@@ -106,7 +113,9 @@ impl Product {
         match self {
             Self::Multiobs | Self::Duacs => Variable::SurfaceCurrent,
             Self::WindL4 | Self::Ascat | Self::Ccmp | Self::Seawinds => Variable::Wind10m,
-            Self::Oisst | Self::GeoPolar | Self::Ostia => Variable::SeaSurfaceTemperature,
+            Self::Oisst | Self::GeoPolar | Self::Ostia | Self::Cmc => {
+                Variable::SeaSurfaceTemperature
+            }
         }
     }
 
@@ -115,7 +124,9 @@ impl Product {
     pub fn period_hours(self) -> u32 {
         match self {
             Self::Multiobs | Self::WindL4 => 1,
-            Self::Duacs | Self::Ascat | Self::Oisst | Self::GeoPolar | Self::Ostia => 24,
+            Self::Duacs | Self::Ascat | Self::Oisst | Self::GeoPolar | Self::Ostia | Self::Cmc => {
+                24
+            }
             Self::Ccmp | Self::Seawinds => 6,
         }
     }
@@ -129,6 +140,7 @@ impl Product {
             }
             Self::GeoPolar => "NOAA Geo-Polar Blended SST, from NOAA CoastWatch",
             Self::Seawinds => "NOAA Blended Seawinds, from NOAA CoastWatch",
+            Self::Cmc => "CMC SST, from the Canadian Meteorological Centre through NASA PO.DAAC",
             Self::Multiobs | Self::Duacs | Self::WindL4 | Self::Ascat | Self::Ostia => {
                 "Generated using E.U. Copernicus Marine Service Information"
             }
@@ -243,7 +255,12 @@ impl Product {
             },
             // Four datasets, opened through `ASCAT_PASSES`; and not
             // Copernicus at all.
-            Self::Ascat | Self::Ccmp | Self::Seawinds | Self::Oisst | Self::GeoPolar => {
+            Self::Ascat
+            | Self::Ccmp
+            | Self::Seawinds
+            | Self::Oisst
+            | Self::GeoPolar
+            | Self::Cmc => {
                 return None;
             }
         })
@@ -290,7 +307,12 @@ impl Product {
                 time_path: None,
                 daily: true,
             },
-            Self::Ascat | Self::Ccmp | Self::Seawinds | Self::Oisst | Self::GeoPolar => {
+            Self::Ascat
+            | Self::Ccmp
+            | Self::Seawinds
+            | Self::Oisst
+            | Self::GeoPolar
+            | Self::Cmc => {
                 return None;
             }
         })
@@ -318,6 +340,33 @@ impl Product {
     /// up, and the failure reported is the catalogue's: it is the one that
     /// says what is actually wrong.
     pub fn open(self) -> Result<Box<dyn FieldSource>> {
+        self.open_with(None)
+    }
+
+    /// Whether opening it needs a NASA Earthdata token.
+    pub fn needs_earthdata(self) -> bool {
+        self == Self::Cmc
+    }
+
+    /// [`Self::open`], with the person's NASA Earthdata token for the
+    /// product that needs one. Every other product ignores it, and it is
+    /// sent nowhere but PO.DAAC's archive.
+    pub fn open_with(self, earthdata_token: Option<&str>) -> Result<Box<dyn FieldSource>> {
+        if self == Self::Cmc {
+            let token = earthdata_token
+                .map(str::trim)
+                .filter(|t| !t.is_empty())
+                .ok_or_else(|| {
+                    crate::error::ZarrError::Open(
+                        "CMC needs a NASA Earthdata token; set one in Settings".into(),
+                    )
+                })?;
+            let catalogue = crate::erddap::Http::new()?;
+            return Ok(Box::new(crate::cmc::CmcStore::open(
+                &catalogue,
+                Box::new(crate::cmc::Earthdata::new(token)?),
+            )?));
+        }
         if self == Self::Ascat {
             // The four passes found and opened together, each with its own
             // fallback.
@@ -377,6 +426,27 @@ mod tests {
             assert_eq!(crate::Archive::parse(product.id()), None);
         }
         assert_eq!(Product::parse("era5-wind"), None);
+    }
+
+    /// CMC is the one product behind a login: without a token it is
+    /// refused before anything is fetched, saying where the token goes.
+    #[test]
+    fn cmc_without_a_token_is_refused_before_any_request() {
+        for token in [None, Some(""), Some("   ")] {
+            let Err(err) = Product::Cmc.open_with(token) else {
+                panic!("CMC opened with no token");
+            };
+            let err = err.to_string();
+            assert!(
+                err.contains("Earthdata token") && err.contains("Settings"),
+                "{err}"
+            );
+        }
+        let needing: Vec<_> = Product::ALL
+            .into_iter()
+            .filter(|p| p.needs_earthdata())
+            .collect();
+        assert_eq!(needing, [Product::Cmc]);
     }
 
     /// The periods the timeline's steps divide or are divided by: one of 1,

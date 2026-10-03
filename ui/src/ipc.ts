@@ -761,6 +761,10 @@ export const api = {
     call<AppSettings>("set_macro_directory", { directory }),
   /** The MCP service's switch, port, token and live state (spec 8.8). */
   mcpStatus: () => call<McpStatus>("mcp_status", {}),
+  /** Whether a NASA Earthdata token is set (M97). The token itself never comes back. */
+  earthdataStatus: () => call<boolean>("earthdata_status", {}),
+  /** Sets the Earthdata token; an empty one removes it. Answers whether one is set. */
+  setEarthdataToken: (token: string) => call<boolean>("set_earthdata_token", { token }),
   /** Turns the service on or off; enabling issues a fresh token. */
   setMcp: (enabled: boolean, port: number) => call<McpStatus>("mcp_set", { enabled, port }),
   /** A new token, and the listener restarted with it. */

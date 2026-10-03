@@ -70,6 +70,13 @@ const features: Feature[] = [
   { id: "settings:delete-macros", label: msg("Delete all macros"), description: msg("Empty the macro library. Projects keep their own copies."),
     keywords: [msg("clear"), msg("disk space"), msg("macro library")], topic: "macros", reveal: open("macros") },
 
+  { id: "settings:earthdata", label: msg("NASA Earthdata"), description: msg("The token CMC sea-surface temperature is downloaded with."),
+    keywords: [msg("login"), msg("credential"), "CMC", "PO.DAAC"], topic: "nrt", reveal: open("earthdata") },
+  { id: "settings:earthdata-token", label: msg("Earthdata token"), description: msg("Paste, replace or remove the NASA Earthdata token."),
+    keywords: [msg("login"), msg("credential"), msg("password")], topic: "nrt", reveal: open("earthdata") },
+  { id: "settings:earthdata-status", label: msg("Earthdata token status"), description: msg("Whether a NASA Earthdata token is set."),
+    keywords: [msg("login"), msg("credential")], topic: "nrt", reveal: open("earthdata") },
+
   { id: "settings:mcp", label: msg("MCP service"), description: msg("Let an AI client on this computer drive the application."),
     keywords: [msg("AI"), "Claude", msg("automation")], topic: "settings", reveal: open("mcp") },
   { id: "settings:mcp-enable", label: msg("Enable the MCP service on this computer"), description: msg("Turn the local MCP service on or off."),

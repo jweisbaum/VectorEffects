@@ -3662,6 +3662,46 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M97 — CMC, and the Earthdata token
+
+The eighth and last product milestone of the near-real-time import.
+`ve_zarr::cmc` lists CMC's days from NASA's catalogue (CMR) anonymously and
+downloads each from PO.DAAC's archive with the token, following the
+archive's redirect by hand: to its CloudFront distribution without the
+token, and never to NASA's login page, which is reported as a refused
+token. `Product::Cmc` opens only with a token (`open_with`).
+`ve_app::earthdata` keeps it; Settings gains a NASA Earthdata section that
+sets, replaces and removes it and shows only whether one is set; the import
+dialog greys CMC out without one. An agent sees `needs_earthdata_token` in
+`nrt_products` and `earthdata_status` through `invoke`, and cannot set it
+(`set_earthdata_token` is excluded).
+
+**Ruled here, against the design (§5.4):** the token is not "a plain string
+in the settings file". The settings are sent whole to the webview and,
+through `invoke`'s `app_settings`, to an MCP agent, and a NASA credential
+belongs to neither; a file of its own, owner-only on Unix, costs one file.
+
+**Measured live, 2026-10-03:** the catalogue lists 300 days, back to
+2025-12-07, in under a second; a made-up token is refused by PO.DAAC with
+its login redirect, and reported without the token in the message. **Not
+verified live:** a download with a real token — none was available. The
+read itself is proved on a real CMC file by `ve-hdf5`'s `real_files.rs`,
+and `cmc_lists_its_days_and_names_a_refused_token` reads the newest day
+when `VE_TEST_EARTHDATA_TOKEN` is set.
+
+**From review:** reqwest ends a failed request's message with its URL, and
+the signed hop's URL carries a credential and the person's username — it
+went into the log, the status bar and an agent's `skipped`; every request
+error here is described without it. The redirect's host is read with the
+client's own parser, so a `#` or `\` cannot pass the check while the
+connection goes elsewhere, and an upper-case host is followed. Settings asks
+whether a token is set once, not at every render.
+
+**Checked in the app, 2026-10-03:** the dialog lists ten products with CMC
+greyed and pointing to Settings; a token saved in Settings lands owner-only
+in its own file and not in `settings.json`, after which CMC is offered,
+ticked, and counted in the cost.
+
 ### M96 — NOAA Blended Seawinds
 
 The seventh milestone of the near-real-time import. `ve_zarr::seawinds` is

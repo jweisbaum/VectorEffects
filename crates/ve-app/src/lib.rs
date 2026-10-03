@@ -11,6 +11,7 @@ pub mod charts;
 pub mod commands;
 pub mod create;
 pub mod document;
+pub mod earthdata;
 pub mod edit;
 pub mod error;
 pub mod export;
@@ -277,6 +278,8 @@ pub fn run() -> anyhow::Result<()> {
                 settings::set_auto_scale,
                 settings::set_display_units,
                 settings::set_temperature_unit,
+                earthdata::earthdata_status,
+                earthdata::set_earthdata_token,
                 settings::set_glyph_appearance,
                 autosave::autosaves,
                 autosave::recover_autosave,

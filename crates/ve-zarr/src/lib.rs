@@ -22,6 +22,7 @@
 pub mod arco;
 pub mod ascat;
 pub mod blosc;
+pub mod cmc;
 pub mod codec;
 pub mod era5;
 pub mod erddap;

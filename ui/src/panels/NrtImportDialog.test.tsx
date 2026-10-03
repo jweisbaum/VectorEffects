@@ -11,11 +11,18 @@
  */
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { NrtRequest } from "../generated/NrtRequest";
 import type { ProjectSummary } from "../generated/ProjectSummary";
-import NrtImportDialog from "./NrtImportDialog";
+
+/** Whether the backend says a NASA Earthdata token is set (CMC, M97). */
+const earthdata = vi.hoisted(() => ({ set: false }));
+vi.mock("../ipc", () => ({
+  api: { earthdataStatus: () => Promise.resolve(earthdata.set) },
+}));
+
+const NrtImportDialog = (await import("./NrtImportDialog")).default;
 
 // React only records updates as acted upon when told it is in a test.
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -86,6 +93,7 @@ async function click(element: HTMLElement) {
 }
 
 beforeEach(() => {
+  earthdata.set = false;
   sent = [];
   closed = 0;
   container = document.createElement("div");
@@ -103,8 +111,9 @@ describe("a day-long hourly project with no date", () => {
 
   it("offers the eight products, all ticked", async () => {
     await open(project);
-    expect(products()).toHaveLength(9);
-    expect(products().every((box) => box.checked)).toBe(true);
+    expect(products()).toHaveLength(10);
+    // Every product but CMC, which waits for a token.
+    expect(products().filter((box) => box.checked)).toHaveLength(9);
     const text = feature("products")?.textContent ?? "";
     expect(text).toContain("Copernicus MULTIOBS");
     expect(text).toContain("Copernicus DUACS");
@@ -252,5 +261,36 @@ describe("a project that has a date", () => {
     await click(checkbox("set-start"));
     await click(importButton());
     expect(sent[0]?.set_start_time).toBe(false);
+  });
+});
+
+describe("CMC and the Earthdata token", () => {
+  const project = projectOf({ step_hours: 1, step_count: 24, start_unix_s: null });
+
+  function cmc(): HTMLLabelElement {
+    const found = feature("products")?.querySelector<HTMLLabelElement>('[data-product="cmc"]');
+    if (!found) throw new Error("no CMC row");
+    return found;
+  }
+
+  it("is offered, unticked, only with a token set, and says where to set one", async () => {
+    await open(project);
+    const box = cmc().querySelector("input");
+    expect(box?.disabled).toBe(true);
+    expect(box?.checked).toBe(false);
+    expect(cmc().textContent).toContain("needs a NASA Earthdata token — Settings");
+    await click(importButton());
+    expect(sent[0]?.products).not.toContain("cmc");
+  });
+
+  it("is fetched like the others once a token is set", async () => {
+    earthdata.set = true;
+    await open(project);
+    const box = cmc().querySelector("input");
+    expect(box?.disabled).toBe(false);
+    expect(box?.checked).toBe(true);
+    expect(cmc().textContent).toContain("daily, read at 0.25° from 0.1°");
+    await click(importButton());
+    expect(sent[0]?.products.at(-1)).toBe("cmc");
   });
 });

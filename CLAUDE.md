@@ -50,7 +50,9 @@ stop and raise it rather than working around it.
    import of spec §4.10 reads the ERA5 and GlobCurrent archives over HTTPS
    when the user asks it to (M38); it lives in `ve-zarr`, and so does the
    near-real-time import beside it (M89), which reads Copernicus Marine's
-   catalogue and stores when its button is pressed. The OpenStreetMap
+   catalogue and stores, NOAA's data servers and CoastWatch directory, and
+   NASA's catalogue and PO.DAAC archive when its button is pressed — the
+   archive with the person's Earthdata token (M97), which goes nowhere else. The OpenStreetMap
    background of spec §5.4 fetches raster tiles while, and only while, the
    user has that box ticked; it lives in `ve-osm`. The offline check names
    those two crates and those hosts and allows them nowhere else, so a new

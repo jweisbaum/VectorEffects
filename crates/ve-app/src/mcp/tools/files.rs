@@ -55,8 +55,8 @@ pub struct HistoryParams {
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct NrtParams {
     /// Product ids from nrt_products: "multiobs", "duacs", "wind-l4",
-    /// "ascat", "ccmp", "seawinds", "oisst", "geopolar", "ostia". Each
-    /// becomes a layer.
+    /// "ascat", "ccmp", "seawinds", "oisst", "geopolar", "ostia", "cmc".
+    /// Each becomes a layer.
     pub products: Vec<String>,
     /// How many days back from today (UTC) the period starts; it runs to the
     /// current hour. At most what 240 steps of the project's step hold: nine
@@ -192,7 +192,7 @@ impl<R: tauri::Runtime> VectorEffects<R> {
     }
 
     #[tool(
-        description = "Today's date, and the NEAR-REAL-TIME products import_nrt fetches: the last few days of observed wind (Copernicus L4, ASCAT, CCMP, Blended Seawinds), ocean current (MULTIOBS, DUACS) and sea-surface temperature (OISST, Geo-Polar Blended, OSTIA), with each one's id, field and period. Answers at once; does not reach the network. Every product trails the present by about a day."
+        description = "Today's date, and the NEAR-REAL-TIME products import_nrt fetches: the last few days of observed wind (Copernicus L4, ASCAT, CCMP, Blended Seawinds), ocean current (MULTIOBS, DUACS) and sea-surface temperature (OISST, Geo-Polar Blended, OSTIA, CMC — CMC only once the person has set a NASA Earthdata token in Settings), with each one's id, field and period. Answers at once; does not reach the network. Every product trails the present by about a day."
     )]
     async fn nrt_products(&self) -> std::result::Result<Json<crate::nrt::NrtProducts>, ToolError> {
         self.run("nrt_products", |_| Ok(crate::nrt::products()))

@@ -270,3 +270,52 @@ fn every_sst_product_opens_and_its_newest_day_is_a_sea() {
         assert!(coldest > -3.0 && warmest < 36.0, "{coldest}..{warmest}");
     }
 }
+
+/// CMC from NASA: the catalogue lists recent days without a login, and a
+/// token PO.DAAC does not accept is reported as such — the archive answers
+/// it with its login page, which is not followed. With a real token in
+/// `VE_TEST_EARTHDATA_TOKEN`, the newest day is read and is a sea.
+#[test]
+#[ignore = "reaches the network; set VE_TEST_NRT=1"]
+fn cmc_lists_its_days_and_names_a_refused_token() {
+    if std::env::var("VE_TEST_NRT").is_err() {
+        println!("VE_TEST_NRT is not set; nothing fetched");
+        return;
+    }
+    let refused = match Product::Cmc.open_with(Some("not-a-real-token")) {
+        Ok(source) => {
+            let (first, last) = source.coverage().expect("coverage");
+            println!("cmc: {} to {}", first.to_iso(), last.to_iso());
+            let step = source.step_at(last).expect("the newest step");
+            match source.read_step(&step) {
+                Ok(_) => panic!("a made-up token was accepted"),
+                Err(err) => err.to_string(),
+            }
+        }
+        Err(err) => panic!("the catalogue did not open: {err}"),
+    };
+    println!("  a made-up token: {refused}");
+    assert!(refused.contains("did not accept the token"), "{refused}");
+    assert!(!refused.contains("not-a-real-token"), "{refused}");
+
+    let Ok(token) = std::env::var("VE_TEST_EARTHDATA_TOKEN") else {
+        println!("  VE_TEST_EARTHDATA_TOKEN is not set; no day read");
+        return;
+    };
+    let source = Product::Cmc.open_with(Some(&token)).expect("opens");
+    let (_, last) = source.coverage().expect("coverage");
+    let began = std::time::Instant::now();
+    let field = &source
+        .read_step(&source.step_at(last).expect("newest"))
+        .expect("the newest day")[0];
+    let sea: Vec<f32> = field.u.iter().copied().filter(|t| t.is_finite()).collect();
+    let mean = sea.iter().sum::<f32>() / sea.len() as f32;
+    println!(
+        "  {} defined, mean {mean:.2} °C, read in {:.1} s",
+        sea.len(),
+        began.elapsed().as_secs_f64()
+    );
+    let fraction = sea.len() as f64 / field.u.len() as f64;
+    assert!((0.55..0.8).contains(&fraction), "{fraction}");
+    assert!((10.0..20.0).contains(&mean), "{mean}");
+}

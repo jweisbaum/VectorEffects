@@ -268,5 +268,7 @@ const catalogue: Record<string, string> = {
   "daily, 0.25°": "täglich, 0,25°",
   "daily, read at 0.25°": "täglich, gelesen mit 0,25°",
   "daily, read at 0.2°": "täglich, gelesen mit 0,2°",
+  "needs a NASA Earthdata token — Settings": "benötigt ein NASA-Earthdata-Token — Einstellungen",
+  "daily, read at 0.25° from 0.1°": "täglich, mit 0,25° aus 0,1° gelesen",
 };
 export default catalogue;

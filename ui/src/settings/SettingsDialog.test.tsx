@@ -121,6 +121,7 @@ vi.mock("../ipc", () => ({
     },
     // The MCP section (Task 9) asks for its status on mount; none of these
     // tests exercise it, so a fixed, off status is enough to let it render.
+    earthdataStatus: () => Promise.resolve(false),
     mcpStatus: () =>
       Promise.resolve({ enabled: false, port: 47391, token: "", bound_port: null, bind_error: null, sessions: 0, last_tool: null }),
   },

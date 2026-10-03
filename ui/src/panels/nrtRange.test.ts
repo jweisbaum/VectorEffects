@@ -148,6 +148,7 @@ describe("the cost", () => {
       "oisst",
       "geopolar",
       "ostia",
+      "cmc",
     ]);
   });
 
@@ -155,22 +156,22 @@ describe("the cost", () => {
    * 88 hourly currents, 4 daily currents, 88 hourly winds, 4 daily
    * scatterometer winds, 15 six-hourly CCMP winds (0 h to 84 h of an
    * 87-hour period), 15 six-hourly Blended Seawinds in 4 day files, and 4
-   * days of each of the three daily temperatures: 88 + 4 + 88 + 4 + 15 + 4
-   * + 3 × 4 = 215 downloads. 88 × 2.8 + 4 × 2.8 + 88 × 4.2 + 4 × 4.2 + 15 ×
-   * 3.7 + 15 × 4.2 + 12 × 1.9 = 246.4 + 11.2 + 369.6 + 16.8 + 55.5 + 63 +
-   * 22.8 = 785.3, which rounds to 785 MB.
+   * days of each of the four daily temperatures: 88 + 4 + 88 + 4 + 15 + 4
+   * + 4 × 4 = 219 downloads. 88 × 2.8 + 4 × 2.8 + 88 × 4.2 + 4 × 4.2 + 15 ×
+   * 3.7 + 15 × 4.2 + 16 × 1.9 = 246.4 + 11.2 + 369.6 + 16.8 + 55.5 + 63 +
+   * 30.4 = 792.9, which rounds to 793 MB.
    */
   it("sums the downloads and the size over the products chosen", () => {
-    expect(costOf(all, p, 1, 88)).toEqual({ downloads: 215, megabytes: 785 });
+    expect(costOf(all, p, 1, 88)).toEqual({ downloads: 219, megabytes: 793 });
   });
 
   /**
-   * A timeline left at 24 steps shows one day: 24 + 1 + 24 + 1 + 4 + 1 + 3
-   * × 1 = 58 downloads — Blended Seawinds' four times are one file — and
-   * 67.2 + 2.8 + 100.8 + 4.2 + 14.8 + 16.8 + 3 × 1.9 = 212.3, so 212 MB.
+   * A timeline left at 24 steps shows one day: 24 + 1 + 24 + 1 + 4 + 1 + 4
+   * × 1 = 59 downloads — Blended Seawinds' four times are one file — and
+   * 67.2 + 2.8 + 100.8 + 4.2 + 14.8 + 16.8 + 4 × 1.9 = 214.2, so 214 MB.
    */
   it("fetches only what the timeline can show", () => {
-    expect(costOf(all, p, 1, 24)).toEqual({ downloads: 58, megabytes: 212 });
+    expect(costOf(all, p, 1, 24)).toEqual({ downloads: 59, megabytes: 214 });
   });
 
   /** A daily timeline takes one time from each day: five days, five files. */

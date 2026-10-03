@@ -33,6 +33,7 @@ import type { GradientView } from "../generated/GradientView";
 import { knownGradients, loadGradients } from "../gradients";
 import GradientPicker from "./GradientPicker";
 import GlyphSettings from "./GlyphSettings";
+import EarthdataSection from "./EarthdataSection";
 import McpSection from "./McpSection";
 import ThemePicker from "./ThemePicker";
 import ThemeEditor from "./ThemeEditor";
@@ -150,6 +151,7 @@ export default function SettingsDialog({
       onReveal("settings:display", show),
       onReveal("settings:charts", show),
       onReveal("settings:macros", show),
+      onReveal("settings:earthdata", show),
       onReveal("settings:mcp", show),
     ];
     return () => { for (const off of offs) off(); };
@@ -519,6 +521,8 @@ export default function SettingsDialog({
             </button>
           </div>
         </section>
+
+        <EarthdataSection onError={report} />
 
         <McpSection onError={report} />
 

@@ -99,6 +99,9 @@ pub struct NrtProduct {
     pub period_hours: u32,
     /// The credit its publisher asks to be shown.
     pub credit: String,
+    /// Whether it needs the person's NASA Earthdata token (CMC), which is
+    /// set in Settings and nowhere else.
+    pub needs_earthdata_token: bool,
 }
 
 /// The products, as [`NrtProducts`].
@@ -118,6 +121,7 @@ pub fn products() -> NrtProducts {
                 .to_owned(),
                 period_hours: product.period_hours(),
                 credit: product.credit().to_owned(),
+                needs_earthdata_token: product.needs_earthdata(),
             })
             .collect(),
     }
@@ -202,7 +206,10 @@ pub fn import_nrt<R: tauri::Runtime>(
         use tauri::{Emitter, Manager};
         let state = worker.state::<AppState>();
         let now = chrono::Utc::now().timestamp();
-        nrt_import(&state, &request, now, Product::open, |progress| {
+        // Read once, here; it reaches PO.DAAC's archive and nothing else.
+        let token = crate::earthdata::read(&state.paths);
+        let open = |product: Product| product.open_with(token.as_deref());
+        nrt_import(&state, &request, now, open, |progress| {
             let _ = worker.emit("nrt://progress", progress);
         })
     })

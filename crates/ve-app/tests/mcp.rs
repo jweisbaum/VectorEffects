@@ -1692,7 +1692,7 @@ async fn nrt_products_are_listed_and_a_bad_import_is_refused() {
         ids,
         [
             "multiobs", "duacs", "wind-l4", "ascat", "ccmp", "seawinds", "oisst", "geopolar",
-            "ostia"
+            "ostia", "cmc"
         ]
     );
     let field = |id: &str| {
@@ -1706,6 +1706,15 @@ async fn nrt_products_are_listed_and_a_bad_import_is_refused() {
     assert_eq!(field("ccmp").as_deref(), Some("wind"));
     assert_eq!(field("seawinds").as_deref(), Some("wind"));
     assert_eq!(field("ostia").as_deref(), Some("sst"));
+    assert_eq!(field("cmc").as_deref(), Some("sst"));
+    let needs = |id: &str| {
+        products
+            .iter()
+            .find(|p| p["id"] == id)
+            .map(|p| p["needs_earthdata_token"].clone())
+    };
+    assert_eq!(needs("cmc"), Some(json!(true)));
+    assert_eq!(needs("ostia"), Some(json!(false)));
     assert!(listed["now"].as_str().is_some_and(|now| now.ends_with('Z')));
 
     call(&client, "project_new", new_project_args("Recent")).await;

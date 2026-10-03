@@ -1211,12 +1211,12 @@ products rather than the archives, and what comes back is one layer per
 product, made by the same pipeline — fetched once, written to a GRIB2 file
 in the data directory, read back as an imported layer. The design is
 `docs/superpowers/specs/2026-10-02-near-real-time-data-design.md`; ten
-products are planned and nine are here: Copernicus Marine's MULTIOBS total
-surface current (hourly), DUACS geostrophic current (daily), L4 wind
+products are planned and all ten are here: Copernicus Marine's MULTIOBS
+total surface current (hourly), DUACS geostrophic current (daily), L4 wind
 (hourly), ASCAT scatterometer wind from Metop-B and Metop-C (daily), CCMP
 NRT wind and NOAA Blended Seawinds (six-hourly), and sea-surface
-temperature from NOAA OISST, NOAA Geo-Polar Blended and the Met Office's
-OSTIA (daily).
+temperature from NOAA OISST, NOAA Geo-Polar Blended, the Met Office's OSTIA
+and CMC (daily).
 
 **ASCAT is four datasets read as one** (M90): each satellite's ascending
 and descending passes are published apart, each a band of ocean with gaps
@@ -1257,6 +1257,23 @@ groups and attributes) and nothing else: an unsupported compression or
 layout is refused by name. A day the index does not list is a day missing,
 as for any product. The directory reaches back to 2023; the host is NOAA
 CoastWatch's, and the offline check names the one directory on it.
+
+**CMC is the one product behind a login** (M97): the Canadian
+Meteorological Centre's 0.1° analysis is published only through NASA's
+PO.DAAC, which asks for a NASA Earthdata token. Its days come from NASA's
+catalogue, anonymously; each day's NetCDF-4 file is downloaded from
+PO.DAAC's archive with the token as a bearer credential, and read with
+`ve-hdf5` onto the 0.25° grid like the other temperatures. The archive
+answers with a redirect to a signed address on its CloudFront
+distribution, which is followed by hand and without the token; a redirect
+to NASA's login page means the token was refused, and says so. **The token
+is not in the settings file**: the settings go whole to the webview and,
+through `app_settings`, to any agent the MCP service admits, so it is kept
+in a file of its own beside them, readable by its owner only, and what
+leaves the backend is whether one is set. It is entered in Settings →
+NASA Earthdata — never by an agent — sent nowhere but the archive, never
+logged and never in a project. Without one, CMC's checkbox is greyed out
+with a pointer to Settings.
 
 **Sea-surface temperature is a display-only layer** (M93). It makes no
 field, reaches no scene, no render-cache key and no export, and cannot be
