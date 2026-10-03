@@ -1024,10 +1024,18 @@ body {
 }
 .layer-panel button:disabled { opacity: 0.3; cursor: default; }
 .layer-panel .eye.on, .layer-panel .lock.on { color: var(--accent); }
+/* Import, the calendar and the dish stand side by side at one height: the
+   icons' 14 px plus their padding and border. Set, not left to the text's
+   line height, which made Import 6 px shorter than its neighbours. */
 .layer-panel header .import-grib {
   border-color: var(--border);
   font-size: 11px;
   white-space: nowrap;
+  box-sizing: border-box;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 7px;
 }
 
 /* The history import is a calendar and no words: it sits beside two buttons
