@@ -100,7 +100,7 @@ const catalogue: Record<string, string> = {
   "Glyphs": "الرموز",
   "Projection": "الإسقاط",
   "Graticule": "شبكة الإحداثيات",
-  "Auto scale: run the colour ramp from the slowest to the fastest speed in view, across every layer and object. A view setting: it changes nothing stored or exported.": "مقياس تلقائي: يمد تدرج الألوان من أبطأ سرعة إلى أسرعها في العرض، عبر كل الطبقات والكائنات. إعداد عرض: لا يغيّر شيئًا مما يُحفظ أو يُصدَّر.",
+  "Auto scale: run each colour ramp across what is in view — the speeds of wind and currents across every layer and object, and the temperatures of a sea-surface temperature layer. A view setting: it changes nothing stored or exported.": "مقياس تلقائي: يمدّ كل تدرّج لوني على ما هو ظاهر — سرعات الرياح والتيارات في كل الطبقات والكائنات، ودرجات حرارة طبقة درجة حرارة سطح البحر. إعداد للعرض: لا يغيّر شيئًا محفوظًا أو مُصدَّرًا.",
   "Auto scale": "مقياس تلقائي",
   "Electronic charts from {directory} ({cells} cells). Drawn under everything; not a layer, and not part of the project.": "خرائط بحرية إلكترونية من {directory} (الخلايا: {cells}). تُرسم تحت كل شيء؛ ليست طبقة ولا جزءًا من المشروع.",
   "Electronic charts from {directory}. Drawn under everything; not a layer, and not part of the project.": "خرائط بحرية إلكترونية من {directory}. تُرسم تحت كل شيء؛ ليست طبقة ولا جزءًا من المشروع.",
@@ -235,7 +235,7 @@ const catalogue: Record<string, string> = {
   "grid": "شبكة",
   "latitude": "خط العرض",
   "longitude": "خط الطول",
-  "Stretch the colour ramp across the speeds in view.": "مد تدرج الألوان على السرعات في العرض.",
+  "Stretch the colour ramps across the speeds and temperatures in view.": "يمدّ التدرّجات اللونية على السرعات ودرجات الحرارة الظاهرة.",
   "colour scale": "مقياس الألوان",
   "colour ramp": "تدرج الألوان",
   "range": "مدى",
@@ -262,5 +262,6 @@ const catalogue: Record<string, string> = {
   "Drop the first mark and let the timeline move freely again": "تجاهل العلامة الأولى واترك الخط الزمني يتحرك بحرية من جديد",
   "Measure how fast and which way a feature moved between two time steps.": "قياس مدى سرعة تحرك ظاهرة واتجاهها بين خطوتين زمنيتين.",
   "movement": "حركة",
+  "Auto scale: the ramp spans the temperatures in view": "مقياس تلقائي: يغطي التدرّج درجات الحرارة الظاهرة",
 };
 export default catalogue;

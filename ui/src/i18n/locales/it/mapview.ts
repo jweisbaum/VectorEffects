@@ -100,7 +100,7 @@ const catalogue: Record<string, string> = {
   "Glyphs": "Simboli",
   "Projection": "Proiezione",
   "Graticule": "Reticolo",
-  "Auto scale: run the colour ramp from the slowest to the fastest speed in view, across every layer and object. A view setting: it changes nothing stored or exported.": "Scala automatica: estende la scala di colori dalla velocità più bassa alla più alta in vista, su tutti i livelli e gli oggetti. È un'impostazione di visualizzazione: non cambia nulla di salvato o esportato.",
+  "Auto scale: run each colour ramp across what is in view — the speeds of wind and currents across every layer and object, and the temperatures of a sea-surface temperature layer. A view setting: it changes nothing stored or exported.": "Scala automatica: adatta ogni rampa di colori a ciò che è visibile — le velocità di vento e correnti su tutti i livelli e gli oggetti, e le temperature di un livello di temperatura superficiale del mare. È un’impostazione della vista: non cambia nulla di salvato o esportato.",
   "Auto scale": "Scala automatica",
   "Electronic charts from {directory} ({cells} cells). Drawn under everything; not a layer, and not part of the project.": "Carte elettroniche da {directory} ({cells} celle). Disegnate sotto tutto il resto; non sono un livello e non fanno parte del progetto.",
   "Electronic charts from {directory}. Drawn under everything; not a layer, and not part of the project.": "Carte elettroniche da {directory}. Disegnate sotto tutto il resto; non sono un livello e non fanno parte del progetto.",
@@ -235,7 +235,7 @@ const catalogue: Record<string, string> = {
   "grid": "griglia",
   "latitude": "latitudine",
   "longitude": "longitudine",
-  "Stretch the colour ramp across the speeds in view.": "Estende la scala di colori sulle velocità in vista.",
+  "Stretch the colour ramps across the speeds and temperatures in view.": "Estende le rampe di colori sulle velocità e le temperature visibili.",
   "colour scale": "scala di colori",
   "colour ramp": "rampa di colori",
   "range": "intervallo",
@@ -262,5 +262,6 @@ const catalogue: Record<string, string> = {
   "Drop the first mark and let the timeline move freely again": "Elimina il primo segno e lascia di nuovo libera la linea temporale",
   "Measure how fast and which way a feature moved between two time steps.": "Misura quanto velocemente e in quale direzione un sistema si è spostato tra due passi temporali.",
   "movement": "movimento",
+  "Auto scale: the ramp spans the temperatures in view": "Scala automatica: la rampa copre le temperature visibili",
 };
 export default catalogue;

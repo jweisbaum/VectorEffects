@@ -1,11 +1,13 @@
 /**
  * The sea-surface temperature layer's colours and numbers (spec.md 4.10, M93).
  *
- * The tiles are coloured in Rust; this is the same ramp repeated so the
- * legend can show it. **A copy, held to the backend's by a test, not a
- * second authority**: a legend whose colours differed from the pixels beside
- * it would be worse than none. Celsius throughout — only what is shown
- * changes with the unit setting, never what is stored.
+ * The tiles carry temperatures, not colours (`ve_app::sst::pack`): sixteen
+ * bits per pixel, which the map's shader colours on the ramp in force. That
+ * ramp is the fixed −2 to 32 °C one, or — with the auto scale on — the
+ * temperatures in view, as the field's ramp follows the speeds in view
+ * (spec.md 5.3). The legend and the shader read the same stops from here.
+ * Celsius throughout — only what is shown changes with the unit setting,
+ * never what is stored.
  */
 import type { TemperatureUnit } from "../generated/TemperatureUnit";
 
@@ -13,6 +15,58 @@ import type { TemperatureUnit } from "../generated/TemperatureUnit";
 export const SST_MIN_C = -2;
 /** The warmest, °C. Warmer takes its colour. */
 export const SST_MAX_C = 32;
+
+/** The coldest temperature a tile can carry, °C: `ve_app::sst::CODE_MIN_C`. */
+export const SST_CODE_MIN_C = -5;
+/** The warmest, °C: `ve_app::sst::CODE_MAX_C`. */
+export const SST_CODE_MAX_C = 45;
+
+/** A tile pixel's two bytes, low then high, as degrees Celsius. */
+export function unpackTemperature(low: number, high: number): number {
+  return SST_CODE_MIN_C + ((low | (high << 8)) / 65535) * (SST_CODE_MAX_C - SST_CODE_MIN_C);
+}
+
+/**
+ * A tile's coldest and warmest water, °C, or null for a tile with none.
+ * Read once, when the tile arrives, as a field tile's speed range is.
+ */
+export function sstTileRange(bytes: Uint8Array): [number, number] | null {
+  let low = 65536;
+  let high = -1;
+  for (let offset = 0; offset + 3 < bytes.length; offset += 4) {
+    if (bytes[offset + 3] === 0) continue;
+    const code = bytes[offset]! | (bytes[offset + 1]! << 8);
+    if (code < low) low = code;
+    if (code > high) high = code;
+  }
+  if (high < 0) return null;
+  const scale = (SST_CODE_MAX_C - SST_CODE_MIN_C) / 65535;
+  return [SST_CODE_MIN_C + low * scale, SST_CODE_MIN_C + high * scale];
+}
+
+/**
+ * The narrowest span the auto scale gives the temperature ramp, °C: one
+ * temperature everywhere would otherwise put the view in one colour.
+ */
+const AUTO_SCALE_MIN_SPAN_C = 1;
+
+/** The temperature ramp in force, °C. */
+export interface SstRamp {
+  min: number;
+  max: number;
+  /** Whether it follows the view rather than being the fixed one. */
+  auto: boolean;
+}
+
+/**
+ * The ramp for what the last frame drew: the fixed one when nothing was
+ * seen or the auto scale is off (the caller passes null), else the range
+ * seen, never narrower than a degree.
+ */
+export function sstRampOf(seen: { min: number; max: number } | null): SstRamp {
+  if (seen === null) return { min: SST_MIN_C, max: SST_MAX_C, auto: false };
+  return { min: seen.min, max: Math.max(seen.max, seen.min + AUTO_SCALE_MIN_SPAN_C), auto: true };
+}
 
 /** Seven evenly spaced sRGB stops, cold to warm, from `SST_MIN_C` to `SST_MAX_C`. */
 export const SST_STOPS: ReadonlyArray<readonly [number, number, number]> = [
@@ -69,10 +123,16 @@ export function formatTemperature(celsius: number, unit: TemperatureUnit): strin
 }
 
 /**
- * A legend end: whole degrees in the chosen unit. A minus sign rather than a
- * hyphen, the way a printed scale writes it.
+ * A legend end: whole degrees in the chosen unit, or tenths when the ramp
+ * spans under five degrees of that unit — an auto-scaled ramp a degree wide
+ * would otherwise read as two equal numbers. A minus sign rather than a
+ * hyphen, the way a printed scale writes it, and none on a zero.
  */
-export function legendTemperature(celsius: number, unit: TemperatureUnit): string {
-  const value = Math.round(temperatureIn(celsius, unit));
-  return `${value < 0 ? "−" : ""}${Math.abs(value)} ${temperatureSymbol(unit)}`;
+export function legendTemperature(celsius: number, unit: TemperatureUnit, spanC = Infinity): string {
+  const span = unit === "fahrenheit" ? (spanC * 9) / 5 : spanC;
+  const digits = span < 5 ? 1 : 0;
+  const value = temperatureIn(celsius, unit);
+  const text = Math.abs(value).toFixed(digits);
+  const negative = value < 0 && Number(text) !== 0;
+  return `${negative ? "−" : ""}${text} ${temperatureSymbol(unit)}`;
 }

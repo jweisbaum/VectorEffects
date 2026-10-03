@@ -100,7 +100,7 @@ const catalogue: Record<string, string> = {
   "Glyphs": "Symbolen",
   "Projection": "Projectie",
   "Graticule": "Gradennet",
-  "Auto scale: run the colour ramp from the slowest to the fastest speed in view, across every layer and object. A view setting: it changes nothing stored or exported.": "Automatische schaal: de kleurschaal loopt van de laagste tot de hoogste zichtbare snelheid, over alle lagen en objecten. Een weergave-instelling: er verandert niets aan wat wordt opgeslagen of geëxporteerd.",
+  "Auto scale: run each colour ramp across what is in view — the speeds of wind and currents across every layer and object, and the temperatures of a sea-surface temperature layer. A view setting: it changes nothing stored or exported.": "Autoschaal: laat elke kleurenschaal lopen over wat in beeld is — de snelheden van wind en stroming over alle lagen en objecten, en de temperaturen van een laag zeewatertemperatuur. Een weergave-instelling: er verandert niets aan wat is opgeslagen of geëxporteerd.",
   "Auto scale": "Autoschaal",
   "Electronic charts from {directory} ({cells} cells). Drawn under everything; not a layer, and not part of the project.": "Elektronische zeekaarten uit {directory} ({cells} cellen). Onder alles getekend; geen laag en geen deel van het project.",
   "Electronic charts from {directory}. Drawn under everything; not a layer, and not part of the project.": "Elektronische zeekaarten uit {directory}. Onder alles getekend; geen laag en geen deel van het project.",
@@ -113,7 +113,7 @@ const catalogue: Record<string, string> = {
   "Legend": "Legenda",
   "barbs": "windvanen",
   "arrows": "pijlen",
-  "Auto scale: the ramp spans the speeds in view": "Automatische schaal: de kleurschaal beslaat de zichtbare snelheden",
+  "Auto scale: the ramp spans the speeds in view": "Autoschaal: de kleurschaal beslaat de zichtbare snelheden",
   "auto": "auto",
   "Pan the map, select objects and transform them.": "De kaart verschuiven, objecten selecteren en transformeren.",
   "pan": "verschuiven",
@@ -235,7 +235,7 @@ const catalogue: Record<string, string> = {
   "grid": "raster",
   "latitude": "breedte",
   "longitude": "lengte",
-  "Stretch the colour ramp across the speeds in view.": "De kleurschaal over de zichtbare snelheden spreiden.",
+  "Stretch the colour ramps across the speeds and temperatures in view.": "Rekt de kleurenschalen uit over de snelheden en temperaturen in beeld.",
   "colour scale": "kleurschaal",
   "colour ramp": "kleurverloop",
   "range": "bereik",
@@ -262,5 +262,6 @@ const catalogue: Record<string, string> = {
   "Drop the first mark and let the timeline move freely again": "De eerste markering laten vallen en de tijdlijn weer vrijgeven",
   "Measure how fast and which way a feature moved between two time steps.": "Meten hoe snel en in welke richting een systeem tussen twee tijdstappen is verplaatst.",
   "movement": "beweging",
+  "Auto scale: the ramp spans the temperatures in view": "Autoschaal: de schaal beslaat de temperaturen in beeld",
 };
 export default catalogue;

@@ -38,8 +38,10 @@ import type { GlyphSettings } from "../generated/GlyphSettings";
 import type { GlyphStyle } from "../generated/GlyphStyle";
 import { GLYPH_SUBDIVISIONS, PlacedGlyphs, glyphCovered, glyphTileIsFull, glyphTileIsEmpty, rankedSites, spacedGlyphs } from "./glyphPlacement";
 import { SPEED_MAX } from "./tileRange";
+import { SST_STOPS, sstRampOf, type SstRamp } from "./sstRamp";
 import {
   BACKDROP_FRAG,
+  SST_FRAG,
   BASE_FRAG,
   BASE_VERT,
   GEO_FRAG,
@@ -212,7 +214,12 @@ const OP_CODE: Record<OperatorKind, number> = {
 
 /** What to draw. */
 /** The range of speeds of each kind the last frame drew, m/s, or null for none. */
-export type SeenRanges = Record<FieldKindName, { min: number; max: number } | null>;
+/** The fixed temperature ramp, for a state that names none. */
+const FIXED_SST_RAMP: SstRamp = sstRampOf(null);
+/** The ramp's stops as the shader takes them: sRGB, 0 to 1, flattened. */
+const SST_STOPS_RGB = new Float32Array(SST_STOPS.flatMap(([r, g, b]) => [r / 255, g / 255, b / 255]));
+
+export type SeenRanges = Record<FieldKindName | "sst", { min: number; max: number } | null>;
 
 /** One end-to-end span of the colour ramp, m/s. */
 export interface RampSpan {
@@ -292,6 +299,11 @@ export interface RenderState {
    * evaluation, a cache key or an export.
    */
   backdrops?: readonly BackdropDraw[];
+  /**
+   * The ramp temperature backdrops are coloured on, °C: the fixed one, or
+   * with the auto scale the temperatures in view. Fixed when absent.
+   */
+  sstRamp?: SstRamp;
   pixelRatio: number;
   /** A gesture that operates on the field, while one is being drawn. */
   operator?: OperatorPreview | null;
@@ -422,6 +434,9 @@ export class MapRenderer {
   private readonly baseUniforms: Uniforms;
   private readonly backdropProgram: WebGLProgram;
   private readonly backdropUniforms: Uniforms;
+  /** Temperature tiles, coloured on the ramp in force (spec.md 4.10). */
+  private readonly sstProgram: WebGLProgram;
+  private readonly sstUniforms: Uniforms;
   private readonly geoProgram: WebGLProgram;
   private readonly rasterProgram: WebGLProgram;
   private readonly glyphProgram: WebGLProgram;
@@ -477,6 +492,15 @@ export class MapRenderer {
       "uTileGeo",
       "uTile",
       "uOpacity",
+    ]);
+    this.sstProgram = link(gl, RASTER_VERT, SST_FRAG);
+    this.sstUniforms = uniforms(gl, this.sstProgram, [
+      ...shared,
+      "uTileGeo",
+      "uTile",
+      "uOpacity",
+      "uRange",
+      "uStops",
     ]);
     this.geoUniforms = uniforms(gl, this.geoProgram, [...shared, "uColor"]);
     const mask = [
@@ -1004,19 +1028,28 @@ export class MapRenderer {
     const gl = this.gl;
     const camera = state.camera;
     const onGpu = projectedOnGpu(projectionFor(camera));
-    gl.useProgram(this.backdropProgram);
-    gl.uniform1i(this.backdropUniforms.uTile ?? null, 0);
     gl.activeTexture(gl.TEXTURE0);
     for (const backdrop of backdrops) {
-      gl.uniform1f(this.backdropUniforms.uOpacity ?? null, backdrop.opacity);
-      for (const { tile, texture } of backdrop.textures) {
+      const temperature = backdrop.temperature === true;
+      const u = temperature ? this.sstUniforms : this.backdropUniforms;
+      gl.useProgram(temperature ? this.sstProgram : this.backdropProgram);
+      gl.uniform1i(u.uTile ?? null, 0);
+      gl.uniform1f(u.uOpacity ?? null, backdrop.opacity);
+      if (temperature) {
+        const ramp = state.sstRamp ?? FIXED_SST_RAMP;
+        gl.uniform2f(u.uRange ?? null, ramp.min, ramp.max);
+        gl.uniform3fv(u.uStops ?? null, SST_STOPS_RGB);
+      }
+      for (const { tile, texture, range } of backdrop.textures) {
         if (!texture) continue;
+        // The temperatures drawn, for the auto scale (spec.md 5.3).
+        if (temperature && range) this.noteSst(range);
         const b = tileBounds(tile.z, tile.x, tile.y);
-        this.setShared(this.backdropUniforms, camera, state.view, tile.lonOffset);
+        this.setShared(u, camera, state.view, tile.lonOffset);
         const exact = onGpu && this.drawnExactly(camera, tile);
-        gl.uniform1i(this.backdropUniforms.uExact ?? null, exact ? 1 : 0);
+        gl.uniform1i(u.uExact ?? null, exact ? 1 : 0);
         gl.uniform4f(
-          this.backdropUniforms.uTileGeo ?? null,
+          u.uTileGeo ?? null,
           b.west, b.north, b.east - b.west, b.north - b.south,
         );
         gl.bindTexture(gl.TEXTURE_2D, texture);
@@ -1026,6 +1059,15 @@ export class MapRenderer {
           this.bindTileGeometry(camera, state.view, tile, exact, onGpu),
         );
       }
+    }
+  }
+
+  private noteSst(range: readonly [number, number]): void {
+    const seen = this.seen.sst;
+    if (seen === null) this.seen.sst = { min: range[0], max: range[1] };
+    else {
+      if (range[0] < seen.min) seen.min = range[0];
+      if (range[1] > seen.max) seen.max = range[1];
     }
   }
 
@@ -1236,7 +1278,7 @@ export class MapRenderer {
    * Accumulated by the raster pass from each tile's own ranges, which the
    * cache read at upload.
    */
-  private seen: SeenRanges = { wind: null, current: null };
+  private seen: SeenRanges = { wind: null, current: null, sst: null };
 
   private noteRange(frame: string, tile: VisibleTile): void {
     const ranges = this.tiles.rangeOf(frame, tile.z, tile.x, tile.y);
@@ -1577,7 +1619,7 @@ export class MapRenderer {
     const COAST = rgba(theme.map.coast, 0.75), GRATICULE = rgba(theme.map.graticule, 0.20);
     this.projectedSurface.setTheme(theme);
     const offsets = this.worldOffsets(state);
-    this.seen = { wind: null, current: null };
+    this.seen = { wind: null, current: null, sst: null };
     const lod = this.lodFor(state.camera.pxPerDeg);
 
     gl.viewport(0, 0, state.view.width, state.view.height);

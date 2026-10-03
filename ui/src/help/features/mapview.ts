@@ -88,7 +88,7 @@ const features: Feature[] = [
     keywords: [msg("wind barbs"), msg("arrows"), msg("symbols")], topic: "settings" },
   { id: "map:graticule", label: msg("Graticule"), description: msg("Show lines of latitude and longitude."),
     keywords: [msg("grid"), msg("latitude"), msg("longitude")], topic: "view" },
-  { id: "map:auto-scale", label: msg("Auto scale"), description: msg("Stretch the colour ramp across the speeds in view."),
+  { id: "map:auto-scale", label: msg("Auto scale"), description: msg("Stretch the colour ramps across the speeds and temperatures in view."),
     keywords: [msg("colour scale"), msg("colour ramp"), msg("range")], topic: "view" },
   { id: "map:charts", label: msg("Charts"), description: msg("Draw electronic nautical charts (S-57) under the map."),
     keywords: [msg("nautical chart"), msg("ENC"), msg("backdrop")], topic: "view" },

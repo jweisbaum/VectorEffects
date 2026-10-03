@@ -100,7 +100,7 @@ const catalogue: Record<string, string> = {
   "Glyphs": "符号",
   "Projection": "投影",
   "Graticule": "经纬网",
-  "Auto scale: run the colour ramp from the slowest to the fastest speed in view, across every layer and object. A view setting: it changes nothing stored or exported.": "自动色标：使色带覆盖视图内所有图层和对象从最低到最高的速度。这是视图设置：不改变任何保存或导出的内容。",
+  "Auto scale: run each colour ramp across what is in view — the speeds of wind and currents across every layer and object, and the temperatures of a sea-surface temperature layer. A view setting: it changes nothing stored or exported.": "自动色标：使每个色带适应视图中的内容——所有图层和对象中风和海流的速度，以及海面温度图层的温度。这是视图设置，不会改变任何保存或导出的内容。",
   "Auto scale": "自动色标",
   "Electronic charts from {directory} ({cells} cells). Drawn under everything; not a layer, and not part of the project.": "来自 {directory} 的电子海图（{cells} 个图幅）。绘制在所有内容之下；不是图层，也不属于项目。",
   "Electronic charts from {directory}. Drawn under everything; not a layer, and not part of the project.": "来自 {directory} 的电子海图。绘制在所有内容之下；不是图层，也不属于项目。",
@@ -235,7 +235,7 @@ const catalogue: Record<string, string> = {
   "grid": "网格",
   "latitude": "纬度",
   "longitude": "经度",
-  "Stretch the colour ramp across the speeds in view.": "将色带拉伸到覆盖视图内的速度。",
+  "Stretch the colour ramps across the speeds and temperatures in view.": "将色带拉伸到视图中的速度和温度范围。",
   "colour scale": "色标",
   "colour ramp": "色带",
   "range": "范围",
@@ -262,5 +262,6 @@ const catalogue: Record<string, string> = {
   "Drop the first mark and let the timeline move freely again": "放弃第一个标记，让时间轴重新自由移动",
   "Measure how fast and which way a feature moved between two time steps.": "测量某个目标在两个时间步之间移动的快慢和方向。",
   "movement": "移动 运动",
+  "Auto scale: the ramp spans the temperatures in view": "自动色标：色带覆盖视图中的温度范围",
 };
 export default catalogue;

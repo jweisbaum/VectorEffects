@@ -100,7 +100,7 @@ const catalogue: Record<string, string> = {
   "Glyphs": "記号",
   "Projection": "図法",
   "Graticule": "経緯線",
-  "Auto scale: run the colour ramp from the slowest to the fastest speed in view, across every layer and object. A view setting: it changes nothing stored or exported.": "自動スケール：すべてのレイヤーとオブジェクトを通じて、表示範囲内の最低速度から最高速度までカラーランプを割り当てます。表示の設定なので、保存や書き出しの内容は変わりません。",
+  "Auto scale: run each colour ramp across what is in view — the speeds of wind and currents across every layer and object, and the temperatures of a sea-surface temperature layer. A view setting: it changes nothing stored or exported.": "自動スケール：各カラーランプを表示範囲に合わせます。すべてのレイヤーとオブジェクトの風と海流の速さ、および海面水温レイヤーの水温が対象です。表示の設定であり、保存や書き出しの内容は変わりません。",
   "Auto scale": "自動スケール",
   "Electronic charts from {directory} ({cells} cells). Drawn under everything; not a layer, and not part of the project.": "{directory} の電子海図（{cells} セル）。すべての下に描画されます。レイヤーではなく、プロジェクトにも含まれません。",
   "Electronic charts from {directory}. Drawn under everything; not a layer, and not part of the project.": "{directory} の電子海図。すべての下に描画されます。レイヤーではなく、プロジェクトにも含まれません。",
@@ -235,7 +235,7 @@ const catalogue: Record<string, string> = {
   "grid": "グリッド 格子",
   "latitude": "緯度",
   "longitude": "経度",
-  "Stretch the colour ramp across the speeds in view.": "カラーランプを表示範囲内の速度に合わせて広げます。",
+  "Stretch the colour ramps across the speeds and temperatures in view.": "カラーランプを表示中の速さと水温に合わせて広げます。",
   "colour scale": "カラースケール",
   "colour ramp": "カラーランプ",
   "range": "範囲",
@@ -262,5 +262,6 @@ const catalogue: Record<string, string> = {
   "Drop the first mark and let the timeline move freely again": "最初の印を取り消し、タイムラインを再び自由に動かせるようにします",
   "Measure how fast and which way a feature moved between two time steps.": "2 つの時間ステップの間に対象がどれだけ速く、どの方向へ移動したかを計測します。",
   "movement": "移動 動き",
+  "Auto scale: the ramp spans the temperatures in view": "自動スケール：ランプは表示中の水温の範囲に合わせています",
 };
 export default catalogue;

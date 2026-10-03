@@ -22,6 +22,7 @@
 
 import { AZIMUTHAL, EXTRA_CYLINDRICAL } from "./projectionShaders";
 import { GLYPH_SIZE_SCALE, GLYPH_TARGET_PX } from "./glyph";
+import { SST_CODE_MAX_C, SST_CODE_MIN_C, SST_STOPS } from "./sstRamp";
 
 /** Shared projection helper, prefixed to every vertex shader. */
 const PROJECTION = `
@@ -708,6 +709,62 @@ void main() {
   vec4 texel = texture(uTile, uv);
   if (texel.a <= 0.0) discard;
   fragColor = vec4(texel.rgb, texel.a * uOpacity);
+}
+`;
+
+/**
+ * A tile of sea-surface temperature (spec.md 4.10): sixteen-bit values,
+ * coloured here on the ramp in force — fixed, or with the auto scale the
+ * temperatures in view (`sstRampOf`). The four nearest values are blended,
+ * land left out of the blend as the field's sampler leaves out a missing
+ * corner, and a pixel whose own nearest value is land stays clear, so the
+ * coast is where the data says.
+ */
+export const SST_FRAG = `#version 300 es
+precision highp float;
+in vec2 vUV;
+in float vHorizon;
+${PROJECTION}
+${EXACT_TILE}
+uniform vec4 uTileGeo;
+uniform sampler2D uTile;
+uniform float uOpacity;
+uniform vec2 uRange;
+uniform vec3 uStops[${SST_STOPS.length}];
+out vec4 fragColor;
+float celsiusOf(vec4 t) {
+  float code = floor(t.r * 255.0 + 0.5) + floor(t.g * 255.0 + 0.5) * 256.0;
+  return ${SST_CODE_MIN_C.toFixed(1)} + code / 65535.0 * ${(SST_CODE_MAX_C - SST_CODE_MIN_C).toFixed(1)};
+}
+void main() {
+  if (vHorizon < 0.0) discard;
+  vec2 uv = vUV;
+  if (uExact == 1) {
+    vec2 exact = exactTileUV(uTileGeo);
+    if (exact.y > 10.0) discard;
+    uv = exact;
+  }
+  vec2 p = uv * 256.0 - 0.5;
+  if (texelFetch(uTile, clamp(ivec2(floor(p + 0.5)), ivec2(0), ivec2(255)), 0).a < 0.5) discard;
+  vec2 f = fract(p);
+  ivec2 base = ivec2(floor(p));
+  float sum = 0.0;
+  float weight = 0.0;
+  for (int k = 0; k < 4; k++) {
+    ivec2 o = ivec2(k - (k / 2) * 2, k / 2);
+    vec4 t = texelFetch(uTile, clamp(base + o, ivec2(0), ivec2(255)), 0);
+    if (t.a < 0.5) continue;
+    float w = (o.x == 1 ? f.x : 1.0 - f.x) * (o.y == 1 ? f.y : 1.0 - f.y);
+    sum += celsiusOf(t) * w;
+    weight += w;
+  }
+  if (weight <= 0.0) discard;
+  float x = clamp((sum / weight - uRange.x) / max(uRange.y - uRange.x, 1e-6), 0.0, 1.0)
+    * ${(SST_STOPS.length - 1).toFixed(1)};
+  int low = min(int(floor(x)), ${SST_STOPS.length - 2});
+  vec3 colour = mix(uStops[low], uStops[low + 1], x - float(low));
+  // The field and its glyphs are on top: drawn a touch translucent.
+  fragColor = vec4(colour, ${(235 / 255).toFixed(4)} * uOpacity);
 }
 `;
 

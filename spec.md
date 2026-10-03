@@ -1288,10 +1288,12 @@ is something to look at under the wind and the current, not something the
 application models. Its days are written to a GRIB2 file in the data
 directory as water temperature (discipline 10, category 3, number 0, in
 kelvin) and read back on open, so it opens offline like every other fetched
-layer, and each day holds for its 24 hours (D73). It is drawn as coloured
-tiles under the field, painted in Rust on one fixed ramp from −2 °C to
-32 °C, clear where there is no water, and addressed by a hash of the day's
-temperatures so the steps of one day share their tiles. A legend for it
+layer, and each day holds for its 24 hours (D73). It is drawn under the
+field from tiles that carry **temperatures, not colours** — sixteen bits per
+pixel over −5 to 45 °C, sampled in Rust, clear where there is no water —
+which the map colours on the ramp in force: the fixed −2 to 32 °C, or with
+the auto scale the temperatures in view (§5.3). The tiles are addressed by
+a hash of the day's temperatures, so the steps of one day share them. A legend for it
 appears while one is shown, and the readout gives the temperature under the
 pointer, in the unit Settings names (°C or °F).
 
@@ -1635,7 +1637,11 @@ anywhere in the UI.
   since the tile encodes undefined as calm. It is an application setting
   (§8.6), toggled from the title bar's view controls beside the graticule: a
   way of looking, not a fact about the project, and it changes no stored or
-  exported value.
+  exported value. **It spans sea-surface temperature the same way**: a
+  temperature layer's ramp runs from the coldest to the warmest water among
+  its tiles on screen, never narrower than a degree, with its legend's ends
+  following and marked *auto* (in tenths when the span is under five
+  degrees); off, it is the fixed −2 to 32 °C ramp (§4.10).
 
   **The fade at an edge is left out too** (M81), and for the same reason one
   step further on. A cell's vector is premultiplied by its coverage, so the

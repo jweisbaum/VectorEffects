@@ -100,7 +100,7 @@ const catalogue: Record<string, string> = {
   "Glyphs": "Glyphes",
   "Projection": "Projection",
   "Graticule": "Graticule",
-  "Auto scale: run the colour ramp from the slowest to the fastest speed in view, across every layer and object. A view setting: it changes nothing stored or exported.": "Échelle automatique : étend l’échelle de couleurs de la vitesse la plus faible à la plus forte visible, sur tous les calques et objets. Réglage d’affichage : il ne change rien d’enregistré ni d’exporté.",
+  "Auto scale: run each colour ramp across what is in view — the speeds of wind and currents across every layer and object, and the temperatures of a sea-surface temperature layer. A view setting: it changes nothing stored or exported.": "Échelle auto : étend chaque rampe de couleurs sur ce qui est visible — les vitesses du vent et des courants sur toutes les couches et tous les objets, et les températures d’une couche de température de surface de la mer. Réglage d’affichage : il ne change rien d’enregistré ni d’exporté.",
   "Auto scale": "Échelle auto",
   "Electronic charts from {directory} ({cells} cells). Drawn under everything; not a layer, and not part of the project.": "Cartes électroniques de {directory} ({cells} cellules). Dessinées sous tout le reste ; ce n’est pas un calque et elles ne font pas partie du projet.",
   "Electronic charts from {directory}. Drawn under everything; not a layer, and not part of the project.": "Cartes électroniques de {directory}. Dessinées sous tout le reste ; ce n’est pas un calque et elles ne font pas partie du projet.",
@@ -235,7 +235,7 @@ const catalogue: Record<string, string> = {
   "grid": "quadrillage",
   "latitude": "latitude",
   "longitude": "longitude",
-  "Stretch the colour ramp across the speeds in view.": "Étend l’échelle de couleurs sur les vitesses visibles.",
+  "Stretch the colour ramps across the speeds and temperatures in view.": "Étend les rampes de couleurs sur les vitesses et les températures visibles.",
   "colour scale": "échelle de couleurs",
   "colour ramp": "rampe de couleurs",
   "range": "plage",
@@ -262,5 +262,6 @@ const catalogue: Record<string, string> = {
   "Drop the first mark and let the timeline move freely again": "Abandonner la première marque et rendre sa liberté à la chronologie",
   "Measure how fast and which way a feature moved between two time steps.": "Mesure à quelle vitesse et dans quelle direction un système s’est déplacé entre deux pas de temps.",
   "movement": "déplacement",
+  "Auto scale: the ramp spans the temperatures in view": "Échelle auto : la rampe couvre les températures visibles",
 };
 export default catalogue;

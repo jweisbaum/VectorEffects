@@ -1,12 +1,13 @@
 //! Drawing a layer of sea-surface temperature (spec.md 4.10, M93).
 //!
 //! An SST layer is display only: it reaches no scene and no export, and is
-//! drawn as coloured tiles under the field through the same backdrop path a
-//! GIS layer takes. Each tile samples the day's temperatures — bilinearly,
-//! the missing corners left out, as the field's own sampler does — and
-//! colours them on one fixed ramp, so a colour means the same temperature on
-//! every day and in every project. Where there is no water there is no
-//! colour.
+//! drawn under the field through the same backdrop path a GIS layer takes.
+//! Each tile samples the day's temperatures — bilinearly, the missing corners
+//! left out, as the field's own sampler does — and carries **temperatures,
+//! not colours**: sixteen bits per pixel, which the map colours on the
+//! ramp in force. That ramp is fixed (−2 to 32 °C) unless the auto scale is
+//! on, and then it spans the temperatures in view, as the field's does for
+//! speeds (spec.md 5.3). Where there is no water the pixel is clear.
 //!
 //! A tile is addressed by the *day's* token, a hash of its temperatures, so
 //! the steps that show one day share its tiles and a tile can be served
@@ -22,43 +23,22 @@ use crate::commands::AppState;
 use crate::error::Result;
 use crate::projects::with_session;
 
-/// The coldest temperature on the ramp, in degrees Celsius: sea water
-/// freezes a little below zero.
-pub const COLDEST_C: f32 = -2.0;
-/// The warmest: the warmest open ocean.
-pub const WARMEST_C: f32 = 32.0;
+/// The coldest temperature a tile can carry, °C: colder than any sea.
+pub const CODE_MIN_C: f32 = -5.0;
+/// The warmest, °C: warmer than any sea. Sixteen bits over the fifty
+/// degrees between is a step of under a thousandth of a degree.
+pub const CODE_MAX_C: f32 = 45.0;
 
-/// The ramp's stops, cold to warm, as sRGB. A blue-to-red thermal scale
-/// whose brightness rises and falls once, so neither end is lost against the
-/// dark map.
-const STOPS: [[u8; 3]; 7] = [
-    [40, 26, 120],
-    [33, 102, 172],
-    [67, 170, 196],
-    [153, 213, 148],
-    [254, 224, 139],
-    [244, 109, 67],
-    [165, 0, 38],
-];
-
-/// How strongly the layer is drawn: the field and its glyphs are on top.
-const ALPHA: u8 = 235;
-
-/// A temperature's colour on the ramp. Values beyond the ends take the end's
-/// colour; a temperature that is not a number has none.
-pub fn colour(celsius: f32) -> Option<[u8; 4]> {
+/// A temperature as a tile pixel: sixteen bits across the code range, low
+/// byte then high, and alpha 255 for water. The map unpacks it
+/// (`ui/src/map/sstRamp.ts`); a temperature that is not a number is none.
+pub fn pack(celsius: f32) -> Option<[u8; 4]> {
     if !celsius.is_finite() {
         return None;
     }
-    let t = ((celsius - COLDEST_C) / (WARMEST_C - COLDEST_C)).clamp(0.0, 1.0);
-    let at = t * (STOPS.len() - 1) as f32;
-    let i = (at.floor() as usize).min(STOPS.len() - 2);
-    let f = at - i as f32;
-    let mix = |k: usize| {
-        let (a, b) = (f32::from(STOPS[i][k]), f32::from(STOPS[i + 1][k]));
-        (a + (b - a) * f).round() as u8
-    };
-    Some([mix(0), mix(1), mix(2), ALPHA])
+    let t = ((celsius - CODE_MIN_C) / (CODE_MAX_C - CODE_MIN_C)).clamp(0.0, 1.0);
+    let [lo, hi] = ((t * 65535.0).round() as u16).to_le_bytes();
+    Some([lo, hi, 0, 255])
 }
 
 /// A day's address: the first six bytes of its temperatures' hash, which a
@@ -69,7 +49,7 @@ pub fn token(grid: &RasterGrid) -> u64 {
     u64::from_be_bytes(bytes)
 }
 
-/// Paints one tile of a day's temperatures, or `None` where the tile has no
+/// Packs one tile of a day's temperatures, or `None` where the tile has no
 /// water at all — which is answered as "nothing here", not as a failure.
 pub fn paint(
     grid: &RasterGrid,
@@ -90,7 +70,7 @@ pub fn paint(
         let lat = north - (row as f64 + 0.5) * dy;
         for col in 0..n {
             let lon = west + (col as f64 + 0.5) * dx;
-            let Some(c) = grid.sample(lon, lat).and_then(|uv| colour(uv.u)) else {
+            let Some(c) = grid.sample(lon, lat).and_then(|uv| pack(uv.u)) else {
                 continue;
             };
             rgba[(row * n + col) * 4..][..4].copy_from_slice(&c);
@@ -183,20 +163,25 @@ pub fn view_of(
 mod tests {
     use super::*;
 
-    /// The ramp's ends are its first and last stops, its middle is the middle
-    /// stop, and what is past an end is the end.
+    /// A temperature is sixteen bits across the code range, low byte first,
+    /// with alpha saying there is water; the ends and the middle are where
+    /// a hand puts them, and what is past an end is the end.
     #[test]
-    fn the_ramp_runs_cold_to_warm() {
-        assert_eq!(colour(COLDEST_C), Some([40, 26, 120, ALPHA]));
-        assert_eq!(colour(WARMEST_C), Some([165, 0, 38, ALPHA]));
-        assert_eq!(
-            colour(15.0),
-            Some([153, 213, 148, ALPHA]),
-            "the middle stop"
-        );
-        assert_eq!(colour(-30.0), colour(COLDEST_C));
-        assert_eq!(colour(45.0), colour(WARMEST_C));
-        assert_eq!(colour(f32::NAN), None);
+    fn a_temperature_is_packed_into_sixteen_bits() {
+        assert_eq!(pack(CODE_MIN_C), Some([0, 0, 0, 255]));
+        assert_eq!(pack(CODE_MAX_C), Some([255, 255, 0, 255]));
+        // 20 °C is 25 of the 50 degrees: 32767.5, rounded to 32768 = 0x8000.
+        assert_eq!(pack(20.0), Some([0x00, 0x80, 0, 255]));
+        assert_eq!(pack(-30.0), pack(CODE_MIN_C));
+        assert_eq!(pack(60.0), pack(CODE_MAX_C));
+        assert_eq!(pack(f32::NAN), None);
+        // Unpacked as the map does, a temperature comes back within a step.
+        let step = (CODE_MAX_C - CODE_MIN_C) / 65535.0;
+        for c in [-1.8_f32, 0.0, 14.37, 31.9] {
+            let [lo, hi, ..] = pack(c).expect("water");
+            let back = CODE_MIN_C + f32::from(u16::from_le_bytes([lo, hi])) * step;
+            assert!((back - c).abs() <= step, "{c} came back as {back}");
+        }
     }
 
     /// A pixel next to sea takes the sea's temperature — a missing corner is
@@ -224,11 +209,7 @@ mod tests {
         )
         .unwrap();
         let coast = paint(&grid, 0.0, 0.0, 10.0, 10.0, 4).expect("some sea");
-        assert_eq!(
-            &coast[4 * 4..][..4],
-            colour(15.0).unwrap(),
-            "beside the sea"
-        );
+        assert_eq!(&coast[4 * 4..][..4], pack(15.0).unwrap(), "beside the sea");
         let inland = paint(&grid, 10.0, 0.0, 20.0, 10.0, 4);
         assert!(inland.is_none(), "between two land points, nothing");
         assert!(

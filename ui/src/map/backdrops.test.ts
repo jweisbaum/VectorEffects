@@ -41,11 +41,41 @@ describe("a sea-surface temperature layer", () => {
     const draws = cache().draws({ sst: [{ layer: 7, token: 4242 }] }, TILES);
     expect(draws.map((draw) => draw.key)).toEqual(["backdrop/sst/4242/7"]);
     expect(requested).toEqual([
-      "ve-tile://localhost/backdrop/sst/4242/7/2/5/1.png",
-      "ve-tile://localhost/backdrop/sst/4242/7/2/6/1.png",
+      "ve-tile://localhost/backdrop/sst/4242/7/2/5/1.bin",
+      "ve-tile://localhost/backdrop/sst/4242/7/2/6/1.bin",
     ]);
     // Drawn over the basemap, never in place of it: land is clear in the tile.
     expect(draws[0]?.replacesBase).toBe(false);
+    // Temperatures for the map to colour, not a picture.
+    expect(draws[0]?.temperature).toBe(true);
+  });
+
+  /**
+   * A tile that arrives brings its coldest and warmest water with it, which
+   * is what the auto scale spans. Two pixels of water, 12 °C and 20 °C, and
+   * the rest land.
+   */
+  it("hands the next draw its tile's temperatures", async () => {
+    const bytes = new Uint8Array(256 * 256 * 4);
+    const put = (at: number, celsius: number) => {
+      const code = Math.round(((celsius + 5) / 50) * 65535);
+      bytes.set([code & 0xff, code >> 8, 0, 255], at * 4);
+    };
+    put(0, 12);
+    put(1000, 20);
+    vi.stubGlobal("fetch", () => Promise.resolve(new Response(bytes, { status: 200 })));
+    const gl = {
+      TEXTURE_2D: 0, createTexture: () => ({}), bindTexture: () => {}, texParameteri: () => {},
+      texImage2D: () => {},
+    } as unknown as WebGL2RenderingContext;
+    const backdrops = new BackdropCache(gl, "ve-tile://localhost/");
+    const arrived = new Promise<void>((resolve) => { backdrops.onChange = resolve; });
+    backdrops.draws({ sst: [{ layer: 7, token: 4242 }] }, TILES.slice(0, 1));
+    await arrived;
+    const [draw] = backdrops.draws({ sst: [{ layer: 7, token: 4242 }] }, TILES.slice(0, 1));
+    const range = draw?.textures[0]?.range;
+    expect(range?.[0]).toBeCloseTo(12, 3);
+    expect(range?.[1]).toBeCloseTo(20, 3);
   });
 
   it("asks for nothing when no layer has a day at this step", () => {

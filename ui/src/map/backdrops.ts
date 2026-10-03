@@ -15,13 +15,26 @@
  */
 
 import type { VisibleTile } from "./camera";
+import { sstTileRange } from "./sstRamp";
 
 /** One backdrop to draw, under everything, in the order given. */
 export interface BackdropDraw {
   /** Its addresses' prefix, which is also its identity for the cache. */
   readonly key: string;
-  /** The texture per visible tile, or null for one not here yet. */
-  readonly textures: ReadonlyArray<{ tile: VisibleTile; texture: WebGLTexture | null }>;
+  /**
+   * The texture per visible tile, or null for one not here yet; for a
+   * temperature backdrop, also the tile's coldest and warmest water, °C.
+   */
+  readonly textures: ReadonlyArray<{
+    tile: VisibleTile;
+    texture: WebGLTexture | null;
+    range?: readonly [number, number] | null;
+  }>;
+  /**
+   * Whether its tiles are temperatures to colour rather than a picture
+   * (spec.md 4.10): drawn by their own shader, on the ramp in force.
+   */
+  readonly temperature?: boolean;
   /** How strongly it shows, 0 to 1. */
   readonly opacity: number;
   /**
@@ -68,6 +81,8 @@ type Status = "pending" | "ready" | "blank" | "failed";
 interface Entry {
   texture: WebGLTexture | null;
   status: Status;
+  /** A temperature tile's coldest and warmest water, °C. */
+  range: [number, number] | null;
 }
 
 /**
@@ -136,13 +151,14 @@ export class BackdropCache {
     const out: BackdropDraw[] = [];
     const wanted = new Set<string>();
 
-    const add = (key: string, opacity: number, replacesBase = false) => {
+    const add = (key: string, opacity: number, replacesBase = false, temperature = false) => {
       const textures = tiles.map((tile) => {
-        const address = `${key}/${tile.z}/${tile.x}/${tile.y}.png`;
+        const address = `${key}/${tile.z}/${tile.x}/${tile.y}.${temperature ? "bin" : "png"}`;
         wanted.add(address);
-        return { tile, texture: this.texture(address) };
+        const texture = this.texture(address, temperature);
+        return { tile, texture, range: this.entries.get(address)?.range ?? null };
       });
-      out.push({ key, textures, opacity, replacesBase });
+      out.push({ key, textures, opacity, replacesBase, temperature });
     };
 
     // The map tiles replace the basemap, so they go first and the chart
@@ -150,7 +166,7 @@ export class BackdropCache {
     if (request.osm) add(backdropKey("osm", 1), 1, true);
     if (request.charts) add(backdropKey("chart", request.charts.token), 1);
     for (const { kind, layer, token } of layerBackdrops(request)) {
-      add(backdropKey(kind, token, layer), 1);
+      add(backdropKey(kind, token, layer), 1, false, kind === "sst");
     }
 
     this.retain(wanted);
@@ -169,16 +185,16 @@ export class BackdropCache {
     }
   }
 
-  private texture(address: string): WebGLTexture | null {
+  private texture(address: string, temperature = false): WebGLTexture | null {
     const existing = this.entries.get(address);
     if (existing) return existing.texture;
-    const entry: Entry = { texture: null, status: "pending" };
+    const entry: Entry = { texture: null, status: "pending", range: null };
     this.entries.set(address, entry);
-    void this.fetch(address, entry);
+    void this.fetch(address, entry, temperature);
     return null;
   }
 
-  private async fetch(address: string, entry: Entry): Promise<void> {
+  private async fetch(address: string, entry: Entry, temperature: boolean): Promise<void> {
     try {
       const response = await fetch(`${this.baseUrl}${address}`);
       // 204: nothing there. Most of a viewport is not covered by a chart
@@ -188,6 +204,15 @@ export class BackdropCache {
         return;
       }
       if (!response.ok) throw new Error(`status ${response.status}`);
+      if (temperature) {
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        if (this.entries.get(address) !== entry) return;
+        entry.texture = this.uploadTemperatures(bytes);
+        entry.range = sstTileRange(bytes);
+        entry.status = entry.texture ? "ready" : "failed";
+        if (entry.status === "ready") this.onChange?.();
+        return;
+      }
       const blob = await response.blob();
       if (blob.size === 0) {
         entry.status = "blank";
@@ -221,6 +246,26 @@ export class BackdropCache {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, bitmap);
+    return texture;
+  }
+
+  /**
+   * A temperature tile: 256 × 256 pixels of sixteen-bit values, uploaded as
+   * they came. NEAREST, as a field tile is, because a value split across two
+   * bytes blended by the hardware is no value at all; the shader blends the
+   * unpacked temperatures itself.
+   */
+  private uploadTemperatures(bytes: Uint8Array): WebGLTexture | null {
+    if (bytes.byteLength !== 256 * 256 * 4) return null;
+    const gl = this.gl;
+    const texture = gl.createTexture();
+    if (!texture) return null;
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, 256, 256, 0, gl.RGBA, gl.UNSIGNED_BYTE, bytes);
     return texture;
   }
 

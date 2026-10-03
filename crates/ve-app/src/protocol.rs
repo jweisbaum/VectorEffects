@@ -447,6 +447,12 @@ fn serve_backdrop(
     let Some(rgba) = crate::charts::tile_for_token(&state, backdrop, id, Some(token)) else {
         return typed(204, "image/png", Vec::new());
     };
+    // A temperature tile is numbers, not a picture: sixteen-bit values the
+    // map unpacks and colours itself, which a PNG decoder's colour handling
+    // must not touch. Sent as they are, as the field's tiles are.
+    if matches!(backdrop, crate::charts::Backdrop::Sst(_)) {
+        return typed(200, "application/octet-stream", rgba);
+    }
     match crate::image::encode_png(&rgba, tile::TILE_SIZE, tile::TILE_SIZE) {
         Ok(bytes) => typed(200, "image/png", bytes),
         Err(err) => {

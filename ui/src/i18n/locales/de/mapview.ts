@@ -100,7 +100,7 @@ const catalogue: Record<string, string> = {
   "Glyphs": "Symbole",
   "Projection": "Projektion",
   "Graticule": "Gradnetz",
-  "Auto scale: run the colour ramp from the slowest to the fastest speed in view, across every layer and object. A view setting: it changes nothing stored or exported.": "Automatische Skala: Die Farbskala reicht von der niedrigsten bis zur höchsten sichtbaren Geschwindigkeit, über alle Ebenen und Objekte. Eine Ansichtseinstellung: Sie ändert nichts Gespeichertes oder Exportiertes.",
+  "Auto scale: run each colour ramp across what is in view — the speeds of wind and currents across every layer and object, and the temperatures of a sea-surface temperature layer. A view setting: it changes nothing stored or exported.": "Auto-Skala: jede Farbskala über das Sichtbare spannen — die Geschwindigkeiten von Wind und Strömung über alle Ebenen und Objekte und die Temperaturen einer Ebene der Meeresoberflächentemperatur. Eine Ansichtseinstellung: Sie ändert nichts Gespeichertes oder Exportiertes.",
   "Auto scale": "Auto-Skala",
   "Electronic charts from {directory} ({cells} cells). Drawn under everything; not a layer, and not part of the project.": "Elektronische Seekarten aus {directory} ({cells} Zellen). Unter allem gezeichnet; keine Ebene und nicht Teil des Projekts.",
   "Electronic charts from {directory}. Drawn under everything; not a layer, and not part of the project.": "Elektronische Seekarten aus {directory}. Unter allem gezeichnet; keine Ebene und nicht Teil des Projekts.",
@@ -113,7 +113,7 @@ const catalogue: Record<string, string> = {
   "Legend": "Legende",
   "barbs": "Windfiedern",
   "arrows": "Pfeile",
-  "Auto scale: the ramp spans the speeds in view": "Automatische Skala: Die Skala umfasst die sichtbaren Geschwindigkeiten",
+  "Auto scale: the ramp spans the speeds in view": "Auto-Skala: Die Skala umfasst die sichtbaren Geschwindigkeiten",
   "auto": "auto",
   "Pan the map, select objects and transform them.": "Karte verschieben, Objekte auswählen und transformieren.",
   "pan": "schwenken",
@@ -235,7 +235,7 @@ const catalogue: Record<string, string> = {
   "grid": "Gitter",
   "latitude": "Breite",
   "longitude": "Länge",
-  "Stretch the colour ramp across the speeds in view.": "Die Farbskala über die sichtbaren Geschwindigkeiten spannen.",
+  "Stretch the colour ramps across the speeds and temperatures in view.": "Spannt die Farbskalen über die sichtbaren Geschwindigkeiten und Temperaturen.",
   "colour scale": "Farbskala",
   "colour ramp": "Farbverlauf",
   "range": "Spanne",
@@ -262,5 +262,6 @@ const catalogue: Record<string, string> = {
   "Drop the first mark and let the timeline move freely again": "Die erste Markierung verwerfen und die Zeitleiste wieder freigeben",
   "Measure how fast and which way a feature moved between two time steps.": "Messen, wie schnell und wohin sich ein System zwischen zwei Zeitschritten verlagert hat.",
   "movement": "Bewegung",
+  "Auto scale: the ramp spans the temperatures in view": "Auto-Skala: die Skala umfasst die sichtbaren Temperaturen",
 };
 export default catalogue;

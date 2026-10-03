@@ -112,7 +112,7 @@ import { showsHoverIndicator, showsMagnifier } from "./hover";
 import { KIND_LABELS, KINDS, type FieldKindName, kindOf } from "../kind";
 import { trackKeyframes } from "./macroTrack";
 import { legendKnots } from "./legend";
-import { SST_MAX_C, SST_MIN_C, formatTemperature, legendTemperature, sstGradientStops } from "./sstRamp";
+import { formatTemperature, legendTemperature, sstGradientStops, sstRampOf } from "./sstRamp";
 import type { TemperatureUnit } from "../generated/TemperatureUnit";
 import { rampColour, rampCss, rampStops } from "./ramp";
 import { parseBasemap } from "./format";
@@ -1433,9 +1433,12 @@ export default function MapView({
   const temperatureUnit: TemperatureUnit = settings?.temperature_unit ?? "celsius";
   // A macro preview shows the field on the basemap alone, so no temperature.
   const showSstLegend = sstShown && !previewing;
-  const [seenRanges, setSeenRanges] = useState<Record<FieldKindName, SeenRange>>({
+  // The temperature layers' range is followed beside the two kinds': the
+  // auto scale spans the temperatures in view as it spans the speeds.
+  const [seenRanges, setSeenRanges] = useState<Record<FieldKindName | "sst", SeenRange>>({
     wind: null,
     current: null,
+    sst: null,
   });
   const ramps: Record<FieldKindName, Ramp> = {
     wind: rampOf(project.wind_scale_knots, autoScale ? seenRanges.wind : null, units),
@@ -1444,11 +1447,17 @@ export default function MapView({
   // The active layer's ramp, which a gesture's preview paints with.
   const rampMin = ramps[activeKind].min;
   const rampMax = ramps[activeKind].max;
-  const rampsKey = KINDS.map((kind) => `${ramps[kind].min}/${ramps[kind].max}`).join(",");
+  const sstRamp = sstRampOf(autoScale ? seenRanges.sst : null);
+  const sstRampRef = useRef(sstRamp);
+  sstRampRef.current = sstRamp;
+  const rampsKey = [
+    ...KINDS.map((kind) => `${ramps[kind].min}/${ramps[kind].max}`),
+    `${sstRamp.min}/${sstRamp.max}`,
+  ].join(",");
   // What the last frame reported, to compare the next against without a
   // render in between: a change smaller than the eye can see is not applied,
   // or the ramp would breathe with every tile that lands.
-  const seenRef = useRef<Record<FieldKindName, SeenRange>>({ wind: null, current: null });
+  const seenRef = useRef<Record<FieldKindName | "sst", SeenRange>>({ wind: null, current: null, sst: null });
   const autoScaleRef = useRef(autoScale);
   autoScaleRef.current = autoScale;
   // `draw` is built once and reads its inputs through refs; the ramp went in
@@ -1698,6 +1707,7 @@ export default function MapView({
         wind: { min: rampRef.current.wind.min, max: rampRef.current.wind.max },
         current: { min: rampRef.current.current.min, max: rampRef.current.current.max },
       },
+      sstRamp: sstRampRef.current,
       gradients: gradientStops(projectRef.current),
       showGlyphs: showGlyphsRef.current,
       glyphs: glyphSettingsRef.current,
@@ -1851,7 +1861,7 @@ export default function MapView({
       // says so.
       if (autoScaleRef.current) {
         let moved = false;
-        KINDS.forEach((kind) => {
+        [...KINDS, "sst" as const].forEach((kind) => {
           const seen = ranges[kind];
           const last = seenRef.current[kind];
           const changed =
@@ -7118,7 +7128,7 @@ export default function MapView({
           />
           {t("Graticule")}
         </label>
-        <label data-feature="map:auto-scale" title={t("Auto scale: run the colour ramp from the slowest to the fastest speed in view, across every layer and object. A view setting: it changes nothing stored or exported.")}>
+        <label data-feature="map:auto-scale" title={t("Auto scale: run each colour ramp across what is in view — the speeds of wind and currents across every layer and object, and the temperatures of a sea-surface temperature layer. A view setting: it changes nothing stored or exported.")}>
           <input
             type="checkbox"
             checked={autoScale}
@@ -7207,8 +7217,9 @@ export default function MapView({
             </div>
           ))}
           {/*
-            The temperature layer's ramp (M93): fixed, and the same stops the
-            backend colours its tiles with (`sstRamp.ts`).
+            The temperature layer's ramp: the stops the map colours it with
+            (`sstRamp.ts`), between the ends in force — fixed, or with the
+            auto scale the temperatures in view, as the speeds' ramp is.
           */}
           {showSstLegend && (
             <div className="legend-row">
@@ -7220,8 +7231,16 @@ export default function MapView({
                 style={{ background: `linear-gradient(to right, ${sstGradientStops().join(", ")})` }}
               />
               <div className="legend-labels">
-                <span>{legendTemperature(SST_MIN_C, temperatureUnit)}</span>
-                <span>{legendTemperature(SST_MAX_C, temperatureUnit)}</span>
+                <span>{legendTemperature(sstRamp.min, temperatureUnit, sstRamp.max - sstRamp.min)}</span>
+                {sstRamp.auto && (
+                  <span
+                    className="legend-auto"
+                    title={t("Auto scale: the ramp spans the temperatures in view")}
+                  >
+                    {t("auto")}
+                  </span>
+                )}
+                <span>{legendTemperature(sstRamp.max, temperatureUnit, sstRamp.max - sstRamp.min)}</span>
               </div>
             </div>
           )}

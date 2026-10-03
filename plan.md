@@ -3667,6 +3667,25 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M99 — The auto scale spans sea-surface temperature
+
+The user's instruction of 2026-10-03: auto scale should work the same with
+SST as with wind and currents. An SST tile now carries temperatures, not
+colours — sixteen bits per pixel over −5 to 45 °C (`ve_app::sst::pack`),
+served raw rather than as PNG — and the map colours them in `SST_FRAG` on
+the ramp in force: the fixed −2 to 32 °C, or with the auto scale the
+coldest to the warmest water among the tiles drawn, each tile's range read
+once on arrival as a field tile's speed range is. It follows the view with
+the speeds' tolerance, never spans less than a degree, and its legend's
+ends follow, marked *auto*, in tenths under five degrees. The auto-scale
+toggle, its Help search entry and its help row say temperatures too, in
+all nine languages.
+
+**Checked in the app, 2026-10-03,** on a day of OISST: auto off, the
+legend reads −2 to 32 °C; on, over the whole world −2 to 34 °C, and over
+the Coral Sea 15 to 31 °C with the full ramp across it. Coasts stay where
+the data puts them.
+
 ### M98 — One Import button
 
 The user's instruction of 2026-10-03: the layer panel's four file imports —
