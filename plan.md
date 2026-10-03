@@ -1,5 +1,10 @@
 # VectorEffects — Implementation Plan
 
+**2026-10-03: Prepare 0.1.20 Beta.** Near-real-time data — ten products of
+wind, currents and sea-surface temperature, the HDF5 reader and the
+Earthdata token (M88–M97) — feature speed (M87), timeline alignment (M91),
+and one Import button (M98). Notes in `docs/releases/0.1.20.md`.
+
 **2026-09-27: Prepare 0.1.19 Beta.** Language picker back on the start page;
 default layer, object, duplicate and project names in the interface language;
 the readout's zoom follows the camera every frame; no Help dropdown on the
