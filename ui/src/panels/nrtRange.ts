@@ -87,6 +87,14 @@ export const NRT_PRODUCTS: readonly NrtProduct[] = [
     periodHours: 1,
     megabytesPerTime: 4.2,
   },
+  {
+    id: "ascat",
+    group: "wind",
+    label: "ASCAT Metop-B/C",
+    detail: msg("scatterometer 10 m wind, daily swaths, 0.25°"),
+    periodHours: 24,
+    megabytesPerTime: 4.2,
+  },
 ];
 
 /** The headings the products are listed under, in the order they are shown. */

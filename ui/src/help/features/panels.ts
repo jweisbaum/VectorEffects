@@ -102,7 +102,7 @@ const features: Feature[] = [
   { id: "nrt-import:extend", label: msg("Lengthen the timeline"), description: msg("Adds steps so the timeline reaches the present; shown when the days asked for need more steps than the project has."),
     keywords: [msg("duration"), msg("more steps")], topic: "nrt", reveal: [...LEFT, "layers:nrt-import"] },
   { id: "nrt-import:products", label: msg("Products"), description: msg("Which products to download: MULTIOBS and DUACS currents, L4 wind."),
-    keywords: [msg("data source"), msg("satellite")], topic: "nrt", reveal: [...LEFT, "layers:nrt-import"] },
+    keywords: [msg("data source"), msg("satellite"), msg("ASCAT")], topic: "nrt", reveal: [...LEFT, "layers:nrt-import"] },
   { id: "nrt-import:import", label: msg("Import"), description: msg("Starts the download; one layer is added per product."),
     keywords: [msg("fetch"), msg("download")], topic: "nrt", reveal: [...LEFT, "layers:nrt-import"] },
 ];

@@ -258,5 +258,7 @@ const catalogue: Record<string, string> = {
   "Which products to download: MULTIOBS and DUACS currents, L4 wind.": "Quali prodotti scaricare: correnti MULTIOBS e DUACS, vento L4.",
   "Starts the download; one layer is added per product.": "Avvia il download; viene aggiunto un livello per prodotto.",
   "Sets the project's first step to the start of the period.": "Imposta il primo passo del progetto all'inizio del periodo.",
+  "scatterometer 10 m wind, daily swaths, 0.25°": "vento a 10 m da scatterometro, strisciate giornaliere, 0,25°",
+  "ASCAT": "ASCAT",
 };
 export default catalogue;

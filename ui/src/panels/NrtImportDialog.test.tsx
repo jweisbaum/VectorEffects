@@ -101,14 +101,15 @@ afterEach(async () => {
 describe("a day-long hourly project with no date", () => {
   const project = projectOf({ step_hours: 1, step_count: 24, start_unix_s: null });
 
-  it("offers the three products, all ticked", async () => {
+  it("offers the four products, all ticked", async () => {
     await open(project);
-    expect(products()).toHaveLength(3);
+    expect(products()).toHaveLength(4);
     expect(products().every((box) => box.checked)).toBe(true);
     const text = feature("products")?.textContent ?? "";
     expect(text).toContain("Copernicus MULTIOBS");
     expect(text).toContain("Copernicus DUACS");
     expect(text).toContain("Copernicus L4 wind");
+    expect(text).toContain("ASCAT Metop-B/C");
     // The attribution the licence asks for, as it words it.
     expect(text).toContain("Generated using E.U. Copernicus Marine Service Information");
   });
@@ -139,7 +140,7 @@ describe("a day-long hourly project with no date", () => {
     await click(importButton());
     expect(sent).toEqual([
       {
-        products: ["multiobs", "duacs", "wind-l4"],
+        products: ["multiobs", "duacs", "wind-l4", "ascat"],
         days: 3,
         set_start_time: true,
         extend_timeline: true,
@@ -157,15 +158,15 @@ describe("a day-long hourly project with no date", () => {
   });
 
   /**
-   * Lengthened to 88 steps: 88 + 4 + 88 downloads and 627 MB. Left at 24:
-   * 24 + 1 + 24 and 171 MB — the steps past the timeline's end are not
-   * fetched, so the cost has to follow the box.
+   * Lengthened to 88 steps: 88 + 4 + 88 + 4 downloads and 644 MB. Left at
+   * 24: 24 + 1 + 24 + 1 and 175 MB — the steps past the timeline's end are
+   * not fetched, so the cost has to follow the box.
    */
   it("prices what the timeline will show", async () => {
     await open(project);
-    expect(dialog().textContent).toContain("180 downloads, about 627 MB on disk.");
+    expect(dialog().textContent).toContain("184 downloads, about 644 MB on disk.");
     await click(checkbox("extend"));
-    expect(dialog().textContent).toContain("49 downloads, about 171 MB on disk.");
+    expect(dialog().textContent).toContain("50 downloads, about 175 MB on disk.");
     await click(importButton());
     expect(sent[0]?.extend_timeline).toBe(false);
   });
@@ -176,7 +177,7 @@ describe("a day-long hourly project with no date", () => {
     if (multiobs === undefined) throw new Error("expected a first product");
     await click(multiobs);
     await click(importButton());
-    expect(sent[0]?.products).toEqual(["duacs", "wind-l4"]);
+    expect(sent[0]?.products).toEqual(["duacs", "wind-l4", "ascat"]);
   });
 
   it("caps the days at what an hourly timeline holds", async () => {

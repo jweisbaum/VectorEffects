@@ -651,8 +651,20 @@ pub(crate) fn fetch_source_to_file(
                         ),
                         None => Ok(variables.iter().map(|v| empty_field(*v)).collect()),
                     };
-                    let built = fields
-                        .and_then(|fields| encode_hour(GRID, reference, *forecast_hour, &fields));
+                    // A step the source lists and has not written — read as
+                    // a field with no value anywhere — is written as nothing,
+                    // so the timeline does not mark it present. The empty
+                    // first message that holds the origin is the one
+                    // exception, and it is the step with no source.
+                    let built = fields.and_then(|fields| {
+                        let unwritten =
+                            step.is_some() && fields.iter().all(|f| f.u.iter().all(|x| x.is_nan()));
+                        if unwritten {
+                            Ok(Vec::new())
+                        } else {
+                            encode_hour(GRID, reference, *forecast_hour, &fields)
+                        }
+                    });
                     let failed = built.is_err();
                     if tx.send((position, built)).is_err() {
                         // The writer has gone; there is nothing to hand back to.

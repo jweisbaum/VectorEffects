@@ -258,5 +258,7 @@ const catalogue: Record<string, string> = {
   "Which products to download: MULTIOBS and DUACS currents, L4 wind.": "ダウンロードするプロダクトです：MULTIOBS と DUACS の海流、L4 の風。",
   "Starts the download; one layer is added per product.": "ダウンロードを開始します。プロダクトごとにレイヤーが 1 つ追加されます。",
   "Sets the project's first step to the start of the period.": "プロジェクトの最初のステップを期間の開始時刻に設定します。",
+  "scatterometer 10 m wind, daily swaths, 0.25°": "散乱計による 10 m 風、日ごとの観測帯、0.25°",
+  "ASCAT": "ASCAT",
 };
 export default catalogue;

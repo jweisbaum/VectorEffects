@@ -18,6 +18,9 @@ pub enum Product {
     Duacs,
     /// Blended scatterometer and model wind at 10 m, hourly.
     WindL4,
+    /// Scatterometer wind at 10 m from Metop-B and Metop-C, daily, the
+    /// day's four passes merged.
+    Ascat,
 }
 
 /// Where one product is in the Marine Data Store.
@@ -32,7 +35,7 @@ struct Home {
 
 impl Product {
     /// Every product, in the order the dialog lists them.
-    pub const ALL: [Self; 3] = [Self::Multiobs, Self::Duacs, Self::WindL4];
+    pub const ALL: [Self; 4] = [Self::Multiobs, Self::Duacs, Self::WindL4, Self::Ascat];
 
     /// The identifier the frontend sends and the document stores.
     pub fn id(self) -> &'static str {
@@ -40,6 +43,7 @@ impl Product {
             Self::Multiobs => "multiobs",
             Self::Duacs => "duacs",
             Self::WindL4 => "wind-l4",
+            Self::Ascat => "ascat",
         }
     }
 
@@ -49,6 +53,7 @@ impl Product {
             Self::Multiobs => "Copernicus MULTIOBS surface current",
             Self::Duacs => "Copernicus DUACS geostrophic current",
             Self::WindL4 => "Copernicus L4 hourly wind",
+            Self::Ascat => "ASCAT Metop-B/C wind",
         }
     }
 
@@ -61,7 +66,7 @@ impl Product {
     pub fn variable(self) -> Variable {
         match self {
             Self::Multiobs | Self::Duacs => Variable::SurfaceCurrent,
-            Self::WindL4 => Variable::Wind10m,
+            Self::WindL4 | Self::Ascat => Variable::Wind10m,
         }
     }
 
@@ -70,7 +75,7 @@ impl Product {
     pub fn period_hours(self) -> u32 {
         match self {
             Self::Multiobs | Self::WindL4 => 1,
-            Self::Duacs => 24,
+            Self::Duacs | Self::Ascat => 24,
         }
     }
 
@@ -78,6 +83,31 @@ impl Product {
     pub fn credit(self) -> &'static str {
         "Generated using E.U. Copernicus Marine Service Information"
     }
+
+    /// The ASCAT passes, each a dataset of its own: Metop-B and Metop-C,
+    /// ascending and descending, at 0.25 degree.
+    const ASCAT_PASSES: [Home; 4] = [
+        Home {
+            product: "WIND_GLO_PHY_L3_NRT_012_002",
+            dataset: "cmems_obs-wind_glo_phy_nrt_l3-metopb-ascat-asc-0.25deg_P1D-i",
+            fallback: "https://s3.waw3-1.cloudferro.com/mdl-arco-time-048/arco/WIND_GLO_PHY_L3_NRT_012_002/cmems_obs-wind_glo_phy_nrt_l3-metopb-ascat-asc-0.25deg_P1D-i_202311/timeChunked.zarr",
+        },
+        Home {
+            product: "WIND_GLO_PHY_L3_NRT_012_002",
+            dataset: "cmems_obs-wind_glo_phy_nrt_l3-metopb-ascat-des-0.25deg_P1D-i",
+            fallback: "https://s3.waw3-1.cloudferro.com/mdl-arco-time-048/arco/WIND_GLO_PHY_L3_NRT_012_002/cmems_obs-wind_glo_phy_nrt_l3-metopb-ascat-des-0.25deg_P1D-i_202311/timeChunked.zarr",
+        },
+        Home {
+            product: "WIND_GLO_PHY_L3_NRT_012_002",
+            dataset: "cmems_obs-wind_glo_phy_nrt_l3-metopc-ascat-asc-0.25deg_P1D-i",
+            fallback: "https://s3.waw3-1.cloudferro.com/mdl-arco-time-048/arco/WIND_GLO_PHY_L3_NRT_012_002/cmems_obs-wind_glo_phy_nrt_l3-metopc-ascat-asc-0.25deg_P1D-i_202311/timeChunked.zarr",
+        },
+        Home {
+            product: "WIND_GLO_PHY_L3_NRT_012_002",
+            dataset: "cmems_obs-wind_glo_phy_nrt_l3-metopc-ascat-des-0.25deg_P1D-i",
+            fallback: "https://s3.waw3-1.cloudferro.com/mdl-arco-time-048/arco/WIND_GLO_PHY_L3_NRT_012_002/cmems_obs-wind_glo_phy_nrt_l3-metopc-ascat-des-0.25deg_P1D-i_202311/timeChunked.zarr",
+        },
+    ];
 
     fn home(self) -> Home {
         match self {
@@ -96,6 +126,14 @@ impl Product {
                 dataset: "cmems_obs-wind_glo_phy_nrt_l4_0.125deg_PT1H",
                 fallback: "https://s3.waw3-1.cloudferro.com/mdl-arco-time-050/arco/WIND_GLO_PHY_L4_NRT_012_004/cmems_obs-wind_glo_phy_nrt_l4_0.125deg_PT1H_202207/timeChunked.zarr",
             },
+            // ASCAT is four datasets and opens through `ASCAT_PASSES`; this
+            // is the first of them, for anything that asks about one
+            // (`open` never does).
+            Self::Ascat => Home {
+                product: Self::ASCAT_PASSES[0].product,
+                dataset: Self::ASCAT_PASSES[0].dataset,
+                fallback: Self::ASCAT_PASSES[0].fallback,
+            },
         }
     }
 
@@ -108,6 +146,7 @@ impl Product {
                 v_path: "/vo",
                 // The surface; the store also holds 15 m down.
                 level: Some(("/elevation", 0.0)),
+                time_path: None,
             },
             Self::Duacs => ArcoSpec {
                 name: "DUACS",
@@ -115,6 +154,7 @@ impl Product {
                 u_path: "/ugos",
                 v_path: "/vgos",
                 level: None,
+                time_path: None,
             },
             Self::WindL4 => ArcoSpec {
                 name: "L4 wind",
@@ -122,7 +162,24 @@ impl Product {
                 u_path: "/eastward_wind",
                 v_path: "/northward_wind",
                 level: None,
+                time_path: None,
             },
+            Self::Ascat => crate::ascat::SPEC,
+        }
+    }
+
+    /// Opens one dataset where the catalogue says it is.
+    ///
+    /// If the catalogue cannot be read — or lists the dataset somewhere that
+    /// will not open — the last address known to work is tried before giving
+    /// up, and the failure reported is the catalogue's: it is the one that
+    /// says what is actually wrong.
+    fn open_home(home: &Home, spec: ArcoSpec) -> Result<ArcoStore> {
+        let found = crate::stac::discover(home.product, home.dataset)
+            .and_then(|url| ArcoStore::open(&url, spec));
+        match found {
+            Ok(store) => Ok(store),
+            Err(first) => ArcoStore::open(home.fallback, spec).map_err(|_| first),
         }
     }
 
@@ -133,16 +190,26 @@ impl Product {
     /// up, and the failure reported is the catalogue's: it is the one that
     /// says what is actually wrong.
     pub fn open(self) -> Result<Box<dyn FieldSource>> {
-        let home = self.home();
-        let found = crate::stac::discover(home.product, home.dataset)
-            .and_then(|url| ArcoStore::open(&url, self.spec()));
-        match found {
-            Ok(store) => Ok(Box::new(store)),
-            Err(first) => match ArcoStore::open(home.fallback, self.spec()) {
-                Ok(store) => Ok(Box::new(store)),
-                Err(_) => Err(first),
-            },
+        if self == Self::Ascat {
+            // The four passes found and opened together, each with its own
+            // fallback.
+            let members = std::thread::scope(|scope| {
+                let handles: Vec<_> = Self::ASCAT_PASSES
+                    .iter()
+                    .map(|home| scope.spawn(move || Self::open_home(home, crate::ascat::SPEC)))
+                    .collect();
+                handles
+                    .into_iter()
+                    .map(|handle| {
+                        handle
+                            .join()
+                            .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+                    })
+                    .collect::<Result<Vec<_>>>()
+            })?;
+            return Ok(Box::new(crate::ascat::AscatStore::new(members)?));
         }
+        Ok(Box::new(Self::open_home(&self.home(), self.spec())?))
     }
 }
 

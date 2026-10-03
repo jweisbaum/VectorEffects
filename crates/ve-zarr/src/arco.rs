@@ -39,6 +39,10 @@ pub struct ArcoSpec {
     /// A depth axis and the value wanted on it, for a store that has one:
     /// GlobCurrent keeps the surface and 15 m down in one array.
     pub level: Option<(&'static str, f32)>,
+    /// A per-cell measurement time beside the components, for a store that
+    /// has one: a swath product records when each cell was seen, which is
+    /// what decides between two passes over the same cell.
+    pub time_path: Option<&'static str>,
 }
 
 /// How a store packs its values.
@@ -48,11 +52,18 @@ enum Packed {
     I32,
 }
 
+/// One step's components on the store's own grid, and the per-cell
+/// measurement time if the store has one.
+pub type Timed = (Vec<f32>, Vec<f32>, Option<Vec<f64>>);
+
 /// An open handle on one time-chunked store.
 pub struct ArcoStore {
     spec: ArcoSpec,
     u: ReadArray,
     v: ReadArray,
+    /// The per-cell time array, its fill value and its epoch in Unix
+    /// seconds, for a store that has one.
+    timed: Option<(ReadArray, f64, f64)>,
     /// Index along the depth axis, for a store that has one.
     level: Option<u64>,
     grid: CellGrid,
@@ -74,6 +85,16 @@ impl std::fmt::Debug for ArcoStore {
                 &self.coverage().map(|(a, b)| (a.to_iso(), b.to_iso())),
             )
             .finish()
+    }
+}
+
+/// A per-cell time in seconds since the Unix epoch, or NaN where the store
+/// has none. `base_s` is the store's own epoch in Unix seconds.
+pub fn unpack_time(raw: f64, fill: f64, base_s: f64) -> f64 {
+    if raw == fill || !raw.is_finite() {
+        f64::NAN
+    } else {
+        base_s + raw
     }
 }
 
@@ -246,10 +267,50 @@ impl ArcoStore {
             }
         };
 
+        let timed = match spec.time_path {
+            None => None,
+            Some(path) => {
+                let array = open_array(&store, path)?;
+                if array.shape() != u.shape() {
+                    return Err(ZarrError::Layout(format!(
+                        "{name} {path} has shape {:?}, not the components' {:?}",
+                        array.shape(),
+                        u.shape()
+                    )));
+                }
+                let units = array
+                    .attributes()
+                    .get("units")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| ZarrError::Layout(format!("{name} {path} has no units")))?
+                    .to_owned();
+                let (epoch, unit) = crate::store::parse_time_units(&units)?;
+                if unit != crate::store::TimeUnit::Seconds {
+                    return Err(ZarrError::Layout(format!(
+                        "{name} {path} counts in {unit:?}; a measurement time is in seconds"
+                    )));
+                }
+                let base_s = epoch.hours_since_unix_epoch() as f64 * 3600.0;
+                let fill = match array.fill_value().as_ne_bytes() {
+                    [a, b, c, d, e, f, g, h] => {
+                        f64::from_ne_bytes([*a, *b, *c, *d, *e, *f, *g, *h])
+                    }
+                    other => {
+                        return Err(ZarrError::Layout(format!(
+                            "{name} {path} fill value is {} bytes, expected a float64",
+                            other.len()
+                        )));
+                    }
+                };
+                Some((array, fill, base_s))
+            }
+        };
+
         Ok(Self {
             spec,
             u,
             v,
+            timed,
             level,
             grid,
             packed,
@@ -265,9 +326,8 @@ impl ArcoStore {
         self.grid
     }
 
-    /// One component at one step, on the store's own grid, in physical units
-    /// with NaN where masked.
-    fn read_native(&self, array: &ReadArray, index: u64, name: &str) -> Result<Vec<f32>> {
+    /// The subset one time step of a field is.
+    fn slice(&self, index: u64) -> ArraySubset {
         // One range per dimension: this time, this level if there is one,
         // and the whole of every row and column.
         let mut ranges: Vec<Range<u64>> = Vec::with_capacity(4);
@@ -277,7 +337,58 @@ impl ArcoStore {
         }
         ranges.push(0..self.grid.nlat as u64);
         ranges.push(0..self.grid.nlon as u64);
-        let subset = ArraySubset::new_with_ranges(&ranges);
+        ArraySubset::new_with_ranges(&ranges)
+    }
+
+    /// The per-cell measurement time at one step, in seconds since the Unix
+    /// epoch with NaN where no measurement was made; `None` for a store
+    /// without one.
+    fn read_times(&self, index: u64) -> Result<Option<Vec<f64>>> {
+        let Some((array, fill, base_s)) = &self.timed else {
+            return Ok(None);
+        };
+        let what = format!("the {} measurement time", self.spec.name);
+        let raw = array
+            .retrieve_array_subset::<Vec<f64>>(&self.slice(index))
+            .map_err(read_err(&what))?;
+        if raw.len() != self.grid.len() {
+            return Err(ZarrError::Layout(format!(
+                "{what} at step {index} holds {} values, expected {}",
+                raw.len(),
+                self.grid.len()
+            )));
+        }
+        Ok(Some(
+            raw.into_iter()
+                .map(|r| unpack_time(r, *fill, *base_s))
+                .collect(),
+        ))
+    }
+
+    /// The components and the measurement time at one step, on the store's
+    /// own grid: what a merge of several stores works from.
+    pub fn read_native_timed(&self, step: &Step) -> Result<Timed> {
+        let ((u, v), times) = try_join(
+            || {
+                try_join(
+                    || self.read_native(&self.u, step.index, "u"),
+                    || self.read_native(&self.v, step.index, "v"),
+                )
+            },
+            || self.read_times(step.index),
+        )?;
+        Ok((u, v, times))
+    }
+
+    /// Hours since the Unix epoch of every step, in order.
+    pub fn hours(&self) -> &[i64] {
+        &self.times
+    }
+
+    /// One component at one step, on the store's own grid, in physical units
+    /// with NaN where masked.
+    fn read_native(&self, array: &ReadArray, index: u64, name: &str) -> Result<Vec<f32>> {
+        let subset = self.slice(index);
         let what = format!("the {} {name} field", self.spec.name);
         let raw: Vec<i64> = match self.packed {
             Packed::I16 => array
@@ -338,14 +449,11 @@ impl FieldSource for ArcoStore {
         )?;
         let u = to_era5_grid(self.grid, &u);
         let v = to_era5_grid(self.grid, &v);
-        // A field with nothing in it is an unwritten chunk, not a calm.
-        if u.iter().all(|x| x.is_nan()) || v.iter().all(|x| x.is_nan()) {
-            return Err(ZarrError::Layout(format!(
-                "the {} field at {} is entirely masked; it is probably not written yet",
-                self.spec.name,
-                step.valid_time.to_iso()
-            )));
-        }
+        // A field with nothing in it is a time the store lists but has not
+        // written yet: just after midnight the time axis already names the
+        // new day. That is an empty field, not a failure — the newest steps
+        // of a near-real-time product are usually empty, and one of them
+        // must not cost the import the whole product.
         Ok(vec![Field {
             variable: self.spec.variable,
             u,
@@ -395,6 +503,20 @@ mod tests {
         // Half the circle.
         assert!(cell_grid_of(&axis(-89.875, 0.25, 720), &axis(-179.875, 0.25, 720)).is_err());
         assert!(cell_grid_of(&[0.0], &axis(-179.875, 0.25, 1440)).is_err());
+    }
+
+    /// 2026-10-01T00Z is 20 727 days after 1970 (see `store.rs`'s working)
+    /// and 13 422 days after 1990; the fill is NaN, and so is anything that
+    /// is not a number.
+    #[test]
+    fn a_measurement_time_is_placed_on_the_unix_epoch_and_a_fill_is_missing() {
+        let since_1990 = 7_305.0 * 86_400.0;
+        let fill = -2_147_483_647.0;
+        assert!(unpack_time(fill, fill, since_1990).is_nan());
+        assert!(unpack_time(f64::NAN, fill, since_1990).is_nan());
+        let at = unpack_time(13_422.0 * 86_400.0, fill, since_1990);
+        assert_eq!(at, 20_727.0 * 86_400.0);
+        assert_eq!(at, 1_790_812_800.0);
     }
 
     #[test]

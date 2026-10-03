@@ -71,6 +71,8 @@ struct Fake {
     variable: Variable,
     /// Hours since the Unix epoch, sorted.
     times: Vec<i64>,
+    /// Hours listed but not written yet: they read as fields with no value.
+    unwritten: Vec<i64>,
 }
 
 impl Fake {
@@ -78,6 +80,19 @@ impl Fake {
         Box::new(Self {
             variable,
             times: unix_times.iter().map(|t| t / HOUR).collect(),
+            unwritten: Vec::new(),
+        })
+    }
+
+    fn boxed_with_unwritten(
+        variable: Variable,
+        unix_times: &[i64],
+        unwritten: &[i64],
+    ) -> Box<dyn FieldSource> {
+        Box::new(Self {
+            variable,
+            times: unix_times.iter().map(|t| t / HOUR).collect(),
+            unwritten: unwritten.iter().map(|t| t / HOUR).collect(),
         })
     }
 }
@@ -102,6 +117,16 @@ impl FieldSource for Fake {
         ve_zarr::source::steps_between(&self.times, start, end, "fake")
     }
     fn read_step(&self, step: &Step) -> ve_zarr::Result<Vec<Field>> {
+        if self
+            .unwritten
+            .contains(&step.valid_time.hours_since_unix_epoch())
+        {
+            return Ok(vec![Field {
+                variable: self.variable,
+                u: vec![f32::NAN; ve_zarr::POINTS_PER_STEP],
+                v: vec![f32::NAN; ve_zarr::POINTS_PER_STEP],
+            }]);
+        }
         let speed = (step.valid_time.hour + 1) as f32;
         Ok(vec![Field {
             variable: self.variable,
@@ -361,6 +386,44 @@ fn a_product_missing_its_first_time_keeps_its_place() {
     assert_eq!(shown(39), Some(1.0));
 }
 
+/// A time the store lists and has not written yet — the new day, just after
+/// midnight — is an empty read, and is written as nothing: the timeline must
+/// not say the layer covers a day it shows nothing for.
+#[test]
+fn an_unwritten_time_is_not_a_frame() {
+    let root = TempRoot::new("unwritten");
+    let state = app(&root, 1, 24);
+    let open = |_: Product| -> ve_zarr::Result<Box<dyn FieldSource>> {
+        Ok(Fake::boxed_with_unwritten(
+            Variable::SurfaceCurrent,
+            &[OCT_1, OCT_1 + DAY],
+            &[OCT_1 + DAY],
+        ))
+    };
+    nrt::nrt_import(
+        &state,
+        &request(&["duacs"], 1, true, true),
+        NOW,
+        open,
+        |_| {},
+    )
+    .expect("import");
+    // Two midnights were listed; the second read empty. One frame, holding
+    // its day and no longer.
+    let frames = {
+        let mut session = state.session.lock().expect("lock");
+        let project = &session.require_open().expect("open").project;
+        project.layers[1]
+            .raster
+            .as_ref()
+            .expect("a raster")
+            .frames
+            .len()
+    };
+    assert_eq!(frames, 1);
+    assert_eq!(covered(&state, 1), steps_true(0..24, 40));
+}
+
 /// A product that cannot be fetched is named and the others still arrive;
 /// nothing arriving at all is an error, and adds nothing.
 #[test]
@@ -372,7 +435,7 @@ fn a_product_that_fails_does_not_stop_the_others() {
             Product::Duacs => Err(ZarrError::Open("the catalogue is not answering".to_owned())),
             // Its newest data is a week old: nothing in the period.
             Product::WindL4 => Ok(Fake::boxed(Variable::Wind10m, &[OCT_1 - 7 * DAY])),
-            Product::Multiobs => Ok(Fake::boxed(
+            _ => Ok(Fake::boxed(
                 Variable::SurfaceCurrent,
                 &hourly(OCT_1, OCT_1 + 5 * HOUR),
             )),

@@ -138,23 +138,24 @@ describe("the cost", () => {
   const all = NRT_PRODUCTS.map((product) => product.id);
 
   it("lists the products in the order the import reads them", () => {
-    expect(all).toEqual(["multiobs", "duacs", "wind-l4"]);
+    expect(all).toEqual(["multiobs", "duacs", "wind-l4", "ascat"]);
   });
 
   /**
-   * 88 hourly currents, 4 daily currents, 88 hourly winds: 180 downloads.
-   * 88 × 2.8 + 4 × 2.8 + 88 × 4.2 = 246.4 + 11.2 + 369.6 = 627.2 MB.
+   * 88 hourly currents, 4 daily currents, 88 hourly winds, 4 daily
+   * scatterometer winds: 184 downloads. 88 × 2.8 + 4 × 2.8 + 88 × 4.2 +
+   * 4 × 4.2 = 246.4 + 11.2 + 369.6 + 16.8 = 644 MB.
    */
   it("sums the downloads and the size over the products chosen", () => {
-    expect(costOf(all, p, 1, 88)).toEqual({ downloads: 180, megabytes: 627 });
+    expect(costOf(all, p, 1, 88)).toEqual({ downloads: 184, megabytes: 644 });
   });
 
   /**
-   * A timeline left at 24 steps shows one day: 24 + 1 + 24 = 49 downloads,
-   * 67.2 + 2.8 + 100.8 = 170.8 MB.
+   * A timeline left at 24 steps shows one day: 24 + 1 + 24 + 1 = 50 downloads,
+   * 67.2 + 2.8 + 100.8 + 4.2 = 175 MB.
    */
   it("fetches only what the timeline can show", () => {
-    expect(costOf(all, p, 1, 24)).toEqual({ downloads: 49, megabytes: 171 });
+    expect(costOf(all, p, 1, 24)).toEqual({ downloads: 50, megabytes: 175 });
   });
 
   it("counts only the products chosen", () => {

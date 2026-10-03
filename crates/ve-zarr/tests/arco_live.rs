@@ -43,13 +43,29 @@ fn every_product_opens_and_its_newest_field_is_plausible() {
         );
         assert!((0..24 * 5).contains(&behind), "{behind} h behind");
 
-        let step = source
-            .step_at(Utc::from_hours_since_unix_epoch(
-                last.hours_since_unix_epoch(),
-            ))
-            .expect("the newest step");
+        // The newest step with anything in it: just after midnight a store
+        // lists a day it has not written yet, which reads as empty.
+        let period = i64::from(product.period_hours());
         let began = std::time::Instant::now();
-        let fields = source.read_step(&step).expect("the newest field");
+        let (k, fields) = (0..3)
+            .filter_map(|k| {
+                let step = source.step_at(Utc::from_hours_since_unix_epoch(
+                    last.hours_since_unix_epoch() - k * period,
+                ))?;
+                let fields = source.read_step(&step).expect("a recent field");
+                fields[0]
+                    .u
+                    .iter()
+                    .any(|v| v.is_finite())
+                    .then_some((k, fields))
+            })
+            .next()
+            .expect("a recent step with data");
+        println!("  newest step with data: {k} back from the last listed");
+        // A store more than a day past its last listed time has written it.
+        if behind >= 24 + period {
+            assert_eq!(k, 0, "the last listed step is empty though it is old");
+        }
         assert_eq!(fields.len(), 1);
         let field = &fields[0];
         assert_eq!(field.variable, product.variable());
@@ -69,8 +85,17 @@ fn every_product_opens_and_its_newest_field_is_plausible() {
             field.u.len(),
             began.elapsed().as_secs_f64()
         );
-        // The ocean is most of the planet.
-        assert!(speeds.len() > field.u.len() / 2);
+        // The ocean is most of the planet — except to a swath instrument,
+        // which sees a day's worth of bands of it.
+        let fraction = speeds.len() as f64 / field.u.len() as f64;
+        if product == Product::Ascat {
+            assert!(
+                (0.15..0.9).contains(&fraction),
+                "{fraction} of the globe seen"
+            );
+        } else {
+            assert!(fraction > 0.5, "{fraction} defined");
+        }
         let (ceiling, typical) = match product.variable() {
             Variable::Wind10m => (80.0, 2.0..15.0),
             Variable::SurfaceCurrent => (5.0, 0.02..1.0),
@@ -91,7 +116,7 @@ fn a_burst_of_steps_of_a_fine_product_arrives() {
         println!("VE_TEST_NRT is not set; nothing fetched");
         return;
     }
-    for product in [Product::Duacs, Product::WindL4] {
+    for product in [Product::Duacs, Product::WindL4, Product::Ascat] {
         let source = product.open().expect("the product opens");
         let (_, last) = source.coverage().expect("coverage");
         let last = last.hours_since_unix_epoch();
@@ -108,8 +133,11 @@ fn a_burst_of_steps_of_a_fine_product_arrives() {
                     loop {
                         let at = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         let Some(step) = steps.get(at) else { return };
+                        // An empty read is a day listed and not written yet.
                         let fields = source.read_step(step).expect("a step of the burst");
-                        assert!(fields[0].u.iter().any(|v| v.is_finite()));
+                        if at > 0 {
+                            assert!(fields[0].u.iter().any(|v| v.is_finite()), "step {at}");
+                        }
                     }
                 });
             }

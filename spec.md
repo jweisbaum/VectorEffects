@@ -1196,9 +1196,28 @@ products rather than the archives, and what comes back is one layer per
 product, made by the same pipeline — fetched once, written to a GRIB2 file
 in the data directory, read back as an imported layer. The design is
 `docs/superpowers/specs/2026-10-02-near-real-time-data-design.md`; ten
-products are planned and three are here: Copernicus Marine's MULTIOBS total
-surface current (hourly), DUACS geostrophic current (daily) and L4 wind
-(hourly).
+products are planned and four are here: Copernicus Marine's MULTIOBS total
+surface current (hourly), DUACS geostrophic current (daily), L4 wind
+(hourly) and ASCAT scatterometer wind from Metop-B and Metop-C (daily).
+
+**ASCAT is four datasets read as one** (M90): each satellite's ascending
+and descending passes are published apart, each a band of ocean with gaps
+where nothing was seen. One layer per day is made from the four, a cell
+taking the most recent measurement where passes overlap and staying empty
+where none passed — the merge is by the store's own per-cell measurement
+time, before the regrid, so a node of the common grid is the mean of what
+was measured around it and missing where nothing was. A day one satellite
+has and the other lacks is a day. Metop-A, which the catalogue still lists,
+is left out.
+
+**A time the store lists but has not written yet is not a failure, and not
+a frame either.** Just after midnight a daily product's time axis already
+names the new day; reading it gives a field with no value anywhere. The
+import writes nothing for it, so the timeline's frame row does not mark a
+day the map shows nothing for — the newest steps of a near-real-time
+product are usually empty, and they are shown as empty. One such step must
+not cost the import the whole product; it did, once, in the live test. The
+one empty message ever written is the first, holding the origin (above).
 
 **The period starts at 00:00 UTC, N days before today, and ends on the
 current hour.** A midnight, so a daily product has whole days and the

@@ -20,6 +20,7 @@
 //! provisional hours are the same in both.
 
 pub mod arco;
+pub mod ascat;
 pub mod blosc;
 pub mod codec;
 pub mod era5;

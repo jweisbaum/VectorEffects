@@ -26,18 +26,29 @@ use crate::error::{Result, ZarrError};
 pub struct HttpStore {
     base: Url,
     client: reqwest::blocking::Client,
-    /// How many requests this store has in flight, and the cap on it.
-    lane: Lane,
+    /// How many requests the host has in flight, and the cap on it. Shared
+    /// by every store on the host: the cap is the host's, and a product read
+    /// from four stores at once is four stores on one host.
+    lane: &'static Lane,
 }
 
-/// How many requests a store on the Marine Data Store sends at once.
+/// How many requests the Marine Data Store is sent at once, by this whole
+/// process.
 ///
 /// A 0.125 degree field is nine chunks per component, read for two
 /// components and several steps at a time, and with nothing holding them
 /// back that object store answered a burst of seventy with closed
 /// connections and 408s. Eight is what the GlobCurrent import always ran
-/// at — four hours, u and v together — and it was never refused.
-const IN_FLIGHT: usize = 8;
+/// at — four hours, u and v together — and was never refused; the ASCAT
+/// import ran at up to twenty-four across its four stores and was not
+/// refused either. Twelve, shared by every store on the host.
+const IN_FLIGHT: usize = 12;
+
+/// The Marine Data Store's lane, one for the process.
+static MARINE_LANE: std::sync::LazyLock<Lane> = std::sync::LazyLock::new(|| Lane::new(IN_FLIGHT));
+
+/// Every other host's, as good as none.
+static OPEN_LANE: std::sync::LazyLock<Lane> = std::sync::LazyLock::new(|| Lane::new(UNCAPPED));
 
 /// The cap for every other host: as good as none. ERA5 on Google is read
 /// as many small range requests multiplexed over one connection, and a cap
@@ -202,7 +213,7 @@ impl HttpStore {
         Ok(Self {
             base,
             client,
-            lane: Lane::new(if marine { IN_FLIGHT } else { UNCAPPED }),
+            lane: if marine { &MARINE_LANE } else { &OPEN_LANE },
         })
     }
 

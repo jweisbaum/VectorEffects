@@ -3662,6 +3662,38 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M90 — ASCAT: the day's passes merged into one wind
+
+The third milestone of the near-real-time import. `ve_zarr::ascat` reads
+the four Metop-B/C ascending and descending datasets together — the
+generic store gained a per-cell measurement time beside its components —
+and `merge_passes` makes one field of each day, the most recent measurement
+winning where passes overlap and nothing where none passed, before the
+regrid. `Product::Ascat` opens the four through the catalogue; the dialog,
+the catalogues and the help page gain one row each.
+
+**Found live:** just after midnight UTC, DUACS's time axis already listed
+the new day and its chunk was not written; the reader called that an error
+and would have dropped the whole product. An unwritten time is now an empty
+field, in both readers (spec §4.10).
+
+**Measured, 2026-10-02:** the four ASCAT stores open together in 6.3 s;
+one day's four passes read and merge in 4.8 s and cover 47 % of the globe;
+mean 8.2 m/s, fastest 31 m/s. ASCAT was 48 h behind, the others 25.
+
+**After review.** Each of the four stores falls back on its own when the
+catalogue's address will not open; the in-flight cap is the host's, shared
+by every store in the process (twelve), since four stores on one host were
+four caps; and a listed-but-unwritten time is written as nothing, so the
+frame row does not mark a day the map shows nothing for. The burst test
+now reads eight days of ASCAT four at a time: 139 s, with the other live
+test running beside it.
+
+**Not done:** Metop-A; a per-pass choice; an offline fixture for the
+time-array path and the merge store (the reviewer's point: `ArcoStore`
+opens only a URL, so nothing below the live test reaches them — the
+in-memory store the ERDDAP milestone needs is where that seam belongs).
+
 ### M89 — The last N days, up to now: three Copernicus products
 
 The second milestone of the near-real-time import and the first that can be
