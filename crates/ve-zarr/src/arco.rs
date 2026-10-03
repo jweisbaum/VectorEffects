@@ -43,6 +43,10 @@ pub struct ArcoSpec {
     /// has one: a swath product records when each cell was seen, which is
     /// what decides between two passes over the same cell.
     pub time_path: Option<&'static str>,
+    /// A daily product: each time is the field for its day, and is filed
+    /// under the day's midnight whatever hour the publisher stamps it with,
+    /// so the midnights an import asks for are found.
+    pub daily: bool,
 }
 
 /// How a store packs its values.
@@ -73,6 +77,8 @@ pub struct ArcoStore {
     fill: i64,
     /// Hours since the Unix epoch, sorted.
     times: Vec<i64>,
+    /// The packed values are kelvin, and leave here in Celsius.
+    kelvin: bool,
 }
 
 impl std::fmt::Debug for ArcoStore {
@@ -96,6 +102,20 @@ pub fn unpack_time(raw: f64, fill: f64, base_s: f64) -> f64 {
     } else {
         base_s + raw
     }
+}
+
+/// A daily product's times, each moved to its day's midnight.
+///
+/// Refused if two times fall on one day: that is not a daily product, and
+/// filing both under one midnight would lose one of them.
+pub fn daily_hours(hours: &[i64]) -> Result<Vec<i64>> {
+    let days: Vec<i64> = hours.iter().map(|h| h.div_euclid(24) * 24).collect();
+    if days.windows(2).any(|w| w[1] <= w[0]) {
+        return Err(ZarrError::Layout(
+            "a daily product holds two times on one day".to_owned(),
+        ));
+    }
+    Ok(days)
 }
 
 /// One packed value in physical units, or NaN where the store has none.
@@ -149,7 +169,11 @@ pub fn cell_grid_of(lat: &[f32], lon: &[f32]) -> Result<CellGrid> {
         dlat,
         nlat: lat.len(),
         lon0: f64::from(lon[0]),
-        dlon,
+        // The spacing a grid that spans the circle *is*, rather than the one
+        // its `f32` axis spells: a fifth of a degree read off two `f32` ends
+        // is not exactly 0.2, and the regridder holds the span to a
+        // millionth of a degree (OSTIA's 0.2 degree copy, M93).
+        dlon: 360.0 / lon.len() as f64,
         nlon: lon.len(),
     })
 }
@@ -228,6 +252,11 @@ impl ArcoStore {
             }
         };
 
+        let kelvin = u
+            .attributes()
+            .get("units")
+            .and_then(|v| v.as_str())
+            .is_some_and(|units| units.eq_ignore_ascii_case("kelvin") || units == "K");
         let steps = u.shape()[0];
         let ((lat, lon), times) = try_join(
             || {
@@ -306,8 +335,15 @@ impl ArcoStore {
             }
         };
 
+        let times = if spec.daily {
+            daily_hours(&times)?
+        } else {
+            times
+        };
+
         Ok(Self {
             spec,
+            kelvin,
             u,
             v,
             timed,
@@ -443,6 +479,19 @@ impl FieldSource for ArcoStore {
     }
 
     fn read_step(&self, step: &Step) -> Result<Vec<Field>> {
+        if self.spec.variable.is_scalar() {
+            let mut values = self.read_native(&self.u, step.index, "value")?;
+            if self.kelvin {
+                for value in &mut values {
+                    *value -= 273.15;
+                }
+            }
+            return Ok(vec![Field {
+                variable: self.spec.variable,
+                u: to_era5_grid(self.grid, &values),
+                v: Vec::new(),
+            }]);
+        }
         let (u, v) = try_join(
             || self.read_native(&self.u, step.index, "u"),
             || self.read_native(&self.v, step.index, "v"),
@@ -491,6 +540,18 @@ mod tests {
         assert_eq!(quarter, CellGrid::GLOBCURRENT);
     }
 
+    /// A fifth of a degree as `f32` endpoints spans the circle only to
+    /// within rounding; the grid made of it spans it exactly, so the
+    /// regridder takes it.
+    #[test]
+    fn a_spacing_f32_cannot_spell_is_snapped_to_the_circle() {
+        let lon: Vec<f32> = (0..1800).map(|i| -179.9 + 0.2 * i as f32).collect();
+        let grid = cell_grid_of(&axis(-89.9, 0.2, 900), &lon).expect("a grid");
+        assert_eq!(grid.dlon * grid.nlon as f64, 360.0);
+        let regridded = to_era5_grid(grid, &vec![1.0; grid.len()]);
+        assert!(regridded.iter().all(|v| *v == 1.0));
+    }
+
     /// An axis that is not evenly spaced, or does not go all the way round,
     /// is not a grid the regridder can be handed.
     #[test]
@@ -517,6 +578,15 @@ mod tests {
         let at = unpack_time(13_422.0 * 86_400.0, fill, since_1990);
         assert_eq!(at, 20_727.0 * 86_400.0);
         assert_eq!(at, 1_790_812_800.0);
+    }
+
+    /// OISST and Geo-Polar stamp a day at noon; filed at midnight, a day is
+    /// found where an import looks for it. Two stamps on one day are refused.
+    #[test]
+    fn a_daily_product_is_filed_under_its_midnights() {
+        assert_eq!(daily_hours(&[12, 36, 60]).unwrap(), vec![0, 24, 48]);
+        assert_eq!(daily_hours(&[-12]).unwrap(), vec![-24]);
+        assert!(daily_hours(&[0, 12]).is_err());
     }
 
     #[test]

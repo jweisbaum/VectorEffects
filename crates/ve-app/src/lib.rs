@@ -36,6 +36,7 @@ pub mod selection_preview;
 pub mod session;
 pub mod settings;
 pub mod shape_animation;
+pub mod sst;
 pub mod theme;
 pub mod transform;
 pub mod zarr;
@@ -224,6 +225,7 @@ pub fn run() -> anyhow::Result<()> {
                 zarr::new_project_from_zarr,
                 history::import_history,
                 nrt::import_nrt,
+                sst::sample_temperature,
                 document::document_tree,
                 document::object_properties,
                 document::set_object_property,
@@ -274,6 +276,7 @@ pub fn run() -> anyhow::Result<()> {
                 settings::set_projection,
                 settings::set_auto_scale,
                 settings::set_display_units,
+                settings::set_temperature_unit,
                 settings::set_glyph_appearance,
                 autosave::autosaves,
                 autosave::recover_autosave,

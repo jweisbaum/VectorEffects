@@ -1675,3 +1675,46 @@ fn the_bridge_follows_the_application_through_a_restart_and_off_and_on() {
             .any(|name| name == "project_status")
     );
 }
+
+/// The near-real-time products are listed without reaching the network,
+/// with what each holds; an import naming nothing, or something that is not
+/// a product, is refused before anything is fetched (spec.md 4.10, M94).
+#[tokio::test]
+async fn nrt_products_are_listed_and_a_bad_import_is_refused() {
+    let root = TempRoot::new("nrt");
+    let app = mock_app(&root);
+    let (port, token) = serve(&app);
+    let client = client(port, &token).await;
+    let listed = call(&client, "nrt_products", json!({})).await;
+    let products = listed["products"].as_array().expect("a list");
+    let ids: Vec<&str> = products.iter().filter_map(|p| p["id"].as_str()).collect();
+    assert_eq!(
+        ids,
+        [
+            "multiobs", "duacs", "wind-l4", "ascat", "ccmp", "oisst", "geopolar", "ostia"
+        ]
+    );
+    let field = |id: &str| {
+        products
+            .iter()
+            .find(|p| p["id"] == id)
+            .and_then(|p| p["field"].as_str())
+            .map(str::to_owned)
+    };
+    assert_eq!(field("duacs").as_deref(), Some("current"));
+    assert_eq!(field("ccmp").as_deref(), Some("wind"));
+    assert_eq!(field("ostia").as_deref(), Some("sst"));
+    assert!(listed["now"].as_str().is_some_and(|now| now.ends_with('Z')));
+
+    call(&client, "project_new", new_project_args("Recent")).await;
+    let empty = call_err(&client, "import_nrt", json!({ "products": [], "days": 2 })).await;
+    assert!(empty.contains("products is empty"), "{empty}");
+    let unknown = call_err(
+        &client,
+        "import_nrt",
+        json!({ "products": ["gfs"], "days": 2 }),
+    )
+    .await;
+    assert!(unknown.contains("\"gfs\""), "{unknown}");
+    client.cancel().await.expect("close");
+}

@@ -223,7 +223,17 @@ impl<'a> File<'a> {
             at: 4,
             wide_offsets,
         };
-        let records = h.u32()? as usize;
+        // 0xFFFFFFFF is the format's "streaming" count: the writer did not
+        // know how many records it would write. A server answering a subset
+        // knows, so a file that says so is refused rather than guessed at.
+        let records = match h.u32()? {
+            u32::MAX => {
+                return Err(layout(
+                    "a streaming record count, which this reader does not take".to_owned(),
+                ));
+            }
+            n => n as usize,
+        };
 
         let n = h.list(0x0A, "dimension")?;
         let mut dimensions = Vec::with_capacity(n);
@@ -291,10 +301,13 @@ impl<'a> File<'a> {
             .collect()
     }
 
-    /// Bytes one record of a record variable takes, before padding.
-    fn record_bytes(&self, variable: &Variable) -> usize {
-        let per: usize = self.shape(variable).iter().skip(1).product();
-        per * variable.kind.size()
+    /// Bytes one record of a record variable takes, before padding; `None`
+    /// when a corrupt header makes it overflow.
+    fn record_bytes(&self, variable: &Variable) -> Option<usize> {
+        self.shape(variable)
+            .iter()
+            .skip(1)
+            .try_fold(variable.kind.size(), |acc, n| acc.checked_mul(*n))
     }
 
     /// Every value of a variable, in its own order, as `f64`. The fill value
@@ -304,6 +317,10 @@ impl<'a> File<'a> {
             .variable(name)
             .ok_or_else(|| layout(format!("there is no variable {name}")))?;
         let size = variable.kind.size();
+        // Every size here comes from the header, and a corrupt one must be an
+        // error rather than an overflow or an allocation the size of the
+        // number: all of it is checked, and nothing is reserved before the
+        // bytes it describes are known to be in the file.
         let short = || layout(format!("{name}'s values run past the end of the file"));
         let decode = |at: usize, bytes: usize| -> Result<Vec<f64>> {
             let end = at.checked_add(bytes).filter(|e| *e <= self.bytes.len());
@@ -312,26 +329,39 @@ impl<'a> File<'a> {
         };
         let begin = usize::try_from(variable.begin).map_err(|_| short())?;
         if !variable.record {
-            let count: usize = self.shape(variable).iter().product();
-            return decode(begin, count * size);
+            let bytes = self
+                .shape(variable)
+                .iter()
+                .try_fold(size, |acc, n| acc.checked_mul(*n))
+                .ok_or_else(short)?;
+            return decode(begin, bytes);
         }
         // Records are interleaved: each record holds one slab of every record
         // variable in turn, each padded to four bytes — unless there is only
         // one record variable, which the format leaves unpadded.
         let record_vars: Vec<&Variable> = self.variables.iter().filter(|v| v.record).collect();
-        let stride: usize = if record_vars.len() == 1 {
-            self.record_bytes(variable)
+        let one = self.record_bytes(variable).ok_or_else(short)?;
+        let stride = if record_vars.len() == 1 {
+            one
         } else {
             record_vars
                 .iter()
-                .map(|v| {
-                    let n = self.record_bytes(v);
-                    n + (4 - n % 4) % 4
+                .try_fold(0usize, |acc, v| {
+                    let n = self.record_bytes(v)?;
+                    acc.checked_add(n.checked_add((4 - n % 4) % 4)?)
                 })
-                .sum()
+                .ok_or_else(short)?
         };
-        let one = self.record_bytes(variable);
-        let mut out = Vec::with_capacity(self.records * one / size.max(1));
+        // The last record has to be in the file before any is read.
+        if self.records > 0 {
+            let last = (self.records - 1)
+                .checked_mul(stride)
+                .and_then(|at| at.checked_add(begin))
+                .and_then(|at| at.checked_add(one))
+                .filter(|end| *end <= self.bytes.len());
+            last.ok_or_else(short)?;
+        }
+        let mut out = Vec::new();
         for r in 0..self.records {
             out.extend(decode(begin + r * stride, one)?);
         }
@@ -406,6 +436,101 @@ mod tests {
             file.read_f64("time").expect("time"),
             vec![(20_697.0 * 86_400.0) + 12.0 * 3600.0]
         );
+    }
+
+    /// A file along an unlimited dimension, written by hand: `n` records of
+    /// each `(name, type, values per record)`, every slab padded to four
+    /// bytes unless there is only one record variable.
+    fn records(n: u32, vars: &[(&str, u32, usize)], record_count: u32) -> Vec<u8> {
+        fn name(out: &mut Vec<u8>, s: &str) {
+            out.extend((s.len() as u32).to_be_bytes());
+            out.extend(s.as_bytes());
+            out.resize(out.len() + (4 - s.len() % 4) % 4, 0);
+        }
+        let size = |t: u32| if t == 3 { 2 } else { 4 };
+        let mut h = b"CDF\x01".to_vec();
+        h.extend(record_count.to_be_bytes());
+        h.extend(0x0Au32.to_be_bytes());
+        h.extend((1 + vars.len() as u32).to_be_bytes());
+        name(&mut h, "time");
+        h.extend(0u32.to_be_bytes());
+        for (v, _, per) in vars {
+            name(&mut h, &format!("{v}_n"));
+            h.extend((*per as u32).to_be_bytes());
+        }
+        h.extend([0u8; 8]);
+        h.extend(0x0Bu32.to_be_bytes());
+        h.extend((vars.len() as u32).to_be_bytes());
+        let mut patches = Vec::new();
+        for (i, (v, t, per)) in vars.iter().enumerate() {
+            name(&mut h, v);
+            h.extend(2u32.to_be_bytes());
+            h.extend(0u32.to_be_bytes());
+            h.extend((1 + i as u32).to_be_bytes());
+            h.extend([0u8; 8]);
+            h.extend(t.to_be_bytes());
+            h.extend(((per * size(*t)) as u32).to_be_bytes());
+            patches.push(h.len());
+            h.extend(0u32.to_be_bytes());
+        }
+        let pad = vars.len() > 1;
+        let mut at = h.len();
+        for (i, patch) in patches.iter().enumerate() {
+            h[*patch..*patch + 4].copy_from_slice(&(at as u32).to_be_bytes());
+            let n = vars[i].2 * size(vars[i].1);
+            at += if pad { n + (4 - n % 4) % 4 } else { n };
+        }
+        for r in 0..n {
+            for (i, (_, t, per)) in vars.iter().enumerate() {
+                let start = h.len();
+                for k in 0..*per {
+                    let value = (r * 10 + i as u32 * 100) as i32 + k as i32;
+                    if *t == 3 {
+                        h.extend((value as i16).to_be_bytes());
+                    } else {
+                        h.extend((value as f32).to_be_bytes());
+                    }
+                }
+                if pad {
+                    let n = h.len() - start;
+                    h.resize(h.len() + (4 - n % 4) % 4, 0);
+                }
+            }
+        }
+        h
+    }
+
+    /// Two record variables, one of shorts that needs padding, are read out
+    /// of their interleave record by record; a single record variable is
+    /// laid out without padding, as the format says.
+    #[test]
+    fn record_variables_are_read_through_their_interleave() {
+        let two = records(3, &[("a", 3, 3), ("b", 5, 2)], 3);
+        let file = File::parse(&two).expect("parses");
+        assert_eq!(file.shape(file.variable("a").unwrap()), vec![3, 3]);
+        assert_eq!(
+            file.read_f64("a").unwrap(),
+            [0., 1., 2., 10., 11., 12., 20., 21., 22.]
+        );
+        assert_eq!(
+            file.read_f64("b").unwrap(),
+            [100., 101., 110., 111., 120., 121.]
+        );
+
+        let one = records(2, &[("a", 3, 3)], 2);
+        let file = File::parse(&one).expect("parses");
+        assert_eq!(file.read_f64("a").unwrap(), [0., 1., 2., 10., 11., 12.]);
+    }
+
+    /// A record count the file cannot hold, or the streaming count, is an
+    /// error — never an allocation the size of the number.
+    #[test]
+    fn a_record_count_the_file_cannot_hold_is_refused() {
+        let lying = records(2, &[("a", 5, 4)], 4_000_000_000);
+        let file = File::parse(&lying).expect("the header parses");
+        assert!(file.read_f64("a").is_err());
+        let streaming = records(2, &[("a", 5, 4)], u32::MAX);
+        assert!(File::parse(&streaming).is_err());
     }
 
     #[test]

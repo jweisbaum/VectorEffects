@@ -1211,10 +1211,11 @@ products rather than the archives, and what comes back is one layer per
 product, made by the same pipeline — fetched once, written to a GRIB2 file
 in the data directory, read back as an imported layer. The design is
 `docs/superpowers/specs/2026-10-02-near-real-time-data-design.md`; ten
-products are planned and five are here: Copernicus Marine's MULTIOBS total
+products are planned and eight are here: Copernicus Marine's MULTIOBS total
 surface current (hourly), DUACS geostrophic current (daily), L4 wind
-(hourly), ASCAT scatterometer wind from Metop-B and Metop-C (daily), and
-CCMP NRT wind (six-hourly).
+(hourly), ASCAT scatterometer wind from Metop-B and Metop-C (daily), CCMP
+NRT wind (six-hourly), and sea-surface temperature from NOAA OISST, NOAA
+Geo-Polar Blended and the Met Office's OSTIA (daily).
 
 **ASCAT is four datasets read as one** (M90): each satellite's ascending
 and descending passes are published apart, each a band of ocean with gaps
@@ -1234,9 +1235,32 @@ six-hourly time is then one request for both components. CCMP stops at
 78.375° either side of the equator, and the common grid's nodes beyond its
 last cells are left empty rather than given the edge row's wind. It is the
 version 2.1 NRT stream; version 3.1 is the delayed product. The server is
-NOAA's Pacific Islands OceanWatch, which the West Coast node's copy of the
-dataset redirects to; a redirect to any other host is not followed, so the
-host is the one the offline check names.
+NOAA's Pacific Islands OceanWatch; the West Coast node lists the same data
+as `pifscCcmpDailyV21NRT` and redirected its data requests there when this
+was written. A redirect to any other host is not followed, so the host read
+is the one the offline check names. A server that does not answer is given
+ten seconds to connect, so an unreachable one costs the import about a
+minute and a half of retries before the product is named as skipped.
+
+**Sea-surface temperature is a display-only layer** (M93). It makes no
+field, reaches no scene, no render-cache key and no export, and cannot be
+painted on — an image or a GIS layer's rules, and for the same reason: it
+is something to look at under the wind and the current, not something the
+application models. Its days are written to a GRIB2 file in the data
+directory as water temperature (discipline 10, category 3, number 0, in
+kelvin) and read back on open, so it opens offline like every other fetched
+layer, and each day holds for its 24 hours (D73). It is drawn as coloured
+tiles under the field, painted in Rust on one fixed ramp from −2 °C to
+32 °C, clear where there is no water, and addressed by a hash of the day's
+temperatures so the steps of one day share their tiles. A legend for it
+appears while one is shown, and the readout gives the temperature under the
+pointer, in the unit Settings names (°C or °F).
+
+All three products land on the 0.25° grid the other layers use: OISST is
+published at it; Geo-Polar Blended is 0.05° and the server takes every fifth
+point; OSTIA is read from Copernicus's 0.2° copy of its 0.05° field, since
+the full one is 26 million values a day. Both NOAA products stamp a day at
+noon; it is filed under its midnight, which is what the import asks for.
 
 **A time the store lists but has not written yet is not a failure, and not
 a frame either.** Just after midnight a daily product's time axis already

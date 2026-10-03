@@ -27,7 +27,7 @@ import type { TileAddress } from "../generated/TileAddress";
 import type { Tool } from "../generated/Tool";
 import type { AppSettings } from "../generated/AppSettings";
 import type { ChartStatus } from "../generated/ChartStatus";
-import { BackdropCache } from "./backdrops";
+import { BackdropCache, type LayerBackdrop } from "./backdrops";
 import type { BrushShape } from "../generated/BrushShape";
 import type { CaptureMode } from "../generated/CaptureMode";
 import type { CaptureRequest } from "../generated/CaptureRequest";
@@ -112,6 +112,8 @@ import { showsHoverIndicator, showsMagnifier } from "./hover";
 import { KIND_LABELS, KINDS, type FieldKindName, kindOf } from "../kind";
 import { trackKeyframes } from "./macroTrack";
 import { legendKnots } from "./legend";
+import { SST_MAX_C, SST_MIN_C, formatTemperature, legendTemperature, sstGradientStops } from "./sstRamp";
+import type { TemperatureUnit } from "../generated/TemperatureUnit";
 import { rampColour, rampCss, rampStops } from "./ramp";
 import { parseBasemap } from "./format";
 import { marqueeBounds } from "./marquee";
@@ -208,6 +210,11 @@ interface Readout {
   defined: boolean;
   /** The kind of the layer that wins the cell. */
   kind: FieldKindName;
+  /**
+   * The sea-surface temperature here, °C (M93): null where no visible SST
+   * layer has a value, undefined when none is visible and none was asked for.
+   */
+  temperatureC?: number | null | undefined;
 }
 
 /** What the readout shows: the sample under the cursor, and the zoom. */
@@ -374,8 +381,16 @@ function autoScaleTolerance(range: { min: number; max: number }): number {
  */
 const NUDGE_PX_CSS = 3;
 
-/** The cursor readout: position, field, zoom. */
-function MapReadout({ store, convention }: { store: ReadoutStore; convention: string }) {
+/** The cursor readout: position, field, temperature, zoom. */
+function MapReadout({
+  store,
+  convention,
+  temperatureUnit,
+}: {
+  store: ReadoutStore;
+  convention: string;
+  temperatureUnit: TemperatureUnit;
+}) {
   const units = useUnits();
   const t = useT();
   const { sample, zoomPercent } = useSyncExternalStore(store.subscribe, store.get);
@@ -396,6 +411,12 @@ function MapReadout({ store, convention }: { store: ReadoutStore; convention: st
           ) : (
             <span className="muted">{t("no field")}</span>
           )}
+          {sample.temperatureC !== undefined &&
+            (sample.temperatureC === null ? (
+              <span className="muted">{t("no temperature")}</span>
+            ) : (
+              <span>{formatTemperature(sample.temperatureC, temperatureUnit)}</span>
+            ))}
           <span className="muted">{zoomPercent}%</span>
         </>
       ) : (
@@ -948,7 +969,16 @@ export default function MapView({
   /** The chart directory's token, or 0 when none is chosen. */
   const chartTokenRef = useRef(0);
   /** The visible GIS layers, bottom of the stack first (spec.md 4.11). */
-  const gisLayersRef = useRef<{ layer: number; token: number }[]>([]);
+  const gisLayersRef = useRef<LayerBackdrop[]>([]);
+  /**
+   * The visible sea-surface temperature layers (spec.md 4.10, M93), bottom
+   * of the stack first, with each step's tile token. The token for the step
+   * on screen is picked at the draw, so playback needs no re-read.
+   */
+  const sstLayersRef = useRef<{ layer: number; stack: number; tokens: ReadonlyArray<number | null> }[]>([]);
+  /** Whether one is visible: the legend shows the temperature ramp and the readout asks for it. */
+  const [sstShown, setSstShown] = useState(false);
+  const sstShownRef = useRef(false);
   /** What the chart directory holds, so the checkbox can say. */
   const [chartStatus, setChartStatus] = useState<ChartStatus | null>(null);
 
@@ -1400,6 +1430,9 @@ export default function MapView({
       ? recording.kinds.map(kindOf)
       : project.kinds_present.map(kindOf);
   const autoScale = settings?.auto_scale ?? false;
+  const temperatureUnit: TemperatureUnit = settings?.temperature_unit ?? "celsius";
+  // A macro preview shows the field on the basemap alone, so no temperature.
+  const showSstLegend = sstShown && !previewing;
   const [seenRanges, setSeenRanges] = useState<Record<FieldKindName, SeenRange>>({
     wind: null,
     current: null,
@@ -1727,6 +1760,11 @@ export default function MapView({
                 : undefined,
               osm: showOsmRef.current,
               gis: gisLayersRef.current,
+              // A step whose token is null shows nothing for that layer.
+              sst: sstLayersRef.current.flatMap(({ layer, stack, tokens }) => {
+                const token = tokens[stepRef.current];
+                return token === null || token === undefined ? [] : [{ layer, stack, token }];
+              }),
             },
             viewTiles,
           ) ?? []),
@@ -2305,9 +2343,17 @@ export default function MapView({
         // A GIS layer is drawn under the field like a picture, but as tiles
         // on the map's own grid rather than as one placed image: a survey
         // may span the world, and its tiles follow the projection.
-        gisLayersRef.current = tree.layers
-          .filter((layer) => layer.visible && layer.gis?.loaded)
-          .map((layer) => ({ layer: layer.id, token: projectRef.current.revision }));
+        gisLayersRef.current = tree.layers.flatMap((layer, stack) =>
+          layer.visible && layer.gis?.loaded
+            ? [{ layer: layer.id, token: projectRef.current.revision, stack }]
+            : [],
+        );
+        // A temperature layer is drawn the same way, a day's tiles at a time.
+        sstLayersRef.current = tree.layers.flatMap((layer, stack) =>
+          layer.visible && layer.sst ? [{ layer: layer.id, stack, tokens: layer.sst.tokens }] : [],
+        );
+        sstShownRef.current = sstLayersRef.current.length > 0;
+        setSstShown(sstShownRef.current);
         imageLayersRef.current = tree.layers
           .filter((layer) => layer.visible)
           .flatMap((layer) => (layer.image ? [{ ...layer.image,
@@ -5519,12 +5565,23 @@ export default function MapView({
     }
     state.inFlight = true;
     const store = readoutStore.current;
-    void api
-      // Read from the refs rather than the closure: a queued request runs from
-      // an earlier pointer report's promise, after the step may have moved.
-      // The composite the map shows, whichever kind wins the cell (M31).
-      .sampleField(geo.lon, geo.lat, stepRef.current, null)
-      .then((sample) =>
+    // The temperature rides in the same request (M93): one stream, so the
+    // readout never shows a temperature from one position beside a field
+    // from another. Asked only while a temperature layer is visible, and a
+    // refusal of it leaves the field's numbers standing.
+    const step = stepRef.current;
+    const temperature: Promise<number | null | undefined> = sstShownRef.current
+      ? api.sampleTemperature(step, geo.lon, geo.lat).catch(() => null)
+      : Promise.resolve(undefined);
+    void Promise.all([
+      api
+        // Read from the refs rather than the closure: a queued request runs from
+        // an earlier pointer report's promise, after the step may have moved.
+        // The composite the map shows, whichever kind wins the cell (M31).
+        .sampleField(geo.lon, geo.lat, step, null),
+      temperature,
+    ])
+      .then(([sample, temperatureC]) =>
         store?.set({
           sample: {
             lon: geo.lon,
@@ -5537,6 +5594,7 @@ export default function MapView({
             azimuthTowardDeg: sample.azimuth_toward_deg,
             defined: sample.defined,
             kind: kindOf(sample.kind),
+            temperatureC,
           },
         }),
       )
@@ -5575,7 +5633,7 @@ export default function MapView({
     // `sampleAt` is rebuilt every render and reads the rest from refs; the
     // step, and whether anyone is reading the number, are what this watches.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step, showReadout, eyedropper]);
+  }, [step, showReadout, eyedropper, sstShown]);
 
   /**
    * Commits a finished gesture.
@@ -7112,7 +7170,7 @@ export default function MapView({
           viewSlot,
         )}
 
-      {showLegend && kindsShown.length > 0 && (
+      {showLegend && (kindsShown.length > 0 || showSstLegend) && (
         <div className="map-legend">
           {kindsShown.map((kind) => (
             <div key={kind} className="legend-row">
@@ -7148,11 +7206,34 @@ export default function MapView({
               </div>
             </div>
           ))}
+          {/*
+            The temperature layer's ramp (M93): fixed, and the same stops the
+            backend colours its tiles with (`sstRamp.ts`).
+          */}
+          {showSstLegend && (
+            <div className="legend-row">
+              <div className="legend-kind">
+                <span>{t("Sea-surface temperature")}</span>
+              </div>
+              <div
+                className="legend-bar"
+                style={{ background: `linear-gradient(to right, ${sstGradientStops().join(", ")})` }}
+              />
+              <div className="legend-labels">
+                <span>{legendTemperature(SST_MIN_C, temperatureUnit)}</span>
+                <span>{legendTemperature(SST_MAX_C, temperatureUnit)}</span>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
       {showReadout && (
-        <MapReadout store={readoutStore.current} convention={project.direction_convention} />
+        <MapReadout
+          store={readoutStore.current}
+          convention={project.direction_convention}
+          temperatureUnit={temperatureUnit}
+        />
       )}
     </div>
   );

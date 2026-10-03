@@ -29,7 +29,10 @@ fn every_product_opens_and_its_newest_field_is_plausible() {
         .expect("a clock after 1970")
         .as_secs() as i64
         / 3600;
-    for product in Product::ALL.into_iter().filter(|p| *p != Product::Ccmp) {
+    for product in Product::ALL
+        .into_iter()
+        .filter(|p| *p != Product::Ccmp && !p.variable().is_scalar())
+    {
         let began = std::time::Instant::now();
         let source = product.open().expect("the product opens");
         let (first, last) = source.coverage().expect("coverage");
@@ -99,6 +102,7 @@ fn every_product_opens_and_its_newest_field_is_plausible() {
         let (ceiling, typical) = match product.variable() {
             Variable::Wind10m => (80.0, 2.0..15.0),
             Variable::SurfaceCurrent => (5.0, 0.02..1.0),
+            Variable::SeaSurfaceTemperature => unreachable!("filtered out above"),
         };
         assert!(fastest < ceiling, "{fastest} m/s");
         assert!(typical.contains(&mean), "mean {mean} m/s");
@@ -185,4 +189,43 @@ fn ccmp_opens_and_its_newest_field_is_plausible() {
     assert!((0.8..0.92).contains(&fraction), "{fraction}");
     assert!((2.0..15.0).contains(&mean), "{mean}");
     assert!(field.u[0].is_nan(), "nothing at the north pole");
+}
+
+/// The three SST products: each opens, its newest day is within a few days,
+/// and its field is a sea temperature — defined over most of the ocean,
+/// between the freezing point of sea water and the warmest tropical sea.
+#[test]
+#[ignore = "reaches the network; set VE_TEST_NRT=1"]
+fn every_sst_product_opens_and_its_newest_day_is_a_sea() {
+    if std::env::var("VE_TEST_NRT").is_err() {
+        println!("VE_TEST_NRT is not set; nothing fetched");
+        return;
+    }
+    for product in [Product::Oisst, Product::GeoPolar, Product::Ostia] {
+        let began = std::time::Instant::now();
+        let source = product.open().expect("opens");
+        let (first, last) = source.coverage().expect("coverage");
+        assert_eq!(last.hour, 0, "a day is filed under its midnight");
+        let step = source.step_at(last).expect("the newest day");
+        let field = &source.read_step(&step).expect("the newest field")[0];
+        assert_eq!(field.variable, Variable::SeaSurfaceTemperature);
+        assert!(field.v.is_empty(), "a scalar has no second component");
+        let defined: Vec<f32> = field.u.iter().copied().filter(|t| t.is_finite()).collect();
+        let fraction = defined.len() as f64 / field.u.len() as f64;
+        let mean = defined.iter().sum::<f32>() / defined.len() as f32;
+        let (coldest, warmest) = defined
+            .iter()
+            .fold((f32::MAX, f32::MIN), |(lo, hi), t| (lo.min(*t), hi.max(*t)));
+        println!(
+            "{}: {} to {}, {:.0} % defined, mean {mean:.1} °C, {coldest:.1} to {warmest:.1}, in {:.1} s",
+            product.id(),
+            first.to_iso(),
+            last.to_iso(),
+            fraction * 100.0,
+            began.elapsed().as_secs_f64()
+        );
+        assert!((0.5..0.85).contains(&fraction), "{fraction}");
+        assert!((10.0..22.0).contains(&mean), "{mean}");
+        assert!(coldest > -3.0 && warmest < 36.0, "{coldest}..{warmest}");
+    }
 }

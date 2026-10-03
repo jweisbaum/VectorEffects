@@ -32,6 +32,16 @@ pub enum Variable {
     Wind10m,
     /// Total surface current, u and v.
     SurfaceCurrent,
+    /// Sea-surface temperature in degrees Celsius: a scalar, carried in a
+    /// field's `u` with `v` empty (spec.md 4.10, M93).
+    SeaSurfaceTemperature,
+}
+
+impl Variable {
+    /// Whether the field is one value per point rather than two.
+    pub fn is_scalar(self) -> bool {
+        self == Self::SeaSurfaceTemperature
+    }
 }
 
 /// A vector field for one step, on the common grid. NaN marks a missing

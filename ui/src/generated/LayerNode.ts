@@ -4,6 +4,7 @@ import type { GribLayerInfo } from "./GribLayerInfo";
 import type { ImageLayerView } from "./ImageLayerView";
 import type { LayerSpeedFilter } from "./LayerSpeedFilter";
 import type { ObjectNode } from "./ObjectNode";
+import type { SstLayerView } from "./SstLayerView";
 
 /**
  * One layer, with its objects in z-order.
@@ -45,6 +46,11 @@ image: ImageLayerView | null,
  * The vector file beneath everything, for a GIS layer (spec.md 4.11).
  */
 gis: GisLayerView | null,
+/**
+ * The days of sea-surface temperature, for an SST layer (spec.md 4.10,
+ * M93).
+ */
+sst: SstLayerView | null,
 /**
  * What the layer is (M29): `"painted"`, `"raster"` for an imported GRIB,
  * `"image"` for a picture, `"zarr"` for hours fetched from a history

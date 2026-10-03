@@ -758,7 +758,16 @@ fn encode_hour(
 ) -> Result<Vec<u8>> {
     let mut bytes = Vec::new();
     for field in fields {
-        for (parameter, values) in components(field) {
+        // A temperature is written as GRIB states one, in kelvin; a missing
+        // point stays missing (NaN), which the bitmap carries.
+        let kelvin: Vec<f32>;
+        let messages: Vec<(Parameter, &[f32])> = if field.variable.is_scalar() {
+            kelvin = field.u.iter().map(|c| c + 273.15).collect();
+            vec![(Parameter::WaterTemperature, kelvin.as_slice())]
+        } else {
+            components(field).to_vec()
+        };
+        for (parameter, values) in messages {
             let spec = MessageSpec {
                 parameter,
                 grid,
@@ -783,7 +792,7 @@ fn components(field: &Field) -> [(Parameter, &[f32]); 2] {
             (Parameter::WindU, field.u.as_slice()),
             (Parameter::WindV, field.v.as_slice()),
         ],
-        Variable::SurfaceCurrent => [
+        Variable::SurfaceCurrent | Variable::SeaSurfaceTemperature => [
             (Parameter::CurrentU, field.u.as_slice()),
             (Parameter::CurrentV, field.v.as_slice()),
         ],
@@ -817,6 +826,37 @@ pub(crate) fn fetched_layer(
     period_hours: u32,
 ) -> Result<Layer> {
     let imported = ve_grib::import::read_file(path, None)?;
+    fetched_from(origin, path, range, period_hours, imported)
+}
+
+/// An SST layer read back from the file its days were written to (spec.md
+/// 4.10, M93): display only, holding each day for its period.
+pub(crate) fn temperature_layer(
+    origin: &Origin<'_>,
+    path: &Path,
+    range: (i64, i64),
+    period_hours: u32,
+) -> Result<Layer> {
+    let sequence = ve_grib::import::read_temperature_file(path)?;
+    let mut layer = Layer::new(origin.label);
+    layer.source = ve_core::document::LayerSource::Sst {
+        path: path.to_path_buf(),
+        product: origin.id.to_owned(),
+        start_unix_s: range.0,
+        end_unix_s: range.1,
+        period_hours,
+    };
+    layer.temperature = Some(Arc::new(sequence));
+    Ok(layer)
+}
+
+fn fetched_from(
+    origin: &Origin<'_>,
+    path: &Path,
+    range: (i64, i64),
+    period_hours: u32,
+    imported: ve_grib::import::Imported,
+) -> Result<Layer> {
     for skipped in &imported.skipped {
         tracing::warn!(
             path = %path.display(),

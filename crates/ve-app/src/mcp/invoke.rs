@@ -98,6 +98,7 @@ pub const EXCLUDED: &[&str] = &[
     "export_grib",
     "export_zarr",
     "import_history",
+    // The curated `import_nrt` carries it, with its progress.
     "import_nrt",
     // The interface language takes the handle to relabel the native menu,
     // and is a person's reading preference that the webview holds too: a
@@ -148,6 +149,8 @@ pub const TABLE: &[(&str, Handler)] = &[
     command!(set_layer_parameter, crate::document::set_layer_parameter, { layer: u64, parameter: String }),
     command!(set_layer_speed_range, crate::document::set_layer_speed_range, { layer: u64, min_mps: Option<f32>, max_mps: Option<f32>, gesture: Option<String> }),
     command!(align_layer, crate::document::align_layer, { layer: u64 }),
+    command!(sample_temperature, crate::sst::sample_temperature, { step: u32, lon: f64, lat: f64 }),
+    command!(set_temperature_unit, crate::settings::set_temperature_unit, { temperature_unit: crate::settings::TemperatureUnit }),
     command!(set_layer_locked, crate::document::set_layer_locked, { layer: u64, locked: bool }),
     command!(move_layer, crate::document::move_layer, { from: usize, to: usize }),
     command!(rename_object, crate::document::rename_object, { object: u64, name: String }),

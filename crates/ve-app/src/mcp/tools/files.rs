@@ -53,6 +53,21 @@ pub struct HistoryParams {
     pub set_start_time: Option<bool>,
 }
 #[derive(Debug, Deserialize, JsonSchema)]
+pub struct NrtParams {
+    /// Product ids from nrt_products: "multiobs", "duacs", "wind-l4",
+    /// "ascat", "ccmp", "oisst", "geopolar", "ostia". Each becomes a layer.
+    pub products: Vec<String>,
+    /// How many days back from today (UTC) the period starts; it runs to the
+    /// current hour. At most what 240 steps of the project's step hold: nine
+    /// days hourly, twenty-nine at 3 h.
+    pub days: u32,
+    /// Set the timeline's start to the period's start. Default true.
+    pub set_start_time: Option<bool>,
+    /// Lengthen the timeline to hold the period. Default true; it never
+    /// shortens one.
+    pub extend_timeline: Option<bool>,
+}
+#[derive(Debug, Deserialize, JsonSchema)]
 pub struct ExportParams {
     /// Where to write: an absolute path, or one beginning with `~/`. A
     /// relative path is refused, since it would land in the application's
@@ -173,6 +188,61 @@ impl<R: tauri::Runtime> VectorEffects<R> {
         })
         .await
         .map(Json)
+    }
+
+    #[tool(
+        description = "Today's date, and the NEAR-REAL-TIME products import_nrt fetches: the last few days of observed wind (Copernicus L4, ASCAT, CCMP), ocean current (MULTIOBS, DUACS) and sea-surface temperature (OISST, Geo-Polar Blended, OSTIA), with each one's id, field and period. Answers at once; does not reach the network. Every product trails the present by about a day."
+    )]
+    async fn nrt_products(&self) -> std::result::Result<Json<crate::nrt::NrtProducts>, ToolError> {
+        self.run("nrt_products", |_| Ok(crate::nrt::products()))
+            .await
+            .map(Json)
+    }
+
+    #[tool(
+        description = "Downloads the LAST FEW DAYS of observed weather, up to now, into the open VectorEffects project: one layer per product (ids from nrt_products). For 'the last N days', 'recent' or 'current conditions'; for a range of past dates use import_history instead. Needs an open project; by default it sets step 0 to midnight UTC N days ago and lengthens the timeline to the current hour. A product that cannot be fetched is named in `skipped` and the others still arrive. Sea-surface temperature layers are display only. Takes from seconds to several minutes and reports progress."
+    )]
+    async fn import_nrt(
+        &self,
+        Parameters(p): Parameters<NrtParams>,
+        ctx: rmcp::service::RequestContext<rmcp::RoleServer>,
+    ) -> std::result::Result<Json<crate::nrt::NrtOutcome>, ToolError> {
+        if p.products.is_empty() {
+            return Err(ToolError::Refused(
+                "products is empty: name at least one id from nrt_products".to_owned(),
+            ));
+        }
+        if let Some(unknown) = p
+            .products
+            .iter()
+            .find(|id| ve_zarr::Product::parse(id).is_none())
+        {
+            return Err(ToolError::Refused(format!(
+                "{unknown:?} is not a product; nrt_products lists them"
+            )));
+        }
+        let request = crate::nrt::NrtRequest {
+            products: p.products,
+            days: p.days,
+            set_start_time: p.set_start_time.unwrap_or(true),
+            extend_timeline: p.extend_timeline.unwrap_or(true),
+        };
+        let relay =
+            self.relay_progress::<crate::history::HistoryProgress>("nrt://progress", ctx, |h| {
+                (
+                    f64::from(h.done),
+                    Some(f64::from(h.total)),
+                    Some(h.archive.clone()),
+                )
+            });
+        let out = self
+            .write("import_nrt", false, move |app| {
+                let outcome = crate::nrt::import_nrt(app.clone(), request)?;
+                Ok(outcome)
+            })
+            .await;
+        relay.stop();
+        out.map(Json)
     }
 
     #[tool(

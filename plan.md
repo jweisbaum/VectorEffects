@@ -3662,6 +3662,48 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M94 — The near-real-time import for an agent
+
+The ninth milestone of the import's design (6–8, the HDF5 reader, Blended
+Seawinds and CMC, were set aside by the user on 2026-10-03). Two MCP tools:
+`nrt_products`, which lists the eight products with their field, period and
+credit and the present moment, without reaching the network; and
+`import_nrt`, which takes product ids and a number of days and relays the
+import's progress. The guide tells an agent that "the last few days" is
+`import_nrt`, not `import_history`. `tests/mcp.rs` drives both over HTTP;
+the import itself is not run there, since it reaches the network.
+
+### M93 — Sea-surface temperature, drawn under the field
+
+The fifth milestone of the near-real-time import: OISST, Geo-Polar Blended
+and OSTIA, as a display-only layer. `ve_grib` gained a water-temperature
+parameter and `read_temperature_file`; `ve_zarr` a scalar variable, a daily
+filing of noon-stamped days, a server-side stride for ERDDAP, and a named
+store for Copernicus (OSTIA's `downsampled4`). `LayerSource::Sst` is display
+only and its days live in `Layer::temperature`, apart from `raster`, so
+nothing that evaluates a field can find them. `ve_app::sst` paints the
+tiles, serves the readout and gives the timeline a day token per step; a
+temperature unit joined the settings.
+
+**Decided here.** 0.25° rather than the design's 0.1°: OISST's own
+resolution, one lattice for every layer, and a quarter of the file; the
+choice is the user's to reverse. The colour ramp is fixed (−2 to 32 °C) so
+a colour means one temperature everywhere.
+
+**Found live:** OSTIA's 0.2° axis is not exactly representable in `f32`, so
+the grid check passed and the regridder's assertion panicked — the edge the
+ASCAT review predicted. A circle-spanning grid's spacing is now exactly
+360/n.
+
+**Measured, 2026-10-03:** OISST opens and reads a day in about 5 s,
+Geo-Polar in 4–57 s (the server varies), OSTIA in 3.5 s; the three agree —
+mean 14.3–14.4 °C, −2 to 35 °C, 67–68 % of the globe defined.
+
+**Also in this commit, from the M92 review:** the NetCDF-3 reader bounds
+every size the header states (a corrupt or streaming record count was an
+allocation the size of the number), its record-variable path is tested, and
+the ERDDAP client gives a server ten seconds to connect.
+
 ### M92 — CCMP, and a reader for NOAA's data servers
 
 The fourth milestone of the near-real-time import. `ve_zarr::netcdf3` reads

@@ -89,7 +89,7 @@ it("prepares while paused, publishes only drawn steps, and maintains the selecte
 it("toggles shape editing per object and uses the shape track to add keys", async () => {
   const project = { revision: 8, step_count: 10, step_hours: 1, start_unix_s: null } as ProjectSummary;
   backend.tree.mockResolvedValue({ layers: [{ id: 1, name: "Layer", visible: true, locked: false,
-    source: "painted", parameter: "wind", grib: null, image: null, gis: null,
+    source: "painted", parameter: "wind", grib: null, image: null, gis: null, sst: null,
     objects: [{ id: 2, name: "Front", tool: "shape_fill", tool_label: "Shape", active_here: true, start_step: 0, end_step: 9 }],
   }] });
   backend.tracks.mockResolvedValue({ object: 2, name: "Front", start_step: 0, end_step: 9,
@@ -136,7 +136,7 @@ it("toggles shape editing per object and uses the shape track to add keys", asyn
 
 it("holds the latest released span through the write and delayed tree refresh", async () => {
   const project = { revision: 8, step_count: 10, step_hours: 1, start_unix_s: null } as ProjectSummary;
-  const layer = { id: 1, name: "Layer", visible: true, locked: false, source: "painted", parameter: "wind", grib: null, image: null, gis: null,
+  const layer = { id: 1, name: "Layer", visible: true, locked: false, source: "painted", parameter: "wind", grib: null, image: null, gis: null, sst: null,
     objects: [{ id: 2, name: "Front", tool: "shape_fill", tool_label: "Shape", active_here: true, start_step: 0, end_step: 9 }] };
   backend.tree.mockResolvedValue({ layers: [layer] });
   let written!: (project: ProjectSummary) => void;
@@ -233,7 +233,7 @@ it("holds the playhead at a measurement's floor and dims what is before it", asy
 });
 
 it.each(["macro", "patch", "liquify"])("does not offer shape animation for a %s", async (tool) => {
-  backend.tree.mockResolvedValue({ layers: [{id:1, name:"Layer", visible:true, locked:false, source:"painted", parameter:"wind", grib:null, image:null, gis:null,
+  backend.tree.mockResolvedValue({ layers: [{id:1, name:"Layer", visible:true, locked:false, source:"painted", parameter:"wind", grib:null, image:null, gis:null, sst:null,
     objects:[{id:2, name:"Capture", tool, tool_label:tool, active_here:true, start_step:0, end_step:9}]}]});
   const project = {revision: 20, step_count:10, step_hours:1, start_unix_s:null} as ProjectSummary;
   const container = document.createElement("div"); document.body.append(container); const root=createRoot(container);
@@ -283,7 +283,7 @@ it("clears old viewport readiness immediately and ignores its late reports", asy
 });
 
 it("shows relative displacement as one position-style track with shared keys", async () => {
-  backend.tree.mockResolvedValue({layers:[{id:1,name:"Layer",visible:true,locked:false,source:"painted",parameter:"wind",grib:null,image:null,gis:null,
+  backend.tree.mockResolvedValue({layers:[{id:1,name:"Layer",visible:true,locked:false,source:"painted",parameter:"wind",grib:null,image:null,gis:null,sst:null,
     objects:[{id:2,name:"Liquify 1",tool:"liquify",tool_label:"Liquify",active_here:true,start_step:0,end_step:9}]}]});
   backend.tracks.mockResolvedValue({object:2,tracks:[{
     property:"DisplacementPosition",label:"Displacement position",base:{kind:"offset",x:200,y:-100},keys:[],
@@ -317,7 +317,7 @@ it("marks a misaligned layer and offers to align it", async () => {
     speed_min_mps: null, speed_max_mps: null, speed_ceiling_mps: 9, covered_steps: steps.map((s) => s.in_file), steps, misaligned,
   });
   const layer = (id: number, name: string, misaligned: import("../generated/LayerAlignment").LayerAlignment | null) => ({
-    id, name, visible: true, locked: false, objects: [], image: null, gis: null, source: "raster", parameter: "wind", grib: grib(misaligned),
+    id, name, visible: true, locked: false, objects: [], image: null, gis: null, sst: null, source: "raster", parameter: "wind", grib: grib(misaligned),
   });
   backend.tree.mockResolvedValue({ layers: [
     layer(1, "Late", { first_valid_unix_s: 1_790_823_600, step_unix_s: 1_790_812_800, offset_hours: 3, aligned_lead: 1, lead_steps: 0, undated: false }),

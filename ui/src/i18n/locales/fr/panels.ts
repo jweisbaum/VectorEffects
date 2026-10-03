@@ -261,5 +261,11 @@ const catalogue: Record<string, string> = {
   "scatterometer 10 m wind, daily swaths, 0.25°": "vent à 10 m par diffusiomètre, fauchées quotidiennes, 0,25°",
   "ASCAT": "ASCAT",
   "10 m wind, 6-hourly, 0.25°, to 78° N and S": "vent à 10 m, toutes les 6 heures, 0,25°, jusqu’à 78° N et S",
+  "Sea-surface temperature": "Température de surface de la mer",
+  "Product": "Produit",
+  "Sea-surface temperature · {product}": "Température de surface de la mer · {product}",
+  "daily, 0.25°": "quotidienne, 0,25°",
+  "daily, read at 0.25°": "quotidienne, lue à 0,25°",
+  "daily, read at 0.2°": "quotidienne, lue à 0,2°",
 };
 export default catalogue;

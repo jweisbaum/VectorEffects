@@ -294,6 +294,15 @@ export default function SettingsDialog({
               <option value="kmh">{t("km/h — kilometres per hour")}</option>
             </select>
           </label>
+          <label className="settings-field" data-feature="settings:temperature-unit">
+            {t("Temperature")}
+            <select value={settings.temperature_unit} onChange={(e) => {
+              void api.setTemperatureUnit(e.target.value as AppSettings["temperature_unit"]).then(onSettings).catch(report);
+            }}>
+              <option value="celsius">{t("°C — degrees Celsius")}</option>
+              <option value="fahrenheit">{t("°F — degrees Fahrenheit")}</option>
+            </select>
+          </label>
         </section>
 
         <section data-feature="settings:display">

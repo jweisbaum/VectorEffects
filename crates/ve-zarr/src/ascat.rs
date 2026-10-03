@@ -60,6 +60,9 @@ pub const SPEC: ArcoSpec = ArcoSpec {
     v_path: "/northward_wind",
     level: None,
     time_path: Some("/measurement_time"),
+    // ASCAT is daily, but its days are merged in `AscatStore`, which files
+    // them under their midnights itself.
+    daily: false,
 };
 
 /// The four passes read together.

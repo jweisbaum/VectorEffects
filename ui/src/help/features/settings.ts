@@ -44,6 +44,8 @@ const features: Feature[] = [
     keywords: [msg("nautical miles"), msg("kilometres")], topic: "settings", reveal: open("units") },
   { id: "settings:speed-unit", label: msg("Speed"), description: msg("Show speeds in knots, miles per hour or kilometres per hour."),
     keywords: [msg("knots"), msg("units")], topic: "settings", reveal: open("units") },
+  { id: "settings:temperature-unit", label: msg("Temperature"), description: msg("Show sea-surface temperatures in degrees Celsius or Fahrenheit."),
+    keywords: [msg("Celsius"), msg("Fahrenheit"), msg("sea-surface temperature")], topic: "settings", reveal: open("units") },
 
   { id: "settings:display", label: msg("Display"), description: msg("Colour scales and gradients the map paints speed with."),
     keywords: [msg("colour scale"), msg("gradient"), msg("legend")], topic: "settings", reveal: open("display") },

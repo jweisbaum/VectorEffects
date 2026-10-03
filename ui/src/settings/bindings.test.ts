@@ -20,6 +20,7 @@ const settings: AppSettings = {
   autosave: "recovery",
   distance_unit: "km",
   speed_unit: "kt",
+  temperature_unit: "celsius",
   default_wind_scale_knots: 60,
   default_current_scale_knots: 6,
   macro_directory: "",

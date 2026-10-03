@@ -509,6 +509,55 @@ pub fn read_messages_reporting(
     Ok((decoded.messages, decoded.skipped))
 }
 
+/// Whether a message is sea-surface temperature (discipline 10, category 3,
+/// number 0) on a regular lat/lon grid.
+fn is_water_temperature(header: &Header) -> bool {
+    header.discipline == 10
+        && header.category == 3
+        && header.number == 0
+        && matches!(header.grid, Grid::LatLon(_))
+}
+
+/// Reads a file of sea-surface temperature (spec.md 4.10, M93) into one
+/// sequence, in degrees Celsius.
+///
+/// A scalar rides in the vector raster's two slots, the same value in each,
+/// so the lattice, its sampler and its hash are the ones every field already
+/// uses; a layer of it is display only and never reaches a scene, so nothing
+/// reads the second slot as a component. GRIB states the temperature in
+/// kelvin; it leaves here in Celsius.
+pub fn read_temperature_file(path: &Path) -> Result<RasterSequence> {
+    let bytes = std::fs::read(path)?;
+    let decoded = decode::read_reporting(&bytes, is_water_temperature, &|_, _| {})?;
+    let mut frames = Vec::new();
+    let mut first_time = None;
+    let mut times: BTreeMap<i64, Message> = BTreeMap::new();
+    for message in decoded.messages {
+        times.insert(message.header.valid_unix_s(), message);
+    }
+    for (time, mut message) in times {
+        for value in &mut message.values {
+            if *value != MISSING {
+                *value -= 273.15;
+            }
+        }
+        let grid = raster_of(&message, &message, None).map_err(GribError::Malformed)?;
+        let first = *first_time.get_or_insert(time);
+        frames.push(RasterFrame {
+            offset_hours: (time - first) as f64 / 3600.0,
+            valid_unix_s: time,
+            grid: Arc::new(grid),
+        });
+    }
+    if frames.is_empty() {
+        return Err(GribError::NoVectorField(
+            "the file holds no sea-surface temperature (discipline 10, category 3, number 0)"
+                .to_owned(),
+        ));
+    }
+    RasterSequence::new(FieldKind::Current, frames).map_err(GribError::Malformed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -48,6 +48,11 @@ pub fn dataset_href(product_json: &str, dataset_id: &str) -> Result<String> {
         .filter_map(|link| link["href"].as_str())
         .filter_map(|href| {
             let directory = href.strip_suffix(DATASET_DOCUMENT)?.strip_suffix('/')?;
+            // A dataset that has never been reissued has no version suffix
+            // at all: OSTIA's directory is its identifier, and nothing more.
+            if directory == dataset_id {
+                return Some((String::new(), href.to_owned()));
+            }
             let version = directory.strip_prefix(dataset_id)?.strip_prefix('_')?;
             let digits = !version.is_empty() && version.bytes().all(|b| b.is_ascii_digit());
             digits.then(|| (version.to_owned(), href.to_owned()))
@@ -68,15 +73,20 @@ pub fn dataset_href(product_json: &str, dataset_id: &str) -> Result<String> {
 /// Time-chunked rather than geo-chunked: one chunk row per time, which is
 /// the shape a few days of a whole field is read in.
 pub fn time_chunked_url(dataset_json: &str) -> Result<String> {
+    asset_url(dataset_json, "timeChunked")
+}
+
+/// Where one of a dataset's stores is: `timeChunked`, or a lighter copy such
+/// as `downsampled4`, which OSTIA publishes at a fifth of a degree beside its
+/// twentieth (spec.md 4.10, M93).
+pub fn asset_url(dataset_json: &str, asset: &str) -> Result<String> {
     let dataset = document(dataset_json, "the dataset's catalogue entry")?;
-    let href = dataset["assets"]["timeChunked"]["href"]
-        .as_str()
-        .ok_or_else(|| {
-            ZarrError::Open(format!(
-                "{} has no time-chunked store listed",
-                dataset["id"].as_str().unwrap_or("the dataset")
-            ))
-        })?;
+    let href = dataset["assets"][asset]["href"].as_str().ok_or_else(|| {
+        ZarrError::Open(format!(
+            "{} has no {asset} store listed",
+            dataset["id"].as_str().unwrap_or("the dataset")
+        ))
+    })?;
     let host = url::Url::parse(href)
         .ok()
         .and_then(|url| url.host_str().map(str::to_owned))
@@ -92,10 +102,15 @@ pub fn time_chunked_url(dataset_json: &str) -> Result<String> {
 
 /// Looks a dataset's store up in the live catalogue: two small documents.
 pub fn discover(product_id: &str, dataset_id: &str) -> Result<String> {
+    discover_asset(product_id, dataset_id, "timeChunked")
+}
+
+/// [`discover`], for a named store of the dataset.
+pub fn discover_asset(product_id: &str, dataset_id: &str, asset: &str) -> Result<String> {
     let product = crate::http::get_text(&format!("{CATALOGUE}/{product_id}/product.stac.json"))?;
     let href = dataset_href(&product, dataset_id)?;
     let dataset = crate::http::get_text(&format!("{CATALOGUE}/{product_id}/{href}"))?;
-    time_chunked_url(&dataset)
+    asset_url(&dataset, asset)
 }
 
 #[cfg(test)]
@@ -168,6 +183,28 @@ mod tests {
             dataset_href(&reissued, "cmems_obs-wind_glo_phy_nrt_l4_0.125deg_PT1H").unwrap(),
             "cmems_obs-wind_glo_phy_nrt_l4_0.125deg_PT1H_202609/dataset.stac.json"
         );
+    }
+
+    /// OSTIA has never been reissued, so its directory is its identifier;
+    /// and its light copy is asked for by name.
+    #[test]
+    fn an_unversioned_dataset_and_a_named_store_are_found() {
+        let product = r#"{"id": "SST_GLO_SST_L4_NRT_OBSERVATIONS_010_001", "links": [
+            {"rel": "item", "href": "METOFFICE-GLO-SST-L4-NRT-OBS-SST-V2/dataset.stac.json"}]}"#;
+        assert_eq!(
+            dataset_href(product, "METOFFICE-GLO-SST-L4-NRT-OBS-SST-V2").unwrap(),
+            "METOFFICE-GLO-SST-L4-NRT-OBS-SST-V2/dataset.stac.json"
+        );
+        assert!(dataset_href(product, "METOFFICE-GLO-SST").is_err());
+        let dataset = r#"{"id": "x", "assets": {
+            "timeChunked": {"href": "https://s3.waw3-1.cloudferro.com/mdl-arco-time-045/a/timeChunked.zarr"},
+            "downsampled4": {"href": "https://s3.waw3-1.cloudferro.com/mdl-arco-time-045/a/downsampled4.zarr"}}}"#;
+        assert!(
+            asset_url(dataset, "downsampled4")
+                .unwrap()
+                .ends_with("downsampled4.zarr")
+        );
+        assert!(asset_url(dataset, "downsampled8").is_err());
     }
 
     #[test]

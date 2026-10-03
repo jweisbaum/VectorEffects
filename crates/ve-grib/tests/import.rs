@@ -169,3 +169,61 @@ fn junk_between_messages_is_skipped_and_junk_alone_is_refused() {
     assert_eq!(decode::read_all(&bytes).unwrap().messages.len(), 2);
     assert!(decode::read_all(b"not a grib at all").is_err());
 }
+
+/// Sea-surface temperature written as GRIB states it — kelvin, missing over
+/// land through the bitmap — reads back in Celsius, one frame per time, with
+/// the land still missing (spec.md 4.10, M93).
+#[test]
+fn water_temperature_reads_back_in_celsius() {
+    use ve_grib::writer::{GridSpec, MessageSpec, Parameter, ReferenceTime, message_masked};
+    let grid = GridSpec {
+        ni: 4,
+        nj: 3,
+        micro_degrees: 90_000_000,
+    };
+    let message = |forecast_hour: u32, celsius: f32| {
+        let mut values = vec![celsius + 273.15; 12];
+        values[5] = f32::NAN;
+        message_masked(
+            &MessageSpec {
+                parameter: Parameter::WaterTemperature,
+                grid,
+                reference_time: ReferenceTime {
+                    year: 2026,
+                    month: 10,
+                    day: 1,
+                    hour: 0,
+                    minute: 0,
+                    second: 0,
+                },
+                forecast_hour,
+                centre: 255,
+                bits: 16,
+            },
+            &values,
+        )
+        .expect("encode")
+    };
+    let dir = std::env::temp_dir().join(format!("ve-sst-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("dir");
+    let path = dir.join("sst.grib2");
+    let mut bytes = message(0, 18.5);
+    bytes.extend(message(24, 19.25));
+    std::fs::write(&path, bytes).expect("write");
+
+    let sequence = ve_grib::import::read_temperature_file(&path).expect("read");
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(sequence.frames.len(), 2);
+    assert_eq!(sequence.frames[1].offset_hours, 24.0);
+    let celsius = |frame: usize, node: usize| sequence.frames[frame].grid.uv[node][0];
+    // Sixteen bits over a 0.75 K span is far finer than a hundredth.
+    assert!((celsius(0, 0) - 18.5).abs() < 0.01, "{}", celsius(0, 0));
+    assert!((celsius(1, 0) - 19.25).abs() < 0.01, "{}", celsius(1, 0));
+    assert_eq!(
+        celsius(0, 5),
+        ve_core::raster::MISSING,
+        "land stays missing"
+    );
+    // And a wind or current import finds nothing in it.
+    assert!(ve_grib::import::read_file(&path, None).is_err());
+}

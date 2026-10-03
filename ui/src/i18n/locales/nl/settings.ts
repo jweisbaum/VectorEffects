@@ -252,5 +252,12 @@ const catalogue: Record<string, string> = {
   "Write the MCP service into an AI client’s own configuration.": "Schrijft de MCP-dienst in de eigen configuratie van een AI-client.",
   "connect": "verbinden",
   "install": "installeren",
+  "Temperature": "Temperatuur",
+  "Show sea-surface temperatures in degrees Celsius or Fahrenheit.": "Toont zeeoppervlaktetemperaturen in graden Celsius of Fahrenheit.",
+  "Celsius": "Celsius",
+  "Fahrenheit": "Fahrenheit",
+  "sea-surface temperature": "zeeoppervlaktetemperatuur",
+  "°C — degrees Celsius": "°C — graden Celsius",
+  "°F — degrees Fahrenheit": "°F — graden Fahrenheit",
 };
 export default catalogue;

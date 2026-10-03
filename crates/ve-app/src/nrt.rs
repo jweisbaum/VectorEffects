@@ -33,6 +33,7 @@ use crate::commands::AppState;
 use crate::error::{AppError, Context, Result};
 use crate::history::{
     HistoryProgress, MAX_FETCHED_STEPS, Origin, fetch_source_to_file, fetched_layer,
+    temperature_layer,
 };
 use crate::projects::{ProjectSummary, with_session};
 
@@ -55,7 +56,7 @@ pub struct NrtRequest {
 }
 
 /// A product that was asked for and did not arrive.
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, TS, schemars::JsonSchema)]
 #[ts(export, export_to = "NrtSkipped.ts")]
 pub struct NrtSkipped {
     /// The product, as its layer would have been called.
@@ -65,13 +66,61 @@ pub struct NrtSkipped {
 }
 
 /// What an import did.
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, TS, schemars::JsonSchema)]
 #[ts(export, export_to = "NrtOutcome.ts")]
 pub struct NrtOutcome {
     /// The project, with the layers that arrived.
     pub project: ProjectSummary,
     /// The products that did not.
     pub skipped: Vec<NrtSkipped>,
+}
+
+/// What a client is told about the products, without reaching the network.
+#[derive(Debug, Clone, Serialize, schemars::JsonSchema)]
+pub struct NrtProducts {
+    /// The present moment, ISO 8601 UTC. "The last N days" counts back from
+    /// here, and a model's own sense of the date is its training's.
+    pub now: String,
+    /// What can be fetched.
+    pub products: Vec<NrtProduct>,
+}
+
+/// One product of [`NrtProducts`].
+#[derive(Debug, Clone, Serialize, schemars::JsonSchema)]
+pub struct NrtProduct {
+    /// What `import_nrt` calls it.
+    pub id: String,
+    /// What its layer is called.
+    pub label: String,
+    /// "wind", "current" or "sst". An SST layer is display only: it is drawn
+    /// and never exported.
+    pub field: String,
+    /// How long each of its times stands for, in hours.
+    pub period_hours: u32,
+    /// The credit its publisher asks to be shown.
+    pub credit: String,
+}
+
+/// The products, as [`NrtProducts`].
+pub fn products() -> NrtProducts {
+    NrtProducts {
+        now: chrono::Utc::now().format("%Y-%m-%dT%H:%MZ").to_string(),
+        products: Product::ALL
+            .into_iter()
+            .map(|product| NrtProduct {
+                id: product.id().to_owned(),
+                label: product.label().to_owned(),
+                field: match product.variable() {
+                    ve_zarr::Variable::Wind10m => "wind",
+                    ve_zarr::Variable::SurfaceCurrent => "current",
+                    ve_zarr::Variable::SeaSurfaceTemperature => "sst",
+                }
+                .to_owned(),
+                period_hours: product.period_hours(),
+                credit: product.credit().to_owned(),
+            })
+            .collect(),
+    }
 }
 
 /// The span an import covers and what the timeline needs to show it.
@@ -255,7 +304,13 @@ pub fn nrt_import(
                     },
                 )
             })
-            .and_then(|path| fetched_layer(&origin, &path, range, product.period_hours()));
+            .and_then(|path| {
+                if product.variable().is_scalar() {
+                    temperature_layer(&origin, &path, range, product.period_hours())
+                } else {
+                    fetched_layer(&origin, &path, range, product.period_hours())
+                }
+            });
         done += times.len() as u32;
         match fetched {
             Ok(layer) => layers.push(layer),

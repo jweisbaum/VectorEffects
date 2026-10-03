@@ -39,7 +39,7 @@ export const MAX_STEPS = 240;
 export const DEFAULT_DAYS = 3;
 
 /** Which field a product is part of, and so which heading it is listed under. */
-export type NrtGroup = "current" | "wind";
+export type NrtGroup = "current" | "wind" | "sst";
 
 /** A product an import can fetch, as `ve_zarr::Product::id` spells it. */
 export interface NrtProduct {
@@ -103,12 +103,49 @@ export const NRT_PRODUCTS: readonly NrtProduct[] = [
     periodHours: 6,
     megabytesPerTime: 3.7,
   },
+  // Sea-surface temperature (M93): display only, one value per point rather
+  // than two components, so about half a vector product's size per time.
+  {
+    id: "oisst",
+    group: "sst",
+    label: "NOAA OISST",
+    detail: msg("daily, 0.25°"),
+    periodHours: 24,
+    megabytesPerTime: 1.9,
+  },
+  {
+    id: "geopolar",
+    group: "sst",
+    label: "NOAA Geo-Polar Blended",
+    detail: msg("daily, read at 0.25°"),
+    periodHours: 24,
+    megabytesPerTime: 1.9,
+  },
+  {
+    id: "ostia",
+    group: "sst",
+    label: "OSTIA (Met Office)",
+    detail: msg("daily, read at 0.2°"),
+    periodHours: 24,
+    megabytesPerTime: 1.9,
+  },
 ];
+
+/**
+ * A product's name for display, from its identifier: the label the dialog
+ * shows, or the identifier itself for one this build does not list. A
+ * proper noun except for the one product named in English, so pass it
+ * through `t` to show it.
+ */
+export function productLabel(id: string): string {
+  return NRT_PRODUCTS.find((product) => product.id === id)?.label ?? id;
+}
 
 /** The headings the products are listed under, in the order they are shown. */
 export const NRT_GROUPS: readonly { id: NrtGroup; heading: string }[] = [
   { id: "current", heading: msg("Currents") },
   { id: "wind", heading: msg("Wind") },
+  { id: "sst", heading: msg("Sea-surface temperature") },
 ];
 
 /**
@@ -121,6 +158,11 @@ export const NRT_GROUPS: readonly { id: NrtGroup; heading: string }[] = [
 export const COPERNICUS_CREDIT = "Generated using E.U. Copernicus Marine Service Information";
 /** CCMP's credit, as Remote Sensing Systems asks for it. Not translated. */
 export const CCMP_CREDIT = "CCMP Version-2.1 NRT wind data are produced by Remote Sensing Systems";
+/** OISST's credit, as NOAA NCEI asks for it. Not translated. */
+export const OISST_CREDIT =
+  "NOAA OI SST V2.1 data provided by the NOAA National Centers for Environmental Information";
+/** Geo-Polar Blended's credit, as NOAA CoastWatch asks for it. Not translated. OSTIA is a Copernicus product and is covered by `COPERNICUS_CREDIT`. */
+export const GEOPOLAR_CREDIT = "NOAA Geo-Polar Blended SST, from NOAA CoastWatch";
 
 /** The span an import covers and what the timeline needs to show it. */
 export interface NrtPeriod {

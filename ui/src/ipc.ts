@@ -40,6 +40,7 @@ import type { EraseStroke } from "./generated/EraseStroke";
 import type { ClipboardKind } from "./generated/ClipboardKind";
 import type { AutosaveMode } from "./generated/AutosaveMode";
 import type { AppSettings } from "./generated/AppSettings";
+import type { TemperatureUnit } from "./generated/TemperatureUnit";
 import type { CustomTheme } from "./generated/CustomTheme";
 import type { McpClient } from "./generated/McpClient";
 import type { McpRegistered } from "./generated/McpRegistered";
@@ -214,6 +215,12 @@ export const api = {
    */
   sampleField: (lon: number, lat: number, step: number, kind: FieldKindName | null) =>
     call<FieldSample>("sample_field", { lon, lat, step, kind }),
+  /**
+   * The sea-surface temperature at a point, in °C, from the topmost visible
+   * SST layer that has a day at this step; null where none does (M93).
+   */
+  sampleTemperature: (step: number, lon: number, lat: number) =>
+    call<number | null>("sample_temperature", { step, lon, lat }),
 
   /**
    * Writes a rendered frame to the log directory. Development only.
@@ -669,6 +676,9 @@ export const api = {
   /** The colour-ramp top a *new* project of each kind gets, in knots. */
   setDisplayUnits: (distanceUnit: AppSettings["distance_unit"], speedUnit: AppSettings["speed_unit"]) =>
     call<AppSettings>("set_display_units", { distanceUnit, speedUnit }),
+  /** How temperatures are shown (M93). Only the display changes; SST is held in °C. */
+  setTemperatureUnit: (temperatureUnit: TemperatureUnit) =>
+    call<AppSettings>("set_temperature_unit", { temperatureUnit }),
   setDefaultScales: (windKnots: number, currentKnots: number) =>
     call<AppSettings>("set_default_scales", { windKnots, currentKnots }),
   // --- Crash recovery (spec.md 4.2, M10) ---

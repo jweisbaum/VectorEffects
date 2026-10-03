@@ -77,6 +77,7 @@ const held = vi.hoisted(() => {
     project,
     chosen: [] as Array<[string, string]>,
     units: [] as Array<[string, string]>,
+    temperatures: [] as string[],
     charts: { directory: "", cells: 0, bounds: null, error: null, token: 1 },
     chartDirectories: [] as string[],
     themeSet: vi.fn(),
@@ -97,6 +98,10 @@ vi.mock("../ipc", () => ({
     setDisplayUnits: (distance: AppSettings["distance_unit"], speed: AppSettings["speed_unit"]) => {
       held.units.push([distance, speed]);
       return Promise.resolve({ ...settings, distance_unit: distance, speed_unit: speed });
+    },
+    setTemperatureUnit: (unit: AppSettings["temperature_unit"]) => {
+      held.temperatures.push(unit);
+      return Promise.resolve({ ...settings, temperature_unit: unit });
     },
     // The dialog asks what the chart directory holds on mount (spec 4.11).
     chartStatus: () => Promise.resolve(held.charts),
@@ -132,6 +137,7 @@ const settings: AppSettings = {
   autosave: "recovery",
   distance_unit: "km",
   speed_unit: "kt",
+  temperature_unit: "celsius",
   default_wind_scale_knots: 60,
   default_current_scale_knots: 6,
   macro_directory: "/macros",
@@ -150,6 +156,7 @@ beforeEach(() => {
   held.deleted.length = 0;
   held.chosen.length = 0;
   held.units.length = 0;
+  held.temperatures.length = 0;
   held.themeSet.mockReset().mockImplementation((theme: string) => Promise.resolve({ ...settings, theme }));
   held.customThemeSet.mockReset().mockImplementation(custom => Promise.resolve({ ...settings, theme: "custom", custom_theme: custom }));
   libraryChanges = 0;
@@ -398,5 +405,20 @@ describe("global unit preferences", () => {
       speed!.dispatchEvent(new Event("change", { bubbles: true }));
     });
     expect(held.units[1]).toEqual(["km", "mph"]);
+  });
+  /** A sea-surface temperature layer is held in °C; this changes only what is shown (M93). */
+  it("offers Celsius and Fahrenheit for temperatures, and saves the choice", async () => {
+    await render();
+    const select = container.querySelector<HTMLSelectElement>(
+      '[data-feature="settings:temperature-unit"] select',
+    );
+    expect(select).not.toBeNull();
+    expect([...select!.options].map((o) => o.value)).toEqual(["celsius", "fahrenheit"]);
+    expect(select!.value).toBe("celsius");
+    await act(async () => {
+      select!.value = "fahrenheit";
+      select!.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(held.temperatures).toEqual(["fahrenheit"]);
   });
 });

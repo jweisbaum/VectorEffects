@@ -487,3 +487,111 @@ fn a_product_that_fails_does_not_stop_the_others() {
         .is_err()
     );
 }
+
+/// An SST product makes a display-only layer of temperatures: one day per
+/// step-day, sampled by the readout in Celsius, a day token per step for the
+/// tiles — and none of it a field. Saved and reopened, the days come back
+/// from their file (spec.md 4.10, M93).
+#[test]
+fn an_sst_product_is_a_layer_of_temperatures_that_survives_a_reopen() {
+    let root = TempRoot::new("sst");
+    let state = app(&root, 1, 24);
+    let open = |_: Product| -> ve_zarr::Result<Box<dyn FieldSource>> {
+        // The fake's value is its hour plus one: 1 C at each midnight.
+        Ok(Fake::boxed(
+            Variable::SeaSurfaceTemperature,
+            &[OCT_1, OCT_1 + DAY],
+        ))
+    };
+    nrt::nrt_import(
+        &state,
+        &request(&["oisst"], 1, true, true),
+        NOW,
+        open,
+        |_| {},
+    )
+    .expect("import");
+
+    let tree = document::tree(&state, 0).expect("tree");
+    let layer = &tree.layers[1];
+    assert_eq!(layer.source, "sst");
+    assert!(layer.grib.is_none(), "not a field layer");
+    let sst = layer.sst.as_ref().expect("an SST view");
+    assert_eq!(sst.product, "oisst");
+    assert_eq!(sst.tokens.len(), 40);
+    assert!(
+        sst.tokens[..24]
+            .iter()
+            .all(|t| *t == sst.tokens[0] && t.is_some())
+    );
+    assert!(sst.tokens[24].is_some());
+    {
+        let mut session = state.session.lock().expect("lock");
+        let project = &session.require_open().expect("open").project;
+        assert!(project.layers[1].source.is_display_only());
+        assert!(
+            project.layers[1].raster.is_none(),
+            "nothing for a scene to find"
+        );
+    }
+
+    let at = |step| ve_app::sst::temperature_at(&state, step, -30.0, 40.0).expect("sample");
+    let first = at(0).expect("a temperature");
+    assert!((first - 1.0).abs() < 0.01, "{first}");
+    assert_eq!(at(39).map(|t| (t * 100.0).round()), Some(100.0));
+
+    let path = root.0.join("sst.veproj");
+    projects::save_as(&state, path.to_string_lossy().into_owned()).expect("save");
+    projects::close_open(&state, true).expect("close");
+    projects::open(&state, path.to_string_lossy().into_owned(), true).expect("reopen");
+    let again = at(0).expect("the days came back from their file");
+    assert!((again - first).abs() < 1e-6);
+}
+
+/// After an SST import the top of the stack is a layer that is only drawn:
+/// an object placed with no layer chosen goes to the layer beneath it, and
+/// one aimed at it is refused — it can hold no field and no edit of one.
+/// A product missing the period's first day shows no day there.
+#[test]
+fn an_sst_layer_takes_no_object_and_its_empty_first_day_is_no_day() {
+    use ve_app::create::{self, Gesture, NewObject, Tool};
+    let root = TempRoot::new("sst-objects");
+    let state = app(&root, 1, 24);
+    let open = |_: Product| -> ve_zarr::Result<Box<dyn FieldSource>> {
+        // 1 October was never published: the import pads it, empty.
+        Ok(Fake::boxed(Variable::SeaSurfaceTemperature, &[OCT_1 + DAY]))
+    };
+    nrt::nrt_import(
+        &state,
+        &request(&["ostia"], 1, true, true),
+        NOW,
+        open,
+        |_| {},
+    )
+    .expect("import");
+    let tree = document::tree(&state, 0).expect("tree");
+    let sst_layer = tree.layers[1].id;
+    let tokens = &tree.layers[1].sst.as_ref().expect("an SST view").tokens;
+    assert!(
+        tokens[..24].iter().all(Option::is_none),
+        "the padded day is no day"
+    );
+    assert!(tokens[24].is_some());
+
+    let brush = |layer: Option<u64>| NewObject {
+        tool: Tool::Brush,
+        gesture: Gesture::Stroke {
+            points: vec![[-20.0, 0.0], [20.0, 0.0]],
+        },
+        options: Vec::new(),
+        layer,
+    };
+    let refused = create::create(&state, brush(Some(sst_layer)))
+        .expect_err("an SST layer holds no field")
+        .to_string();
+    assert!(refused.contains("only drawn"), "{refused}");
+    create::create(&state, brush(None)).expect("the layer beneath takes it");
+    let tree = document::tree(&state, 0).expect("tree");
+    assert_eq!(tree.layers[0].objects.len(), 1, "on the painted layer");
+    assert!(tree.layers[1].objects.is_empty());
+}

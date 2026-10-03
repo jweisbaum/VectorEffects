@@ -295,6 +295,19 @@ pub enum DistanceUnit {
     Nm,
 }
 
+/// Preferred display unit for temperatures (spec.md 4.10, M93); a fetched
+/// SST layer holds Celsius, and only what is shown changes.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum TemperatureUnit {
+    /// Degrees Celsius.
+    #[default]
+    Celsius,
+    /// Degrees Fahrenheit.
+    Fahrenheit,
+}
+
 /// Preferred display unit for speeds; fields remain metres per second.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
@@ -507,6 +520,8 @@ pub struct AppSettings {
     pub distance_unit: DistanceUnit,
     /// Global speed display preference.
     pub speed_unit: SpeedUnit,
+    /// Global temperature display preference.
+    pub temperature_unit: TemperatureUnit,
     /// What happens to unsaved work while the user is not saving (D70).
     pub autosave: AutosaveMode,
     /// Every binding, in the order the dialog lists them.
@@ -616,6 +631,7 @@ impl Default for AppSettings {
             glyphs: GlyphSettings::default(),
             distance_unit: DistanceUnit::Km,
             speed_unit: SpeedUnit::Kt,
+            temperature_unit: TemperatureUnit::Celsius,
             autosave: AutosaveMode::Recovery,
             shortcuts: default_shortcuts(),
             default_wind_scale_knots: 60.0,
@@ -939,6 +955,28 @@ pub fn display_units_set(
     with_session(state, |session| {
         session.settings.distance_unit = distance_unit;
         session.settings.speed_unit = speed_unit;
+        session.save_settings(&file)?;
+        Ok(session.settings.clone())
+    })
+}
+
+/// Sets the unit temperatures are shown in.
+#[tauri::command]
+pub fn set_temperature_unit(
+    state: tauri::State<'_, AppState>,
+    temperature_unit: TemperatureUnit,
+) -> Result<AppSettings> {
+    temperature_unit_set(&state, temperature_unit)
+}
+
+/// Implementation of [`set_temperature_unit`].
+pub fn temperature_unit_set(
+    state: &AppState,
+    temperature_unit: TemperatureUnit,
+) -> Result<AppSettings> {
+    let file = state.paths.settings_file();
+    with_session(state, |session| {
+        session.settings.temperature_unit = temperature_unit;
         session.save_settings(&file)?;
         Ok(session.settings.clone())
     })

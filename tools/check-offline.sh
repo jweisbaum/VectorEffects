@@ -67,8 +67,9 @@ hits=$(find crates -name '*.rs' -not -path 'crates/ve-zarr/*' -not -path 'crates
 # The Copernicus Marine object store holds both the stores (`mdl-arco-time`)
 # and the catalogue that says where each one currently is (`mdl-metadata`),
 # which the near-real-time import reads first (spec 4.10, M89).
-# NOAA's Pacific Islands OceanWatch ERDDAP serves CCMP NRT wind (M92).
-ARCHIVES='storage\.googleapis\.com/gcp-public-data-arco-era5|s3\.waw3-1\.cloudferro\.com/mdl-arco-time|s3\.waw3-1\.cloudferro\.com/mdl-metadata|oceanwatch\.pifsc\.noaa\.gov/erddap'
+# NOAA's Pacific Islands OceanWatch ERDDAP serves CCMP NRT wind (M92), and
+# NOAA's West Coast and CoastWatch ERDDAPs serve OISST and Geo-Polar SST (M93).
+ARCHIVES='storage\.googleapis\.com/gcp-public-data-arco-era5|s3\.waw3-1\.cloudferro\.com/mdl-arco-time|s3\.waw3-1\.cloudferro\.com/mdl-metadata|oceanwatch\.pifsc\.noaa\.gov/erddap|coastwatch\.pfeg\.noaa\.gov/erddap|coastwatch\.noaa\.gov/erddap'
 hits=$(find crates/ve-zarr -name '*.rs' -exec grep -nHE 'https?://' {} + 2>/dev/null \
   | grep -vE "$COMMENT" | grep -vE "$ALLOW" | grep -vE "$ARCHIVES" || true)
 [ -n "$hits" ] && report "unexpected remote host in ve-zarr" "$hits"

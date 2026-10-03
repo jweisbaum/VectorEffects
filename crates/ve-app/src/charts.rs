@@ -34,6 +34,8 @@ pub enum Backdrop {
     Osm,
     /// One GIS layer of the open project.
     Gis(u64),
+    /// One SST layer of the open project; the token says which day.
+    Sst(u64),
 }
 
 /// What the frontend is told about the chart directory (spec.md 4.11).
@@ -311,6 +313,11 @@ pub fn tile_for_token(
                 return None;
             }
             draw_vectors(&vectors.features, frame, style)
+        }
+        Backdrop::Sst(layer) => {
+            let day = crate::sst::day_of(state, layer, token?)?;
+            let b = &frame.bounds;
+            crate::sst::paint(&day, b.west, b.south, b.east, b.north, frame.size)
         }
     }
 }

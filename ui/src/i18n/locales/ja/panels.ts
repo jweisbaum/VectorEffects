@@ -261,5 +261,11 @@ const catalogue: Record<string, string> = {
   "scatterometer 10 m wind, daily swaths, 0.25°": "散乱計による 10 m 風、日ごとの観測帯、0.25°",
   "ASCAT": "ASCAT",
   "10 m wind, 6-hourly, 0.25°, to 78° N and S": "10 m 風、6 時間ごと、0.25°、南北 78° まで",
+  "Sea-surface temperature": "海面水温",
+  "Product": "プロダクト",
+  "Sea-surface temperature · {product}": "海面水温 · {product}",
+  "daily, 0.25°": "1 日ごと、0.25°",
+  "daily, read at 0.25°": "1 日ごと、0.25° で読み込み",
+  "daily, read at 0.2°": "1 日ごと、0.2° で読み込み",
 };
 export default catalogue;

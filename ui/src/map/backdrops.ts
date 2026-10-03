@@ -41,7 +41,25 @@ export interface BackdropRequest {
   /** OpenStreetMap tiles, when the box is on. */
   osm?: boolean | undefined;
   /** One entry per visible GIS layer, bottom of the stack first. */
-  gis?: ReadonlyArray<{ layer: number; token: number }> | undefined;
+  gis?: ReadonlyArray<LayerBackdrop> | undefined;
+  /**
+   * One entry per visible sea-surface temperature layer with a day at this
+   * step, bottom of the stack first (spec.md 4.10, M93). The token is that
+   * day's, so the step is already in it.
+   */
+  sst?: ReadonlyArray<LayerBackdrop> | undefined;
+}
+
+/** A backdrop that belongs to a layer of the document. */
+export interface LayerBackdrop {
+  readonly layer: number;
+  readonly token: number;
+  /**
+   * The layer's position in the stack, bottom 0. GIS and temperature layers
+   * arrive in two lists and are drawn in one stack, so this is what
+   * interleaves them; without it each list keeps its own order, GIS first.
+   */
+  readonly stack?: number | undefined;
 }
 
 /** How a fetch is doing. */
@@ -61,6 +79,27 @@ export function backdropKey(kind: string, token: number, layer?: number): string
   return layer === undefined
     ? `backdrop/${kind}/${token}`
     : `backdrop/${kind}/${token}/${layer}`;
+}
+
+/**
+ * The layers' backdrops in the order they are drawn: the stack's, bottom
+ * first. A stable sort, so entries with no position keep the order given.
+ */
+export function layerBackdrops(
+  request: BackdropRequest,
+): Array<{ kind: "gis" | "sst"; layer: number; token: number }> {
+  const all = [
+    ...(request.gis ?? []).map((entry) => ({ kind: "gis" as const, ...entry })),
+    ...(request.sst ?? []).map((entry) => ({ kind: "sst" as const, ...entry })),
+  ];
+  return all
+    .map((entry, index) => ({ entry, index }))
+    .sort(
+      (a, b) =>
+        (a.entry.stack ?? Number.POSITIVE_INFINITY) - (b.entry.stack ?? Number.POSITIVE_INFINITY) ||
+        a.index - b.index,
+    )
+    .map(({ entry }) => ({ kind: entry.kind, layer: entry.layer, token: entry.token }));
 }
 
 /**
@@ -110,8 +149,8 @@ export class BackdropCache {
     // over them: a chart is the thing being navigated by.
     if (request.osm) add(backdropKey("osm", 1), 1, true);
     if (request.charts) add(backdropKey("chart", request.charts.token), 1);
-    for (const { layer, token } of request.gis ?? []) {
-      add(backdropKey("gis", token, layer), 1);
+    for (const { kind, layer, token } of layerBackdrops(request)) {
+      add(backdropKey(kind, token, layer), 1);
     }
 
     this.retain(wanted);

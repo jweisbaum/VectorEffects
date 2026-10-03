@@ -229,5 +229,6 @@ const catalogue: Record<string, string> = {
   "{layer}: its first field lands on step {lead} ({step} UTC) but is valid at {first} UTC — {offset} h off": "{layer}：第一个字段位于第 {lead} 步（{step} UTC），但其有效时间为 {first} UTC — 相差 {offset} 小时",
   "{layer}: its first field is on step {lead}, aligned to a start time the timeline no longer has": "{layer}：第一个字段位于第 {lead} 步，是按时间轴已不再有的起始时间对齐的",
   "Put the first field back on the first step": "将第一个字段放回第一步",
+  "{layer}: sea-surface temperature at {time}": "{layer}：{time} 的海表温度",
 };
 export default catalogue;

@@ -215,5 +215,6 @@ const catalogue: Record<string, string> = {
   "autosave": "自動保存",
   "recovery": "復元 リカバリ",
   "crash": "クラッシュ 異常終了",
+  "no temperature": "水温なし",
 };
 export default catalogue;

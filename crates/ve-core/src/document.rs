@@ -520,6 +520,14 @@ pub struct Layer {
     /// and a decoded field can run to hundreds of megabytes.
     #[serde(skip)]
     pub raster: Option<Arc<RasterSequence>>,
+    /// The sea-surface temperature of an SST layer, in degrees Celsius
+    /// (spec.md 4.10, M93), carried in each sample's first slot.
+    ///
+    /// **Never serialised**, for the same reason as `raster`, and kept
+    /// apart from it so nothing that evaluates a field can find it: an SST
+    /// layer is drawn, never composited.
+    #[serde(skip)]
+    pub temperature: Option<Arc<RasterSequence>>,
     /// Which speeds of an imported field to keep (spec.md 4.8).
     ///
     /// `None` keeps every sample, which is what a layer has until the user
@@ -673,6 +681,25 @@ pub enum LayerSource {
         #[serde(with = "crate::canonical::ratio_field")]
         fill_opacity: f64,
     },
+    /// Sea-surface temperature fetched from a near-real-time product
+    /// (spec.md 4.10, M93).
+    ///
+    /// **Display only**, as an image or a GIS layer is: it makes no field,
+    /// is never evaluated and never exported. It is drawn as coloured tiles
+    /// under the field, with its own legend and readout. The project keeps
+    /// the file the days were written to, never the temperatures.
+    Sst {
+        /// The GRIB2 file the fetched days were written to.
+        path: PathBuf,
+        /// The product, as `ve_zarr::Product::id` spells it.
+        product: String,
+        /// First hour asked for, in Unix seconds.
+        start_unix_s: i64,
+        /// Last hour asked for, in Unix seconds.
+        end_unix_s: i64,
+        /// How long each day stands for, in hours: 24.
+        period_hours: u32,
+    },
     /// A field imported from a history archive (spec.md 4.10, M38).
     ///
     /// **A GRIB layer that remembers where it came from.** The hours the user
@@ -737,6 +764,7 @@ impl LayerSource {
             Self::Grib { path, .. }
             | Self::Image { path, .. }
             | Self::Gis { path, .. }
+            | Self::Sst { path, .. }
             | Self::Zarr { path, .. }
             | Self::ZarrFile { path, .. } => Some(path),
         }
@@ -752,7 +780,7 @@ impl LayerSource {
             Self::Grib { path, field }
             | Self::Zarr { path, field, .. }
             | Self::ZarrFile { path, field } => Some((path, *field)),
-            Self::Painted | Self::Image { .. } | Self::Gis { .. } => None,
+            Self::Painted | Self::Image { .. } | Self::Gis { .. } | Self::Sst { .. } => None,
         }
     }
 
@@ -763,7 +791,10 @@ impl LayerSource {
     /// "does this layer contribute a vector" asks this rather than matching
     /// on the variant and forgetting one of them.
     pub fn is_display_only(&self) -> bool {
-        matches!(self, Self::Image { .. } | Self::Gis { .. })
+        matches!(
+            self,
+            Self::Image { .. } | Self::Gis { .. } | Self::Sst { .. }
+        )
     }
 }
 
@@ -928,9 +959,12 @@ impl Layer {
         }
     }
 
-    /// Whether the layer can hold a field at all: an image layer cannot.
+    /// Whether the layer can hold a field at all: a layer that is only
+    /// drawn — an image, a GIS file, sea-surface temperature — cannot. Such
+    /// a layer reaches no scene and is no field kind of the project, so an
+    /// SST import beside a current never adds an empty wind to an export.
     pub fn has_field(&self) -> bool {
-        !matches!(self.source, LayerSource::Image { .. })
+        !self.source.is_display_only()
     }
 
     /// An empty, visible, unlocked layer.
@@ -947,6 +981,7 @@ impl Layer {
             speed_range: None,
             frame_overrides: Vec::new(),
             lead_steps: 0,
+            temperature: None,
             erased: Vec::new(),
         }
     }
@@ -973,6 +1008,7 @@ impl Layer {
             speed_range: None,
             frame_overrides: Vec::new(),
             lead_steps: 0,
+            temperature: None,
             erased: Vec::new(),
         }
     }
@@ -1040,6 +1076,27 @@ impl Layer {
         overrides.sort_by_key(|o| o.step);
         overrides.dedup_by_key(|o| o.step);
         self.frame_overrides = overrides;
+    }
+
+    /// The temperature frame an SST layer shows at a step, if any: the day
+    /// whose period contains the step's hour (spec.md 4.10, M93).
+    pub fn temperature_frame(
+        &self,
+        settings: &crate::project::ProjectSettings,
+        step: u32,
+    ) -> Option<&crate::raster::RasterFrame> {
+        let LayerSource::Sst { period_hours, .. } = &self.source else {
+            return None;
+        };
+        let sequence = self.temperature.as_deref()?;
+        let file_step = u32::try_from(i64::from(step) - i64::from(self.lead_steps)).ok()?;
+        let hour = f64::from(settings.forecast_hour(file_step));
+        // A day with no temperature anywhere is the empty first message that
+        // holds an import's origin, not a day: nothing is shown for it. Its
+        // largest magnitude is zero, which no day of sea temperatures has.
+        sequence
+            .frame_within(hour, f64::from(*period_hours))
+            .filter(|frame| frame.grid.fastest_mps > 0.0)
     }
 
     /// What the file itself shows at a step, before the user's overrides.
@@ -1219,6 +1276,80 @@ mod tests {
         // A lead further back than the file reaches leaves nothing at all.
         layer.lead_steps = -3;
         assert_eq!(shown(&layer), [None; 6]);
+    }
+
+    /// An SST layer is drawn and never evaluated, holds each day for its
+    /// period, and offers no raster to anything that evaluates one.
+    #[test]
+    fn an_sst_layer_is_display_only_and_holds_its_days() {
+        use crate::raster::{RasterFrame, RasterGrid, RasterSequence};
+        let frames = [0.0_f64, 24.0]
+            .iter()
+            .map(|&h| RasterFrame {
+                offset_hours: h,
+                valid_unix_s: (h * 3600.0) as i64,
+                grid: std::sync::Arc::new(
+                    RasterGrid::new(2, 2, 0.0, 1.0, 1.0, 1.0, vec![[15.0 + h as f32, 0.0]; 4])
+                        .unwrap(),
+                ),
+            })
+            .collect();
+        let mut layer = Layer::new("SST");
+        layer.source = LayerSource::Sst {
+            path: "sst.grib2".into(),
+            product: "oisst".into(),
+            start_unix_s: 0,
+            end_unix_s: 0,
+            period_hours: 24,
+        };
+        layer.temperature = Some(std::sync::Arc::new(
+            RasterSequence::new(crate::project::FieldKind::Current, frames).unwrap(),
+        ));
+        assert!(layer.source.is_display_only());
+        assert!(layer.source.raster_file().is_none());
+        let settings = hourly(60);
+        let at = |s| {
+            layer
+                .temperature_frame(&settings, s)
+                .map(|f| f.offset_hours)
+        };
+        assert_eq!(
+            (at(0), at(23), at(24), at(47), at(48)),
+            (Some(0.0), Some(0.0), Some(24.0), Some(24.0), None)
+        );
+        assert!(
+            layer.imported_frame(&settings, 0).is_none(),
+            "no field to evaluate"
+        );
+    }
+
+    /// A layer that is only drawn is no field kind of the project: an SST
+    /// layer beside a current adds no wind to what is exported or shown.
+    #[test]
+    fn a_display_only_layer_is_no_field_kind() {
+        let mut project = crate::project::Project::new(
+            "currents",
+            crate::project::ProjectSettings::new(
+                crate::project::FieldKind::Current,
+                crate::project::Resolution::Deg1,
+                crate::project::StepHours::H1,
+                4,
+            ),
+        );
+        project.layers[0].parameter = crate::project::FieldKind::Current;
+        let before = project.kinds_present();
+        let mut sst = Layer::new("SST");
+        sst.source = LayerSource::Sst {
+            path: "sst.grib2".into(),
+            product: "ostia".into(),
+            start_unix_s: 0,
+            end_unix_s: 0,
+            period_hours: 24,
+        };
+        assert!(!sst.has_field());
+        project.layers.push(sst);
+        assert_eq!(project.kinds_present(), before);
+        assert_eq!(before, vec![crate::project::FieldKind::Current]);
     }
 
     /// Only a fetched layer has a period to set.

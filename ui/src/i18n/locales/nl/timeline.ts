@@ -229,5 +229,6 @@ const catalogue: Record<string, string> = {
   "{layer}: its first field lands on step {lead} ({step} UTC) but is valid at {first} UTC — {offset} h off": "{layer}: het eerste veld valt op stap {lead} ({step} UTC) maar geldt voor {first} UTC — {offset} h verschoven",
   "{layer}: its first field is on step {lead}, aligned to a start time the timeline no longer has": "{layer}: het eerste veld staat op stap {lead}, uitgelijnd op een begintijd die de tijdlijn niet meer heeft",
   "Put the first field back on the first step": "Het eerste veld terugzetten op de eerste stap",
+  "{layer}: sea-surface temperature at {time}": "{layer}: zeeoppervlaktetemperatuur om {time}",
 };
 export default catalogue;

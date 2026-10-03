@@ -301,6 +301,7 @@ fn parse(path: &str) -> Option<Served> {
             "chart" => crate::charts::Backdrop::Chart,
             "osm" => crate::charts::Backdrop::Osm,
             "gis" => crate::charts::Backdrop::Gis(parts.next()?.parse().ok()?),
+            "sst" => crate::charts::Backdrop::Sst(parts.next()?.parse().ok()?),
             _ => return None,
         };
         let z: u32 = parts.next()?.parse().ok()?;

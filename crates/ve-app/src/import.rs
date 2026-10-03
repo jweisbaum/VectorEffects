@@ -369,6 +369,21 @@ pub fn attach_rasters(
     }
 
     let mut failures = Vec::new();
+    // An SST layer's days come back from their own file, as temperatures
+    // rather than a field (spec.md 4.10, M93).
+    for layer in &mut project.layers {
+        let LayerSource::Sst { path, .. } = &layer.source else {
+            continue;
+        };
+        match ve_grib::import::read_temperature_file(path) {
+            Ok(sequence) => layer.temperature = Some(Arc::new(sequence)),
+            Err(err) => {
+                layer.temperature = None;
+                tracing::warn!(layer = %layer.name, path = %path.display(), %err, "SST layer could not be read");
+                failures.push((layer.name.clone(), AppError::Internal(err.to_string())));
+            }
+        }
+    }
     for (index, at, field) in wanted {
         let layer = &mut project.layers[index];
         let path = &sources[at].0;

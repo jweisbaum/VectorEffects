@@ -252,5 +252,12 @@ const catalogue: Record<string, string> = {
   "Write the MCP service into an AI client’s own configuration.": "将 MCP 服务写入 AI 客户端自身的配置。",
   "connect": "连接",
   "install": "安装",
+  "Temperature": "温度",
+  "Show sea-surface temperatures in degrees Celsius or Fahrenheit.": "以摄氏度或华氏度显示海表温度。",
+  "Celsius": "摄氏",
+  "Fahrenheit": "华氏",
+  "sea-surface temperature": "海表温度",
+  "°C — degrees Celsius": "°C — 摄氏度",
+  "°F — degrees Fahrenheit": "°F — 华氏度",
 };
 export default catalogue;

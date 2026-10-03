@@ -98,6 +98,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     GribLayerInfo::export_all(&cfg)?;
     ve_app::document::GribStepView::export_all(&cfg)?;
     ve_app::document::LayerAlignment::export_all(&cfg)?;
+    ve_app::sst::SstLayerView::export_all(&cfg)?;
     ve_app::frames::FrameClipboardState::export_all(&cfg)?;
     ve_app::capture::CaptureState::export_all(&cfg)?;
     ve_app::image::ImageLayerView::export_all(&cfg)?;
@@ -111,6 +112,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ve_app::nrt::NrtSkipped::export_all(&cfg)?;
     ve_app::autosave::Autosave::export_all(&cfg)?;
     ve_app::settings::AppSettings::export_all(&cfg)?;
+    ve_app::settings::TemperatureUnit::export_all(&cfg)?;
     ve_app::settings::GlyphStyle::export_all(&cfg)?;
     ve_app::settings::GlyphSetting::export_all(&cfg)?;
     ve_app::settings::GradientView::export_all(&cfg)?;

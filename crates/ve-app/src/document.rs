@@ -102,6 +102,9 @@ pub struct LayerNode {
     pub image: Option<crate::image::ImageLayerView>,
     /// The vector file beneath everything, for a GIS layer (spec.md 4.11).
     pub gis: Option<GisLayerView>,
+    /// The days of sea-surface temperature, for an SST layer (spec.md 4.10,
+    /// M93).
+    pub sst: Option<crate::sst::SstLayerView>,
     /// What the layer is (M29): `"painted"`, `"raster"` for an imported GRIB,
     /// `"image"` for a picture, `"zarr"` for hours fetched from a history
     /// archive (spec.md 4.10, M38). Says which controls the panel offers.
@@ -599,11 +602,13 @@ fn tree_of(project: &Project, step: u32, backdrops: &crate::charts::Backdrops) -
                     ve_core::document::LayerSource::Zarr { .. }
                     | ve_core::document::LayerSource::ZarrFile { .. } => "zarr",
                     ve_core::document::LayerSource::Gis { .. } => "gis",
+                    ve_core::document::LayerSource::Sst { .. } => "sst",
                 }
                 .to_owned(),
                 parameter: crate::projects::kind_name(layer.parameter()).to_owned(),
                 image: crate::image::view(layer.id, &layer.source),
                 gis: gis_view(layer.id, &layer.source, backdrops),
+                sst: crate::sst::view_of(layer, &project.settings),
                 // Every layer that reads a raster file gets this view — an
                 // imported forecast and a fetched history alike, which is
                 // what makes the panel offer a history layer the speed
@@ -1078,11 +1083,25 @@ pub(crate) fn creation_layer(
         Some(raw) => project
             .layer(object_id(raw))
             .ok_or_else(|| missing_layer(raw))?,
+        // The top of the stack that can hold an object: a layer that is only
+        // drawn — the SST an import just put on top — cannot.
         None => project
             .layers
-            .last()
+            .iter()
+            .rev()
+            .find(|layer| !layer.source.is_display_only())
+            .or_else(|| project.layers.last())
             .ok_or_else(|| AppError::Internal("project has no layers".to_owned()))?,
     };
+    if found.source.is_display_only() {
+        return Err(AppError::BadOption {
+            field: "layer",
+            value: format!(
+                "\"{}\" is only drawn and holds no field; pick a painted or imported layer",
+                found.name
+            ),
+        });
+    }
     if !found.source.is_painted() && placing == Placing::Field {
         return Err(AppError::BadOption {
             field: "layer",

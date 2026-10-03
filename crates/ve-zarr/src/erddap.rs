@@ -38,10 +38,16 @@ pub struct ErddapSpec {
     pub dataset: &'static str,
     /// What the components are of.
     pub variable: Variable,
-    /// The eastward and northward components.
+    /// The eastward component, or the one value of a scalar product.
     pub u: &'static str,
-    /// .
-    pub v: &'static str,
+    /// The northward component; `None` for a scalar product.
+    pub v: Option<&'static str>,
+    /// Every how-many-th latitude and longitude to take: the server strides
+    /// a fine grid itself, so a 0.05 degree analysis arrives at 0.25.
+    pub stride: usize,
+    /// A daily product, filed under each day's midnight (see
+    /// [`crate::arco::daily_hours`]).
+    pub daily: bool,
     /// The axes between time and latitude, each read at its first index:
     /// OISST's `zlev` is one depth, written as an axis of its own.
     pub extra_axes: usize,
@@ -76,6 +82,11 @@ impl Http {
         });
         let client = reqwest::blocking::Client::builder()
             .timeout(std::time::Duration::from_secs(180))
+            // A server that does not answer is found out in seconds, not at
+            // the operating system's connect timeout: each try would
+            // otherwise wait over a minute, and the import holds the whole
+            // product list for every try.
+            .connect_timeout(std::time::Duration::from_secs(10))
             .redirect(policy)
             .build()
             .map_err(|err| ZarrError::Open(format!("no HTTP client: {err}")))?;
@@ -113,11 +124,11 @@ impl Fetch for Http {
     }
 }
 
-/// An ERDDAP subscript: one index, or every index.
-fn subscript(index: Option<usize>) -> String {
+/// An ERDDAP subscript: one index, or every `stride`-th.
+fn subscript(index: Option<usize>, stride: usize) -> String {
     match index {
         Some(i) => format!("%5B{i}%5D"),
-        None => "%5B0:1:last%5D".to_owned(),
+        None => format!("%5B0:{}:last%5D", stride.max(1)),
     }
 }
 
@@ -152,8 +163,9 @@ impl ErddapStore {
 
     /// Opens the dataset: one request for its axes.
     pub fn open(spec: ErddapSpec, fetch: Box<dyn Fetch>) -> Result<Self> {
+        let every = subscript(None, spec.stride);
         let url = format!(
-            "{}/griddap/{}.nc?time,latitude,longitude",
+            "{}/griddap/{}.nc?time,latitude{every},longitude{every}",
             spec.server, spec.dataset
         );
         let bytes = fetch.get(&url)?;
@@ -166,6 +178,11 @@ impl ErddapStore {
             .to_owned();
         let (epoch, unit) = parse_time_units(&units)?;
         let times = hours_from_axis(epoch.hours_since_unix_epoch(), unit, &time)?;
+        let times = if spec.daily {
+            crate::arco::daily_hours(&times)?
+        } else {
+            times
+        };
         let lat: Vec<f32> = file
             .read_f64("latitude")?
             .iter()
@@ -190,20 +207,21 @@ impl ErddapStore {
     /// The components at one step, on the dataset's own grid, NaN where it
     /// has no value.
     fn read_native(&self, index: usize) -> Result<Vec<Vec<f32>>> {
-        let mut indices = subscript(Some(index));
+        let mut indices = subscript(Some(index), 1);
         for _ in 0..self.spec.extra_axes {
-            indices.push_str(&subscript(Some(0)));
+            indices.push_str(&subscript(Some(0), 1));
         }
-        indices.push_str(&subscript(None));
-        indices.push_str(&subscript(None));
-        let query = [self.spec.u, self.spec.v]
+        indices.push_str(&subscript(None, self.spec.stride));
+        indices.push_str(&subscript(None, self.spec.stride));
+        let names = self.components();
+        let query = names
             .iter()
             .map(|name| format!("{name}{indices}"))
             .collect::<Vec<_>>()
             .join(",");
         let bytes = self.fetch.get(&self.url(&query))?;
         let file = File::parse(&bytes)?;
-        [self.spec.u, self.spec.v]
+        names
             .iter()
             .map(|name| {
                 let variable = file.variable(name).ok_or_else(|| {
@@ -235,6 +253,14 @@ impl ErddapStore {
                     .collect())
             })
             .collect()
+    }
+
+    /// The variables read at each step: both components, or the one value.
+    fn components(&self) -> Vec<&'static str> {
+        match self.spec.v {
+            Some(v) => vec![self.spec.u, v],
+            None => vec![self.spec.u],
+        }
     }
 
     /// Onto the common grid, empty beyond the latitudes the dataset reaches.
@@ -277,13 +303,13 @@ impl FieldSource for ErddapStore {
     }
 
     fn read_step(&self, step: &Step) -> Result<Vec<Field>> {
-        let mut native = self.read_native(step.index as usize)?;
-        let v = native.pop().unwrap_or_default();
-        let u = native.pop().unwrap_or_default();
+        let mut native = self.read_native(step.index as usize)?.into_iter();
+        let u = native.next().unwrap_or_default();
+        let v = native.next();
         Ok(vec![Field {
             variable: self.spec.variable,
             u: self.regrid(&u),
-            v: self.regrid(&v),
+            v: v.map(|v| self.regrid(&v)).unwrap_or_default(),
         }])
     }
 }
@@ -383,8 +409,10 @@ mod tests {
         dataset: "winds",
         variable: Variable::Wind10m,
         u: "uwnd",
-        v: "vwnd",
+        v: Some("vwnd"),
         extra_axes: 0,
+        stride: 1,
+        daily: false,
     };
 
     /// Cells 30 degrees tall centred on 30 S, 0 and 30 N — so the data stops
@@ -406,7 +434,7 @@ mod tests {
         );
         let canned = Canned {
             answers: vec![
-                ("time,latitude,longitude".to_owned(), axes),
+                (".nc?time,".to_owned(), axes),
                 ("uwnd".to_owned(), fields.to_vec()),
             ],
             asked: Mutex::new(Vec::new()),
@@ -476,8 +504,8 @@ mod tests {
 
     #[test]
     fn a_step_url_names_the_index_and_both_components() {
-        let mut indices = subscript(Some(42));
-        indices.push_str(&subscript(None));
-        assert_eq!(indices, "%5B42%5D%5B0:1:last%5D");
+        let mut indices = subscript(Some(42), 1);
+        indices.push_str(&subscript(None, 5));
+        assert_eq!(indices, "%5B42%5D%5B0:5:last%5D");
     }
 }

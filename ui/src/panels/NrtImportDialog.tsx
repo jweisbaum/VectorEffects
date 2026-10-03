@@ -34,6 +34,8 @@ import {
   CCMP_CREDIT,
   COPERNICUS_CREDIT,
   DEFAULT_DAYS,
+  GEOPOLAR_CREDIT,
+  OISST_CREDIT,
   NRT_GROUPS,
   NRT_PRODUCTS,
   clampDays,
@@ -166,6 +168,8 @@ export default function NrtImportDialog({
           {/* The attribution the products' licence asks for, as it words it. */}
           <span className="muted nrt-credit">{COPERNICUS_CREDIT}</span>
           <span className="muted nrt-credit">{CCMP_CREDIT}</span>
+          <span className="muted nrt-credit">{OISST_CREDIT}</span>
+          <span className="muted nrt-credit">{GEOPOLAR_CREDIT}</span>
         </fieldset>
 
         {/*

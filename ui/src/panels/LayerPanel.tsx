@@ -20,6 +20,7 @@ import { AlignIcon } from "./AlignIcon";
 import { EyeIcon } from "./EyeIcon";
 import HistoryImportDialog, { type HistoryChoice } from "./HistoryImportDialog";
 import NrtImportDialog from "./NrtImportDialog";
+import { productLabel } from "./nrtRange";
 import { SatelliteDishIcon } from "./SatelliteDishIcon";
 import { dropSide, layerDropIndex, objectDropIndex } from "./reorder";
 import { KIND_LABELS, KINDS, type FieldKindName, kindOf } from "../kind";
@@ -248,7 +249,9 @@ export default function LayerPanel({
   // in it will paint.
   useEffect(() => {
     const active = tree?.layers.find((layer) => layer.id === activeLayer);
-    if (active && active.source !== "image") onActiveKind(kindOf(active.parameter));
+    // Only a layer with a field has a kind to turn the map to: an image, a
+    // GIS file and a sea-surface temperature have none.
+    if (active && hasField(active.source)) onActiveKind(kindOf(active.parameter));
   }, [activeLayer, onActiveKind, tree]);
 
   /**
@@ -805,6 +808,13 @@ export default function LayerPanel({
                   {layer.grib?.history
                     ? t("Field: {kind} · from the archive", { kind: t(KIND_LABELS[kindOf(layer.parameter)]) })
                     : t("Field: {kind} · from the file", { kind: t(KIND_LABELS[kindOf(layer.parameter)]) })}
+                </div>
+              )}
+              {layer.sst && (
+                <div className="layer-parameter muted">
+                  {t("Sea-surface temperature · {product}", {
+                    product: t(productLabel(layer.sst.product)),
+                  })}
                 </div>
               )}
               {hasField(layer.source) && (

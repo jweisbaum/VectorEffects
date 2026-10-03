@@ -1487,6 +1487,24 @@ export default function Timeline({
                     />
                   );
                 })}
+                {/*
+                  Which steps a sea-surface temperature layer has a day for
+                  (M93), in the same mark. Display only, so nothing here is
+                  selected, copied or hidden: the marks are facts.
+                */}
+                {layer.sst?.tokens.map((token, s) =>
+                  token === null ? null : (
+                    <span
+                      key={`sst-${s}`}
+                      className="tl-grib"
+                      style={{ left: s * pxPerStep, width: Math.max(2, pxPerStep - 1) }}
+                      title={t("{layer}: sea-surface temperature at {time}", {
+                        layer: layer.name,
+                        time: tickLabel(s),
+                      })}
+                    />
+                  ),
+                )}
               </div>
             </div>
             {[...layer.objects].reverse().map((object) => {

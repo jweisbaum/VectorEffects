@@ -6,6 +6,7 @@ import type { GlyphSettings } from "./GlyphSettings";
 import type { McpSettings } from "./McpSettings";
 import type { Shortcut } from "./Shortcut";
 import type { SpeedUnit } from "./SpeedUnit";
+import type { TemperatureUnit } from "./TemperatureUnit";
 
 /**
  * The application's persisted preferences.
@@ -36,6 +37,10 @@ distance_unit: DistanceUnit,
  * Global speed display preference.
  */
 speed_unit: SpeedUnit,
+/**
+ * Global temperature display preference.
+ */
+temperature_unit: TemperatureUnit,
 /**
  * What happens to unsaved work while the user is not saving (D70).
  */

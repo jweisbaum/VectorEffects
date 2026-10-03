@@ -12,6 +12,7 @@ import type { PropertyValue } from "../generated/PropertyValue";
 import type { PropertyView } from "../generated/PropertyView";
 import { KIND_LABELS, kindOf } from "../kind";
 import { formatUtcHour } from "./historyRange";
+import { productLabel } from "./nrtRange";
 import { useUnits } from "../settings/units";
 import type { PositionPick } from "../picking";
 import { toShownAngle } from "./inspectorAngle";
@@ -50,12 +51,18 @@ function LayerFacts({ layer }: { layer: LayerNode | null }) {
       ? t("Painted")
       : layer.source === "image"
         ? t("Image")
-        : layer.grib?.history
+        : layer.sst
+          ? t("Sea-surface temperature")
+          : layer.grib?.history
           ? t("History")
           : t("Imported field");
   rows.push([t("Layer"), layer.name]);
   rows.push([t("Holds"), kindOfLayer]);
-  if (layer.source !== "image") rows.push([t("Field"), t(KIND_LABELS[kindOf(layer.parameter)])]);
+  // Only a layer with a field is part of one: an image, a GIS file and a
+  // sea-surface temperature are display only.
+  if (layer.source === "painted" || layer.source === "raster" || layer.source === "zarr") {
+    rows.push([t("Field"), t(KIND_LABELS[kindOf(layer.parameter)])]);
+  }
   if (!layer.visible) rows.push([t("Shown"), t("hidden")]);
   if (layer.locked) rows.push([t("Locked"), t("yes")]);
 
@@ -86,6 +93,19 @@ function LayerFacts({ layer }: { layer: LayerNode | null }) {
     if (grib.speed_min_mps !== null || grib.speed_max_mps !== null) {
       rows.push([t("Speed filter"), t("on — see the layer panel")]);
     }
+  }
+
+  const sst = layer.sst;
+  if (sst) {
+    rows.push([t("Product"), t(productLabel(sst.product))]);
+    // A day is a token: steps showing the same day share one.
+    const days = new Set(sst.tokens.filter((token) => token !== null)).size;
+    rows.push([t("Days"), String(days)]);
+    const covered = sst.tokens.filter((token) => token !== null).length;
+    rows.push([
+      t("Steps covered"),
+      t("{covered} of {total}", { covered, total: sst.tokens.length }),
+    ]);
   }
 
   const image = layer.image;

@@ -93,6 +93,7 @@ pub const GUIDE: &str = concat!(
    c. project_new: field_kind \"wind\", resolution \"0.25\" (the archives' own), step_hours 6 for an event of several days, 1 or 3 for a day or two. step_count can be 1: the next call sets it.
    d. import_history with fields [\"wind\"] (add \"current\" only if ocean current is wanted) and start/end as ISO 8601 UTC. It sizes the timeline to the range, downloads every step and stamps the timeline with the real dates.
    e. export_grib or export_zarr with an absolute path. The reference time is taken from the project.
+   f. THE LAST FEW DAYS up to now (\"recent\", \"current conditions\", \"the last 3 days\") is not a range of dates: nrt_products, then import_nrt with product ids and `days`. It sets the timeline to the period itself. Its sea-surface temperature layers are drawn, never exported.
 
 2. INVENTED WEATHER — \"create / make / draw\" a storm, a front, a wind shift, a current. Draw it with object_create and animate it.
    a. project_new with enough steps for the event: a storm crossing an ocean basin takes 4 to 6 days, so step_hours 6 and step_count 17 to 25. Steps run from 0 to step_count - 1.

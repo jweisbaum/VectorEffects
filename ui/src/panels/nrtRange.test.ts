@@ -138,26 +138,37 @@ describe("the cost", () => {
   const all = NRT_PRODUCTS.map((product) => product.id);
 
   it("lists the products in the order the import reads them", () => {
-    expect(all).toEqual(["multiobs", "duacs", "wind-l4", "ascat", "ccmp"]);
+    expect(all).toEqual([
+      "multiobs",
+      "duacs",
+      "wind-l4",
+      "ascat",
+      "ccmp",
+      "oisst",
+      "geopolar",
+      "ostia",
+    ]);
   });
 
   /**
    * 88 hourly currents, 4 daily currents, 88 hourly winds, 4 daily
-   * scatterometer winds and 15 six-hourly CCMP winds (0 h to 84 h of an
-   * 87-hour period): 199 downloads. 88 × 2.8 + 4 × 2.8 + 88 × 4.2 + 4 × 4.2
-   * + 15 × 3.7 = 246.4 + 11.2 + 369.6 + 16.8 + 55.5 = 699.5, which rounds
-   * to 700 MB.
+   * scatterometer winds, 15 six-hourly CCMP winds (0 h to 84 h of an
+   * 87-hour period) and 4 days of each of the three daily temperatures:
+   * 88 + 4 + 88 + 4 + 15 + 3 × 4 = 211 downloads. 88 × 2.8 + 4 × 2.8 +
+   * 88 × 4.2 + 4 × 4.2 + 15 × 3.7 + 12 × 1.9 = 246.4 + 11.2 + 369.6 + 16.8
+   * + 55.5 + 22.8 = 722.3, which rounds to 722 MB.
    */
   it("sums the downloads and the size over the products chosen", () => {
-    expect(costOf(all, p, 1, 88)).toEqual({ downloads: 199, megabytes: 700 });
+    expect(costOf(all, p, 1, 88)).toEqual({ downloads: 211, megabytes: 722 });
   });
 
   /**
-   * A timeline left at 24 steps shows one day: 24 + 1 + 24 + 1 + 4 = 54 downloads,
-   * 67.2 + 2.8 + 100.8 + 4.2 + 14.8 = 189.8, which rounds to 190 MB.
+   * A timeline left at 24 steps shows one day: 24 + 1 + 24 + 1 + 4 + 3 × 1
+   * = 57 downloads, 67.2 + 2.8 + 100.8 + 4.2 + 14.8 + 3 × 1.9 = 195.5,
+   * which rounds up to 196 MB.
    */
   it("fetches only what the timeline can show", () => {
-    expect(costOf(all, p, 1, 24)).toEqual({ downloads: 54, megabytes: 190 });
+    expect(costOf(all, p, 1, 24)).toEqual({ downloads: 57, megabytes: 196 });
   });
 
   it("counts only the products chosen", () => {
@@ -165,6 +176,10 @@ describe("the cost", () => {
     expect(costOf(["duacs"], p, 1, 88)).toEqual({ downloads: 4, megabytes: 11 });
     // Eighty-eight hourly winds at 4.2 MB is 369.6 MB.
     expect(costOf(["wind-l4"], p, 1, 88)).toEqual({ downloads: 88, megabytes: 370 });
+    // A temperature is daily whatever the timeline: four days at 1.9 MB is
+    // 7.6 MB, and on a 24-step timeline one day, 1.9 MB.
+    expect(costOf(["ostia"], p, 1, 88)).toEqual({ downloads: 4, megabytes: 8 });
+    expect(costOf(["oisst"], p, 1, 24)).toEqual({ downloads: 1, megabytes: 2 });
     expect(costOf([], p, 1, 88)).toEqual({ downloads: 0, megabytes: 0 });
   });
 });

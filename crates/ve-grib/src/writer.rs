@@ -38,6 +38,11 @@ pub enum Parameter {
     CurrentU,
     /// Northward surface current. Discipline 10, VOGRD.
     CurrentV,
+    /// Sea-surface temperature, in kelvin as GRIB states it (spec.md 4.10,
+    /// M93): discipline 10, category 3, number 0. Display only — a layer of
+    /// it is never exported, but it is fetched into a file like everything
+    /// else.
+    WaterTemperature,
 }
 
 impl Parameter {
@@ -45,7 +50,7 @@ impl Parameter {
     pub fn discipline(self) -> u8 {
         match self {
             Self::WindU | Self::WindV => 0,
-            Self::CurrentU | Self::CurrentV => 10,
+            Self::CurrentU | Self::CurrentV | Self::WaterTemperature => 10,
         }
     }
 
@@ -56,6 +61,8 @@ impl Parameter {
             Self::WindU | Self::WindV => 2,
             // Currents.
             Self::CurrentU | Self::CurrentV => 1,
+            // Surface properties.
+            Self::WaterTemperature => 3,
         }
     }
 
@@ -64,6 +71,7 @@ impl Parameter {
         match self {
             Self::WindU | Self::CurrentU => 2,
             Self::WindV | Self::CurrentV => 3,
+            Self::WaterTemperature => 0,
         }
     }
 
@@ -74,6 +82,8 @@ impl Parameter {
             Self::WindU | Self::WindV => (103, 0, 10),
             // 160: depth below sea surface, 0 m.
             Self::CurrentU | Self::CurrentV => (160, 0, 0),
+            // 1: the ground or water surface.
+            Self::WaterTemperature => (1, 0, 0),
         }
     }
 
@@ -84,6 +94,7 @@ impl Parameter {
             Self::WindV => "VGRD",
             Self::CurrentU => "UOGRD",
             Self::CurrentV => "VOGRD",
+            Self::WaterTemperature => "WTMP",
         }
     }
 }
@@ -602,6 +613,7 @@ mod tests {
             Parameter::WindV,
             Parameter::CurrentU,
             Parameter::CurrentV,
+            Parameter::WaterTemperature,
         ] {
             let mut spec = spec();
             spec.parameter = parameter;
