@@ -1,5 +1,9 @@
 # VectorEffects — Implementation Plan
 
+**2026-10-03: Prepare 0.1.21 Beta.** The auto scale spans sea-surface
+temperature (M99); even toolbar spacing; the start page's Create project
+spacing and wording. Notes in `docs/releases/0.1.21.md`.
+
 **2026-10-03: Prepare 0.1.20 Beta.** Near-real-time data — ten products of
 wind, currents and sea-surface temperature, the HDF5 reader and the
 Earthdata token (M88–M97) — feature speed (M87), timeline alignment (M91),
