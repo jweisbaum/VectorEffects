@@ -104,7 +104,7 @@ const catalogue: Record<string, string> = {
   "1 hour": "1 時間",
   "{count} hours": "{count} 時間",
   "{ni} × {nj} grid · covers {hours} h · export about {size}": "{ni} × {nj} 格子 · {hours} h 分 · 書き出し約 {size}",
-  "Field, resolution and time step cannot be changed later.": "場、解像度、時間間隔は後から変更できません。",
+  "Resolution and time step cannot be changed later.": "解像度と時間間隔は後から変更できません。",
   "“{name}” has changes that have not been saved.": "「{name}」には保存されていない変更があります。",
   "Don’t save": "保存しない",
 

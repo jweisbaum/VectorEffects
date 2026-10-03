@@ -104,7 +104,7 @@ const catalogue: Record<string, string> = {
   "1 hour": "1 heure",
   "{count} hours": "{count} heures",
   "{ni} × {nj} grid · covers {hours} h · export about {size}": "grille de {ni} × {nj} · couvre {hours} h · export d’environ {size}",
-  "Field, resolution and time step cannot be changed later.": "Le champ, la résolution et le pas de temps ne pourront plus être modifiés.",
+  "Resolution and time step cannot be changed later.": "La résolution et le pas de temps ne pourront plus être modifiés.",
   "“{name}” has changes that have not been saved.": "« {name} » contient des modifications non enregistrées.",
   "Don’t save": "Ne pas enregistrer",
 

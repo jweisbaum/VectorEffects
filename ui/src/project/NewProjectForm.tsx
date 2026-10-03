@@ -92,7 +92,7 @@ export default function NewProjectForm({
         })}
         <br />
         <span className="warn-note">
-          {t("Field, resolution and time step cannot be changed later.")}
+          {t("Resolution and time step cannot be changed later.")}
         </span>
       </p>
 

@@ -104,7 +104,7 @@ const catalogue: Record<string, string> = {
   "1 hour": "ساعة واحدة",
   "{count} hours": "\u200F{count} ساعات",
   "{ni} × {nj} grid · covers {hours} h · export about {size}": "شبكة {ni} × {nj} · تغطي {hours} h · التصدير نحو {size}",
-  "Field, resolution and time step cannot be changed later.": "لا يمكن تغيير الحقل والدقة والخطوة الزمنية لاحقًا.",
+  "Resolution and time step cannot be changed later.": "لا يمكن تغيير الدقة والخطوة الزمنية لاحقًا.",
   "“{name}” has changes that have not been saved.": "في «{name}» تغييرات لم تُحفظ.",
   "Don’t save": "عدم الحفظ",
 
