@@ -260,5 +260,6 @@ const catalogue: Record<string, string> = {
   "Sets the project's first step to the start of the period.": "将项目的第一步设为该时段的起点。",
   "scatterometer 10 m wind, daily swaths, 0.25°": "散射计 10 m 风，逐日条带，0.25°",
   "ASCAT": "ASCAT",
+  "10 m wind, 6-hourly, 0.25°, to 78° N and S": "10 米风，每 6 小时，0.25°，至南北纬 78°",
 };
 export default catalogue;

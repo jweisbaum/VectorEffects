@@ -112,7 +112,7 @@ fn failed(err: reqwest::Error) -> StorageError {
     StorageError::Other(with_causes(&err))
 }
 
-fn with_causes(err: &dyn std::error::Error) -> String {
+pub(crate) fn with_causes(err: &dyn std::error::Error) -> String {
     let mut text = err.to_string();
     let mut cause = err.source();
     while let Some(next) = cause {
@@ -174,7 +174,7 @@ pub(crate) enum Retry {
 }
 
 /// Whether a status is the server saying "not now".
-fn transient(status: StatusCode) -> bool {
+pub(crate) fn transient(status: StatusCode) -> bool {
     status.is_server_error()
         || status == StatusCode::TOO_MANY_REQUESTS
         || status == StatusCode::REQUEST_TIMEOUT

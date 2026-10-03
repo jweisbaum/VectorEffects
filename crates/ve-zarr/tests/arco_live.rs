@@ -29,7 +29,7 @@ fn every_product_opens_and_its_newest_field_is_plausible() {
         .expect("a clock after 1970")
         .as_secs() as i64
         / 3600;
-    for product in Product::ALL {
+    for product in Product::ALL.into_iter().filter(|p| *p != Product::Ccmp) {
         let began = std::time::Instant::now();
         let source = product.open().expect("the product opens");
         let (first, last) = source.coverage().expect("coverage");
@@ -149,4 +149,40 @@ fn a_burst_of_steps_of_a_fine_product_arrives() {
             began.elapsed().as_secs_f64()
         );
     }
+}
+
+/// CCMP from NOAA's ERDDAP: the axes open, the newest six-hourly time is
+/// within a few days, and its field is a wind that stops short of the poles.
+#[test]
+#[ignore = "reaches the network; set VE_TEST_NRT=1"]
+fn ccmp_opens_and_its_newest_field_is_plausible() {
+    if std::env::var("VE_TEST_NRT").is_err() {
+        println!("VE_TEST_NRT is not set; nothing fetched");
+        return;
+    }
+    let began = std::time::Instant::now();
+    let source = Product::Ccmp.open().expect("CCMP opens");
+    let (first, last) = source.coverage().expect("coverage");
+    println!(
+        "ccmp: {} to {}, opened in {:.1} s",
+        first.to_iso(),
+        last.to_iso(),
+        began.elapsed().as_secs_f64()
+    );
+    let step = source.step_at(last).expect("the newest step");
+    let field = &source.read_step(&step).expect("the newest field")[0];
+    let speeds: Vec<f32> = field
+        .u
+        .iter()
+        .zip(&field.v)
+        .filter(|(u, v)| u.is_finite() && v.is_finite())
+        .map(|(u, v)| u.hypot(*v))
+        .collect();
+    let mean = speeds.iter().sum::<f32>() / speeds.len() as f32;
+    println!("  {} defined, mean {mean:.2} m/s", speeds.len());
+    // 78.5 S to 78.5 N of 1440 x 721: about 87 % of the nodes.
+    let fraction = speeds.len() as f64 / field.u.len() as f64;
+    assert!((0.8..0.92).contains(&fraction), "{fraction}");
+    assert!((2.0..15.0).contains(&mean), "{mean}");
+    assert!(field.u[0].is_nan(), "nothing at the north pole");
 }

@@ -6,6 +6,7 @@
 //! of its times stands for — is here; where it lives is asked for.
 
 use crate::arco::{ArcoSpec, ArcoStore};
+use crate::erddap::{ErddapSpec, ErddapStore};
 use crate::error::Result;
 use crate::source::{FieldSource, Variable};
 
@@ -21,6 +22,9 @@ pub enum Product {
     /// Scatterometer wind at 10 m from Metop-B and Metop-C, daily, the
     /// day's four passes merged.
     Ascat,
+    /// Cross-Calibrated Multi-Platform wind at 10 m, near-real-time
+    /// (version 2.1 NRT), six-hourly, from a NOAA ERDDAP server.
+    Ccmp,
 }
 
 /// Where one product is in the Marine Data Store.
@@ -35,7 +39,13 @@ struct Home {
 
 impl Product {
     /// Every product, in the order the dialog lists them.
-    pub const ALL: [Self; 4] = [Self::Multiobs, Self::Duacs, Self::WindL4, Self::Ascat];
+    pub const ALL: [Self; 5] = [
+        Self::Multiobs,
+        Self::Duacs,
+        Self::WindL4,
+        Self::Ascat,
+        Self::Ccmp,
+    ];
 
     /// The identifier the frontend sends and the document stores.
     pub fn id(self) -> &'static str {
@@ -44,6 +54,7 @@ impl Product {
             Self::Duacs => "duacs",
             Self::WindL4 => "wind-l4",
             Self::Ascat => "ascat",
+            Self::Ccmp => "ccmp",
         }
     }
 
@@ -54,6 +65,7 @@ impl Product {
             Self::Duacs => "Copernicus DUACS geostrophic current",
             Self::WindL4 => "Copernicus L4 hourly wind",
             Self::Ascat => "ASCAT Metop-B/C wind",
+            Self::Ccmp => "CCMP NRT wind",
         }
     }
 
@@ -66,7 +78,7 @@ impl Product {
     pub fn variable(self) -> Variable {
         match self {
             Self::Multiobs | Self::Duacs => Variable::SurfaceCurrent,
-            Self::WindL4 | Self::Ascat => Variable::Wind10m,
+            Self::WindL4 | Self::Ascat | Self::Ccmp => Variable::Wind10m,
         }
     }
 
@@ -76,13 +88,29 @@ impl Product {
         match self {
             Self::Multiobs | Self::WindL4 => 1,
             Self::Duacs | Self::Ascat => 24,
+            Self::Ccmp => 6,
         }
     }
 
     /// The line its licence asks to be shown.
     pub fn credit(self) -> &'static str {
-        "Generated using E.U. Copernicus Marine Service Information"
+        match self {
+            Self::Ccmp => "CCMP Version-2.1 NRT wind data are produced by Remote Sensing Systems",
+            _ => "Generated using E.U. Copernicus Marine Service Information",
+        }
     }
+
+    /// Where CCMP is: NOAA's Pacific Islands OceanWatch ERDDAP, which the
+    /// West Coast node's copy of the same dataset redirects to.
+    const CCMP: ErddapSpec = ErddapSpec {
+        name: "CCMP",
+        server: "https://oceanwatch.pifsc.noaa.gov/erddap",
+        dataset: "ccmp-daily-v2-1-NRT",
+        variable: Variable::Wind10m,
+        u: "uwnd",
+        v: "vwnd",
+        extra_axes: 0,
+    };
 
     /// The ASCAT passes, each a dataset of its own: Metop-B and Metop-C,
     /// ascending and descending, at 0.25 degree.
@@ -109,8 +137,14 @@ impl Product {
         },
     ];
 
-    fn home(self) -> Home {
-        match self {
+    /// Where a single-dataset Copernicus product is, and how it is read;
+    /// `None` for the products that are not one Copernicus dataset.
+    fn marine(self) -> Option<(Home, ArcoSpec)> {
+        Some((self.home()?, self.spec()?))
+    }
+
+    fn home(self) -> Option<Home> {
+        Some(match self {
             Self::Multiobs => Home {
                 product: "MULTIOBS_GLO_PHY_MYNRT_015_003",
                 dataset: "cmems_obs-mob_glo_phy-cur_nrt_0.25deg_PT1H-i",
@@ -126,19 +160,14 @@ impl Product {
                 dataset: "cmems_obs-wind_glo_phy_nrt_l4_0.125deg_PT1H",
                 fallback: "https://s3.waw3-1.cloudferro.com/mdl-arco-time-050/arco/WIND_GLO_PHY_L4_NRT_012_004/cmems_obs-wind_glo_phy_nrt_l4_0.125deg_PT1H_202207/timeChunked.zarr",
             },
-            // ASCAT is four datasets and opens through `ASCAT_PASSES`; this
-            // is the first of them, for anything that asks about one
-            // (`open` never does).
-            Self::Ascat => Home {
-                product: Self::ASCAT_PASSES[0].product,
-                dataset: Self::ASCAT_PASSES[0].dataset,
-                fallback: Self::ASCAT_PASSES[0].fallback,
-            },
-        }
+            // Four datasets, opened through `ASCAT_PASSES`; and not
+            // Copernicus at all.
+            Self::Ascat | Self::Ccmp => return None,
+        })
     }
 
-    fn spec(self) -> ArcoSpec {
-        match self {
+    fn spec(self) -> Option<ArcoSpec> {
+        Some(match self {
             Self::Multiobs => ArcoSpec {
                 name: "MULTIOBS",
                 variable: Variable::SurfaceCurrent,
@@ -165,7 +194,8 @@ impl Product {
                 time_path: None,
             },
             Self::Ascat => crate::ascat::SPEC,
-        }
+            Self::Ccmp => return None,
+        })
     }
 
     /// Opens one dataset where the catalogue says it is.
@@ -209,7 +239,16 @@ impl Product {
             })?;
             return Ok(Box::new(crate::ascat::AscatStore::new(members)?));
         }
-        Ok(Box::new(Self::open_home(&self.home(), self.spec())?))
+        if self == Self::Ccmp {
+            return Ok(Box::new(ErddapStore::open(
+                Self::CCMP,
+                Box::new(crate::erddap::Http::new()?),
+            )?));
+        }
+        let (home, spec) = self
+            .marine()
+            .ok_or_else(|| crate::error::ZarrError::Open(format!("{} has no store", self.id())))?;
+        Ok(Box::new(Self::open_home(&home, spec)?))
     }
 }
 

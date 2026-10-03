@@ -3662,6 +3662,30 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M92 — CCMP, and a reader for NOAA's data servers
+
+The fourth milestone of the near-real-time import. `ve_zarr::netcdf3` reads
+the classic and 64-bit-offset NetCDF-3 formats — what an ERDDAP server
+answers a subset request with — and is held to the server's own CSV of the
+same 81 OISST values, fills included. `ve_zarr::erddap` is a `FieldSource`
+over any ERDDAP grid: the axes once, then one request per time for both
+components, NaN where the data stops short of the poles, through a fetch
+seam a test answers with NetCDF-3 written in the test. Its client follows a
+redirect only on the host it was sent to. `Product::Ccmp` is the first
+product off Copernicus, with Remote Sensing Systems' credit in the dialog.
+
+**Found while probing:** the `_LonPM180` copy of CCMP NRT stopped updating
+on 2 June 2026; the 0–360 one is current, and its downloads are redirected
+from `coastwatch.pfeg.noaa.gov` to `oceanwatch.pifsc.noaa.gov`.
+
+**Not verified live:** on 2–3 October 2026 OceanWatch timed out at the TCP
+level on every port and path, from this machine, for hours. The reader is
+proved against OISST's real NetCDF-3 and against synthetic files of CCMP's
+shape; `ccmp_opens_and_its_newest_field_is_plausible` is the live test to
+run when the server answers. Until then the product is offered and, when
+the server cannot be reached, named in the status bar as skipped while the
+others import.
+
 ### M91 — A file's times against the timeline's
 
 Asked for by the user, 2026-10-02: when the timeline has a start time,

@@ -260,5 +260,6 @@ const catalogue: Record<string, string> = {
   "Sets the project's first step to the start of the period.": "Zet de eerste stap van het project op het begin van de periode.",
   "scatterometer 10 m wind, daily swaths, 0.25°": "scatterometerwind op 10 m, dagelijkse banen, 0,25°",
   "ASCAT": "ASCAT",
+  "10 m wind, 6-hourly, 0.25°, to 78° N and S": "wind op 10 m, 6-uurlijks, 0,25°, tot 78° N en Z",
 };
 export default catalogue;

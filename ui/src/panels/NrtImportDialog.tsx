@@ -31,6 +31,7 @@ import type { ProjectSummary } from "../generated/ProjectSummary";
 import { useT } from "../i18n";
 import { formatUtcHour } from "./historyRange";
 import {
+  CCMP_CREDIT,
   COPERNICUS_CREDIT,
   DEFAULT_DAYS,
   NRT_GROUPS,
@@ -164,6 +165,7 @@ export default function NrtImportDialog({
           ))}
           {/* The attribution the products' licence asks for, as it words it. */}
           <span className="muted nrt-credit">{COPERNICUS_CREDIT}</span>
+          <span className="muted nrt-credit">{CCMP_CREDIT}</span>
         </fieldset>
 
         {/*

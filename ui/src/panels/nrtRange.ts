@@ -95,6 +95,14 @@ export const NRT_PRODUCTS: readonly NrtProduct[] = [
     periodHours: 24,
     megabytesPerTime: 4.2,
   },
+  {
+    id: "ccmp",
+    group: "wind",
+    label: "CCMP NRT",
+    detail: msg("10 m wind, 6-hourly, 0.25°, to 78° N and S"),
+    periodHours: 6,
+    megabytesPerTime: 3.7,
+  },
 ];
 
 /** The headings the products are listed under, in the order they are shown. */
@@ -111,6 +119,8 @@ export const NRT_GROUPS: readonly { id: NrtGroup; heading: string }[] = [
  * same sentence is `ve_zarr::Product::credit` on the Rust side.
  */
 export const COPERNICUS_CREDIT = "Generated using E.U. Copernicus Marine Service Information";
+/** CCMP's credit, as Remote Sensing Systems asks for it. Not translated. */
+export const CCMP_CREDIT = "CCMP Version-2.1 NRT wind data are produced by Remote Sensing Systems";
 
 /** The span an import covers and what the timeline needs to show it. */
 export interface NrtPeriod {

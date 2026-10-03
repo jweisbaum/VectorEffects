@@ -260,5 +260,6 @@ const catalogue: Record<string, string> = {
   "Sets the project's first step to the start of the period.": "プロジェクトの最初のステップを期間の開始時刻に設定します。",
   "scatterometer 10 m wind, daily swaths, 0.25°": "散乱計による 10 m 風、日ごとの観測帯、0.25°",
   "ASCAT": "ASCAT",
+  "10 m wind, 6-hourly, 0.25°, to 78° N and S": "10 m 風、6 時間ごと、0.25°、南北 78° まで",
 };
 export default catalogue;
