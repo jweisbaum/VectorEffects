@@ -7,13 +7,8 @@ import type { ProjectSummary } from "../generated/ProjectSummary";
 import type { ImageLayerView } from "../generated/ImageLayerView";
 import type { GisLayerView } from "../generated/GisLayerView";
 import type { NrtRequest } from "../generated/NrtRequest";
-import {
-  isGeoRaster,
-  pickGisToImport,
-  pickGribToImport,
-  pickImageToImport,
-  pickZarrToImport,
-} from "../project/dialogs";
+import { pickFileToImport } from "../project/dialogs";
+import { importOf } from "../project/importKind";
 import { layerForSelection, layerToActivate } from "./activeLayer";
 import { CalendarIcon } from "./CalendarIcon";
 import { AlignIcon } from "./AlignIcon";
@@ -277,18 +272,31 @@ export default function LayerPanel({
   };
 
   /** Picks a GRIB2 file and imports it as a layer, or two if it holds both kinds. */
-  const importGrib = async () => {
+  /**
+   * The one Import button (spec.md 4.8): a GRIB2 file, a routing Zarr store
+   * by its `zarr.json`, an image or GIS data, decided by the file chosen.
+   * The dialog lists only those formats; a name it lets through that none of
+   * them reads is said so, never guessed at.
+   */
+  const importFile = async () => {
     setError(null);
-    const path = await pickGribToImport();
-    if (path === null) return;
-    run(api.importGrib(path));
-  };
-
-  const importZarr = async () => {
-    setError(null);
-    const path = await pickZarrToImport();
-    if (path === null) return;
-    run(api.importZarr(path));
+    const chosen = await pickFileToImport();
+    if (chosen === null) return;
+    const target = importOf(chosen);
+    if (target === null) {
+      setError(t("{file} is not a format this imports: GRIB2, a Zarr store's zarr.json, an image or GIS data.", { file: chosen }));
+      return;
+    }
+    switch (target.kind) {
+      case "grib":
+        return run(api.importGrib(target.path));
+      case "zarr":
+        return run(api.importZarr(target.path));
+      case "image":
+        return run(api.importImage(target.path, viewBounds?.() ?? null));
+      case "gis":
+        return run(api.importGis(target.path));
+    }
   };
 
   /**
@@ -343,27 +351,6 @@ export default function LayerPanel({
   };
 
   /** Picks an image and lays it under the field (spec.md 4.9, M18). */
-  const importImage = async () => {
-    setError(null);
-    const path = await pickImageToImport();
-    if (path === null) return;
-    run(api.importImage(path, viewBounds?.() ?? null));
-  };
-
-  /**
-   * Picks a GIS file and lays it under the field (spec.md 4.11).
-   *
-   * A georeferenced raster goes to the image import instead: a GeoTIFF is a
-   * picture, and the application already places one. The user chooses a
-   * file, not a kind — which of the two it is, is the file's own business.
-   */
-  const importGis = async () => {
-    setError(null);
-    const path = await pickGisToImport();
-    if (path === null) return;
-    run(isGeoRaster(path) ? api.importImage(path, viewBounds?.() ?? null) : api.importGis(path));
-  };
-
   const commitRename = (id: number, isLayer: boolean) => {
     const name = draft.trim();
     setRenaming(null);
@@ -587,35 +574,11 @@ export default function LayerPanel({
         </button>
         <button
           className="import-grib"
-          title={t("Import a GRIB2 file as a layer")}
-          data-feature="layers:import-grib"
-          onClick={() => void importGrib()}
+          title={t("Import a file as layers: a GRIB2 file, a routing Zarr store (choose its zarr.json), an image, or GIS data — a shapefile, GeoJSON, KML/KMZ or GPX.")}
+          data-feature="layers:import"
+          onClick={() => void importFile()}
         >
-          + GRIB
-        </button>
-        <button
-          className="import-grib"
-          title={t("Import wind and currents from a routing Zarr directory as layers")}
-          data-feature="layers:import-zarr"
-          onClick={() => void importZarr()}
-        >
-          + Zarr
-        </button>
-        <button
-          className="import-grib"
-          title={t("Lay a georeferenced image under the field. A GeoTIFF or an image with a world file lands where it says; anything else lands on the view, to be placed by hand.")}
-          data-feature="layers:import-image"
-          onClick={() => void importImage()}
-        >
-          {t("+ image")}
-        </button>
-        <button
-          className="import-grib"
-          title={t("Lay GIS data under the field: a shapefile, GeoJSON, KML/KMZ, a GPX route or track, or a georeferenced raster. Display only — it makes no wind and reaches no export.")}
-          data-feature="layers:import-gis"
-          onClick={() => void importGis()}
-        >
-          + GIS
+          {t("Import")}
         </button>
         <button
           className="import-grib icon-button"

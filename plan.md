@@ -3662,6 +3662,26 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M98 — One Import button
+
+The user's instruction of 2026-10-03: the layer panel's four file imports —
+GRIB, Zarr, image and GIS — are one **Import** button, and its dialog is
+filtered to the formats supported. `ui/src/project/importKind.ts` holds the
+extensions and `importOf`, which the chosen file's name routes through; the
+dialog's first filter is all of them, then one per kind.
+
+**Ruled here:** a routing Zarr store is a directory, and a native file
+dialog offers files or directories, not both. The store is chosen by the
+`zarr.json` at its top and its directory imported; the start screen's Open
+from Zarr still picks the directory. A GeoTIFF imports as an image, as it
+did from the GIS button. A name the filters let through and nothing reads
+is reported in the status bar. The start screen's project-from-file
+buttons are unchanged.
+
+**Checked in the app, 2026-10-03:** the header reads `+`, Import, Import
+history, Near-real-time data. The native dialog cannot be driven; its
+filters are held to `importOf` by `importKind.test.ts`.
+
 ### M97 — CMC, and the Earthdata token
 
 The eighth and last product milestone of the near-real-time import.

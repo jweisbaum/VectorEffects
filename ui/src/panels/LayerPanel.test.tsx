@@ -10,15 +10,12 @@ import LayerPanel from "./LayerPanel";
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const backend = vi.hoisted(() => ({
   documentTree: vi.fn(), moveLayer: vi.fn(), moveObject: vi.fn(), setLayerVisible: vi.fn(),
-  importZarr: vi.fn(), pickZarr: vi.fn(),
+  importZarr: vi.fn(), importGrib: vi.fn(), importImage: vi.fn(), importGis: vi.fn(), pickFile: vi.fn(),
 }));
 vi.mock("../ipc", () => ({ api: backend }));
-vi.mock("../hint", () => ({ reportError: vi.fn() }));
-vi.mock("../project/dialogs", () => ({
-  pickZarrToImport: backend.pickZarr,
-  pickGribToImport: vi.fn(),
-  pickImageToImport: vi.fn(),
-}));
+const hint = vi.hoisted(() => ({ reportError: vi.fn() }));
+vi.mock("../hint", () => hint);
+vi.mock("../project/dialogs", () => ({ pickFileToImport: backend.pickFile }));
 
 let container: HTMLDivElement;
 let root: Root;
@@ -48,8 +45,10 @@ function pointer(target: EventTarget, type: string, y: number, pointerId = 1) {
 
 beforeEach(async () => {
   vi.clearAllMocks();
-  backend.pickZarr.mockResolvedValue(null);
-  backend.importZarr.mockResolvedValue({ ...project, revision: 2 });
+  backend.pickFile.mockResolvedValue(null);
+  for (const run of [backend.importZarr, backend.importGrib, backend.importImage, backend.importGis]) {
+    run.mockResolvedValue({ ...project, revision: 2 });
+  }
   tree = { layers: ["painted", "raster", "zarr", "image"].map((source, i) => ({
     id: i + 1, name: `Layer ${i + 1}`, source, visible: true, locked: false,
     objects: [], grib: null, image: null, gis: null, sst: null, parameter: "wind",
@@ -84,13 +83,35 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-it("imports a selected Zarr directory through the layer controls", async () => {
-  const button = container.querySelector<HTMLButtonElement>('button[title^="Import wind and currents"]')!;
+/** One button for every file a layer can come from; the file decides which import. */
+it("imports whatever file is chosen through the one Import button", async () => {
+  const buttons = [...container.querySelectorAll<HTMLButtonElement>(".layer-panel header button")];
+  expect(buttons.filter((b) => /GRIB|Zarr|GIS|image/.test(b.textContent ?? ""))).toEqual([]);
+  const button = container.querySelector<HTMLButtonElement>('[data-feature="layers:import"]')!;
+  expect(button.textContent).toBe("Import");
+
   await act(async () => button.click());
   expect(backend.importZarr).not.toHaveBeenCalled();
-  backend.pickZarr.mockResolvedValue("/data/routing_test");
+
+  backend.pickFile.mockResolvedValue("/data/routing_test/zarr.json");
   await act(async () => button.click());
   expect(backend.importZarr).toHaveBeenCalledWith("/data/routing_test");
+
+  backend.pickFile.mockResolvedValue("/data/gfs.grib2");
+  await act(async () => button.click());
+  expect(backend.importGrib).toHaveBeenCalledWith("/data/gfs.grib2");
+
+  backend.pickFile.mockResolvedValue("/maps/chart.tif");
+  await act(async () => button.click());
+  expect(backend.importImage).toHaveBeenCalledWith("/maps/chart.tif", null);
+
+  backend.pickFile.mockResolvedValue("/gis/route.gpx");
+  await act(async () => button.click());
+  expect(backend.importGis).toHaveBeenCalledWith("/gis/route.gpx");
+
+  backend.pickFile.mockResolvedValue("/data/notes.txt");
+  await act(async () => button.click());
+  expect(hint.reportError).toHaveBeenCalledWith(expect.stringContaining("notes.txt"));
 });
 
 it.each([

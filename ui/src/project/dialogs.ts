@@ -10,6 +10,7 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 import { whileChoosing } from "../busy";
 import { msg, t } from "../i18n";
 import { EXTENSION } from "./format";
+import { IMPORT_FILTERS } from "./importKind";
 
 /** A function, not a constant: the filter's name is read in the language on screen. */
 const filters = () => [{ name: t("VectorEffects project"), extensions: [EXTENSION] }];
@@ -51,47 +52,13 @@ export async function pickChartDirectory(): Promise<string | null> {
 }
 
 /**
- * Picks a GIS file to lay under the field (spec.md 4.11).
- *
- * A georeferenced raster is offered here too, and routed to the image-layer
- * import: a GeoTIFF is a picture, and the application already places one.
- * Which of the two a file is, is a question its extension answers.
+ * Picks a file for the layer panel's Import button: any format a layer can
+ * come from, which `importOf` then sorts (spec.md 4.8). The first filter is
+ * all of them, so the dialog opens showing everything it can import.
  */
-export async function pickGisToImport(): Promise<string | null> {
-  const chosen = await whileChoosing(msg("Choosing a GIS file"), () =>
-    open({
-      multiple: false,
-      directory: false,
-      filters: [
-        {
-          name: t("GIS data"),
-          extensions: ["geojson", "json", "shp", "kml", "kmz", "gpx", "tif", "tiff"],
-        },
-      ],
-    }),
-  );
-  return typeof chosen === "string" ? chosen : null;
-}
-
-/** Whether a GIS path is a raster, which imports as an image layer. */
-export function isGeoRaster(path: string): boolean {
-  return /\.(tif|tiff)$/i.test(path);
-}
-
-/**
- * Picks an image to lay under the field (spec.md 4.9, M18).
- *
- * The three formats there are pure-Rust decoders for. A GeoTIFF is a `.tif`
- * like any other, so it is not offered separately: whether a file carries a
- * georeference is something only the file knows.
- */
-export async function pickImageToImport(): Promise<string | null> {
-  const chosen = await whileChoosing(msg("Choosing an image"), () =>
-    open({
-      multiple: false,
-      directory: false,
-      filters: [{ name: t("Image"), extensions: ["tif", "tiff", "png", "jpg", "jpeg"] }],
-    }),
+export async function pickFileToImport(): Promise<string | null> {
+  const chosen = await whileChoosing(msg("Choosing a file to import"), () =>
+    open({ multiple: false, directory: false, filters: IMPORT_FILTERS() }),
   );
   return typeof chosen === "string" ? chosen : null;
 }

@@ -599,8 +599,13 @@ decodes on every open.
 
 ### 4.8 Imported GRIB layers
 
-A GRIB2 file can be imported as a layer, from the **Import GRIB** button
-beside the layer panel's `+`. The layer carries the file's `u`/`v` field as a
+A GRIB2 file can be imported as a layer, from the **Import** button beside
+the layer panel's `+`. That one button takes every file a layer can come
+from — a GRIB2 file, a routing Zarr store (§4.10's local imports), an image
+(§4.9) or GIS data (§4.11) — through one dialog filtered to those formats,
+an "everything" filter first and then one per kind; the chosen file's name
+decides which import runs, and a name none of them reads is reported rather
+than guessed at. A GeoTIFF imports as an image layer. The layer carries the file's `u`/`v` field as a
 lattice — a *raster*, in the sense of invariant 1 — beneath any objects
 painted on it, and composites like any other layer: where the lattice has a
 value it overwrites what is beneath; where it has none (outside a regional
@@ -891,9 +896,10 @@ rather than at every frame.
 A message that cannot be read is skipped and logged rather than failing the
 file; a file with no usable `u`/`v` pair is refused with the reasons.
 
-**Local routing Zarr imports.** The layer panel offers **Import Zarr**, and
-the start screen offers **Open from Zarr**. Both choose a directory, with or
-without a `.zarr` suffix. The supported layout is the one in `routing_test`
+**Local routing Zarr imports.** The layer panel's **Import** takes a store
+by the `zarr.json` at its top — a file dialog cannot also offer
+directories — and imports its directory; the start screen's **Open from
+Zarr** chooses the directory itself, with or without a `.zarr` suffix. The supported layout is the one in `routing_test`
 and §12.3: Zarr v3 `data(time, param, latitude, longitude)`, Float16 or
 Float32 components in m/s, `u10`/`v10` and/or `ucur`/`vcur` named by the
 parameter coordinate, a strictly increasing whole-hour UTC time axis, and a
@@ -1397,7 +1403,7 @@ could not be identified that way is left out**, because a guessed code draws
 the wrong thing in the right place, which is the worst failure a chart can
 have. An unlisted class keeps its number (`OBJL_137`) and is not drawn.
 
-**GIS layers.** *Import GIS* in the layer panel reads a shapefile (`.shp`
+**GIS layers.** The layer panel's *Import* reads a shapefile (`.shp`
 with its `.dbf` and `.prj`), GeoJSON, KML, KMZ or GPX, and adds a
 display-only layer — a real layer, with an eye, a name and a place in the
 stack, but no field, no speed filter and no step bar.
