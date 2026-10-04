@@ -39,7 +39,7 @@ for local automation and is never included in release builds.
 Rust owns the project model, animation, rendering, and GRIB encoding. The UI uses
 React and TypeScript inside Tauri. See [spec.md](spec.md) for the application
 contract, [CLAUDE.md](CLAUDE.md) for development conventions, and the
-[release guide](docs/github-release-plan.md) for the four-platform pipeline.
+[release guide](docs/github-release-plan.md) for the five-platform pipeline.
 
 ## License
 

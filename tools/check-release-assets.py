@@ -10,8 +10,10 @@ def main(directory):
     required = {
         "Intel Mac": lambda name: name.endswith("_x64.dmg"),
         "Apple Silicon Mac": lambda name: name.endswith("_aarch64.dmg"),
-        "Windows MSI": lambda name: name.endswith(".msi"),
-        "Windows setup": lambda name: name.endswith("-setup.exe"),
+        "Windows x64 MSI": lambda name: "_x64_" in name and name.endswith(".msi"),
+        "Windows x64 setup": lambda name: name.endswith("_x64-setup.exe"),
+        "Windows ARM MSI": lambda name: "_arm64_" in name and name.endswith(".msi"),
+        "Windows ARM setup": lambda name: name.endswith("_arm64-setup.exe"),
         "Linux AppImage": lambda name: name.endswith(".AppImage"),
         "Linux Debian": lambda name: name.endswith(".deb"),
         "Linux RPM": lambda name: name.endswith(".rpm"),
@@ -29,7 +31,7 @@ def main(directory):
                 digest.update(block)
         lines.append(f"{digest.hexdigest()}  {path.name}\n")
     (directory / "SHA256SUMS").write_text("".join(lines), encoding="utf-8")
-    print(f"Verified all four platforms; checksummed {len(assets)} release assets.")
+    print(f"Verified all five platforms; checksummed {len(assets)} release assets.")
 
 
 if __name__ == "__main__":

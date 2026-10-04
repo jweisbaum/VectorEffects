@@ -17,7 +17,7 @@ on:
         required: false
         default: all
         type: choice
-        options: [all, mac-intel, mac-arm, windows-x64, linux-x64]
+        options: [all, mac-intel, mac-arm, windows-x64, windows-arm, linux-x64]
 
 permissions:
   contents: read
@@ -66,6 +66,7 @@ jobs:
             { name: 'mac-intel', os: 'macos-15-intel', targets: 'x86_64-apple-darwin' },
             { name: 'mac-arm', os: 'macos-15', targets: 'aarch64-apple-darwin' },
             { name: 'windows-x64', os: 'windows-2022', targets: 'x86_64-pc-windows-msvc' },
+            { name: 'windows-arm', os: 'windows-11-arm', targets: 'aarch64-pc-windows-msvc' },
             { name: 'linux-x64', os: 'ubuntu-22.04', targets: 'x86_64-unknown-linux-gnu' },
           ].filter(target => process.env.BUILD_PLATFORM === 'all' || target.name === process.env.BUILD_PLATFORM)
             .map(target => ({ ...target, args: `--target ${target.targets} -- --locked` }));
@@ -225,7 +226,7 @@ jobs:
       - name: The Windows application carries its manifest
         if: runner.os == 'Windows'
         shell: pwsh
-        run: ./tools/check-windows-manifest.ps1 -Exe target/x86_64-pc-windows-msvc/release/ve-app.exe
+        run: ./tools/check-windows-manifest.ps1 -Exe target/${{ matrix.targets }}/release/ve-app.exe
 
   publish:
     name: checksums and publish beta

@@ -4731,8 +4731,8 @@ their reasoning so they are not reopened by accident.
   values remain defined. Entirely undefined messages are valid empty bitmaps.
 - **Help → VectorEffects Help** (F1) opens searchable help with bundled real app
   screenshots. Text and images work offline; screenshots can be enlarged.
-- GitHub workflows build Intel Mac, ARM Mac, Windows x64 and Linux x64. Manual
-  runs retain artifacts; version tags prepare draft beta releases. See
+- GitHub workflows build Intel Mac, ARM Mac, Windows x64, Windows ARM and Linux
+  x64. Manual runs retain artifacts; version tags prepare draft beta releases. See
   `docs/github-release-plan.md` for credentials, signing and publication steps.
 - The MCP service (§8.8) is the second exception to invariant 5 and the first
   inbound one. It is switched, tokened and confined to one module; the

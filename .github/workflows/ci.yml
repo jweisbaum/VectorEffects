@@ -25,7 +25,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-15-intel, macos-15, windows-2022, ubuntu-22.04]
+        os: [macos-15-intel, macos-15, windows-2022, windows-11-arm, ubuntu-22.04]
     steps:
       - name: Preserve source line endings on Windows
         if: runner.os == 'Windows'
@@ -95,6 +95,46 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: ./tools/check-windows-manifest.ps1 -Exe target/debug/ve-app.exe
+      # Invariant 4: export is byte-reproducible across machines. Each
+      # platform's maths library supplies sin, cos and atan2, so the same
+      # project is exported everywhere and `export-identical` compares them.
+      - name: Export the sample project
+        shell: pwsh
+        run: |
+          cargo run -p ve-app --example export_sample -- sample.grib2 empty.grib2
+          New-Item -ItemType Directory -Force export | Out-Null
+          foreach ($file in 'sample.grib2', 'empty.grib2') {
+            $hash = (Get-FileHash -Algorithm SHA256 $file).Hash.ToLower()
+            # LF on every platform, so the files compare byte for byte.
+            [IO.File]::AppendAllText("$PWD/export/SHA256SUMS", "$hash  $file`n")
+          }
+          Copy-Item sample.grib2, empty.grib2 export/
+          Get-Content export/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: export-${{ matrix.os }}
+          path: export/
+
+  export-identical:
+    name: export is byte-identical on every platform
+    needs: rust
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: export-*
+      - name: Compare every platform's export
+        run: |
+          for sums in export-*/SHA256SUMS; do echo "${sums%%/*}"; sed 's/^/  /' "$sums"; done
+          reference=$(ls -d export-*/ | head -n 1)
+          status=0
+          for dir in export-*/; do
+            if ! cmp -s "$reference/SHA256SUMS" "$dir/SHA256SUMS"; then
+              echo "::error title=Export differs::${dir%/} does not match ${reference%/}"
+              status=1
+            fi
+          done
+          exit $status
 
   grib:
     name: grib validated by ecCodes

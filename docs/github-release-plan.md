@@ -24,7 +24,7 @@ pushes and pull requests run CI. A version tag starts the release pipeline.
 Repository visibility also applies to release downloads; private repositories
 require collaborators to sign in.
 
-## 2. Build all four targets
+## 2. Build all five targets
 
 The checked-in [release workflow](../.github/workflows/release.yml) can be run from
 Actions → Release builds → Run workflow to produce downloadable build artifacts
@@ -36,10 +36,14 @@ offline check before bundling. The optional WebDriver feature is never enabled.
 | Intel Mac | `macos-15-intel` | `x86_64-apple-darwin` | `.dmg`, `.app` |
 | Apple Silicon Mac | `macos-15` | `aarch64-apple-darwin` | `.dmg`, `.app` |
 | Windows 64-bit | `windows-2022` | `x86_64-pc-windows-msvc` | `.msi`, setup `.exe` |
+| Windows on ARM | `windows-11-arm` | `aarch64-pc-windows-msvc` | `.msi`, setup `.exe` |
 | Linux 64-bit | `ubuntu-22.04` | `x86_64-unknown-linux-gnu` | `.AppImage`, `.deb`, `.rpm` |
 
-Separate Mac runners test each architecture natively. The Linux build uses the
-older Ubuntu baseline to avoid unnecessarily raising its runtime requirements.
+Separate Mac and Windows runners test each architecture natively. CI exports
+the same sample project on every platform and fails unless the GRIB files are
+byte-identical (invariant 4): each platform supplies its own `sin`, `cos` and
+`atan2`. The Linux build uses the older Ubuntu baseline to avoid unnecessarily
+raising its runtime requirements.
 Runner architectures were checked against
 [GitHub's runner reference](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
 Bundling and release uploads follow the
@@ -80,7 +84,7 @@ git push origin v0.1.4
 ```
 
 The pipeline validates versions and notes, creates one draft prerelease, and
-runs all four builds. Only after every build succeeds does it verify that each
+runs all five builds. Only after every build succeeds does it verify that each
 platform's installers exist, upload `SHA256SUMS`, and publish the beta. A failed
 build leaves a draft that can be resumed using Actions → Re-run failed jobs.
 Published releases are not overwritten by a new run; issue a new version instead.
