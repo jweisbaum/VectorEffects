@@ -57,3 +57,29 @@ VE_TEST_GRIBS=~/temp_test_gribs cargo test -p ve-grib --release \
 
 Generated with the `eccodes` Python bindings; regenerate only when the sample
 set itself changes.
+
+## `jpeg2000_wide.grib2`
+
+One message, `u = lon/10` on a 1° global grid (360 × 181), node 0 missing,
+packed by ecCodes at 12 bits. With a bitmap, ecCodes writes the codestream as
+one row of the kept values — 65,159 × 1 — which is the shape Météo-France's
+AROME files take at millions wide, and past the 60,000 pixels unpatched
+`hayro-jpeg2000` accepts (`vendor/README.md`). Made from `simple.grib2`'s
+first message with the `eccodes` Python bindings:
+
+```python
+for key, value in [("Ni", 360), ("Nj", 181),
+                   ("latitudeOfFirstGridPointInDegrees", 90.0),
+                   ("longitudeOfFirstGridPointInDegrees", 0.0),
+                   ("latitudeOfLastGridPointInDegrees", -90.0),
+                   ("longitudeOfLastGridPointInDegrees", 359.0),
+                   ("iDirectionIncrementInDegrees", 1.0),
+                   ("jDirectionIncrementInDegrees", 1.0)]:
+    codes_set(gid, key, value)
+codes_set(gid, "missingValue", 9999.0)
+codes_set(gid, "bitmapPresent", 1)
+values[0] = 9999.0                      # values = lon / 10, lon in [-180, 180)
+codes_set(gid, "packingType", "grid_jpeg")
+codes_set(gid, "bitsPerValue", 12)
+codes_set_values(gid, values)
+```

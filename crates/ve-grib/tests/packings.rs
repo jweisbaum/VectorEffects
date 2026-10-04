@@ -21,6 +21,7 @@ const COMPLEX: &[u8] = include_bytes!("fixtures/complex.grib2");
 const COMPLEX_SD: &[u8] = include_bytes!("fixtures/complex_sd.grib2");
 const CCSDS_BITMAP: &[u8] = include_bytes!("fixtures/ccsds_bitmap.grib2");
 const JPEG2000_BITMAP: &[u8] = include_bytes!("fixtures/jpeg2000_bitmap.grib2");
+const JPEG2000_WIDE: &[u8] = include_bytes!("fixtures/jpeg2000_wide.grib2");
 
 const NI: usize = 36;
 const NJ: usize = 19;
@@ -130,6 +131,41 @@ fn ccsds_packing_honours_a_bitmap() {
 #[test]
 fn jpeg_2000_packing_honours_a_bitmap() {
     check("jpeg2000+bitmap", JPEG2000_BITMAP, true);
+}
+
+/// Météo-France writes AROME's JPEG 2000 codestream as one row of every
+/// value the bitmap keeps — 4,160,515 wide for the 0.01° France grid — and
+/// `hayro-jpeg2000` 0.4 refuses any dimension past 60,000. ecCodes writes a
+/// bitmapped field the same way, so this is a 1° global `u` (65,160 nodes,
+/// node 0 missing) packed by ecCodes into a codestream 65,159 wide and 1
+/// high. See `fixtures/README.md` and `vendor/hayro-jpeg2000`.
+#[test]
+fn a_jpeg_2000_codestream_wider_than_60000_decodes() {
+    const NI: usize = 360;
+    const NJ: usize = 181;
+    let decoded = decode::read_all(JPEG2000_WIDE).expect("the fixture decodes");
+    assert!(
+        decoded.skipped.is_empty(),
+        "{:?} was skipped",
+        decoded.skipped
+    );
+    let [message] = decoded.messages.as_slice() else {
+        panic!("one message, got {}", decoded.messages.len());
+    };
+    assert_eq!(message.values.len(), NI * NJ);
+    // The fixture is packed at 12 bits over a 35.9-wide range, which ecCodes
+    // rounds to a binary step of 2^-6; a value can be off by half of that.
+    let tol = 2f32.powi(-7);
+    for (k, &got) in message.values.iter().enumerate() {
+        if k == 0 {
+            assert_eq!(got, MISSING, "node 0: the bitmap leaves it out");
+            continue;
+        }
+        let raw = (k % NI) as f32;
+        let lon = if raw >= 180.0 { raw - 360.0 } else { raw };
+        let want = lon / 10.0;
+        assert!((got - want).abs() <= tol, "node {k}: {got} against {want}");
+    }
 }
 
 /// The point of the fixture set: five packings of one field must not merely

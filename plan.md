@@ -1924,10 +1924,11 @@ GRIB2 messages, all of them now parsed.
 - **GRIB edition 1**, 82 files. An edition, not a grid definition: different
   sections, tables and packing. All 82 are derived duplicates whose GRIB2
   originals are not in the set.
-- **JPEG 2000 codestreams wider than 60,000 px**, 55 files. Météo-France
-  writes AROME's codestream as a single row of 4,160,515 pixels and
-  `hayro-jpeg2000` caps a dimension at 60,000. A packing limit, not a grid
-  one — those files are on plain lat/lon grids.
+- ~~**JPEG 2000 codestreams wider than 60,000 px**, 55 files.~~ Fixed
+  2026-10-04: Météo-France writes AROME's codestream as a single row of
+  4,160,515 pixels and `hayro-jpeg2000` capped each side at 60,000. A
+  patched copy in `vendor/` caps the area instead (`vendor/README.md`); a
+  4.2-million-wide codestream decodes to ecCodes' values in 1.9 s.
 - **Product templates 4.5, 4.6, 4.9 and 4.10**, 70 files. Probability and
   percentile products, which carry no `u`/`v` and so would not import as a
   field even once read.

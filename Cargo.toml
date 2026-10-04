@@ -12,6 +12,8 @@ members = [
     "tools/basemap-builder",
     "tools/icon-grid-builder",
 ]
+# Patched copies of crates.io dependencies, not ours to lint or format.
+exclude = ["vendor"]
 
 [workspace.package]
 version = "0.1.21"
@@ -89,3 +91,9 @@ opt-level = 2
 # there. `CARGO_INCREMENTAL=0` is the other workaround, and it costs 27 s.
 [profile.dev.package.ve-app]
 opt-level = 0
+
+# `hayro-jpeg2000` refuses a JPEG 2000 image wider than 60,000 pixels, and
+# AROME's GRIB codestreams are millions wide. vendor/README.md says what is
+# changed and when to drop the patch.
+[patch.crates-io]
+hayro-jpeg2000 = { path = "vendor/hayro-jpeg2000" }

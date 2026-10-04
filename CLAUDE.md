@@ -531,7 +531,10 @@ to differ. That was live in the shipped decoder and made most real GFS and
 GEFS messages decode as garbage while others were perfect.
 
 Both compressed packings are decoded by crates, not by us: `hayro-jpeg2000`
-(5.40) and `rust-aec` (5.42). Neither may gain a `-sys` dependency — invariant
+(5.40) and `rust-aec` (5.42). `hayro-jpeg2000` is a **patched copy** in
+`vendor/` — upstream refuses an image wider than 60,000 px and AROME's are
+millions wide — so a version bump means copying the release over it and
+reapplying the change (`vendor/README.md`). Neither may gain a `-sys` dependency — invariant
 5 and the three-platform build both forbid a C library — so check `cargo tree`
 after any version bump.
 
