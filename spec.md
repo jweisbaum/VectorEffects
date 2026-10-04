@@ -858,8 +858,9 @@ Those positions are **bundled**, converted at build time by
 `tools/icon-grid-builder` into `assets/icon_grids.bin` and matched by UUID, so
 an ICON import needs no files but the forecast and reaches no network. A file
 whose UUID nothing bundled matches is refused by name rather than placed on a
-guess. The asset holds ICON global R03B07 and the ICON-EPS global R02B06 mesh;
-it is grid *geometry*, time-invariant and shared by every file ever issued on
+guess. The asset holds every mesh DWD publishes icosahedral files on: ICON
+global R03B07, ICON-EPS global R02B06, ICON-EU-EPS (Europe) and ICON-D2
+(Germany, shared by ICON-D2-EPS). It is grid *geometry*, time-invariant and shared by every file ever issued on
 that grid, which is the kind of thing §1.5 says a project may hold.
 
 **An unstructured field is resampled onto the project's own grid at import**
@@ -874,6 +875,14 @@ bearing, which would turn two opposing vectors into a fast one pointing
 nowhere. A missing cell is skipped rather than blended, and a node with
 nothing present is missing.
 
+**A regional mesh leaves the rest of the earth missing.** A node whose nearest
+cell is more than two of the mesh's own cell spacings away is beyond the mesh,
+as a lat/lon raster is beyond its extent, rather than taking the nearest edge
+cell's wind across the globe. A global mesh has a cell within about one
+spacing of every point, so the limit never reaches it. The spacing is
+measured — the median distance from a cell to its nearest neighbour — not
+derived from the cell count.
+
 The search that finds those three cells is the expensive half — half a second
 for a global 0.1° grid — and depends only on the mesh and the project's
 resolution, never on the values. It is therefore computed once and **kept in
@@ -882,9 +891,11 @@ derived state: losing it costs a rebuild and nothing else, and a set that no
 longer matches the project's grid is dropped on open rather than trusted.
 
 For a file that states no spacing, the resolution a new project gets comes
-from the mesh itself: `n` roughly equal cells over the sphere are about
-`sqrt(4π/n)` radians across, which for ICON global is 0.118° and picks the
-0.1° grid. A projected file states metres, and a metre is a fixed fraction of
+from the mesh itself: its measured spacing, scaled to a cell width so that
+ICON global comes out at 0.118° (DWD's 13 km, and `sqrt(4π/n)` for `n` equal
+cells over the sphere) and picks the 0.1° grid. ICON-D2 comes out at 0.02°
+and also picks 0.1°; a count over the sphere would have put its 2 km cells at
+0.28°. A projected file states metres, and a metre is a fixed fraction of
 a degree of latitude wherever the grid is, so it reaches the same answer.
 
 A regional model is usually finer than the finest grid the app offers, and

@@ -243,6 +243,46 @@ mod tests {
         assert!(centres.lon.iter().any(|&o| o > 179.0));
     }
 
+    /// Every mesh DWD publishes icosahedral files on, by the UUID its
+    /// forecasts carry: the two global ones cover every point of a grid, the
+    /// two regional ones leave the rest of the earth missing
+    /// (`ve_core::regrid::REACH`). ICON-D2-EPS is on ICON-D2's grid.
+    #[test]
+    fn every_dwd_mesh_is_bundled_and_covers_what_its_name_says() {
+        use ve_core::regrid::{Neighbours, TargetGrid};
+        let target = TargetGrid {
+            ni: 360,
+            nj: 181,
+            lon0: -180.0,
+            lat0: 90.0,
+            dlon: 1.0,
+            dlat: 1.0,
+        };
+        for (hex, cells, global) in [
+            ("a27b8de618c411e4820ab5b098c6a5c0", 2_949_120, true), // ICON global R03B07
+            ("ae487d14fe2e11e4af85e50a2a56a360", 737_280, true),   // ICON-EPS global R02B06
+            ("ae487d28fe2e11e4af85e50a2a56a360", 164_984, false),  // ICON-EU-EPS
+            ("c6b12daa91ad64045b26c1b6452a2a20", 542_040, false),  // ICON-D2, ICON-D2-EPS
+        ] {
+            let uuid: Vec<u8> = (0..16)
+                .map(|k| u8::from_str_radix(&hex[2 * k..2 * k + 2], 16).expect("hex"))
+                .collect();
+            let uuid: [u8; 16] = uuid.try_into().expect("16 bytes");
+            let (entry, centres) = bundled(&uuid).expect("the asset parses").expect(hex);
+            assert_eq!(entry.cells, cells, "{}", entry.name);
+            let beyond = Neighbours::build(&centres, &target).beyond();
+            if global {
+                assert_eq!(beyond, 0, "{} is global", entry.name);
+            } else {
+                assert!(
+                    beyond > target.len() * 9 / 10,
+                    "{} is regional, but only {beyond} nodes are beyond it",
+                    entry.name
+                );
+            }
+        }
+    }
+
     #[test]
     fn an_unknown_grid_is_not_guessed_at() {
         assert!(bundled(&[0u8; 16]).expect("the asset parses").is_none());

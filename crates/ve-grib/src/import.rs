@@ -179,20 +179,26 @@ impl<'a> Resampling<'a> {
 /// A lat/lon file states it. A projected one states its spacing in metres,
 /// which is a spacing in degrees of latitude wherever the grid sits. An
 /// unstructured one does not state anything at all, so it comes from the
-/// cell count: a mesh of `n` roughly equal cells
-/// covering the sphere has cells about `sqrt(4π/n)` radians across, which for
-/// ICON global's 2,949,120 cells is 0.118° — near enough 13 km, which is what
-/// DWD publishes.
+/// bundled mesh: the measured distance between neighbouring cell centres,
+/// times [`CELL_WIDTH_PER_SPACING`]. Not the earth's area over the cell
+/// count, which assumes the mesh covers the earth: ICON-D2's 542,040 cells
+/// cover Germany, and that would make its 2 km cells 0.28° across.
 pub fn nominal_spacing(messages: &[Message]) -> Option<f64> {
     messages.iter().find_map(|m| match &m.header.grid {
         Grid::LatLon(grid) => Some(grid.di.min(grid.dj)),
         Grid::Projected(grid) => Some(grid.nominal_spacing_deg()),
         Grid::Unstructured(grid) => {
-            let cells = f64::from(grid.count);
-            (cells > 0.0).then(|| (4.0 * std::f64::consts::PI / cells).sqrt().to_degrees())
+            let (_, centres) = crate::icon::bundled(&grid.uuid).ok()??;
+            Some(centres.spacing() * CELL_WIDTH_PER_SPACING)
         }
     })
 }
+
+/// How much wider an ICON cell is than the distance between neighbouring
+/// cell centres. Measured on ICON global R03B07, whose 2,949,120 cells cover
+/// the sphere at `sqrt(4π/n)` = 0.1183° each (DWD's 13 km) and whose centres
+/// are 0.0931° apart, so that mesh's answer is what it always was.
+const CELL_WIDTH_PER_SPACING: f64 = 0.1183 / 0.0931;
 
 /// The best message for one component at one time.
 struct Candidate {

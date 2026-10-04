@@ -588,12 +588,16 @@ new asset entry, not new code:
 ```bash
 cargo run -p icon-grid-builder --release -- --out assets/icon_grids.bin \
     --grid "ICON global R03B07"     clat.grib2     clon.grib2 \
-    --grid "ICON global EPS R02B06" eps_clat.grib2 eps_clon.grib2
+    --grid "ICON global EPS R02B06" eps_clat.grib2 eps_clon.grib2 \
+    --grid "ICON-EU-EPS Europe"     eu_eps_clat.grib2 eu_eps_clon.grib2 \
+    --grid "ICON-D2 Germany R19B07" d2_clat.grib2  d2_clon.grib2
 ```
 
 **Every grid has to be passed in one run**: the tool writes the whole asset,
 so leaving one out drops it. `ve_grib::icon::EMBEDDED` is what gets shipped,
-and `icon.rs`'s tests assert the R03B07 mesh is in there and reaches both
+and `icon.rs`'s tests assert every one of the four is in there, the global
+ones covering every point and the regional ones leaving the rest of the earth
+missing, and that the R03B07 mesh reaches both
 poles, so a truncated asset fails the suite rather than the user's import.
 
 The coordinates are stored on the lattice the source messages were packed on

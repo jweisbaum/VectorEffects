@@ -17,6 +17,14 @@
 //! imported field mean something different from a painted one at the same
 //! resolution.
 //!
+//! **A mesh need not cover the earth.** ICON-D2 covers Germany and ICON-EU
+//! Europe, and the project's grid is global. A node whose nearest cell is
+//! more than [`REACH`] typical cell spacings away is beyond the mesh and is
+//! missing, as a lat/lon raster is missing outside its extent; without that,
+//! the nearest edge cell's wind would be copied across the rest of the earth.
+//! A global mesh has a cell within about one spacing of every point, so the
+//! limit never reaches it.
+//!
 //! Interpolation is inverse-distance over the three nearest cells, which on a
 //! quasi-uniform mesh is the natural stand-in for the barycentric weights the
 //! file gives no triangles for. `u` and `v` are interpolated **separately**,
@@ -69,6 +77,14 @@ impl CellCentres {
     /// Whether there are no cells. Never true of a constructed value.
     pub fn is_empty(&self) -> bool {
         self.lat.is_empty()
+    }
+
+    /// The typical distance between neighbouring cell centres, degrees of
+    /// arc: the median, over an even sample of cells, of the distance from
+    /// a cell to its nearest neighbour.
+    pub fn spacing(&self) -> f64 {
+        let buckets = Buckets::new(self, band_for(self.len()));
+        spacing(&buckets, &self.unit_vectors(), self)
     }
 
     /// Unit vectors on the sphere, which is what the search compares.
@@ -133,6 +149,27 @@ impl TargetGrid {
         out
     }
 }
+
+/// How many typical cell spacings a node's nearest cell may be away before
+/// the node is beyond the mesh.
+///
+/// Inside a mesh the nearest cell centre is within about one spacing of any
+/// point — the spacing is measured as the distance between neighbouring
+/// centres — so two is a margin over the mesh's own irregularity, and leaves
+/// a band about one cell wide outside a regional mesh's last row.
+pub const REACH: f64 = 2.0;
+
+/// The bucket size for a mesh of `cells`: about the cell spacing of a
+/// global mesh that size, so a bucket holds a handful of cells and the
+/// bucket count stays near the cell count. A regional mesh's buckets hold
+/// more, which costs a little search time and bounds the memory.
+fn band_for(cells: usize) -> f64 {
+    (41_252.0f64 / cells as f64).sqrt().clamp(0.05, 5.0)
+}
+
+/// The neighbour triple of a node beyond the mesh. No cell has this index, so
+/// the interpolation finds no value and the node is missing.
+const BEYOND: [u32; 3] = [u32::MAX; 3];
 
 fn unit(lat_deg: f64, lon_deg: f64) -> [f32; 3] {
     let (a, o) = (lat_deg.to_radians(), lon_deg.to_radians());
@@ -276,11 +313,11 @@ impl Neighbours {
     /// which is what keeps the result identical on every machine — the export
     /// is built from this and has to be byte-reproducible (invariant 4).
     pub fn build(centres: &CellCentres, target: &TargetGrid) -> Self {
-        // A bucket about the mean cell spacing across holds a handful of
-        // cells, so the first ring is usually the last.
-        let band = (41_252.0f64 / centres.len() as f64).sqrt().clamp(0.05, 5.0);
-        let buckets = Buckets::new(centres, band);
+        let buckets = Buckets::new(centres, band_for(centres.len()));
         let xyz = centres.unit_vectors();
+        let reach = REACH * spacing(&buckets, &xyz, centres);
+        // As a chord, which is what the search compares.
+        let limit = 2.0 * (reach.to_radians() / 2.0).sin();
 
         let idx = (0..target.nj)
             .into_par_iter()
@@ -288,7 +325,7 @@ impl Neighbours {
                 let mut row = Vec::with_capacity(target.ni as usize);
                 for i in 0..target.ni {
                     let (lon, lat) = target.node(i, j);
-                    row.push(nearest_three(&buckets, &xyz, lat, lon));
+                    row.push(nearest_three(&buckets, &xyz, lat, lon, limit));
                 }
                 row.into_iter()
             })
@@ -301,9 +338,14 @@ impl Neighbours {
         }
     }
 
+    /// How many target nodes are beyond the mesh, and so always missing.
+    pub fn beyond(&self) -> usize {
+        self.idx.iter().filter(|&&triple| triple == BEYOND).count()
+    }
+
     /// Interpolates one component onto the target grid.
     ///
-    /// A node whose nearest cell is missing takes the nearest *present* one of
+    /// A node beyond the mesh has no cells and is missing. A node whose nearest cell is missing takes the nearest *present* one of
     /// the three; with none present it is missing itself, so a bitmap's gaps
     /// survive the resample instead of being filled with a neighbour's wind.
     fn interpolate(&self, centres: &CellCentres, values: &[f32], out: &mut [f32]) {
@@ -409,13 +451,18 @@ impl Neighbours {
             let first = previous + take_varint(bytes, &mut at)?;
             let second = first + take_varint(bytes, &mut at)?;
             let third = first + take_varint(bytes, &mut at)?;
-            for value in [first, second, third] {
+            previous = first;
+            let triple = [first, second, third];
+            if triple == BEYOND.map(i64::from) {
+                idx.push(BEYOND);
+                continue;
+            }
+            for value in triple {
                 if value < 0 || value as usize >= cells {
                     return Err(format!("cell {value} is outside a mesh of {cells}"));
                 }
             }
             idx.push([first as u32, second as u32, third as u32]);
-            previous = first;
         }
         if at != bytes.len() {
             return Err(format!(
@@ -440,8 +487,77 @@ impl Neighbours {
     }
 }
 
-/// The three nearest cells to `(lat, lon)`, nearest first.
-fn nearest_three(buckets: &Buckets, xyz: &[[f32; 3]], lat: f64, lon: f64) -> [u32; 3] {
+/// The mesh's typical cell spacing, degrees of arc: the median distance from
+/// a cell to its nearest neighbour, over an even sample of 4,096 cells.
+///
+/// A median of neighbours rather than the earth's area over the cell count,
+/// because a regional mesh's cells are far denser than that would say. The
+/// sample is fixed by the cell count, so the answer is the same on every
+/// machine (invariant 4).
+fn spacing(buckets: &Buckets, xyz: &[[f32; 3]], centres: &CellCentres) -> f64 {
+    let step = (centres.len() / 4096).max(1);
+    let mut gaps: Vec<f64> = (0..centres.len())
+        .step_by(step)
+        .filter_map(|k| {
+            let lat = f64::from(centres.lat[k]);
+            let lon = f64::from(centres.lon[k]);
+            // The cell itself is the nearest; its neighbour is the next one
+            // at a distance above zero (a mesh may repeat a point).
+            let near = nearest_with_distances(buckets, xyz, lat, lon, f64::INFINITY);
+            near.iter()
+                .map(|&(d, _)| d)
+                .find(|&d| d > 0.0 && d.is_finite())
+                .map(|chord| (2.0 * (chord.sqrt() / 2.0).asin()).to_degrees())
+        })
+        .collect();
+    if gaps.is_empty() {
+        return 180.0;
+    }
+    gaps.sort_by(f64::total_cmp);
+    gaps[gaps.len() / 2]
+}
+
+/// The three nearest cells to `(lat, lon)`, nearest first, or [`BEYOND`] when
+/// none is within the chord `limit`.
+fn nearest_three(buckets: &Buckets, xyz: &[[f32; 3]], lat: f64, lon: f64, limit: f64) -> [u32; 3] {
+    let best = nearest_with_distances(buckets, xyz, lat, lon, limit);
+    if best[0].1 == u32::MAX || best[0].0 > limit * limit {
+        return BEYOND;
+    }
+
+    // A mesh of one or two cells leaves slots unfilled; repeat the nearest so
+    // the interpolation has something to weight rather than a sentinel.
+    let fallback = best[0].1;
+    [
+        best[0].1,
+        if best[1].1 == u32::MAX {
+            fallback
+        } else {
+            best[1].1
+        },
+        if best[2].1 == u32::MAX {
+            fallback
+        } else {
+            best[2].1
+        },
+    ]
+}
+
+/// The three nearest cells as `(chord squared, cell)`, nearest first, with
+/// `u32::MAX` in a slot nothing filled.
+///
+/// The search stops early, its slots possibly unfilled, once it has covered
+/// the chord `limit` without finding a single cell inside it: past that, the
+/// node is beyond the mesh and how far the mesh is does not matter. Without
+/// that, every node of a global grid outside a regional mesh would widen its
+/// ring until it reached the mesh.
+fn nearest_with_distances(
+    buckets: &Buckets,
+    xyz: &[[f32; 3]],
+    lat: f64,
+    lon: f64,
+    limit: f64,
+) -> [(f64, u32); 3] {
     let here = unit(lat, lon);
     let home = (((90.0 - lat) / buckets.band) as usize).min(buckets.rows - 1);
     // (chord squared, cell). Ties break on the cell index, so the result does
@@ -507,28 +623,15 @@ fn nearest_three(buckets: &Buckets, xyz: &[[f32; 3]], lat: f64, lon: f64) -> [u3
         if best[2].1 != u32::MAX && best[2].0 <= chord * chord {
             break;
         }
+        if chord >= limit && best[0].0 > limit * limit {
+            break;
+        }
         if ring as usize > buckets.rows {
             break;
         }
         ring += 1;
     }
-
-    // A mesh of one or two cells leaves slots unfilled; repeat the nearest so
-    // the interpolation has something to weight rather than a sentinel.
-    let fallback = best[0].1;
-    [
-        best[0].1,
-        if best[1].1 == u32::MAX {
-            fallback
-        } else {
-            best[1].1
-        },
-        if best[2].1 == u32::MAX {
-            fallback
-        } else {
-            best[2].1
-        },
-    ]
+    best
 }
 
 fn put_varint(out: &mut Vec<u8>, value: i64) {
@@ -700,6 +803,85 @@ mod tests {
         for sample in neighbours.resample(&centres, &u, &v) {
             assert!(is_missing(sample[0]) && is_missing(sample[1]));
         }
+    }
+
+    /// A 1-degree patch over lon 0..10, lat 40..50: a regional mesh.
+    fn patch() -> CellCentres {
+        let mut lat = Vec::new();
+        let mut lon = Vec::new();
+        for j in 0..=10 {
+            for i in 0..=10 {
+                lat.push(50.0 - j as f32);
+                lon.push(i as f32);
+            }
+        }
+        CellCentres::new(lat, lon).expect("a patch")
+    }
+
+    #[test]
+    fn a_regional_mesh_leaves_the_rest_of_the_earth_missing() {
+        // Without a limit, every node on earth takes the nearest edge cell's
+        // value. With it, a node is filled only within REACH spacings
+        // (2 degrees here) of a cell.
+        let centres = patch();
+        let grid = target(0.5);
+        let neighbours = Neighbours::build(&centres, &grid);
+        let u = vec![4.0f32; centres.len()];
+        let v = vec![-1.0f32; centres.len()];
+        let out = neighbours.resample(&centres, &u, &v);
+
+        let mut inside = 0;
+        for (k, sample) in out.iter().enumerate() {
+            let (lon, lat) =
+                grid.node((k % grid.ni as usize) as u32, (k / grid.ni as usize) as u32);
+            // Great-circle distance to the patch, from its clamped point:
+            // exact enough here, where the patch is small and away from a pole.
+            let (plon, plat) = (lon.clamp(0.0, 10.0), lat.clamp(40.0, 50.0));
+            let gap = {
+                let (a, b) = (unit(lat, lon), unit(plat, plon));
+                let chord = f64::from(
+                    ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt(),
+                );
+                (2.0 * (chord / 2.0).asin()).to_degrees()
+            };
+            if gap == 0.0 {
+                inside += 1;
+                assert_eq!(
+                    *sample,
+                    [4.0, -1.0],
+                    "node {k} at ({lon}, {lat}) is in the patch"
+                );
+            } else if gap > 2.0 * REACH {
+                assert!(
+                    is_missing(sample[0]) && is_missing(sample[1]),
+                    "node {k} at ({lon}, {lat}) is {gap} degrees from the patch: {sample:?}"
+                );
+            }
+        }
+        assert_eq!(inside, 21 * 21);
+        // Most of the earth is beyond it.
+        assert!(
+            neighbours.beyond() > grid.len() * 99 / 100,
+            "{}",
+            neighbours.beyond()
+        );
+    }
+
+    #[test]
+    fn a_global_mesh_has_no_node_beyond_it() {
+        let centres = lattice(5.0);
+        let grid = target(1.0);
+        assert_eq!(Neighbours::build(&centres, &grid).beyond(), 0);
+    }
+
+    #[test]
+    fn a_neighbour_set_beyond_a_mesh_round_trips() {
+        let centres = patch();
+        let grid = target(3.0);
+        let neighbours = Neighbours::build(&centres, &grid);
+        assert!(neighbours.beyond() > 0);
+        let back = Neighbours::decode(&neighbours.encode(), &grid, centres.len()).expect("decodes");
+        assert_eq!(back, neighbours);
     }
 
     #[test]
