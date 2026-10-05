@@ -55,8 +55,7 @@ pub fn grib_import(state: &AppState, path: String) -> Result<ProjectSummary> {
         let open = session.require_open()?;
         // An unstructured file is resampled onto *this* project's grid, so
         // the read cannot happen before the project is in hand.
-        let imported = resample_into(&mut open.project, &path)
-            .doing("import the GRIB file at", path.display())?;
+        let imported = resample_into(&mut open.project, &path)?;
         for skipped in &imported.skipped {
             tracing::warn!(
                 path = %path.display(),
@@ -74,14 +73,55 @@ pub fn grib_import(state: &AppState, path: String) -> Result<ProjectSummary> {
 /// Reads a file for an open project, resampling onto that project's grid and
 /// keeping whatever neighbour sets the resample had to compute.
 fn resample_into(project: &mut Project, path: &Path) -> Result<import::Imported> {
-    let target = project.settings.resolution.target_grid();
     let mut cache = std::mem::take(&mut project.regrid);
     let result = {
-        let mut resampling = import::Resampling::new(target, &mut cache);
+        let mut resampling = resampling_for(&project.settings, &mut cache);
         import::read_file(path, Some(&mut resampling))
     };
     project.regrid = cache;
-    Ok(result?)
+    result.map_err(|err| grib_error(err, path, &project.settings, "import the GRIB file at"))
+}
+
+/// What a project's files are read onto (spec.md 4.8, M101).
+///
+/// A global project resamples onto its resolution's grid and keeps every
+/// lat/lon file whole, exactly as it always has, so its lattices, their
+/// hashes and the render cache are untouched. A regional one reads every
+/// file onto the region's lattice, cropped to it plus a node.
+pub(crate) fn resampling_for<'a>(
+    settings: &ProjectSettings,
+    cache: &'a mut std::collections::BTreeMap<String, Arc<ve_core::regrid::Neighbours>>,
+) -> import::Resampling<'a> {
+    match settings.region {
+        Some(_) => import::Resampling::regional(settings.lattice(), cache),
+        None => import::Resampling::new(settings.resolution.target_grid(), cache),
+    }
+}
+
+/// The lattice a regional project crops its imports to; `None` when global.
+pub(crate) fn crop_for(settings: &ProjectSettings) -> Option<ve_core::regrid::TargetGrid> {
+    settings.region.map(|_| settings.lattice())
+}
+
+/// A GRIB reader's failure, said in the app's words: a file outside the
+/// region is refused naming both (decision R10); anything else names what
+/// was being done and to which file.
+fn grib_error(
+    err: ve_grib::GribError,
+    path: &Path,
+    settings: &ProjectSettings,
+    doing: &'static str,
+) -> AppError {
+    match (err, settings.region) {
+        (ve_grib::GribError::OutsideRegion, Some(region)) => {
+            AppError::outside_region(path.display(), &region)
+        }
+        (err, _) => AppError::Doing {
+            doing,
+            what: path.display().to_string(),
+            why: err.to_string(),
+        },
+    }
 }
 
 /// Adds one layer per imported field above the open project's top, as one
@@ -288,6 +328,17 @@ pub fn grib_project(
     })
 }
 
+/// A reader's failure on reopening: a file that now misses the region says so
+/// in the words an import would (decision R10); anything else is as it was.
+fn reopen_error(err: ve_grib::GribError, path: &Path, settings: &ProjectSettings) -> AppError {
+    match (err, settings.region) {
+        (ve_grib::GribError::OutsideRegion, Some(region)) => {
+            AppError::outside_region(path.display(), &region)
+        }
+        (err, _) => AppError::from(err),
+    }
+}
+
 /// Reads every imported layer's file back into memory after a project opens.
 ///
 /// A file that cannot be read leaves its layer without a field — it still
@@ -337,7 +388,11 @@ pub fn attach_rasters(
     // costs a decode and an interpolation rather than the search as well.
     // Every file starts from the project's sets — they are shared, so the
     // copy is a map of pointers — and what each had to build goes back after.
-    let target = project.settings.resolution.target_grid();
+    //
+    // A regional project reads every file onto its region (spec.md 4.8,
+    // M101), on every open: a file stays where the person put it and is
+    // cropped in memory, never copied (R4).
+    let settings = project.settings.clone();
     let regrid = std::mem::take(&mut project.regrid);
     let opening = &*opening;
     let read: Vec<_> = sources
@@ -347,12 +402,12 @@ pub fn attach_rasters(
             let progress = |done: usize, total: usize| opening.source(at, done, total);
             let mut cache = regrid.clone();
             let sequences = if *zarr {
-                crate::zarr::read_reporting(path, &progress)
+                crate::zarr::read_for(path, &settings, &progress)
             } else {
-                let mut resampling = import::Resampling::new(target, &mut cache);
+                let mut resampling = resampling_for(&settings, &mut cache);
                 import::read_file_reporting(path, Some(&mut resampling), &progress)
                     .map(|imported| imported.sequences)
-                    .map_err(AppError::from)
+                    .map_err(|err| reopen_error(err, path, &settings))
             };
             let sequences = sequences.map(|s| s.into_iter().map(Arc::new).collect::<Vec<_>>());
             (sequences, cache)
@@ -375,9 +430,11 @@ pub fn attach_rasters(
         let LayerSource::Sst { path, .. } = &layer.source else {
             continue;
         };
-        match ve_grib::import::read_temperature_file(path) {
+        let crop = crop_for(&settings);
+        match ve_grib::import::read_temperature_file_onto(path, crop.as_ref()) {
             Ok(sequence) => layer.temperature = Some(Arc::new(sequence)),
             Err(err) => {
+                let err = reopen_error(err, path, &settings);
                 layer.temperature = None;
                 tracing::warn!(layer = %layer.name, path = %path.display(), %err, "SST layer could not be read");
                 failures.push((layer.name.clone(), AppError::Internal(err.to_string())));

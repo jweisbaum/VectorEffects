@@ -134,7 +134,14 @@ pub fn canonical_order(grid: &LatLonGrid, values: &[f32]) -> Vec<f32> {
     out
 }
 
-/// What an unstructured file is resampled onto, and what that cost.
+/// What a file is read onto, and what that cost.
+///
+/// For a projected or unstructured file, `target` is the lattice it is
+/// resampled onto. For a regional project (spec.md 4.8, M101) `crop` is set
+/// as well, and then a lat/lon file is cropped to `target` plus a node of
+/// margin and a file that covers none of it is refused
+/// ([`GribError::OutsideRegion`]). A global project leaves `crop` off, so its
+/// lat/lon files keep their whole lattice and their hashes do not move.
 ///
 /// The neighbour search is the expensive half and does not depend on the
 /// values, so it is done once per (mesh, target) pair and kept here. A caller
@@ -148,6 +155,9 @@ pub struct Resampling<'a> {
     pub neighbours: &'a mut BTreeMap<String, Arc<Neighbours>>,
     /// Keys added during this run.
     pub produced: Vec<String>,
+    /// Whether `target` is a region every file is cropped to, rather than
+    /// only what a file without a lattice of its own is resampled onto.
+    pub crop: bool,
 }
 
 impl<'a> Resampling<'a> {
@@ -157,7 +167,25 @@ impl<'a> Resampling<'a> {
             target,
             neighbours,
             produced: Vec::new(),
+            crop: false,
         }
+    }
+
+    /// Starts a read for a regional project: every file is cropped to
+    /// `target`, the region's own lattice, and one that misses it is refused.
+    pub fn regional(
+        target: TargetGrid,
+        neighbours: &'a mut BTreeMap<String, Arc<Neighbours>>,
+    ) -> Self {
+        Self {
+            crop: true,
+            ..Self::new(target, neighbours)
+        }
+    }
+
+    /// The region a lat/lon file is cropped to, if this read crops.
+    fn crop_target(&self) -> Option<TargetGrid> {
+        self.crop.then_some(self.target)
     }
 
     /// The neighbour set for one mesh, computing it if this is the first ask.
@@ -253,8 +281,15 @@ pub fn sequences_reporting(
     let tick = || progress(done.fetch_add(1, Ordering::Relaxed) + 1, total);
     progress(0, total);
 
+    // A lat/lon frame is cropped to the region, if the read has one; it is
+    // taken out here so the parallel path below needs no `&mut`.
+    let crop = resampling.as_deref().and_then(Resampling::crop_target);
     let mut out = Vec::new();
     let mut dropped = Vec::new();
+    // Frames refused only for lying outside the region. When that is every
+    // frame there was, the file as a whole is outside it (decision R10).
+    let mut outside = 0usize;
+    let mut frames_seen = 0usize;
     for (kind_key, times) in slots {
         let kind = if kind_key == 0 {
             FieldKind::Wind
@@ -288,7 +323,7 @@ pub fn sequences_reporting(
             pairs
                 .into_par_iter()
                 .map(|(time, u, v)| {
-                    let grid = raster_of(&u, &v, None);
+                    let grid = raster_of(&u, &v, crop.as_ref(), None);
                     tick();
                     (time, grid)
                 })
@@ -297,7 +332,7 @@ pub fn sequences_reporting(
             pairs
                 .into_iter()
                 .map(|(time, u, v)| {
-                    let grid = raster_of(&u, &v, resampling.as_deref_mut());
+                    let grid = raster_of(&u, &v, crop.as_ref(), resampling.as_deref_mut());
                     tick();
                     (time, grid)
                 })
@@ -306,9 +341,15 @@ pub fn sequences_reporting(
         let mut frames = Vec::new();
         let mut first_time = None;
         for (time, grid) in grids {
+            frames_seen += 1;
             let grid = match grid {
                 Ok(grid) => grid,
-                Err(why) => {
+                Err(FrameError::Outside) => {
+                    outside += 1;
+                    dropped.push(format!("{kind:?} at {time}: outside the region"));
+                    continue;
+                }
+                Err(FrameError::Other(why)) => {
                     dropped.push(format!("{kind:?} at {time}: {why}"));
                     continue;
                 }
@@ -326,6 +367,9 @@ pub fn sequences_reporting(
     }
 
     if out.is_empty() {
+        if outside > 0 && outside == frames_seen {
+            return Err(GribError::OutsideRegion);
+        }
         let why = if dropped.is_empty() {
             "the file holds no u/v wind (discipline 0, category 2) or current \
              (discipline 10, category 1) messages"
@@ -348,20 +392,26 @@ pub fn sequences_reporting(
 /// is an ordinary [`RasterGrid`], which is what keeps the rest of the app —
 /// both kernels, the cache, the exporter — unaware that any other kind of
 /// grid exists at all.
+///
+/// `crop` is the region a regional project reads onto (spec.md 4.8, M101): a
+/// lat/lon frame keeps the part of its own lattice that reaches it, plus a
+/// node; a resampled one is put on the region's nodes and no others, which
+/// the `resampling` target already is.
 fn raster_of(
     u: &Message,
     v: &Message,
+    crop: Option<&TargetGrid>,
     resampling: Option<&mut Resampling<'_>>,
-) -> std::result::Result<RasterGrid, String> {
+) -> std::result::Result<RasterGrid, FrameError> {
     match (&u.header.grid, &v.header.grid) {
         (Grid::LatLon(gu_grid), Grid::LatLon(gv_grid)) => {
             let (gu, gv) = (Canonical::of(gu_grid), Canonical::of(gv_grid));
             if gu != gv {
-                return Err("u and v are on different grids".to_owned());
+                return Err("u and v are on different grids".into());
             }
             let us = canonical_order(gu_grid, &u.values);
             let vs = canonical_order(gv_grid, &v.values);
-            RasterGrid::new(
+            let grid = RasterGrid::new(
                 gu.ni,
                 gu.nj,
                 gu.lon0,
@@ -369,26 +419,34 @@ fn raster_of(
                 gu.dlon,
                 gu.dlat,
                 paired(&us, &vs),
-            )
+            )?;
+            match crop {
+                None => Ok(grid),
+                Some(target) => grid.cropped_to(target, 1).ok_or(FrameError::Outside),
+            }
         }
         (Grid::Projected(pu), Grid::Projected(pv)) => {
             if pu != pv {
-                return Err("u and v are on different projected grids".to_owned());
+                return Err("u and v are on different projected grids".into());
             }
             let Some(resampling) = resampling else {
-                return Err(
-                    "a projected grid needs a target resolution to resample onto".to_owned(),
-                );
+                return Err("a projected grid needs a target resolution to resample onto".into());
             };
-            resample::resample(pu, &u.values, &v.values, &resampling.target)
+            resample::resample(pu, &u.values, &v.values, &resampling.target).map_err(|why| {
+                if why == resample::OUTSIDE_TARGET {
+                    FrameError::Outside
+                } else {
+                    FrameError::Other(why)
+                }
+            })
         }
         (Grid::Unstructured(mu), Grid::Unstructured(mv)) => {
             if mu != mv {
-                return Err("u and v are on different unstructured grids".to_owned());
+                return Err("u and v are on different unstructured grids".into());
             }
             let Some(resampling) = resampling else {
                 return Err(
-                    "an unstructured grid needs a target resolution to resample onto".to_owned(),
+                    "an unstructured grid needs a target resolution to resample onto".into(),
                 );
             };
             let (_, centres) = crate::icon::bundled(&mu.uuid)
@@ -406,9 +464,15 @@ fn raster_of(
                     mu.uuid_hex(),
                     mu.count,
                     centres.len()
-                ));
+                )
+                .into());
             }
             let neighbours = resampling.for_mesh(&mu.uuid, &centres);
+            // A regional mesh can miss a region entirely; its set is then
+            // every node beyond it. A global target never is.
+            if resampling.crop && neighbours.beyond() == neighbours.len() {
+                return Err(FrameError::Outside);
+            }
             let uv = neighbours.resample(&centres, &u.values, &v.values);
             let target = resampling.target;
             RasterGrid::new(
@@ -420,8 +484,38 @@ fn raster_of(
                 target.dlat,
                 uv,
             )
+            .map_err(FrameError::Other)
         }
-        _ => Err("u and v are on different kinds of grid".to_owned()),
+        _ => Err("u and v are on different kinds of grid".into()),
+    }
+}
+
+/// Why one frame could not be built.
+enum FrameError {
+    /// It lies wholly outside the region the read is cropped to.
+    Outside,
+    /// Anything else, in words for the user.
+    Other(String),
+}
+
+impl From<String> for FrameError {
+    fn from(why: String) -> Self {
+        Self::Other(why)
+    }
+}
+
+impl From<&str> for FrameError {
+    fn from(why: &str) -> Self {
+        Self::Other(why.to_owned())
+    }
+}
+
+impl std::fmt::Display for FrameError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Outside => f.write_str("outside the region"),
+            Self::Other(why) => f.write_str(why),
+        }
     }
 }
 
@@ -533,6 +627,16 @@ fn is_water_temperature(header: &Header) -> bool {
 /// reads the second slot as a component. GRIB states the temperature in
 /// kelvin; it leaves here in Celsius.
 pub fn read_temperature_file(path: &Path) -> Result<RasterSequence> {
+    read_temperature_file_onto(path, None)
+}
+
+/// [`read_temperature_file`], cropped to a regional project's lattice when
+/// `crop` is given (spec.md 4.8, M101). A file that covers none of it is
+/// [`GribError::OutsideRegion`].
+pub fn read_temperature_file_onto(
+    path: &Path,
+    crop: Option<&TargetGrid>,
+) -> Result<RasterSequence> {
     let bytes = std::fs::read(path)?;
     let decoded = decode::read_reporting(&bytes, is_water_temperature, &|_, _| {})?;
     let mut frames = Vec::new();
@@ -541,13 +645,21 @@ pub fn read_temperature_file(path: &Path) -> Result<RasterSequence> {
     for message in decoded.messages {
         times.insert(message.header.valid_unix_s(), message);
     }
+    let mut outside = false;
     for (time, mut message) in times {
         for value in &mut message.values {
             if *value != MISSING {
                 *value -= 273.15;
             }
         }
-        let grid = raster_of(&message, &message, None).map_err(GribError::Malformed)?;
+        let grid = match raster_of(&message, &message, crop, None) {
+            Ok(grid) => grid,
+            Err(FrameError::Outside) => {
+                outside = true;
+                continue;
+            }
+            Err(FrameError::Other(why)) => return Err(GribError::Malformed(why)),
+        };
         let first = *first_time.get_or_insert(time);
         frames.push(RasterFrame {
             offset_hours: (time - first) as f64 / 3600.0,
@@ -556,6 +668,9 @@ pub fn read_temperature_file(path: &Path) -> Result<RasterSequence> {
         });
     }
     if frames.is_empty() {
+        if outside {
+            return Err(GribError::OutsideRegion);
+        }
         return Err(GribError::NoVectorField(
             "the file holds no sea-surface temperature (discipline 10, category 3, number 0)"
                 .to_owned(),

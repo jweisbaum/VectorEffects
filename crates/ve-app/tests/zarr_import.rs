@@ -305,3 +305,51 @@ fn a_real_store_assembled_from_blocks_matches_its_times_read_whole() {
         }
     }
 }
+
+/// A regional project reads a routing store's region and a node round it,
+/// and nothing else (spec.md 4.8, M101).
+#[test]
+fn a_regional_project_reads_only_its_region_of_a_store() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("routing_test");
+    write_store(&path);
+    let app = app(root.path());
+    projects::create(
+        &app,
+        projects::NewProjectRequest {
+            name: "Regional".to_owned(),
+            field_kind: "wind".to_owned(),
+            resolution: "1.0".to_owned(),
+            step_hours: 3,
+            step_count: 2,
+        },
+        false,
+    )
+    .unwrap();
+    {
+        let mut session = app.session.lock().unwrap();
+        let open = session.open.as_mut().unwrap();
+        open.project.settings.region = Some(
+            ve_core::region::Region::snapped(
+                -40.0,
+                -20.0,
+                40.0,
+                60.0,
+                false,
+                open.project.settings.resolution,
+            )
+            .unwrap(),
+        );
+    }
+    zarr::zarr_import(&app, path.display().to_string()).unwrap();
+    {
+        let session = app.session.lock().unwrap();
+        let project = &session.open.as_ref().unwrap().project;
+        let wind = project.layers[1].raster.as_ref().unwrap();
+        let grid = &wind.frames[0].grid;
+        assert!(grid.ni <= 23 && grid.nj <= 23, "{} x {}", grid.ni, grid.nj);
+    }
+    assert_eq!(sample(&app, 0, FieldKind::Wind), (5.0, 2.0));
+    assert_eq!(sample(&app, 1, FieldKind::Wind), (9.0, 2.0));
+    assert_eq!(sample(&app, 0, FieldKind::Current), (1.0, 2.0));
+}

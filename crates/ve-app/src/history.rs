@@ -40,6 +40,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use ve_core::Command;
 use ve_core::document::Layer;
+use ve_core::regrid::TargetGrid;
 use ve_grib::writer::{GridSpec, MessageSpec, Parameter, ReferenceTime, message_masked};
 use ve_zarr::{Archive, Field, Utc, Variable};
 
@@ -295,9 +296,13 @@ pub fn history_import(
     // (spec.md 4.8, D48), so on a three-hourly project two hours in every
     // three could never be drawn — and fetching them would be minutes spent
     // on data the application throws away.
-    let (step_hours, step_count) = with_session(state, |session| {
+    let (step_hours, step_count, crop) = with_session(state, |session| {
         let settings = &session.require_open()?.project.settings;
-        Ok((settings.step_hours.hours(), settings.step_count))
+        Ok((
+            settings.step_hours.hours(),
+            settings.step_count,
+            crate::import::crop_for(settings),
+        ))
     })?;
     let wanted = wanted_hours(request, step_hours, step_count)?;
     let began = std::time::Instant::now();
@@ -344,7 +349,7 @@ pub fn history_import(
     // every edit and every tile for the length of it.
     let mut layers = Vec::with_capacity(written.len());
     for (archive, path) in &written {
-        layers.push(history_layer(*archive, path, request)?);
+        layers.push(history_layer(*archive, path, request, crop.as_ref())?);
     }
 
     let summary = with_session(state, |session| {
@@ -805,7 +810,12 @@ fn components(field: &Field) -> [(Parameter, &[f32]); 2] {
 /// forecast layer holds and there is no second decoding path to keep in step.
 /// The grid is a regular 0.25 degree lat/lon lattice, which is what the app
 /// samples natively, so nothing is resampled.
-fn history_layer(archive: Archive, path: &Path, request: &HistoryRequest) -> Result<Layer> {
+fn history_layer(
+    archive: Archive,
+    path: &Path,
+    request: &HistoryRequest,
+    crop: Option<&TargetGrid>,
+) -> Result<Layer> {
     fetched_layer(
         &Origin {
             id: archive.id(),
@@ -814,18 +824,31 @@ fn history_layer(archive: Archive, path: &Path, request: &HistoryRequest) -> Res
         path,
         (request.start_unix_s, request.end_unix_s),
         0,
+        crop,
     )
 }
 
 /// The layer a fetched file is read back as, holding each of its times for
 /// `period_hours` (zero for a history archive, which holds nothing).
+///
+/// `crop` is a regional project's lattice: the layer holds the region and a
+/// node round it, as it will when the project is reopened (spec.md 4.8,
+/// M101).
 pub(crate) fn fetched_layer(
     origin: &Origin<'_>,
     path: &Path,
     range: (i64, i64),
     period_hours: u32,
+    crop: Option<&TargetGrid>,
 ) -> Result<Layer> {
-    let imported = ve_grib::import::read_file(path, None)?;
+    let imported = match crop {
+        Some(target) => {
+            let mut none = std::collections::BTreeMap::new();
+            let mut resampling = ve_grib::import::Resampling::regional(*target, &mut none);
+            ve_grib::import::read_file(path, Some(&mut resampling))?
+        }
+        None => ve_grib::import::read_file(path, None)?,
+    };
     fetched_from(origin, path, range, period_hours, imported)
 }
 
@@ -836,8 +859,9 @@ pub(crate) fn temperature_layer(
     path: &Path,
     range: (i64, i64),
     period_hours: u32,
+    crop: Option<&TargetGrid>,
 ) -> Result<Layer> {
-    let sequence = ve_grib::import::read_temperature_file(path)?;
+    let sequence = ve_grib::import::read_temperature_file_onto(path, crop)?;
     let mut layer = Layer::new(origin.label);
     layer.source = ve_core::document::LayerSource::Sst {
         path: path.to_path_buf(),

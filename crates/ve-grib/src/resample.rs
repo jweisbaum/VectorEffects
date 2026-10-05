@@ -158,22 +158,60 @@ fn coverage(grid: &ProjectedGrid) -> Coverage {
     }
 }
 
+/// What [`resample`] says when a grid reaches none of a regional target's
+/// nodes, so the importer can tell "outside the region" from a broken grid.
+pub const OUTSIDE_TARGET: &str = "the grid covers none of the target's nodes";
+
+/// Whether a target runs all the way round in longitude, as the global grid
+/// and a polar cap do, rather than stopping at an east edge.
+fn wraps(target: &TargetGrid) -> bool {
+    (f64::from(target.ni) * target.dlon - 360.0).abs() < 1e-9
+}
+
+/// What a window over a target turned out to be.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Windowed {
+    /// The grid does not land on the earth at all.
+    Nowhere,
+    /// The grid lands on the earth, but on none of the target's nodes: only
+    /// possible for a regional target.
+    Outside,
+    /// These nodes.
+    Nodes(Window),
+}
+
 impl Coverage {
     /// The target nodes this covers, with a node of margin.
-    fn window(&self, target: &TargetGrid) -> Option<Window> {
+    ///
+    /// A target that wraps — the global grid, a polar cap — is periodic in
+    /// longitude, so the window's first column may lie off either end of it.
+    /// A regional target is not: its columns stop at the region's east edge,
+    /// so the window is clipped to them (spec.md 4.8, M101), and a grid that
+    /// misses them is [`Windowed::Outside`].
+    fn window(&self, target: &TargetGrid) -> Windowed {
         if !self.lat_min.is_finite() || !self.lat_max.is_finite() || self.lat_min > self.lat_max {
-            return None;
+            return Windowed::Nowhere;
         }
+        let last_row = i64::from(target.nj) - 1;
         let row = |lat: f64| (target.lat0 - lat) / target.dlat;
-        let j0 = (row(self.lat_max).floor() as i64 - MARGIN).clamp(0, i64::from(target.nj) - 1);
-        let j1 = (row(self.lat_min).ceil() as i64 + MARGIN).clamp(0, i64::from(target.nj) - 1);
+        let (top, bottom) = (
+            row(self.lat_max).floor() as i64 - MARGIN,
+            row(self.lat_min).ceil() as i64 + MARGIN,
+        );
+        // Only a regional target can miss the rows: the global one runs pole
+        // to pole.
+        if bottom < 0 || top > last_row {
+            return Windowed::Outside;
+        }
+        let j0 = top.clamp(0, last_row);
+        let j1 = bottom.clamp(0, last_row);
 
-        let (i0, ni) = if self.all_longitudes
+        let all = self.all_longitudes
             || !self.lon_min.is_finite()
-            || self.lon_max - self.lon_min >= 360.0 - target.dlon
-        {
+            || self.lon_max - self.lon_min >= 360.0 - target.dlon;
+        let (i0, ni) = if all {
             (0, target.ni)
-        } else {
+        } else if wraps(target) {
             let column = |lon: f64| (lon - target.lon0) / target.dlon;
             let a = column(self.lon_min).floor() as i64 - MARGIN;
             let b = column(self.lon_max).ceil() as i64 + MARGIN;
@@ -183,8 +221,31 @@ impl Coverage {
             } else {
                 (a, span as u32)
             }
+        } else {
+            // The run of longitudes is continuous but may sit a turn either
+            // side of the target's, and a wide grid may meet a wide region
+            // from both ends at once: every turn that overlaps contributes,
+            // and the window is the hull of what they reach.
+            let last = i64::from(target.ni) - 1;
+            let turn = 360.0 / target.dlon;
+            let mut hull: Option<(i64, i64)> = None;
+            for k in -2..=2 {
+                let shift = f64::from(k) * turn;
+                let a =
+                    ((self.lon_min - target.lon0) / target.dlon + shift).floor() as i64 - MARGIN;
+                let b = ((self.lon_max - target.lon0) / target.dlon + shift).ceil() as i64 + MARGIN;
+                if b < 0 || a > last {
+                    continue;
+                }
+                let (a, b) = (a.max(0), b.min(last));
+                hull = Some(hull.map_or((a, b), |(lo, hi)| (lo.min(a), hi.max(b))));
+            }
+            match hull {
+                Some((a, b)) => (a, (b - a + 1) as u32),
+                None => return Windowed::Outside,
+            }
         };
-        Some(Window {
+        Windowed::Nodes(Window {
             i0,
             j0,
             ni,
@@ -296,9 +357,11 @@ pub fn resample(
     if target.is_empty() {
         return Err("a target grid with no nodes".to_owned());
     }
-    let window = coverage(grid)
-        .window(target)
-        .ok_or_else(|| "the grid does not land on the earth".to_owned())?;
+    let window = match coverage(grid).window(target) {
+        Windowed::Nodes(window) => window,
+        Windowed::Outside => return Err(OUTSIDE_TARGET.to_owned()),
+        Windowed::Nowhere => return Err("the grid does not land on the earth".to_owned()),
+    };
 
     let uv = canonical_earth_relative(grid, u, v);
     let uv = uv.as_slice();

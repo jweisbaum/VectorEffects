@@ -78,6 +78,34 @@ fn opening_a_grib_project() {
     });
 }
 
+/// The same file in a regional project (spec.md 4.8, M101): a 20° box of the
+/// North Atlantic. The project is shaped from the file as a global one is,
+/// then given the region before it is saved, so what is measured is the
+/// open: every frame read and cropped to the region.
+#[test]
+#[ignore = "reads $VE_TEST_OPEN_GRIB, a file too large to commit"]
+fn opening_a_regional_grib_project() {
+    let Some(path) = source("VE_TEST_OPEN_GRIB") else {
+        return;
+    };
+    measure("grib-regional", &path, |app, path| {
+        import::grib_project(app, path, true).unwrap();
+        let mut session = app.session.lock().unwrap();
+        let open = session.open.as_mut().unwrap();
+        open.project.settings.region = Some(
+            ve_core::region::Region::snapped(
+                -40.0,
+                -20.0,
+                40.0,
+                60.0,
+                false,
+                open.project.settings.resolution,
+            )
+            .unwrap(),
+        );
+    });
+}
+
 #[test]
 #[ignore = "reads $VE_TEST_OPEN_ZARR, a store too large to commit"]
 fn opening_a_zarr_project() {

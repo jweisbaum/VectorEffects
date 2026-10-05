@@ -774,7 +774,10 @@ fn read_captures(
 /// entry is skipped rather than failing the open: the project still holds
 /// everything the user authored.
 fn read_regrid(archive: &mut zip::ZipArchive<std::fs::File>, project: &mut Project) -> Result<()> {
-    let target = project.settings.resolution.target_grid();
+    // The project's own lattice: a regional project's sets were built for its
+    // region (spec.md 4.8, M101), and decoding one against the global grid
+    // would fail its length check and rebuild it on every open.
+    let target = project.settings.lattice();
     let names: Vec<String> = archive
         .file_names()
         .filter(|n| n.starts_with(REGRID_PREFIX) && n.ends_with(".bin"))
@@ -1032,6 +1035,45 @@ mod tests {
             reopened.regrid.is_empty(),
             "a set built for another grid must not be reused"
         );
+    }
+
+    /// A regional project's neighbour set is built for the region's lattice,
+    /// and is read back against it: against the global grid it would fail its
+    /// length check and be rebuilt at every open.
+    #[test]
+    fn a_regional_neighbour_set_travels_with_a_regional_project() {
+        use crate::regrid::{CellCentres, Neighbours};
+
+        let dir = TempDir::new();
+        let path = dir.path("regional-regrid.veproj");
+        let mut project = sample();
+        project.settings.region = Some(
+            crate::region::Region::snapped(
+                160.0,
+                -160.0,
+                -10.0,
+                10.0,
+                false,
+                project.settings.resolution,
+            )
+            .unwrap(),
+        );
+        let target = project.settings.lattice();
+        assert_ne!(target, project.settings.resolution.target_grid());
+        let centres = CellCentres::new(
+            vec![0.0, 5.0, -5.0, 2.0],
+            vec![170.0, -175.0, 179.0, -170.0],
+        )
+        .unwrap();
+        let set = Neighbours::build(&centres, &target);
+        let key = Neighbours::cache_key(b"a-mesh", &target);
+        project
+            .regrid
+            .insert(key.clone(), std::sync::Arc::new(set.clone()));
+
+        save(&project, &path).unwrap();
+        let loaded = load(&path).unwrap();
+        assert_eq!(**loaded.regrid.get(&key).expect("kept"), set);
     }
 
     /// The M1 acceptance criterion: save, load, save again, and the document

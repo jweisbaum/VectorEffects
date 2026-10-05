@@ -632,6 +632,26 @@ empty and marked in the panel; the user's own objects are unaffected. The
 project is therefore portable only with its GRIB, which is the price of not
 copying forecast data into every project that references it.
 
+**A regional project reads only its region** (§4.2, M101). Every import —
+a lat/lon GRIB, a projected one, an ICON mesh, a routing Zarr store, a
+fetched history or near-real-time file, a sea-surface temperature — is
+cropped to the region's lattice plus one node of margin, on first import and
+again on every reopen, so what is held in memory is the region and not the
+file's extent. The file itself stays where it is and is never copied or
+rewritten (decision R4). A lat/lon file keeps its own nodes inside the crop;
+a projected one is resampled onto the region's nodes and no others; an ICON
+mesh builds its neighbour set for the region's lattice, and that smaller
+set is what the project keeps. A store is still read whole, since its chunks
+span every longitude, and cropped as each frame is built. A file that
+partly covers the region imports the overlap, and the rest of the region
+reads missing, as a regional grid always has. **A file that covers none of
+it is refused**, naming the file and the region — *"wind.grib2 covers none
+of this project's region (130°…145°, 30°…45°)"* — rather than adding an
+empty layer (decision R10). One that misses the region on reopen opens
+empty, with the same reason, like a file that has gone. A global project
+reads every file exactly as before, so its lattices and their hashes, and
+with them the render cache, are unchanged.
+
 **Open from GRIB.** The start screen can also build a project *from* a
 file: the kind is wind when the file has wind and current otherwise; the
 grid is the app resolution nearest the file's spacing; the time step is the

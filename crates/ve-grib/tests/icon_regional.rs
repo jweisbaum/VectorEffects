@@ -192,3 +192,57 @@ fn a_regional_mesh_implies_its_own_spacing() {
         assert!((low..high).contains(&spacing), "{file}: {spacing}");
     }
 }
+
+/// Onto a regional project (spec.md 4.8, M101): ICON-D2 read for a region
+/// over Germany lands the same values as the global read, on a neighbour set
+/// the size of the region; read for a region over Japan it is refused.
+#[test]
+#[ignore = "needs the DWD sample files; see the module docs"]
+fn icon_d2_onto_a_region() {
+    use ve_core::region::Region;
+    let dir = directory();
+    let mut bytes = std::fs::read(
+        dir.join("icon-d2_germany_icosahedral_single-level_2026100412_000_2d_u_10m.grib2"),
+    )
+    .expect("the U file");
+    bytes.extend_from_slice(
+        &std::fs::read(
+            dir.join("icon-d2_germany_icosahedral_single-level_2026100412_000_2d_v_10m.grib2"),
+        )
+        .expect("the V file"),
+    );
+    let path = std::env::temp_dir().join("ve_icon_regional_d2_region.grib2");
+    std::fs::write(&path, &bytes).expect("a scratch file");
+    let q = Resolution::Deg025;
+
+    let germany = Region::snapped(5.0, 16.0, 46.0, 56.0, false, q)
+        .expect("a region")
+        .lattice(q);
+    let (messages, _) = import::read_messages(&path).expect("it decodes");
+    let mut cache = BTreeMap::new();
+    let started = Instant::now();
+    let sequences = {
+        let mut resampling = Resampling::regional(germany, &mut cache);
+        import::sequences(messages, Some(&mut resampling)).expect("it resamples")
+    };
+    println!(
+        "d2 onto Germany: {:.0} ms",
+        started.elapsed().as_secs_f64() * 1e3
+    );
+    assert_eq!(cache.values().next().expect("a set").len(), germany.len());
+    let grid = &sequences[0].frames[0].grid;
+    let got = grid.sample(10.0, 51.0).expect("a sample");
+    assert!(
+        (got.u - -0.704028).abs() < 1e-3 && (got.v - 0.486297).abs() < 1e-3,
+        "{got:?}"
+    );
+
+    let japan = Region::snapped(130.0, 145.0, 30.0, 45.0, false, q)
+        .expect("a region")
+        .lattice(q);
+    let (messages, _) = import::read_messages(&path).expect("it decodes");
+    let mut cache = BTreeMap::new();
+    let mut resampling = Resampling::regional(japan, &mut cache);
+    let err = import::sequences(messages, Some(&mut resampling)).expect_err("refused");
+    assert!(matches!(err, ve_grib::GribError::OutsideRegion), "{err:?}");
+}

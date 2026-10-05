@@ -238,9 +238,13 @@ pub fn nrt_import(
     mut on_progress: impl FnMut(HistoryProgress),
 ) -> Result<NrtOutcome> {
     let products = products_of(request)?;
-    let (step_hours, step_count) = with_session(state, |session| {
+    let (step_hours, step_count, crop) = with_session(state, |session| {
         let settings = &session.require_open()?.project.settings;
-        Ok((settings.step_hours.hours(), settings.step_count))
+        Ok((
+            settings.step_hours.hours(),
+            settings.step_count,
+            crate::import::crop_for(settings),
+        ))
     })?;
     let period = period(now_unix_s, request.days, step_hours)?;
     // Lengthened, never shortened: a timeline longer than the period keeps
@@ -313,9 +317,9 @@ pub fn nrt_import(
             })
             .and_then(|path| {
                 if product.variable().is_scalar() {
-                    temperature_layer(&origin, &path, range, product.period_hours())
+                    temperature_layer(&origin, &path, range, product.period_hours(), crop.as_ref())
                 } else {
-                    fetched_layer(&origin, &path, range, product.period_hours())
+                    fetched_layer(&origin, &path, range, product.period_hours(), crop.as_ref())
                 }
             });
         done += times.len() as u32;

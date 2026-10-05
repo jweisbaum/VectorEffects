@@ -91,6 +91,22 @@ pub enum AppError {
         why: String,
     },
 
+    /// An import lies wholly outside a regional project's region (spec.md
+    /// 4.8, decision R10), so there is nothing of it to add.
+    #[error("{file} covers none of this project's region ({west}°…{east}°, {south}°…{north}°)")]
+    OutsideRegion {
+        /// The file or directory, as the person chose it.
+        file: String,
+        /// Western edge, degrees.
+        west: f64,
+        /// Eastern edge, degrees in `[-180, 180]`.
+        east: f64,
+        /// Southern edge, degrees.
+        south: f64,
+        /// Northern edge, degrees.
+        north: f64,
+    },
+
     /// A failure with no more specific classification.
     #[error("{0}")]
     Internal(String),
@@ -118,6 +134,26 @@ impl<T, E: std::fmt::Display> Context<T> for std::result::Result<T, E> {
 }
 
 impl AppError {
+    /// The refusal for `file` in a project covering `region` (decision R10).
+    ///
+    /// The east edge is shown as a longitude, so a region across the
+    /// antimeridian reads `160°…-160°` rather than its stored `160°…200°`.
+    pub fn outside_region(file: impl std::fmt::Display, region: &ve_core::region::Region) -> Self {
+        let (west, east, south, north) = region.bounds_deg();
+        let east = if !region.is_full_circle() && east > 180.0 {
+            east - 360.0
+        } else {
+            east
+        };
+        Self::OutsideRegion {
+            file: file.to_string(),
+            west,
+            east,
+            south,
+            north,
+        }
+    }
+
     /// A stable, machine-readable discriminant for the frontend.
     pub fn kind(&self) -> &'static str {
         match self {
@@ -133,6 +169,7 @@ impl AppError {
             Self::BadOption { .. } => "bad-option",
             Self::ExportCancelled => "cancelled",
             Self::Doing { .. } => "doing",
+            Self::OutsideRegion { .. } => "outside-region",
             Self::Internal(_) => "internal",
         }
     }
@@ -168,6 +205,27 @@ pub type Result<T> = std::result::Result<T, AppError>;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The refusal names the file and the region, with the east edge shown
+    /// as a longitude even when the region crosses the antimeridian (R10).
+    #[test]
+    fn a_refusal_names_the_file_and_the_region() {
+        let region = ve_core::region::Region::snapped(
+            160.0,
+            -160.0,
+            -10.5,
+            10.0,
+            false,
+            ve_core::project::Resolution::Deg05,
+        )
+        .unwrap();
+        let err = AppError::outside_region("/data/arctic.grib2", &region);
+        assert_eq!(
+            err.to_string(),
+            "/data/arctic.grib2 covers none of this project's region (160°…-160°, -10.5°…10°)"
+        );
+        assert_eq!(err.kind(), "outside-region");
+    }
 
     #[test]
     fn serialises_with_kind_and_message() {

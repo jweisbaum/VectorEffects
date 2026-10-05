@@ -595,3 +595,49 @@ fn an_sst_layer_takes_no_object_and_its_empty_first_day_is_no_day() {
     assert_eq!(tree.layers[0].objects.len(), 1, "on the painted layer");
     assert!(tree.layers[1].objects.is_empty());
 }
+
+/// A regional project's fetched layer holds the region and a node round it
+/// from the moment it is fetched, as it does after a reopen (spec.md 4.8,
+/// M101), whatever extent the file on disk has.
+#[test]
+fn a_regional_projects_fetched_layer_holds_its_region() {
+    let root = TempRoot::new("regional");
+    let state = app(&root, 1, 24);
+    {
+        let mut session = state.session.lock().expect("lock");
+        let open = session.open.as_mut().expect("open");
+        open.project.settings.region = Some(
+            ve_core::region::Region::snapped(
+                160.0,
+                -160.0,
+                -10.0,
+                10.0,
+                false,
+                open.project.settings.resolution,
+            )
+            .expect("a region"),
+        );
+    }
+    let open = |_: Product| -> ve_zarr::Result<Box<dyn FieldSource>> {
+        Ok(Fake::boxed(
+            Variable::SurfaceCurrent,
+            &hourly(OCT_1, OCT_1 + 20 * HOUR),
+        ))
+    };
+    nrt::nrt_import(
+        &state,
+        &request(&["multiobs"], 1, true, true),
+        NOW,
+        open,
+        |_| {},
+    )
+    .expect("import");
+    let session = state.session.lock().expect("lock");
+    let project = &session.open.as_ref().expect("open").project;
+    let grid = &project.layers[1].raster.as_ref().expect("a field").frames[0].grid;
+    // 0.25° source, 160 E to 160 W and 10 S to 10 N, with a margin node of
+    // the project's 1° each side: 42° by 22° at 0.25°.
+    assert_eq!((grid.ni, grid.nj), (169, 89));
+    assert!(grid.sample(-179.5, 0.0).is_some());
+    assert!(grid.sample(0.0, 0.0).is_none());
+}

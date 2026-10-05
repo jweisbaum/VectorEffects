@@ -7,8 +7,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use rayon::prelude::*;
-use ve_core::project::{FieldKind, Project};
+use ve_core::project::{FieldKind, Project, ProjectSettings};
 use ve_core::raster::{MISSING, RasterFrame, RasterGrid, RasterSequence};
+use ve_core::regrid::TargetGrid;
 use ve_zarr::routing::RoutingStore;
 
 use crate::commands::AppState;
@@ -31,13 +32,29 @@ pub fn read_reporting(
     path: &Path,
     progress: &(dyn Fn(usize, usize) + Sync),
 ) -> Result<Vec<RasterSequence>> {
-    read_store(path, progress).doing("read the Zarr directory at", path.display())
+    read_store(path, None, progress).doing("read the Zarr directory at", path.display())
+}
+
+/// [`read_reporting`] for a project: a regional one keeps only its region of
+/// each frame, plus a node (spec.md 4.8, M101), and refuses a store that
+/// covers none of it (decision R10). A global one reads the whole lattice.
+pub fn read_for(
+    path: &Path,
+    settings: &ProjectSettings,
+    progress: &(dyn Fn(usize, usize) + Sync),
+) -> Result<Vec<RasterSequence>> {
+    match read_store(path, Some(settings), progress) {
+        Err(refused @ AppError::OutsideRegion { .. }) => Err(refused),
+        result => result.doing("read the Zarr directory at", path.display()),
+    }
 }
 
 fn read_store(
     path: &Path,
+    settings: Option<&ProjectSettings>,
     progress: &(dyn Fn(usize, usize) + Sync),
 ) -> Result<Vec<RasterSequence>> {
+    let crop: Option<TargetGrid> = settings.and_then(crate::import::crop_for);
     let internal = |e: ve_zarr::ZarrError| AppError::Internal(e.to_string());
     let store = RoutingStore::open(path).map_err(internal)?;
     let mut fields = Vec::new();
@@ -108,13 +125,22 @@ fn read_store(
                     (store.longitude[ni - 1] - store.longitude[0]) / (ni - 1) as f64,
                     (store.latitude[0] - store.latitude[nj - 1]) / (nj - 1) as f64,
                     uv,
-                );
+                )
+                // A regional project keeps its region and a node round it:
+                // the store is still read whole, since its chunks span every
+                // longitude, but only the region is held (M101).
+                .map(|grid| match &crop {
+                    Some(target) => grid.cropped_to(target, 1),
+                    None => Some(grid),
+                });
                 progress(done.fetch_add(1, Ordering::Relaxed) + 1, total);
                 grid
             })
             .collect();
         for (k, grid) in built.into_iter().enumerate() {
-            let grid = grid.map_err(AppError::Internal)?;
+            let Some(grid) = grid.map_err(AppError::Internal)? else {
+                continue;
+            };
             let t = times.start + k / fields.len();
             let grid = grids
                 .entry(grid.hash)
@@ -126,6 +152,14 @@ fn read_store(
                 grid,
             });
         }
+    }
+    // Every frame of a store is on one lattice, so a region it misses is
+    // missed by all of them.
+    if let (Some(region), true) = (
+        settings.and_then(|s| s.region),
+        !sequences.is_empty() && sequences.iter().all(Vec::is_empty),
+    ) {
+        return Err(AppError::outside_region(path.display(), &region));
     }
     fields
         .into_iter()
@@ -146,8 +180,11 @@ pub fn zarr_import(state: &AppState, path: String) -> Result<ProjectSummary> {
     // Read outside the session lock, as a GRIB project's file is: a month of
     // hourly wind is most of a minute, and every tile request and every edit
     // would otherwise stand behind it.
-    let into = with_session(state, |session| Ok(session.require_open()?.project.id))?;
-    let sequences = read(&path)?;
+    let (into, settings) = with_session(state, |session| {
+        let project = &session.require_open()?.project;
+        Ok((project.id, project.settings.clone()))
+    })?;
+    let sequences = read_for(&path, &settings, &|_, _| {})?;
     with_session(state, |session| {
         let open = session.require_open()?;
         // The lock was let go of, so the project may not be the one that was

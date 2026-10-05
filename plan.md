@@ -3679,6 +3679,38 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M101 — Imports read only the region
+
+Part 3 of regional projects (design R4, R10). Every import a regional
+project reads — lat/lon, projected and ICON GRIB, a routing Zarr store, a
+fetched history or near-real-time file, an SST file — is cropped to the
+region's lattice plus one node, on first import and on every reopen
+(`attach_rasters`), and never copied. `Resampling::regional` sets `crop`:
+the lat/lon path builds the frame and `cropped_to(&target, 1)`; the
+projected path's `Coverage::window` clips its columns to a target that does
+not wrap (trying the run a turn either side, so a grid across 180° meets a
+region across 180°) and reports a miss; the ICON path builds its neighbour
+set for the region's lattice, and `io::read_regrid` decodes kept sets
+against `settings.lattice()`, so a reopened regional ICON layer does not
+search again. A file that covers none of the region is
+`GribError::OutsideRegion`, and the app refuses it as
+`AppError::OutsideRegion`: *"{file} covers none of this project's region
+(130°…145°, 30°…45°)"*, east shown as a longitude. A global project takes
+the old path unchanged (`crop: false`), so its hashes and the render cache
+do not move. `RoutingStore::read_block` still reads every longitude; only
+what is held shrinks. Tests: `ve-grib/tests/regional_import.rs` (lat/lon
+across 180° and over a polar cap, Lambert, Alaska across 180°, an Arctic
+stereographic cap, ICON R02B06 from the bundled asset, SST), the ignored
+`icon_regional::icon_d2_onto_a_region` on DWD's files, and in `ve-app`
+the refusal, a reopen that crops identically, a regional Zarr, and an NRT
+fetch. The reference set passes unchanged.
+**Measured** (`open_cost`, release, `era5-wind-globcurrent.grib2`, 164 MB,
+four runs each): opening the saved global project 0.29–0.35 s, the same
+project with a 20° North Atlantic region 0.31–0.38 s. The decode is the
+cost and is unchanged; the crop adds about 10 ms. What is held falls from
+1440 × 721 nodes per frame to 83 × 83, under 0.7 %. Read time was not
+worth restricting `read_block` to the region's rows.
+
 ### M100 — A project may cover a region
 
 Part 1 of regional projects (design: `docs/superpowers/specs/2026-10-05-regional-projects-design.md`).

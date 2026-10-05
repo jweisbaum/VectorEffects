@@ -30,6 +30,11 @@ pub enum GribError {
     /// An input file holds no wind or current field that could be imported.
     #[error("no wind or current field was found to import: {0}")]
     NoVectorField(String),
+
+    /// Every field in the file lies outside the region it was read for
+    /// (spec.md 4.8, decision R10). The caller names the file and the region.
+    #[error("the file covers none of the region it was read for")]
+    OutsideRegion,
 }
 
 /// Convenience alias for results in this crate.

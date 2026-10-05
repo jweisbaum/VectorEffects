@@ -724,3 +724,149 @@ fn a_held_layer_covers_every_step_of_its_period() {
     assert!(held.steps[1].in_file && held.steps[1].shown);
     assert!(!held.steps[4].in_file && !held.steps[4].shown);
 }
+
+// --- A regional project (spec.md 4.8, M101) ----------------------------------
+
+/// A project like [`state`]'s, covering only `west..east`, `south..north`.
+///
+/// The region is set on the open project directly: the command that creates
+/// one with a region is not this test's subject, and no command may change it
+/// afterwards (R1).
+fn regional(root: &TempRoot, west: f64, east: f64, south: f64, north: f64) -> AppState {
+    let app = state(root, 3, 4);
+    {
+        let mut session = app.session.lock().expect("lock");
+        let open = session.open.as_mut().expect("open");
+        open.project.settings.region = Some(
+            ve_core::region::Region::snapped(
+                west,
+                east,
+                south,
+                north,
+                false,
+                open.project.settings.resolution,
+            )
+            .expect("a region"),
+        );
+    }
+    app
+}
+
+/// A 1° patch, 0..10 E and 80..90 N: the writer's lattice, cut short.
+fn write_patch(root: &TempRoot, name: &str) -> String {
+    let grid = GridSpec {
+        ni: 11,
+        nj: 11,
+        micro_degrees: 1_000_000,
+    };
+    let mut bytes = Vec::new();
+    for parameter in [Parameter::WindU, Parameter::WindV] {
+        let spec = MessageSpec {
+            parameter,
+            grid,
+            reference_time: ReferenceTime {
+                year: 2026,
+                month: 9,
+                day: 3,
+                hour: 0,
+                minute: 0,
+                second: 0,
+            },
+            forecast_hour: 0,
+            centre: 255,
+            bits: 16,
+        };
+        bytes.extend(message(&spec, &vec![4.0; 121]).unwrap());
+    }
+    let path = root.0.join(name);
+    std::fs::write(&path, bytes).expect("write grib");
+    path.to_string_lossy().into_owned()
+}
+
+/// Every imported layer's first frame, as the open project holds it.
+fn first_grids(app: &AppState) -> Vec<std::sync::Arc<ve_core::raster::RasterGrid>> {
+    let session = app.session.lock().expect("lock");
+    let project = &session.open.as_ref().expect("open").project;
+    project
+        .layers
+        .iter()
+        .filter_map(|l| l.raster.as_ref())
+        .map(|s| s.frames[0].grid.clone())
+        .collect()
+}
+
+#[test]
+fn importing_a_file_outside_the_region_is_refused() {
+    let root = TempRoot::new("outside");
+    let app = regional(&root, 130.0, 145.0, 30.0, 45.0);
+    let patch = write_patch(&root, "arctic-patch.grib2");
+    let err = import::grib_import(&app, patch).unwrap_err();
+    let message = err.to_string();
+    assert!(message.contains("arctic-patch.grib2"), "{message}");
+    assert!(
+        message.contains("covers none of this project's region (130°…145°, 30°…45°)"),
+        "{message}"
+    );
+    let summary = projects::current(&app).expect("current").expect("open");
+    assert_eq!(summary.layer_count, 1, "nothing was added");
+    assert!(!summary.can_undo, "nothing to undo");
+
+    // A global file is read for the region and a node round it, no more.
+    let grib = write_file(&root, "wind.grib2", &[FieldKind::Wind], &[0, 3]);
+    import::grib_import(&app, grib).expect("import");
+    let grids = first_grids(&app);
+    assert_eq!((grids[0].ni, grids[0].nj), (18, 18));
+    assert_eq!(u_at_lonlat(&app, 1, 140.0, 40.0), 3.0);
+}
+
+/// The field at a given place, through the path the tiles take.
+fn u_at_lonlat(state: &AppState, step: u32, lon: f64, lat: f64) -> f32 {
+    let session = state.session.lock().expect("lock");
+    let project = &session.open.as_ref().expect("open").project;
+    sample_scene(&flatten(project, step), LonLat::new(lon, lat).unwrap()).u
+}
+
+#[test]
+fn reopening_a_regional_project_crops_identically() {
+    let root = TempRoot::new("regional-reopen");
+    // Across the antimeridian, so the crop is one contiguous run of columns
+    // taken from both ends of the file's.
+    let app = regional(&root, 160.0, -160.0, -10.0, 10.0);
+    let grib = write_file(&root, "wind.grib2", &[FieldKind::Wind], &[0, 3]);
+    import::grib_import(&app, grib).expect("import");
+    let imported = first_grids(&app);
+    assert_eq!((imported[0].ni, imported[0].nj), (43, 23));
+    assert_eq!(u_at_lonlat(&app, 1, 179.5, 0.0), 3.0);
+    assert_eq!(u_at_lonlat(&app, 1, -179.5, 0.0), 3.0);
+
+    let project_path = root.0.join("regional.veproj");
+    projects::save_as(&app, project_path.to_string_lossy().into_owned()).expect("save");
+    let mut hashes = Vec::new();
+    for _ in 0..2 {
+        projects::close_open(&app, true).expect("close");
+        projects::open(&app, project_path.to_string_lossy().into_owned(), false).expect("open");
+        let grids = first_grids(&app);
+        assert_eq!(grids.len(), 1);
+        hashes.push(grids[0].hash);
+    }
+    assert_eq!(
+        hashes,
+        vec![imported[0].hash; 2],
+        "the same crop every time"
+    );
+    assert_eq!(u_at_lonlat(&app, 1, -170.0, 5.0), 3.0);
+}
+
+/// A global project is read exactly as before: the whole lattice, so its
+/// hashes and the render cache do not move.
+#[test]
+fn a_global_project_keeps_the_whole_file() {
+    let root = TempRoot::new("global-whole");
+    let app = state(&root, 3, 4);
+    let grib = write_file(&root, "wind.grib2", &[FieldKind::Wind], &[0]);
+    import::grib_import(&app, grib.clone()).expect("import");
+    let grids = first_grids(&app);
+    let read = ve_grib::import::read_file(std::path::Path::new(&grib), None).expect("read");
+    assert_eq!((grids[0].ni, grids[0].nj), (360, 181));
+    assert_eq!(grids[0].hash, read.sequences[0].frames[0].grid.hash);
+}
