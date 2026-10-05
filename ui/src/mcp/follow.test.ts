@@ -14,6 +14,7 @@ function actions(): FollowActions & Record<string, ReturnType<typeof vi.fn>> {
     setShapeEditing: vi.fn(),
     setActiveLayer: vi.fn(),
     clearError: vi.fn(),
+    replaced: vi.fn(),
   };
 }
 
@@ -25,6 +26,7 @@ describe("applyDocumentChanged", () => {
     expect(a.setStep).not.toHaveBeenCalled();
     expect(a.setSelection).not.toHaveBeenCalled();
     expect(a.clearError).not.toHaveBeenCalled();
+    expect(a.replaced).not.toHaveBeenCalled();
   });
 
   it("resets the editor state when a different project opens, as the open path does", () => {
@@ -35,6 +37,10 @@ describe("applyDocumentChanged", () => {
     expect(a.setActiveLayer).toHaveBeenCalledWith(null);
     expect(a.setStep).toHaveBeenCalledWith(0);
     expect(a.clearError).toHaveBeenCalled();
+    // The map is told before the summary lands, so it places a regional
+    // project's camera on its region even when the region is unchanged (R8).
+    expect(a.replaced).toHaveBeenCalled();
+    expect(vi.mocked(a.replaced!).mock.invocationCallOrder[0]!).toBeLessThan(vi.mocked(a.setProject).mock.invocationCallOrder[0]!);
     expect(a.setProject).toHaveBeenCalledWith(summary("Q", 1));
   });
 

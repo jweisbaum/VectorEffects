@@ -110,4 +110,39 @@ describe("the region on screen", () => {
     expect(mask.closed).toBe(false);
     expect(mask.rings.length).toBeGreaterThan(0);
   });
+
+  /**
+   * Zoomed in far enough that one 2° segment of the outline is longer than
+   * half the window's diagonal: the walk must still find the edge where it
+   * crosses the window, and not mistake the long off-screen chords for a seam.
+   */
+  for (const projection of ["orthographic", "stereographic"] as const) {
+    it(`keeps the Pacific box whole under ${projection} at 2,000 px a degree, its east edge on screen`, () => {
+      const camera = clampCamera({ centerLon: -160.3, centerLat: 0, pxPerDeg: 2000, region: pacific, projection }, view);
+      const mask = regionMask(camera, view)!;
+      expect(mask.closed).toBe(true);
+      const edge = project(camera, view, { lon: -160, lat: 0 });
+      expect(edge.x).toBeGreaterThan(0);
+      expect(edge.x).toBeLessThan(view.width);
+      // An edge piece crosses the window: samples on screen, on either side
+      // of the centre line, along the east edge.
+      const onScreen = mask.rings.flat().filter((p) => p.x >= 0 && p.x <= view.width && p.y >= 0 && p.y <= view.height);
+      expect(onScreen.some((p) => p.y < view.height / 2)).toBe(true);
+      expect(onScreen.some((p) => p.y > view.height / 2)).toBe(true);
+      expect(inside(mask.rings, { x: edge.x - 50, y: edge.y })).toBe(true);
+      expect(inside(mask.rings, { x: edge.x + 50, y: edge.y })).toBe(false);
+    });
+  }
+
+  it("keeps a box whole under Robinson zoomed in at its edge, and still sees the seam", () => {
+    const atlantic: ProjectRegion = { west: -60, east: -10, south: 20, north: 50, full_circle: false };
+    const camera = clampCamera({ centerLon: -10.2, centerLat: 35, pxPerDeg: 2000, region: atlantic, projection: "robinson" }, view);
+    const mask = regionMask(camera, view)!;
+    expect(mask.closed).toBe(true);
+    const edge = project(camera, view, { lon: -10, lat: 35 });
+    expect(inside(mask.rings, { x: edge.x - 50, y: edge.y })).toBe(true);
+    expect(inside(mask.rings, { x: edge.x + 50, y: edge.y })).toBe(false);
+    // Robinson's seam is the antimeridian, which the Pacific box crosses.
+    expect(atMinimum(pacific, "robinson", 180).mask.closed).toBe(false);
+  });
 });

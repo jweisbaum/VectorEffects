@@ -5,7 +5,7 @@
  *
  * Built per camera, because the camera is what moves it, and so built cheaply:
  * a cylindrical map's region is a rectangle in screen space and is computed as
- * one; a general projection's is walked from `regionRings`, subdivided only
+ * one; a general projection's is walked from `regionRings`, bisected only
  * where a segment is on or near the window. `projectedRing` subdivides every
  * segment to eight pixels, which zoomed into a globe is tens of thousands of
  * projections per frame for an outline almost all of which is off screen.
@@ -16,6 +16,7 @@ import {
   normalizeLon,
   project,
   projectionFor,
+  unproject,
   type Camera,
   type GeoPoint,
   type ScreenPoint,
@@ -94,22 +95,46 @@ const finite = (p: ScreenPoint) => Number.isFinite(p.x) && Number.isFinite(p.y);
 
 /**
  * One ring projected, in pieces where it leaves the map: a point that does not
- * project (past a horizon) or a jump longer than half the window's diagonal
- * (across a seam) ends a piece, as `projectedRing` decides it.
+ * project (past a horizon) ends a piece, and so does a step across a fixed
+ * map's seam.
+ *
+ * A segment is bisected while it is longer than a few pixels on screen and
+ * near the window — near meaning within its own screen length, which bounds
+ * how far an arc that short can bulge — so a segment zoomed to thousands of
+ * pixels is still drawn smoothly where it crosses the window and costs a
+ * handful of projections where it does not. A step's length on screen is
+ * therefore no evidence of a seam: a far segment is one long chord. A seam is
+ * found geographically instead — the chord's middle, taken back to the earth,
+ * lies nowhere near the segment's own middle — and only under a fixed map,
+ * the only kind that has one; a movable map's edge is its horizon.
  */
 function walk(camera: Camera, view: Viewport, ring: readonly GeoPoint[]): { pieces: ScreenPoint[][]; whole: boolean } {
   const pieces: ScreenPoint[][] = [];
   const jump = Math.hypot(view.width, view.height) / 2;
+  const fixed = !projectionFor(camera).general?.movable;
   let current: ScreenPoint[] | null = null;
   let whole = true;
-  const add = (p: ScreenPoint) => {
-    if (!finite(p)) {
+  let last: { q: ScreenPoint; g: GeoPoint } | null = null;
+
+  /** Whether the step from one sample to the next crosses a fixed map's seam. */
+  const seam = (ga: GeoPoint, qa: ScreenPoint, gb: GeoPoint, qb: ScreenPoint): boolean => {
+    if (!fixed || Math.hypot(qb.x - qa.x, qb.y - qa.y) <= jump) return false;
+    const mid = unproject(camera, view, { x: (qa.x + qb.x) / 2, y: (qa.y + qb.y) / 2 });
+    if (!Number.isFinite(mid.lon) || !Number.isFinite(mid.lat)) return false;
+    const dLon = normalizeLon(gb.lon - ga.lon), dLat = gb.lat - ga.lat;
+    const lat = ga.lat + dLat / 2;
+    const cos = Math.cos((lat * Math.PI) / 180);
+    const off = Math.hypot(normalizeLon(mid.lon - (ga.lon + dLon / 2)) * cos, mid.lat - lat);
+    return off > Math.max(1, Math.hypot(dLon * cos, dLat));
+  };
+  const add = (q: ScreenPoint, g: GeoPoint) => {
+    if (!finite(q)) {
       whole = false;
       current = null;
+      last = null;
       return;
     }
-    const last = current?.[current.length - 1];
-    if (last && Math.hypot(p.x - last.x, p.y - last.y) > jump) {
+    if (current && last && seam(last.g, last.q, g, q)) {
       whole = false;
       current = null;
     }
@@ -117,7 +142,8 @@ function walk(camera: Camera, view: Viewport, ring: readonly GeoPoint[]): { piec
       current = [];
       pieces.push(current);
     }
-    current.push(p);
+    current.push(q);
+    last = { q, g };
   };
   const near = (a: ScreenPoint, b: ScreenPoint, slack: number) =>
     Math.max(a.x, b.x) >= -slack && Math.min(a.x, b.x) <= view.width + slack
@@ -125,23 +151,31 @@ function walk(camera: Camera, view: Viewport, ring: readonly GeoPoint[]): { piec
 
   for (let i = 0; i + 1 < ring.length; i++) {
     const a = ring[i]!, b = ring[i + 1]!;
-    const pa = project(camera, view, a), pb = project(camera, view, b);
     const dLon = normalizeLon(b.lon - a.lon), dLat = b.lat - a.lat;
-    let steps = 1;
-    if (finite(pa) && finite(pb)) {
-      // A segment's bulge is a fraction of its length, so one within its own
-      // length of the window may curve into it; one further out may not.
-      const length = Math.hypot(pb.x - pa.x, pb.y - pa.y);
-      if (length <= jump && near(pa, pb, length)) steps = Math.min(256, Math.max(1, Math.ceil(length / STEP_PX)));
-    } else if (finite(pa) || finite(pb)) {
-      // Find the horizon to within a sixteenth of the segment.
-      steps = 16;
-    }
-    for (let j = 0; j < steps; j++) {
-      add(j === 0 ? pa : project(camera, view, { lon: a.lon + (dLon * j) / steps, lat: a.lat + (dLat * j) / steps }));
-    }
+    const at = (t: number): GeoPoint => ({ lon: a.lon + dLon * t, lat: a.lat + dLat * t });
+    // Emits the samples in (ta, tb], bisecting where the segment is on screen.
+    const refine = (ta: number, qa: ScreenPoint, tb: number, qb: ScreenPoint, depth: number): void => {
+      const fa = finite(qa), fb = finite(qb);
+      let split: boolean;
+      if (fa && fb) {
+        const length = Math.hypot(qb.x - qa.x, qb.y - qa.y);
+        split = depth < 40 && length > STEP_PX && near(qa, qb, length);
+      } else {
+        // Find a horizon to within a thirty-second of the segment.
+        split = fa !== fb && depth < 5;
+      }
+      if (!split) {
+        add(qb, at(tb));
+        return;
+      }
+      const tm = (ta + tb) / 2;
+      const qm = project(camera, view, at(tm));
+      refine(ta, qa, tm, qm, depth + 1);
+      refine(tm, qm, tb, qb, depth + 1);
+    };
+    const pa = project(camera, view, a);
+    if (i === 0) add(pa, a);
+    refine(0, pa, 1, project(camera, view, b), 0);
   }
-  const end = ring[ring.length - 1];
-  if (end) add(project(camera, view, end));
   return { pieces, whole: whole && pieces.length === 1 };
 }

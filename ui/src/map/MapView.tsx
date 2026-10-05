@@ -560,6 +560,13 @@ export interface MapHandle extends PlaybackMap {
    */
   endMeasuring(): void;
   /**
+   * The project under the map is being replaced by another (opened, created,
+   * or opened by the MCP service). A regional project's camera is put back on
+   * its region when the new summary lands, even if the region is the same
+   * one the last project had (R8).
+   */
+  replaced(): void;
+  /**
    * `Cmd`-`C` with a region selected: captures the field inside it and says
    * so. False when there is no region, in which case the key means the
    * objects and the app copies them (spec.md 8.5).
@@ -2811,13 +2818,31 @@ export default function MapView({
    * The project's region, onto the camera (spec 5.1, R8).
    *
    * It rides on the camera as the projection does, so every path through
-   * `clampCamera` holds the window to it. Keyed on its value rather than the
-   * summary: the region never changes after creation (R1), so this runs when
-   * a project with another region is opened and on no edit. A regional
-   * project opens on its region's centre at the zoom that fits it; a global
-   * one keeps the camera it had.
+   * `clampCamera` holds the window to it. Applied when the region's value
+   * changes and when the project is replaced (`replaced`, which the app calls
+   * from `rewind` and the MCP service's opening): the region never changes
+   * after creation (R1), so an edit never moves the camera, but a second
+   * project with the same region is still opened on it. A regional project
+   * opens on its region's centre at the zoom that fits it; a global one keeps
+   * the camera it had.
+   *
+   * The first run, on mount, may see a 1x1 view before the canvas is
+   * measured: the fit is then tiny, and the resize handler's `clampCamera`
+   * raises the zoom to the region's real floor, so the map still opens at the
+   * fit.
    */
   const regionKey = project.region ? JSON.stringify(project.region) : "";
+  const replacedRef = useRef(false);
+  const [placements, setPlacements] = useState(0);
+  const replaced = useCallback(() => {
+    replacedRef.current = true;
+  }, []);
+  useEffect(() => {
+    // The summary that follows a replacement: place the camera again.
+    if (!replacedRef.current) return;
+    replacedRef.current = false;
+    setPlacements((n) => n + 1);
+  }, [project]);
   useEffect(() => {
     const region = regionKey ? (JSON.parse(regionKey) as ProjectRegion) : undefined;
     const { region: _previous, ...camera } = cameraRef.current;
@@ -2836,7 +2861,7 @@ export default function MapView({
       }, viewRef.current);
     }
     requestDraw();
-  }, [regionKey, requestDraw]);
+  }, [regionKey, placements, requestDraw]);
   // The preview is served under its own revision (D71): its tiles are other
   // tiles, so the map redraws when it comes, moves and goes.
   useEffect(() => {
@@ -3007,6 +3032,7 @@ export default function MapView({
       bounds,
       clearRegion,
       endMeasuring,
+      replaced,
       copyRegion,
       pasteCapture,
       setCapture,
@@ -3023,6 +3049,7 @@ export default function MapView({
       focus,
       isAligning,
       pasteCapture,
+      replaced,
       setCapture,
       warm,
       prepare,

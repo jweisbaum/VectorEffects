@@ -17,6 +17,8 @@ export interface FollowActions {
   setActiveLayer: (layer: number | null) => void;
   /** What `openPath` clears with `reportError(null)` (App.tsx, M76). */
   clearError: () => void;
+  /** The map's `replaced`, so a regional project opens on its region (R8). */
+  replaced?: () => void;
 }
 
 export function applyDocumentChanged(payload: DocumentChanged, actions: FollowActions): void {
@@ -26,6 +28,7 @@ export function applyDocumentChanged(payload: DocumentChanged, actions: FollowAc
     actions.setActiveLayer(null);
     actions.setStep(0);
     actions.clearError();
+    actions.replaced?.();
   }
   actions.setProject(payload.project);
 }

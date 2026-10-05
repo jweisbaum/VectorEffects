@@ -3682,8 +3682,10 @@ does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 ### M105 — The map is held to the region (part 2: drawn, culled, enforced)
 
 Decision R8 in the running app. `MapView` puts `summary.region` on the camera,
-keyed on the region's value (it never changes, R1), opening a regional
-project on `regionCentre` at `minPxPerDeg`'s fit; the readout's zoom is
+applied when the region's value changes and when the project is replaced
+(`MapHandle.replaced`, called from the app's `rewind` and the MCP service's
+opening, so a second project with the same region is opened on it too),
+opening a regional project on `regionCentre` at `minPxPerDeg`'s fit; the readout's zoom is
 relative to that floor. The overlay is split: `drawOverlayContent` is the old
 `drawOverlay`, and `drawRegionBounds` follows it with `destination-over`, so
 the dim and the edge lie under everything the overlay draws — drawn *first*
@@ -3691,9 +3693,11 @@ they would be cut by an edge band's `destination-out` knock-out inside any
 selected object that straddles the edge. The dim is the theme's `void` (the
 off-map colour) at the modal scrim's 62%, an even-odd fill of the window
 against `regionMask` (`map/regionMask.ts`: a rectangle computed directly under
-a cylindrical map, `regionRings` walked under a general one, subdivided only
-near the window, so a zoomed globe does not project tens of thousands of
-points per frame); the edge is 1 px in the graticule colour. A ring a horizon
+a cylindrical map, `regionRings` walked under a general one and bisected
+only where a piece is within its own screen length of the window, so a zoomed
+globe neither projects tens of thousands of points per frame nor mistakes a
+long off-screen chord for a seam: a fixed map's seam is found geographically,
+by taking the chord's middle back to the earth); the edge is 1 px in the graticule colour. A ring a horizon
 or a seam cuts is outlined and not filled. `visibleTiles` drops a tile that
 `regionMeetsBox` says misses the region; `mapTiles` is the window's whole set,
 which the renderer's basemap and the backdrops use, so land outside the region
@@ -3701,8 +3705,11 @@ is dimmed rather than gone. `allowed.ts` gains `refusePress` with reasons
 `hidden-layer` and `outside-region`: every press on a hidden layer is refused
 (M68), and outside the region only one that starts a gesture; the cursor shows
 the refusal on hover. The brush, shapes, operators, a selected region's fill,
-the eraser and the macro insert are covered; the eraser and the insert now
-also refuse a hidden layer with its hint, which the cursor already said.
+the eraser and the macro insert are covered. The eraser now also refuses a
+hidden layer with its hint, which the cursor already said; the insert does
+not reach that check for a hidden layer, since `canInsertMacro` (which
+refuses a hidden, locked or imported destination) returns first, silently,
+as before.
 Hint *"Outside this project's region"* in all nine languages.
 
 Tests: `camera.test.ts` (Pacific at 20 px/°: no tile wholly west of 150°E or
@@ -3714,7 +3721,11 @@ under way allowed, hidden before outside), `regionMask.test.ts` (rectangle
 equals the projected corners; the near copy either side of the antimeridian;
 Mercator cap; a circle about the pole for both caps under stereographic and
 orthographic; the Pacific box whole on the globe; an Antarctic cap down to its
-pole line under Robinson; outlined not filled when a horizon cuts it).
+pole line under Robinson; outlined not filled when a horizon cuts it; the
+Pacific box whole under the globe and stereographic at 2,000 px/° with its east
+edge on screen; a box whole under Robinson zoomed in at its edge while the
+Pacific box still meets Robinson's seam), and `follow.test.ts` (the MCP
+service's opening tells the map before the summary lands).
 
 In the app (driver on port 5199, `VE_AUTOMATION_ROOT` scratch; projects made
 by `new_project` with a region, a stroke inside and one straddling the edge,

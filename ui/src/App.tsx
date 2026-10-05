@@ -103,6 +103,7 @@ function EditorApp() {
    */
   const rewind = useCallback(() => {
     mapRef.current?.endMeasuring();
+    mapRef.current?.replaced();
     setStepFloor(null);
     setStepRaw(0);
   }, [setStepFloor]);
@@ -312,6 +313,7 @@ function EditorApp() {
       setShapeEditing,
       setActiveLayer,
       clearError: () => reportError(null),
+      replaced: () => mapRef.current?.replaced(),
     };
     const subs = [
       listen<DocumentChanged>("document://changed", (e) => applyDocumentChanged(e.payload, actions)),
