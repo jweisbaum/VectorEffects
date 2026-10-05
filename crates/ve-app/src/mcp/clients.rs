@@ -329,12 +329,27 @@ pub fn mcp_register_client(
             // What was written is remembered, so the next registration
             // replaces exactly that (`claude_settings`).
             let rules = super::claude_settings::rules_for(mcp.ask);
-            super::claude_settings::write_rules(&claude_home, &mcp.claude_rules, &rules)?;
             let file = state.paths.settings_file();
-            with_session(&state, |session| {
-                session.settings.mcp.claude_rules = rules;
-                session.save_settings(&file)
+            let remember = |owned: &[String]| {
+                with_session(&state, |session| {
+                    session.settings.mcp.claude_rules = owned.to_vec();
+                    session.save_settings(&file)
+                })
+            };
+            let written = super::claude_settings::write_rules(
+                &claude_home,
+                &mcp.claude_rules,
+                &rules,
+                remember,
+            )
+            .map_err(|err| AppError::Doing {
+                doing: "set what Claude Code may do without asking in",
+                what: "Claude Code's settings.json".to_owned(),
+                why: format!(
+                    "the service and the skill were added, but the permission rules were not: {err}"
+                ),
             })?;
+            remember(&written)?;
             Ok(McpRegistered {
                 skill: Some(skill.display().to_string()),
             })
