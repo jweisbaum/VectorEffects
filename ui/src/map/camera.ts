@@ -22,6 +22,8 @@ import {
 
 import { defaultCentre, generalMap, mapExtent, mapTransform } from "./projections/general";
 import type { GeographicMesh, MeshTriangle } from "./projections/mesh";
+import type { ProjectRegion } from "../generated/ProjectRegion";
+import { clampToRegion, regionCentre, regionFitPxPerDeg } from "./extent";
 import {
   buildPlaneMeshData, trianglesOf, virtualOf,
   type PlaneBox, type PlaneMeshData, type PlaneMeshRequest,
@@ -79,6 +81,14 @@ export interface Camera {
    * screen, never what is stored or exported (invariant 3).
    */
   projection?: ProjectionId;
+  /**
+   * The project's region (spec 5.1, R8); absent for a global project.
+   *
+   * It rides on the camera for the same reason the projection does: every
+   * path that moves the camera goes through `clampCamera`, which holds the
+   * window to it, and a camera built by spreading another keeps it.
+   */
+  region?: ProjectRegion;
 }
 
 /** Viewport size in CSS pixels. */
@@ -104,11 +114,24 @@ export function normalizeLon(lon: number): number {
   return ((((lon + 180) % 360) + 360) % 360) - 180;
 }
 
-/** The smallest scale that still fits the whole world in the viewport. */
+/**
+ * The smallest scale: the one that fits the whole world in the viewport, or
+ * for a regional project the larger one that fits the region (R8).
+ *
+ * A movable projection's region fit depends on where the camera looks; this
+ * answers for the region's own centre, and `clampToRegion` for the camera's.
+ */
 export function minPxPerDeg(
   view: Viewport,
   projection: Projection = PLATE_CARREE,
+  region?: ProjectRegion,
 ): number {
+  const world = worldMinPxPerDeg(view, projection);
+  if (!region) return world;
+  return Math.max(world, regionFitPxPerDeg(region, view, projection, regionCentre(region)));
+}
+
+function worldMinPxPerDeg(view: Viewport, projection: Projection): number {
   if (projection.general) {
     const [west,south,east,north] = mapExtent(projection.general);
     return Math.min(view.width / Math.max(1e-6,east-west), view.height / Math.max(1e-6,north-south)) * 0.96;
@@ -124,8 +147,13 @@ export function minPxPerDeg(
  * Longitude wraps freely — panning past the dateline is seamless and must never
  * stop. Latitude is clamped so the viewport cannot scroll past a pole into
  * empty space; when the world is shorter than the viewport, it centres instead.
+ * A regional camera is then held to its region (`clampToRegion`, R8).
  */
 export function clampCamera(camera: Camera, view: Viewport): Camera {
+  return clampToRegion(clampToWorld(camera, view), view);
+}
+
+function clampToWorld(camera: Camera, view: Viewport): Camera {
   const projection = projectionFor(camera);
   const pxPerDeg = Math.min(
     Math.max(camera.pxPerDeg, minPxPerDeg(view, projection)),
@@ -861,8 +889,12 @@ function planeMeshTiles(camera: Camera, view: Viewport, budget: number): Visible
 export function cameraForProjection(camera:Camera,view:Viewport,id:ProjectionId):Camera {
   const projection=projectionOf(id);
   if(!projection.general)return clampCamera({...camera,projection:id},view);
-  const centre=projection.general.movable?{lon:camera.centerLon,lat:camera.centerLat}:defaultCentre(projection.general);
-  return clampCamera({projection:id,centerLon:centre.lon,centerLat:centre.lat,pxPerDeg:minPxPerDeg(view,projection)},view);
+  const region=camera.region;
+  // A regional project opens the new map on its region rather than the map's own.
+  const centre=projection.general.movable?{lon:camera.centerLon,lat:camera.centerLat}
+    :region?regionCentre(region):defaultCentre(projection.general);
+  return clampCamera({projection:id,centerLon:centre.lon,centerLat:centre.lat,
+    pxPerDeg:minPxPerDeg(view,projection,region),...(region?{region}:{})},view);
 }
 
 /** Solve a geographic anchor's screen position for zooming and clone previews. */

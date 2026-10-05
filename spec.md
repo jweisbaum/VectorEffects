@@ -1678,6 +1678,24 @@ is available in cylindrical views.
   Grid rows beyond those limits sit off the map.
 - The camera state lives in the frontend and is mirrored into `ViewState` on
   save.
+- **A regional project's camera is held to its region** (§4.1, R8). The
+  region rides on the `Camera` beside the projection, so every path through
+  `clampCamera` holds it (`clampToRegion` in `map/extent.ts`). The minimum
+  zoom is the one at which the whole region fits the window; on each axis
+  where the region is larger than the window, panning stops at its edge, and
+  on one where it is smaller it is centred. Under a cylindrical map the
+  longitude is held in the region's unwrapped arc, so a Pacific region pans
+  across the antimeridian and stops at its far edge; a full-circle region
+  keeps the free wrap and its zoom floor fits its latitude alone. Latitude is
+  held in the projection's own `y`, so a cap past Mercator's 85.05° stops at
+  the projection's edge. Under the globe and the azimuthals the centre is
+  held in the region and the floor fits the region projected about that
+  centre; a polar cap is held about its pole, which a view zoomed out to the
+  cap looks straight down on. Under a fixed general map the region's outline
+  is projected once per projection and region into a box in the plane, held
+  as the cylindrical case is. A region a fixed map cuts at its own seam (a
+  Pacific region under Robinson centred on Greenwich) has a box as wide as
+  the map. A global project's camera is unchanged.
 
 ### 5.2 Basemap
 

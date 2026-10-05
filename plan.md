@@ -3679,6 +3679,35 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M105 — The map is held to the region (part 1: the camera)
+
+Decision R8, the camera maths. `Camera.region?: ProjectRegion` rides on the
+camera like the projection, so a spread keeps it and `cameraForProjection`
+carries it (opening a fixed map on the region's centre, not the map's own).
+`clampCamera` is now the world clamp followed by `clampToRegion`
+(`ui/src/map/extent.ts`), which returns a camera without a region unchanged;
+`minPxPerDeg` takes an optional region and answers max(world, region fit).
+Cylindrical: longitude held in the unwrapped arc, measured the short way from
+its middle (free wrap for a full circle, whose floor fits latitude only);
+latitude held in the projection's `y`. Movable: the centre held in the
+region, a cap about its pole by as much as the window lies inside it, and the
+floor `regionFitPxPerDeg` about that centre. Fixed general: the region's
+projected box, memoised by (projection, region) with a last-answer check so
+no key is built per camera, held in plane coordinates. Also `regionOutline`
+(unwrapped closed ring; a cap one parallel), `regionContains`, `regionCentre`.
+Wiring the summary's region onto the camera, the dimmed exterior, tile
+culling and refusing gestures outside are part 2.
+
+Tests: `extent.test.ts` — the brief's seven (the floor is 20 px/° for the
+Pacific box; the antimeridian pan stops at -160; a thin region is centred; an
+Arctic cap wraps and its window's south edge stays at 60°N; the globe keeps
+its centre in the region; polar stereographic centres a cap on the pole at
+its fit; a global camera is untouched) plus the south-edge stop, Mercator's
+edge, a globe moving off the pole when zoomed in, the region kept through a
+zoom and a change of projection, and Robinson and British National Grid
+holding the projected box (covered or centred on each screen axis). The
+existing `camera.test.ts` passes unchanged.
+
 ### M104 — Choosing a region (part 1: IPC and MCP)
 
 Decision R9, the backend half. `NewProjectRequest.region` is an optional
