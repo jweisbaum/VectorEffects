@@ -208,3 +208,9 @@ fn check_centre(centre: &str) {
 fn dwd_icon_models_import() {
     check_centre("icon");
 }
+
+#[test]
+#[ignore = "needs the downloaded model files; see the module docs"]
+fn meteo_france_arome_and_arpege_models_import() {
+    check_centre("meteofrance");
+}
