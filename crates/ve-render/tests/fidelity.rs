@@ -345,7 +345,21 @@ fn raster(rng: &mut Rng, z: usize) -> FlatRaster {
         nj.min(((lat0 + 90.0) / d).floor() as u32 + 1).max(2)
     };
     uv.truncate((ni * nj) as usize);
-    let grid = RasterGrid::new(ni, nj, lon0, lat0, d, d, uv).expect("valid grid");
+    let mut grid = RasterGrid::new(ni, nj, lon0, lat0, d, d, uv).expect("valid grid");
+    // A global lattice is sometimes cropped to a region across 180 degrees,
+    // as a regional project's import is (M100): the copied columns must
+    // sample the same on both backends.
+    if global && rng.next() < 0.4 {
+        let target = ve_core::regrid::TargetGrid {
+            ni: 31,
+            nj: 17,
+            lon0: 165.0,
+            lat0: rng.range(-30.0, 30.0),
+            dlon: 1.0,
+            dlat: 1.0,
+        };
+        grid = grid.cropped_to(&target, 1).expect("the crop overlaps");
+    }
     FlatRaster {
         erased: Vec::new(),
         layer: 0,

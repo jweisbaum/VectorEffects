@@ -230,6 +230,81 @@ impl RasterGrid {
         })
     }
 
+    /// The part of this lattice a region needs: `target`'s extent grown by
+    /// `margin` nodes of the target's own spacing, snapped outward to this
+    /// lattice's nodes. `None` when no node of `self` lies inside it.
+    ///
+    /// The margin is what lets the sampler's four-corner blend read a real
+    /// node at the region's outermost row and column. Rows clamp at the poles.
+    /// A wrapping source copies columns modulo `ni`, so a window across the
+    /// antimeridian (or the seam) comes out contiguous; a window that spans
+    /// the whole circle keeps every column and the source's own `lon0`.
+    pub fn cropped_to(
+        &self,
+        target: &crate::regrid::TargetGrid,
+        margin: u32,
+    ) -> Option<RasterGrid> {
+        const EPS: f64 = 1e-9;
+        let m = f64::from(margin);
+        // Rows.
+        let north = (target.lat0 + m * target.dlat).min(90.0);
+        let south =
+            (target.lat0 - f64::from(target.nj - 1) * target.dlat - m * target.dlat).max(-90.0);
+        let nj = f64::from(self.nj);
+        let j0 = ((self.lat0 - north) / self.dlat + EPS).floor().max(0.0);
+        let j1 = ((self.lat0 - south) / self.dlat - EPS).ceil().min(nj - 1.0);
+        if j1 < j0 {
+            return None;
+        }
+        let (j0, j1) = (j0 as usize, j1 as usize);
+
+        // Columns, as a start index into the source and a count.
+        let west = target.lon0 - m * target.dlon;
+        let width = f64::from(target.ni - 1) * target.dlon + 2.0 * m * target.dlon;
+        let ni = self.ni as usize;
+        let start_f = (west - self.lon0).rem_euclid(360.0) / self.dlon;
+        let span = width / self.dlon;
+        let (start, count) = if self.wraps {
+            if width + self.dlon >= 360.0 - EPS {
+                (0, ni)
+            } else {
+                let s = (start_f + EPS).floor();
+                let e = (start_f + span - EPS).ceil();
+                (s as usize, ((e - s) as usize + 1).min(ni))
+            }
+        } else {
+            let n = f64::from(self.ni);
+            let mut found = None;
+            // The window may reach the patch from either side of the seam.
+            for shift in [0.0, -360.0 / self.dlon] {
+                let s = ((start_f + shift) + EPS).floor().max(0.0);
+                let e = ((start_f + shift + span) - EPS).ceil().min(n - 1.0);
+                if e >= s {
+                    found = Some((s as usize, (e - s) as usize + 1));
+                    break;
+                }
+            }
+            found?
+        };
+
+        let nj_out = j1 - j0 + 1;
+        let mut uv = Vec::with_capacity(count * nj_out);
+        for j in j0..=j1 {
+            let row = &self.uv[j * ni..(j + 1) * ni];
+            uv.extend((0..count).map(|k| row[(start + k) % ni]));
+        }
+        RasterGrid::new(
+            count as u32,
+            nj_out as u32,
+            self.lon0 + start as f64 * self.dlon,
+            self.lat0 - j0 as f64 * self.dlat,
+            self.dlon,
+            self.dlat,
+            uv,
+        )
+        .ok()
+    }
+
     /// Total nodes.
     pub fn len(&self) -> usize {
         self.uv.len()
@@ -557,6 +632,7 @@ impl RasterSequence {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::regrid::TargetGrid;
 
     fn grid(
         ni: u32,
@@ -573,6 +649,95 @@ mod tests {
             }
         }
         RasterGrid::new(ni, nj, lon0, lat0, d, d, uv).expect("valid grid")
+    }
+
+    fn pos(lon0: f64, lat0: f64) -> impl Fn(u32, u32) -> [f32; 2] {
+        move |i, j| [(lon0 + f64::from(i)) as f32, (lat0 - f64::from(j)) as f32]
+    }
+
+    #[test]
+    fn a_crop_keeps_the_region_and_one_node_round_it() {
+        let world = grid(360, 181, -180.0, 90.0, 1.0, pos(-180.0, 90.0));
+        let target = TargetGrid {
+            ni: 11,
+            nj: 11,
+            lon0: 10.0,
+            lat0: 50.0,
+            dlon: 1.0,
+            dlat: 1.0,
+        };
+        let c = world.cropped_to(&target, 1).unwrap();
+        assert_eq!((c.ni, c.nj), (13, 13));
+        assert_eq!((c.lon0, c.lat0), (9.0, 51.0));
+        assert!(!c.wraps);
+        assert_eq!(c.sample(15.0, 45.0), world.sample(15.0, 45.0));
+    }
+
+    #[test]
+    fn a_crop_across_the_antimeridian_is_contiguous() {
+        let world = grid(360, 181, -180.0, 90.0, 1.0, pos(-180.0, 90.0));
+        let target = TargetGrid {
+            ni: 41,
+            nj: 21,
+            lon0: 160.0,
+            lat0: 10.0,
+            dlon: 1.0,
+            dlat: 1.0,
+        };
+        let c = world.cropped_to(&target, 1).unwrap();
+        assert_eq!(c.ni, 43);
+        assert_eq!(c.lon0, 159.0);
+        for lon in [170.0, 179.5, -179.5, -170.0] {
+            assert_eq!(c.sample(lon, 0.0), world.sample(lon, 0.0), "at {lon}");
+        }
+        assert!(c.sample(0.0, 0.0).is_none());
+    }
+
+    #[test]
+    fn a_crop_to_a_polar_cap_keeps_the_wrap() {
+        let world = grid(360, 181, -180.0, 90.0, 1.0, pos(-180.0, 90.0));
+        let target = TargetGrid {
+            ni: 360,
+            nj: 31,
+            lon0: -180.0,
+            lat0: 90.0,
+            dlon: 1.0,
+            dlat: 1.0,
+        };
+        let c = world.cropped_to(&target, 1).unwrap();
+        assert!(c.wraps);
+        assert_eq!((c.ni, c.nj), (360, 32)); // margin only southward: the pole is the top
+        assert_eq!(c.sample(-179.5, 75.0), world.sample(-179.5, 75.0));
+    }
+
+    #[test]
+    fn a_crop_that_misses_is_none() {
+        let patch = grid(20, 10, -10.0, 60.0, 1.0, |_, _| [1.0, 1.0]);
+        let target = TargetGrid {
+            ni: 11,
+            nj: 11,
+            lon0: 100.0,
+            lat0: 0.0,
+            dlon: 1.0,
+            dlat: 1.0,
+        };
+        assert!(patch.cropped_to(&target, 1).is_none());
+    }
+
+    #[test]
+    fn a_crop_of_a_regional_grid_takes_the_overlap() {
+        let patch = grid(21, 11, 0.0, 50.0, 1.0, pos(0.0, 50.0));
+        let target = TargetGrid {
+            ni: 41,
+            nj: 41,
+            lon0: 10.0,
+            lat0: 60.0,
+            dlon: 1.0,
+            dlat: 1.0,
+        };
+        let c = patch.cropped_to(&target, 1).unwrap();
+        assert_eq!((c.lon0, c.ni), (9.0, 12));
+        assert_eq!(c.lat0, 50.0);
     }
 
     /// The key the render cache holds tiles under is BLAKE3 over the header

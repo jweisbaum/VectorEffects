@@ -3688,6 +3688,10 @@ is optional, absent from a global project's file (no schema bump), and
 `ProjectSettings::lattice()` is the region's nodes or the global grid.
 `Project::validate` checks it. Nothing consumes it yet: imports, export and
 the UI follow in later parts.
+Part 2: `RasterGrid::cropped_to(&TargetGrid, margin)` crops a lattice to the
+region plus a margin node (columns modulo `ni` across the seam, rows clamped at
+the poles, `None` when it misses); the fidelity generator crops one global
+raster across 180 degrees.
 
 ### M99 — The auto scale spans sea-surface temperature
 
