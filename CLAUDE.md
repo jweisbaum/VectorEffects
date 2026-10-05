@@ -353,6 +353,13 @@ state all the same, so it is saved and undone like everything else.
 1. The tool calls the `#[tauri::command]` function with `app.state()`; it
    never reimplements it. If the feature has no command, add the command
    first, for the interface.
+   **Classify it** in `mcp/tools/effects.rs`'s `TABLE` by what its command
+   does: `Read`, `Edit` (an undoable change to the open document), `View`,
+   `Files`, `Network`, `Discard` or `Anything`. That sets its MCP
+   annotations and whether Claude Code may run it without asking (spec
+   8.8); `every_tool_is_classified_and_nothing_else_is` fails until it is.
+   Classify by the worst it can do: a tool that discards unsaved work only
+   when told to is still `Discard`.
 2. Parameters are a `schemars::JsonSchema` struct in `mcp/tools/<group>.rs`
    beside the tool, with a doc comment per field; the client reads those.
 3. A tool that writes goes through `VectorEffects::write`, which emits

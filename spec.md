@@ -3999,6 +3999,41 @@ and never as a side effect of another setting; it fetches nothing and
 listens to nothing (invariant 5). The command is excluded from `invoke`.
 Every other client gets the same configuration as text.
 
+**What a client may do without asking** is the person's choice, one of
+three, made above the Add buttons (`McpSettings::ask`, `mcp_set_ask`, which is
+excluded from `invoke`: a client must not grant itself permission). Every tool
+is classified by its effect in one table (`mcp::tools::effects`): *read*,
+*edit* (the open document, undoably), *view* (frontend state only), *files*
+(`project_save` and the exports, which write and can replace files),
+*network* (`import_nrt`, `import_history`), *discard* (`project_new`,
+`project_open`, `project_close`, which can throw away unsaved work when told
+to) and *anything* (`invoke`). The default choice lets read, edit and view run
+without a prompt and asks before the rest; the others are *ask before every
+action* and *never ask*.
+
+The table reaches the clients two ways. Every tool publishes it as the MCP
+annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`,
+`openWorldHint`, all four stated, since a missing hint reads as `true`).
+Codex's default `auto` approval acts on them — it runs a read-only tool, or
+one neither destructive nor open-world, without asking — so for the default
+choice *Add to Codex* writes nothing more, and for the other two sets
+`default_tools_approval_mode` to `prompt` or `approve`, never touching the
+person's own per-tool approvals. Claude Code does not act on annotations, so
+*Add to Claude Code* writes `permissions.allow` rules into `settings.json`
+under the same folder as the skill (`mcp::claude_settings`): one
+`mcp__vectoreffects__<tool>` per tool for the default, the wildcard
+`mcp__vectoreffects__*` for *never ask*, none for *ask before every action*.
+That file is documented and hand-edited, unlike `~/.claude.json`, and is
+edited keeping every key: only the rules the previous registration wrote,
+remembered in `McpSettings::claude_rules`, are replaced, so a rule the person
+wrote — even one naming a VectorEffects tool — survives. A file that is not a
+JSON object, or whose `permissions` is the wrong shape, is refused and left
+untouched. The default is an enumerated list, not the wildcard with
+exceptions, so a tool added in a later version asks until it is classified
+and the person presses *Add to Claude Code* again, which the dialog says to do
+after an update. Like the rest of registration, the choice is applied only on
+that click.
+
 **A client that has skills is given one** (`mcp::skill`): a `SKILL.md` whose
 description says when to reach for VectorEffects and whose body *is* the
 guide, so there is no second text to keep in step, followed by what it means
