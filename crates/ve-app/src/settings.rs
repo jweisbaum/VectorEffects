@@ -1561,6 +1561,8 @@ pub struct McpStatus {
     pub last_tool: Option<String>,
     /// The clients the dialog can add the service to on this platform.
     pub clients: Vec<crate::mcp::clients::McpClient>,
+    /// What a client may do without asking, applied by the Add buttons.
+    pub ask: McpAsk,
 }
 
 /// Reads the service's settings and live state.
@@ -1612,6 +1614,29 @@ pub fn mcp_set<R: tauri::Runtime>(
     })?;
     service.apply(&app, &mcp);
     Ok(service.status(&mcp))
+}
+
+/// Sets which MCP tools a client may run without asking (spec.md 8.8). It
+/// is applied when an Add button is next pressed, not here: a client's
+/// configuration is written only on that click.
+#[tauri::command]
+pub fn mcp_set_ask(
+    state: tauri::State<'_, AppState>,
+    service: tauri::State<'_, crate::mcp::McpService>,
+    ask: McpAsk,
+) -> Result<McpStatus> {
+    let mcp = mcp_ask_set(&state, ask)?;
+    Ok(service.status(&mcp))
+}
+
+/// Implementation of [`mcp_set_ask`].
+pub fn mcp_ask_set(state: &AppState, ask: McpAsk) -> Result<McpSettings> {
+    let file = state.paths.settings_file();
+    with_session(state, |session| {
+        session.settings.mcp.ask = ask;
+        session.save_settings(&file)?;
+        Ok(session.settings.mcp.clone())
+    })
 }
 
 /// Issues a new token and restarts the listener with it.

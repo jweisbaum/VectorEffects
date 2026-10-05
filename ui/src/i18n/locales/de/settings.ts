@@ -273,5 +273,13 @@ const catalogue: Record<string, string> = {
   "Paste a token": "Token einfügen",
   "Save token": "Token speichern",
   "Remove token": "Token entfernen",
+  "What an AI client may do without asking": "Was ein KI-Client ohne Nachfrage tun darf",
+  "Anything that stays in VectorEffects and can be undone; ask before saving, exporting, downloading or discarding": "Alles, was in VectorEffects bleibt und sich rückgängig machen lässt; vor dem Speichern, Exportieren, Herunterladen oder Verwerfen nachfragen",
+  "Ask before every action": "Vor jeder Aktion nachfragen",
+  "Never ask": "Nie nachfragen",
+  "Applies when you press an Add button. Press it again after changing this or after updating VectorEffects.": "Gilt, sobald Sie auf eine Hinzufügen-Schaltfläche klicken. Klicken Sie erneut darauf, nachdem Sie dies geändert oder VectorEffects aktualisiert haben.",
+  "Choose which MCP tools an AI client may use without asking you first.": "Legen Sie fest, welche MCP-Werkzeuge ein KI-Client verwenden darf, ohne Sie vorher zu fragen.",
+  "permission": "Berechtigung",
+  "approval": "Freigabe",
 };
 export default catalogue;

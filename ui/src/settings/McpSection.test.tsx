@@ -12,7 +12,7 @@ import type { McpStatus } from "../generated/McpStatus";
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const held = vi.hoisted(() => {
-  const off: McpStatus = { enabled: false, port: 47391, token: "", bound_port: null, bind_error: null, sessions: 0, last_tool: null, clients: ["claude_code", "codex", "claude_desktop"] };
+  const off: McpStatus = { enabled: false, port: 47391, token: "", bound_port: null, bind_error: null, sessions: 0, last_tool: null, clients: ["claude_code", "codex", "claude_desktop"], ask: "outside" };
   const on: McpStatus = { ...off, enabled: true, token: "tok_abc", bound_port: 47391 };
   // What the command answers: where it wrote the client's skill, if it has one.
   const registered = (client: string): { skill: string | null } => ({
@@ -37,6 +37,10 @@ const held = vi.hoisted(() => {
       return held.status;
     }),
     registerMcpClient: vi.fn(async (client: string): Promise<{ skill: string | null }> => held.registered(client)),
+    setMcpAsk: vi.fn(async (ask: McpStatus["ask"]) => {
+      held.status = { ...held.status, ask };
+      return held.status;
+    }),
   };
 });
 
@@ -46,6 +50,7 @@ vi.mock("../ipc", () => ({
     setMcp: held.setMcp,
     rotateMcpToken: held.rotateMcpToken,
     registerMcpClient: held.registerMcpClient,
+    setMcpAsk: held.setMcpAsk,
   },
   IpcError: class extends Error {},
 }));
@@ -63,13 +68,14 @@ beforeEach(() => {
   held.setMcp.mockClear();
   held.rotateMcpToken.mockClear();
   held.registerMcpClient.mockReset();
+  held.setMcpAsk.mockClear();
   held.registerMcpClient.mockImplementation(async (client: string) => held.registered(client));
 });
 
 afterEach(() => {
   act(() => root.unmount());
   host.remove();
-  held.status = { enabled: false, port: 47391, token: "", bound_port: null, bind_error: null, sessions: 0, last_tool: null, clients: ["claude_code", "codex", "claude_desktop"] };
+  held.status = { enabled: false, port: 47391, token: "", bound_port: null, bind_error: null, sessions: 0, last_tool: null, clients: ["claude_code", "codex", "claude_desktop"], ask: "outside" };
 });
 
 async function flush() {
@@ -123,6 +129,24 @@ describe("McpSection", () => {
 
   const button = (words: string) =>
     Array.from(host.querySelectorAll("button")).find((b) => b.textContent === words);
+
+  it("changing_the_choice_says_to_press_add_again", async () => {
+    held.status = held.on;
+    act(() => root.render(<McpSection onError={() => {}} />));
+    await flush();
+    const radios = Array.from(host.querySelectorAll<HTMLInputElement>('input[type="radio"][name="mcp-ask"]'));
+    expect(radios.map((r) => r.value)).toEqual(["outside", "everything", "nothing"]);
+    expect(radios[0]?.checked).toBe(true);
+    expect(host.querySelector('[data-feature="settings:mcp-ask"]')).not.toBeNull();
+    expect(host.textContent).toContain("Applies when you press an Add button.");
+    await act(async () => {
+      radios[2]?.click();
+    });
+    await flush();
+    expect(held.setMcpAsk).toHaveBeenCalledWith("nothing");
+    const after = Array.from(host.querySelectorAll<HTMLInputElement>('input[type="radio"][name="mcp-ask"]'));
+    expect(after[2]?.checked).toBe(true);
+  });
 
   it("offers no client button while the service is off", async () => {
     act(() => root.render(<McpSection onError={() => {}} />));

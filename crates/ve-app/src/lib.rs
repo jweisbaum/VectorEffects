@@ -270,6 +270,7 @@ pub fn run() -> anyhow::Result<()> {
                 settings::set_macro_directory,
                 settings::mcp_status,
                 settings::mcp_set,
+                settings::mcp_set_ask,
                 settings::mcp_rotate_token,
                 mcp::clients::mcp_register_client,
                 history::history_archives,

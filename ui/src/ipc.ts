@@ -44,6 +44,7 @@ import type { TemperatureUnit } from "./generated/TemperatureUnit";
 import type { CustomTheme } from "./generated/CustomTheme";
 import type { McpClient } from "./generated/McpClient";
 import type { McpRegistered } from "./generated/McpRegistered";
+import type { McpAsk } from "./generated/McpAsk";
 import type { McpStatus } from "./generated/McpStatus";
 import type { GlyphSetting } from "./generated/GlyphSetting";
 import type { GlyphStyle } from "./generated/GlyphStyle";
@@ -767,6 +768,7 @@ export const api = {
   setEarthdataToken: (token: string) => call<boolean>("set_earthdata_token", { token }),
   /** Turns the service on or off; enabling issues a fresh token. */
   setMcp: (enabled: boolean, port: number) => call<McpStatus>("mcp_set", { enabled, port }),
+  setMcpAsk: (ask: McpAsk) => call<McpStatus>("mcp_set_ask", { ask }),
   /** A new token, and the listener restarted with it. */
   rotateMcpToken: () => call<McpStatus>("mcp_rotate_token", {}),
   /** Writes the service into a client's own configuration, and its skill (spec 8.8). */

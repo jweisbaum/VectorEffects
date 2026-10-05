@@ -85,6 +85,8 @@ const features: Feature[] = [
     keywords: ["MCP", msg("network")], topic: "settings", reveal: open("mcp") },
   { id: "settings:mcp-token", label: msg("Rotate token"), description: msg("Replace the MCP service’s token, revoking the old one."),
     keywords: ["MCP", msg("security"), msg("password")], topic: "settings", reveal: open("mcp") },
+  { id: "settings:mcp-ask", label: msg("What an AI client may do without asking"), description: msg("Choose which MCP tools an AI client may use without asking you first."),
+    keywords: ["MCP", msg("permission"), msg("approval"), msg("AI")], topic: "settings", reveal: open("mcp") },
   { id: "settings:mcp-clients", label: msg("Add to Claude Code, Codex or Claude Desktop"), description: msg("Write the MCP service into an AI client’s own configuration."),
     keywords: ["MCP", msg("connect"), msg("install")], topic: "settings", reveal: open("mcp") },
 ];

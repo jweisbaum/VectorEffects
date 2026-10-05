@@ -273,5 +273,13 @@ const catalogue: Record<string, string> = {
   "Paste a token": "粘贴令牌",
   "Save token": "保存令牌",
   "Remove token": "删除令牌",
+  "What an AI client may do without asking": "AI 客户端无需询问即可执行的操作",
+  "Anything that stays in VectorEffects and can be undone; ask before saving, exporting, downloading or discarding": "所有留在 VectorEffects 内且可撤销的操作；在保存、导出、下载或丢弃之前询问",
+  "Ask before every action": "每次操作前都询问",
+  "Never ask": "从不询问",
+  "Applies when you press an Add button. Press it again after changing this or after updating VectorEffects.": "在按下“添加”按钮时生效。更改此项或更新 VectorEffects 后，请再按一次。",
+  "Choose which MCP tools an AI client may use without asking you first.": "选择 AI 客户端无需事先询问即可使用的 MCP 工具。",
+  "permission": "权限",
+  "approval": "批准",
 };
 export default catalogue;

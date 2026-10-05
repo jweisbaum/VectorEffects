@@ -516,3 +516,28 @@ fn new_layers_and_objects_are_named_in_the_interface_language() {
         .collect();
     assert_eq!(objects, ["Kreis 1", "Kreis 1 Kopie"]);
 }
+
+/// The MCP choice of what may run without asking (spec.md 8.8) is saved and
+/// survives a restart, and setting it leaves the record of which Claude
+/// Code rules the last registration wrote alone: those are replaced only by
+/// registering again, which is when the choice is applied.
+#[test]
+fn the_mcp_choice_is_saved_and_leaves_the_written_rules_alone() {
+    let root = TempRoot::new("mcp-ask");
+    let file = app(&root).paths.settings_file();
+    std::fs::write(
+        &file,
+        r#"{"recent_projects":[],"app":{"mcp":{"enabled":true,"port":47391,"token":"t","claude_rules":["mcp__vectoreffects__*"]}}}"#,
+    )
+    .expect("seed");
+
+    let state = app(&root);
+    let set = settings::mcp_ask_set(&state, settings::McpAsk::Everything).expect("set");
+    assert_eq!(set.ask, settings::McpAsk::Everything);
+
+    let restarted = app(&root);
+    let loaded = settings::settings_of(&restarted).expect("settings");
+    assert_eq!(loaded.mcp.ask, settings::McpAsk::Everything);
+    assert_eq!(loaded.mcp.claude_rules, ["mcp__vectoreffects__*"]);
+    assert_eq!(loaded.mcp.token, "t");
+}

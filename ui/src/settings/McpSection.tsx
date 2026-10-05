@@ -6,11 +6,12 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import type { McpAsk } from "../generated/McpAsk";
 import type { McpClient } from "../generated/McpClient";
 import type { McpStatus } from "../generated/McpStatus";
 import NumberField from "../NumberField";
 import { api } from "../ipc";
-import { t, useT } from "../i18n";
+import { msg, t, useT } from "../i18n";
 import { rich } from "./rich";
 
 /** The Claude Code command and a generic HTTP client entry. */
@@ -23,6 +24,16 @@ export function clientSnippets(status: McpStatus): { claudeCode: string; json: s
     bridge: `npx -y mcp-remote ${url} --header "Authorization:${auth}"`,
   };
 }
+
+/**
+ * What a client may do without asking (spec 8.8), in the order offered.
+ * `msg` because the table is built at module load; translated at render.
+ */
+const ASK_CHOICES: ReadonlyArray<{ value: McpAsk; label: string }> = [
+  { value: "outside", label: msg("Anything that stays in VectorEffects and can be undone; ask before saving, exporting, downloading or discarding") },
+  { value: "everything", label: msg("Ask before every action") },
+  { value: "nothing", label: msg("Never ask") },
+];
 
 const CLIENT_NAMES: Readonly<Record<McpClient, string>> = {
   claude_code: "Claude Code",
@@ -172,6 +183,24 @@ export default function McpSection({ onError }: { onError: (err: unknown) => voi
               {connectedLabel(status.sessions, status.last_tool)}
             </span>
           </div>
+          <div className="settings-field" data-feature="settings:mcp-ask" role="radiogroup" aria-label={t("What an AI client may do without asking")}>
+            <span>{t("What an AI client may do without asking")}</span>
+            {ASK_CHOICES.map((choice) => (
+              <label key={choice.value} className="settings-check">
+                <input
+                  type="radio"
+                  name="mcp-ask"
+                  value={choice.value}
+                  checked={status.ask === choice.value}
+                  onChange={() => apply(api.setMcpAsk(choice.value))}
+                />
+                {t(choice.label)}
+              </label>
+            ))}
+          </div>
+          <p className="settings-note">
+            {t("Applies when you press an Add button. Press it again after changing this or after updating VectorEffects.")}
+          </p>
           <div className="settings-field" data-feature="settings:mcp-clients">
             {status.clients.map((client) => (
               <button key={client} disabled={adding !== null} onClick={() => register(client, status)}>

@@ -273,5 +273,13 @@ const catalogue: Record<string, string> = {
   "Paste a token": "トークンを貼り付け",
   "Save token": "トークンを保存",
   "Remove token": "トークンを削除",
+  "What an AI client may do without asking": "AI クライアントが確認なしで実行できること",
+  "Anything that stays in VectorEffects and can be undone; ask before saving, exporting, downloading or discarding": "VectorEffects 内で完結し、元に戻せる操作すべて。保存・書き出し・ダウンロード・破棄の前には確認する",
+  "Ask before every action": "すべての操作の前に確認する",
+  "Never ask": "確認しない",
+  "Applies when you press an Add button. Press it again after changing this or after updating VectorEffects.": "追加ボタンを押したときに適用されます。この設定を変更した後や VectorEffects を更新した後は、もう一度押してください。",
+  "Choose which MCP tools an AI client may use without asking you first.": "AI クライアントが事前の確認なしに使える MCP ツールを選びます。",
+  "permission": "権限",
+  "approval": "承認",
 };
 export default catalogue;

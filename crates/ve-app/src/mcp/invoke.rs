@@ -91,6 +91,9 @@ pub const EXCLUDED: &[&str] = &[
     // connected has no use for it, and one that is not cannot call it.
     "mcp_status",
     "mcp_set",
+    // What a client may do without asking: a client must not be able to
+    // grant itself that.
+    "mcp_set_ask",
     "mcp_rotate_token",
     "mcp_register_client",
     "deliver_capture",

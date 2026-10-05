@@ -122,6 +122,7 @@ impl McpService {
             sessions: activity.as_ref().map_or(0, |a| a.sessions),
             last_tool: activity.and_then(|a| a.last_tool.clone()),
             clients: clients::McpClient::available(),
+            ask: mcp.ask,
         }
     }
 }
