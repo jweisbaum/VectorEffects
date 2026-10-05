@@ -45,7 +45,7 @@ pub use era5::{DEFAULT_STORE_URL, Era5Store};
 pub use error::{Result, ZarrError};
 pub use globcurrent::GlobCurrentStore;
 pub use product::Product;
-pub use source::{Field, FieldSource, NI, NJ, POINTS_PER_STEP, Step, Variable};
+pub use source::{Field, FieldSource, NI, NJ, POINTS_PER_STEP, Step, Variable, Window};
 pub use time::Utc;
 
 /// Which archive an import reads.

@@ -73,6 +73,9 @@ struct Fake {
     times: Vec<i64>,
     /// Hours listed but not written yet: they read as fields with no value.
     unwritten: Vec<i64>,
+    /// Whether each node differs from the next, so a message has something
+    /// to pack: a constant field packs to no data section at all.
+    textured: bool,
 }
 
 impl Fake {
@@ -81,6 +84,16 @@ impl Fake {
             variable,
             times: unix_times.iter().map(|t| t / HOUR).collect(),
             unwritten: Vec::new(),
+            textured: false,
+        })
+    }
+
+    fn boxed_textured(variable: Variable, unix_times: &[i64]) -> Box<dyn FieldSource> {
+        Box::new(Self {
+            variable,
+            times: unix_times.iter().map(|t| t / HOUR).collect(),
+            unwritten: Vec::new(),
+            textured: true,
         })
     }
 
@@ -93,6 +106,7 @@ impl Fake {
             variable,
             times: unix_times.iter().map(|t| t / HOUR).collect(),
             unwritten: unwritten.iter().map(|t| t / HOUR).collect(),
+            textured: false,
         })
     }
 }
@@ -128,9 +142,16 @@ impl FieldSource for Fake {
             }]);
         }
         let speed = (step.valid_time.hour + 1) as f32;
+        let u = if self.textured {
+            (0..ve_zarr::POINTS_PER_STEP)
+                .map(|k| speed + (k % 97) as f32 * 0.01)
+                .collect()
+        } else {
+            vec![speed; ve_zarr::POINTS_PER_STEP]
+        };
         Ok(vec![Field {
             variable: self.variable,
-            u: vec![speed; ve_zarr::POINTS_PER_STEP],
+            u,
             v: vec![0.0; ve_zarr::POINTS_PER_STEP],
         }])
     }
@@ -596,28 +617,103 @@ fn an_sst_layer_takes_no_object_and_its_empty_first_day_is_no_day() {
     assert!(tree.layers[1].objects.is_empty());
 }
 
-/// A regional project's fetched layer holds the region and a node round it
-/// from the moment it is fetched, as it does after a reopen (spec.md 4.8,
-/// M101), whatever extent the file on disk has.
+/// Makes the open project regional: 160 E to 160 W, 10 S to 10 N.
+fn make_regional(state: &AppState) -> ve_core::region::Region {
+    let mut session = state.session.lock().expect("lock");
+    let open = session.open.as_mut().expect("open");
+    let region = ve_core::region::Region::snapped(
+        160.0,
+        -160.0,
+        -10.0,
+        10.0,
+        false,
+        open.project.settings.resolution,
+    )
+    .expect("a region");
+    open.project.settings.region = Some(region);
+    region
+}
+
+/// The files a fetch left in the history folder.
+fn history_files(root: &TempRoot) -> Vec<std::path::PathBuf> {
+    let mut files: Vec<_> = std::fs::read_dir(root.0.join("history"))
+        .expect("the history folder")
+        .map(|entry| entry.expect("an entry").path())
+        .collect();
+    files.sort();
+    files
+}
+
+/// A regional project's fetch writes its region and nothing else (spec.md
+/// 4.10, M102). The history import and this one share the writer
+/// (`history::fetch_source_to_file`); this drives it through the fake
+/// product because the archives are only reached over the network.
+///
+/// 160 E to 160 W and 10 S to 10 N at the sources' 0.25 degrees is 161 by
+/// 81 nodes against the globe's 1440 by 721: 1.3 % of the points, so the
+/// file is under 2 % of the global run's. Its name carries the region.
+#[test]
+fn a_regional_history_import_writes_a_regional_file() {
+    let open = |_: Product| -> ve_zarr::Result<Box<dyn FieldSource>> {
+        Ok(Fake::boxed_textured(
+            Variable::SurfaceCurrent,
+            &hourly(OCT_1, OCT_1 + 6 * HOUR),
+        ))
+    };
+    let global_root = TempRoot::new("global-file");
+    let global = app(&global_root, 1, 24);
+    nrt::nrt_import(
+        &global,
+        &request(&["multiobs"], 1, true, true),
+        NOW,
+        open,
+        |_| {},
+    )
+    .expect("global import");
+    let regional_root = TempRoot::new("regional-file");
+    let regional = app(&regional_root, 1, 24);
+    let region = make_regional(&regional);
+    nrt::nrt_import(
+        &regional,
+        &request(&["multiobs"], 1, true, true),
+        NOW,
+        open,
+        |_| {},
+    )
+    .expect("regional import");
+
+    let [global_file] = history_files(&global_root).try_into().expect("one file");
+    let [regional_file] = history_files(&regional_root).try_into().expect("one file");
+    let name = |p: &std::path::Path| p.file_name().unwrap().to_string_lossy().into_owned();
+    assert!(!name(&global_file).contains(&region.key()));
+    assert_eq!(
+        name(&regional_file),
+        name(&global_file).replace(".grib2", &format!("-{}.grib2", region.key())),
+    );
+
+    // Section 3 states the region: the decoder reads the file as written.
+    let read = ve_grib::import::read_file(&regional_file, None).expect("reads");
+    let grid = &read.sequences[0].frames[0].grid;
+    assert_eq!((grid.ni, grid.nj), (161, 81));
+    assert_eq!((grid.lon0, grid.lat0), (160.0, 10.0));
+    let read = ve_grib::import::read_file(&global_file, None).expect("reads");
+    let grid = &read.sequences[0].frames[0].grid;
+    assert_eq!((grid.ni, grid.nj), (1440, 721));
+
+    let size = |p: &std::path::Path| std::fs::metadata(p).expect("a file").len();
+    let (g, r) = (size(&global_file), size(&regional_file));
+    assert!(r * 50 < g, "regional {r} bytes against global {g}");
+}
+
+/// A regional project's fetched layer holds the region from the moment it
+/// is fetched, as it does after a reopen (spec.md 4.8, M101). The file now
+/// holds only the region snapped outward to 0.25 degrees (M102), so the
+/// layer is that and not a node of the project's own 1 degree beyond it.
 #[test]
 fn a_regional_projects_fetched_layer_holds_its_region() {
     let root = TempRoot::new("regional");
     let state = app(&root, 1, 24);
-    {
-        let mut session = state.session.lock().expect("lock");
-        let open = session.open.as_mut().expect("open");
-        open.project.settings.region = Some(
-            ve_core::region::Region::snapped(
-                160.0,
-                -160.0,
-                -10.0,
-                10.0,
-                false,
-                open.project.settings.resolution,
-            )
-            .expect("a region"),
-        );
-    }
+    make_regional(&state);
     let open = |_: Product| -> ve_zarr::Result<Box<dyn FieldSource>> {
         Ok(Fake::boxed(
             Variable::SurfaceCurrent,
@@ -635,9 +731,8 @@ fn a_regional_projects_fetched_layer_holds_its_region() {
     let session = state.session.lock().expect("lock");
     let project = &session.open.as_ref().expect("open").project;
     let grid = &project.layers[1].raster.as_ref().expect("a field").frames[0].grid;
-    // 0.25° source, 160 E to 160 W and 10 S to 10 N, with a margin node of
-    // the project's 1° each side: 42° by 22° at 0.25°.
-    assert_eq!((grid.ni, grid.nj), (169, 89));
+    // 0.25° source, 160 E to 160 W and 10 S to 10 N: 40° by 20° at 0.25°.
+    assert_eq!((grid.ni, grid.nj), (161, 81));
     assert!(grid.sample(-179.5, 0.0).is_some());
     assert!(grid.sample(0.0, 0.0).is_none());
 }

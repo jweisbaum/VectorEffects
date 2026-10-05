@@ -40,9 +40,11 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use ve_core::Command;
 use ve_core::document::Layer;
+use ve_core::project::{ProjectSettings, Resolution};
+use ve_core::region::Region;
 use ve_core::regrid::TargetGrid;
 use ve_grib::writer::{GridSpec, MessageSpec, Parameter, ReferenceTime, message_masked};
-use ve_zarr::{Archive, Field, Utc, Variable};
+use ve_zarr::{Archive, Field, Utc, Variable, Window};
 
 use crate::commands::AppState;
 use crate::error::{AppError, Context, Result};
@@ -52,6 +54,101 @@ use crate::projects::{ProjectSummary, with_session};
 /// grid, north to south from the pole and east from the prime meridian, which
 /// is GRIB2 scanning mode 0 exactly.
 const GRID: GridSpec = GridSpec::global(ve_zarr::NI as u32, ve_zarr::NJ as u32, 250_000);
+
+/// The grid spacing every source is fetched at, in micro-degrees.
+const SOURCE_UDEG: u32 = 250_000;
+
+/// What a fetch writes (spec.md 4.10, M102): the common grid for a global
+/// project, and for a regional one its region snapped outward onto that
+/// grid, so a 0.1 degree project's edges — which are not on it — are inside
+/// what is written.
+///
+/// The file is always at the sources' 0.25 degrees, whatever the project's
+/// resolution: the layer reads it like any GRIB and samples it. Only the
+/// extent follows the project.
+#[derive(Debug, Clone)]
+pub(crate) struct Extent {
+    /// The grid the file states.
+    pub grid: GridSpec,
+    /// The part of the common grid it holds, in the same order.
+    pub window: Window,
+    /// The project's region, which names the file; `None` when global.
+    pub region: Option<Region>,
+    /// The project's lattice the layer is cropped to on reading, as an
+    /// import is (spec.md 4.8, M101); `None` when global.
+    pub crop: Option<TargetGrid>,
+}
+
+impl Extent {
+    /// The extent a project's fetches write.
+    pub(crate) fn of(settings: &ProjectSettings) -> Self {
+        let Some(region) = settings.region else {
+            return Self {
+                grid: GRID,
+                window: Window::global(),
+                region: None,
+                crop: None,
+            };
+        };
+        let (west, east, south, north) = region.bounds_deg();
+        // Re-snapped outward on the sources' own lattice rather than read
+        // off the project's: a 0.1 degree edge is not a 0.25 degree node.
+        // The one region that cannot be re-snapped is a full circle whose
+        // edges round out to both poles, which is the globe.
+        let lattice = Region::snapped(
+            west,
+            east,
+            south,
+            north,
+            region.is_full_circle(),
+            Resolution::Deg025,
+        )
+        .map(|snapped| snapped.lattice(Resolution::Deg025))
+        .unwrap_or_else(|_| Resolution::Deg025.target_grid());
+        Self {
+            grid: GridSpec::of_lattice(&lattice, SOURCE_UDEG),
+            window: Window::of(&lattice),
+            region: Some(region),
+            crop: crate::import::crop_for(settings),
+        }
+    }
+
+    /// The file a fetch of `id` over `range` is written to: named for the
+    /// source, the range and, in a regional project, the region, so a
+    /// global and a regional fetch of the same hours never share a file.
+    fn file_name(&self, id: &str, (start, end): (i64, i64)) -> String {
+        match self.region {
+            None => format!("{id}-{start}-{end}.grib2"),
+            Some(region) => format!("{id}-{start}-{end}-{}.grib2", region.key()),
+        }
+    }
+
+    /// A field from a source on this extent: as it came when the source
+    /// subset it at the server, cropped when it came as the whole grid.
+    fn fit(&self, field: Field, label: &str) -> Result<Field> {
+        let n = field.u.len();
+        if n == self.window.len() {
+            Ok(field)
+        } else if n == ve_zarr::POINTS_PER_STEP {
+            Ok(field.cropped(&self.window))
+        } else {
+            Err(AppError::Internal(format!(
+                "\"{label}\" sent a field of {n} values, which is neither the grid nor the window"
+            )))
+        }
+    }
+}
+
+/// A reader's failure on a fetched file, in the words an import uses: a file
+/// that misses the region names both (decision R10).
+fn read_error(err: ve_grib::GribError, path: &Path, extent: &Extent) -> AppError {
+    match (err, extent.region) {
+        (ve_grib::GribError::OutsideRegion, Some(region)) => {
+            AppError::outside_region(path.display(), &region)
+        }
+        (err, _) => AppError::from(err),
+    }
+}
 
 /// Bits per packed value. Sixteen is a millimetre per second over any wind or
 /// current the archives hold, far finer than either is measured to.
@@ -292,12 +389,12 @@ pub fn history_import(
     // (spec.md 4.8, D48), so on a three-hourly project two hours in every
     // three could never be drawn — and fetching them would be minutes spent
     // on data the application throws away.
-    let (step_hours, step_count, crop) = with_session(state, |session| {
+    let (step_hours, step_count, extent) = with_session(state, |session| {
         let settings = &session.require_open()?.project.settings;
         Ok((
             settings.step_hours.hours(),
             settings.step_count,
-            crate::import::crop_for(settings),
+            Extent::of(settings),
         ))
     })?;
     let wanted = wanted_hours(request, step_hours, step_count)?;
@@ -329,7 +426,7 @@ pub fn history_import(
             done,
             total,
         });
-        let path = fetch_to_file(archive, request, &wanted, &directory, |fetched| {
+        let path = fetch_to_file(archive, request, &wanted, &directory, &extent, |fetched| {
             on_progress(HistoryProgress {
                 archive: archive.label().to_owned(),
                 done: done + fetched,
@@ -345,7 +442,7 @@ pub fn history_import(
     // every edit and every tile for the length of it.
     let mut layers = Vec::with_capacity(written.len());
     for (archive, path) in &written {
-        layers.push(history_layer(*archive, path, request, crop.as_ref())?);
+        layers.push(history_layer(*archive, path, request, &extent)?);
     }
 
     let summary = with_session(state, |session| {
@@ -505,14 +602,15 @@ fn fetch_to_file(
     request: &HistoryRequest,
     wanted: &[i64],
     directory: &Path,
+    extent: &Extent,
     on_step: impl FnMut(u32),
 ) -> Result<PathBuf> {
     let started = std::time::Instant::now();
-    let source = Arc::<dyn ve_zarr::FieldSource>::from(
-        archive
-            .open()
-            .doing("reach the archive", format!("\"{}\"", archive.label()))?,
-    );
+    let mut source = archive
+        .open()
+        .doing("reach the archive", format!("\"{}\"", archive.label()))?;
+    source.set_window(extent.window);
+    let source = Arc::<dyn ve_zarr::FieldSource>::from(source);
     // Opening reads the whole time axis, which is seconds on a cold start and
     // is silent; saying so is the difference between a slow start and an
     // apparent hang.
@@ -531,6 +629,7 @@ fn fetch_to_file(
         wanted,
         false,
         directory,
+        extent,
         on_step,
     )
 }
@@ -553,6 +652,13 @@ pub(crate) struct Origin<'a> {
 /// 4.8), so a file that began a day late would land a day early; the empty
 /// message keeps the origin where the timeline's is. The history import
 /// leaves it off and keeps the behaviour it has always had.
+///
+/// `extent` is what is written (M102): the source has been given its window
+/// already, and whatever it hands back as the whole grid is cropped to it.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "one fetch's inputs; a struct of them would be built at the two call sites only"
+)]
 pub(crate) fn fetch_source_to_file(
     origin: &Origin<'_>,
     source: &Arc<dyn ve_zarr::FieldSource>,
@@ -560,6 +666,7 @@ pub(crate) fn fetch_source_to_file(
     wanted: &[i64],
     pad_first: bool,
     directory: &Path,
+    extent: &Extent,
     mut on_step: impl FnMut(u32),
 ) -> Result<PathBuf> {
     use std::io::{BufWriter, Write};
@@ -613,10 +720,7 @@ pub(crate) fn fetch_source_to_file(
     }
     let variables = source.variables();
 
-    let path = directory.join(format!(
-        "{}-{}-{}.grib2",
-        origin.id, start_unix_s, end_unix_s
-    ));
+    let path = directory.join(extent.file_name(origin.id, range));
     let mut out = BufWriter::with_capacity(
         1 << 20,
         std::fs::File::create(&path).doing("create the history file", path.display())?,
@@ -650,8 +754,17 @@ pub(crate) fn fetch_source_to_file(
                                 spelled(step.valid_time.hours_since_unix_epoch() * HOUR)
                             ),
                         ),
-                        None => Ok(variables.iter().map(|v| empty_field(*v)).collect()),
+                        None => Ok(variables
+                            .iter()
+                            .map(|v| empty_field(*v, &extent.window))
+                            .collect()),
                     };
+                    let fields = fields.and_then(|fields| {
+                        fields
+                            .into_iter()
+                            .map(|field| extent.fit(field, label))
+                            .collect::<Result<Vec<_>>>()
+                    });
                     // A step the source lists and has not written — read as
                     // a field with no value anywhere — is written as nothing,
                     // so the timeline does not mark it present. The empty
@@ -663,7 +776,7 @@ pub(crate) fn fetch_source_to_file(
                         if unwritten {
                             Ok(Vec::new())
                         } else {
-                            encode_hour(GRID, reference, *forecast_hour, &fields)
+                            encode_hour(extent.grid, reference, *forecast_hour, &fields)
                         }
                     });
                     let failed = built.is_err();
@@ -736,12 +849,12 @@ pub(crate) fn fetch_source_to_file(
     Ok(path)
 }
 
-/// A field with no value anywhere, on the common grid.
-fn empty_field(variable: Variable) -> Field {
+/// A field with no value anywhere, on the window a fetch writes.
+fn empty_field(variable: Variable, window: &Window) -> Field {
     Field {
         variable,
-        u: vec![f32::NAN; ve_zarr::POINTS_PER_STEP],
-        v: vec![f32::NAN; ve_zarr::POINTS_PER_STEP],
+        u: vec![f32::NAN; window.len()],
+        v: vec![f32::NAN; window.len()],
     }
 }
 
@@ -810,7 +923,7 @@ fn history_layer(
     archive: Archive,
     path: &Path,
     request: &HistoryRequest,
-    crop: Option<&TargetGrid>,
+    extent: &Extent,
 ) -> Result<Layer> {
     fetched_layer(
         &Origin {
@@ -820,31 +933,33 @@ fn history_layer(
         path,
         (request.start_unix_s, request.end_unix_s),
         0,
-        crop,
+        extent,
     )
 }
 
 /// The layer a fetched file is read back as, holding each of its times for
 /// `period_hours` (zero for a history archive, which holds nothing).
 ///
-/// `crop` is a regional project's lattice: the layer holds the region and a
-/// node round it, as it will when the project is reopened (spec.md 4.8,
-/// M101).
+/// `extent.crop` is a regional project's lattice: the layer holds the
+/// region and a node round it where the file has one, as it will when the
+/// project is reopened (spec.md 4.8, M101). A file that misses the region
+/// says so naming both (R10).
 pub(crate) fn fetched_layer(
     origin: &Origin<'_>,
     path: &Path,
     range: (i64, i64),
     period_hours: u32,
-    crop: Option<&TargetGrid>,
+    extent: &Extent,
 ) -> Result<Layer> {
-    let imported = match crop {
+    let imported = match extent.crop {
         Some(target) => {
             let mut none = std::collections::BTreeMap::new();
-            let mut resampling = ve_grib::import::Resampling::regional(*target, &mut none);
-            ve_grib::import::read_file(path, Some(&mut resampling))?
+            let mut resampling = ve_grib::import::Resampling::regional(target, &mut none);
+            ve_grib::import::read_file(path, Some(&mut resampling))
         }
-        None => ve_grib::import::read_file(path, None)?,
-    };
+        None => ve_grib::import::read_file(path, None),
+    }
+    .map_err(|err| read_error(err, path, extent))?;
     fetched_from(origin, path, range, period_hours, imported)
 }
 
@@ -855,9 +970,10 @@ pub(crate) fn temperature_layer(
     path: &Path,
     range: (i64, i64),
     period_hours: u32,
-    crop: Option<&TargetGrid>,
+    extent: &Extent,
 ) -> Result<Layer> {
-    let sequence = ve_grib::import::read_temperature_file_onto(path, crop)?;
+    let sequence = ve_grib::import::read_temperature_file_onto(path, extent.crop.as_ref())
+        .map_err(|err| read_error(err, path, extent))?;
     let mut layer = Layer::new(origin.label);
     layer.source = ve_core::document::LayerSource::Sst {
         path: path.to_path_buf(),
@@ -946,6 +1062,256 @@ fn bad_range(why: &str) -> AppError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn settings_with(resolution: Resolution, region: Option<Region>) -> ProjectSettings {
+        let mut settings = ProjectSettings::new(
+            ve_core::FieldKind::Wind,
+            resolution,
+            ve_core::project::StepHours::H1,
+            24,
+        );
+        settings.region = region;
+        settings
+    }
+
+    fn region(west: f64, east: f64, south: f64, north: f64, full: bool, res: Resolution) -> Region {
+        Region::snapped(west, east, south, north, full, res).expect("a region")
+    }
+
+    /// The grid a fetch states and the window it crops to name the same
+    /// nodes: the same first point, the same counts. Across the antimeridian,
+    /// across the prime meridian, at both poles, and on a 0.1 degree project
+    /// whose edges are not on the sources' lattice and are snapped outward
+    /// round it.
+    #[test]
+    fn a_fetch_states_the_grid_it_crops_to() {
+        let cases = [
+            (
+                region(160.0, -160.0, -10.0, 10.0, false, Resolution::Deg1),
+                Resolution::Deg1,
+            ),
+            (
+                region(-20.0, 20.0, 40.0, 60.0, false, Resolution::Deg1),
+                Resolution::Deg1,
+            ),
+            (
+                region(-180.0, 180.0, 70.0, 90.0, true, Resolution::Deg05),
+                Resolution::Deg05,
+            ),
+            (
+                region(-180.0, 180.0, -90.0, -60.0, true, Resolution::Deg1),
+                Resolution::Deg1,
+            ),
+            (
+                region(-10.1, 10.3, -5.3, 5.1, false, Resolution::Deg01),
+                Resolution::Deg01,
+            ),
+        ];
+        for (region, res) in cases {
+            let extent = Extent::of(&settings_with(res, Some(region)));
+            let (g, w) = (extent.grid, extent.window);
+            assert_eq!((g.ni, g.nj), (w.ni, w.nj), "{region:?}");
+            assert_eq!(g.lo1_udeg, w.i0 * SOURCE_UDEG, "{region:?}");
+            assert_eq!(
+                g.la1_udeg,
+                90_000_000 - (w.j0 * SOURCE_UDEG) as i32,
+                "{region:?}"
+            );
+            // Every edge of the project's region is inside what is written.
+            let (west, east, south, north) = region.bounds_deg();
+            let la1 = f64::from(g.la1_udeg) / 1e6;
+            let la2 = la1 - f64::from(g.nj - 1) * 0.25;
+            assert!(la1 >= north && la2 <= south, "{region:?}: {la1}..{la2}");
+            if !region.is_full_circle() {
+                // In GRIB's [0, 360): the written grid starts at or west of
+                // the region and runs at least as far east.
+                let west_g = west.rem_euclid(360.0);
+                let mut lo1 = f64::from(g.lo1_udeg) / 1e6;
+                if lo1 > west_g + 1.0 {
+                    lo1 -= 360.0;
+                }
+                let lo2 = lo1 + f64::from(g.ni - 1) * 0.25;
+                assert!(
+                    lo1 <= west_g && lo2 >= west_g + (east - west),
+                    "{region:?}: {lo1}..{lo2}"
+                );
+            } else {
+                assert_eq!(g.ni, 1440);
+            }
+        }
+        // 10.1 W snaps out to 10.25 W and 10.3 E to 10.5 E: 20.75 degrees, 84 columns.
+        let extent = Extent::of(&settings_with(Resolution::Deg01, Some(cases[4].0)));
+        assert_eq!(extent.grid.ni, 84);
+        assert_eq!(extent.grid.lo1_udeg, 349_750_000);
+    }
+
+    /// A global project's fetch is what it always was: the global grid, the
+    /// whole window, and a file named for the archive and the range only.
+    #[test]
+    fn a_global_fetch_is_unchanged() {
+        let extent = Extent::of(&settings_with(Resolution::Deg025, None));
+        assert_eq!(extent.grid, GRID);
+        assert!(extent.window.is_global());
+        assert!(extent.crop.is_none());
+        assert_eq!(
+            extent.file_name("era5-wind", (10, 20)),
+            "era5-wind-10-20.grib2"
+        );
+        let r = region(160.0, -160.0, -10.0, 10.0, false, Resolution::Deg1);
+        let regional = Extent::of(&settings_with(Resolution::Deg1, Some(r)));
+        assert_eq!(
+            regional.file_name("era5-wind", (10, 20)),
+            format!("era5-wind-10-20-{}.grib2", r.key())
+        );
+    }
+
+    /// A fetched file that misses the region is refused naming the file and
+    /// the region (R10), on the wind and current path and the temperature
+    /// one alike, not as a decoder error.
+    #[test]
+    fn a_fetched_file_outside_the_region_names_the_file_and_the_region() {
+        let far = region(-20.0, 20.0, 40.0, 60.0, false, Resolution::Deg1);
+        let here = region(160.0, -160.0, -10.0, 10.0, false, Resolution::Deg1);
+        let written = Extent::of(&settings_with(Resolution::Deg1, Some(far)));
+        let reading = Extent::of(&settings_with(Resolution::Deg1, Some(here)));
+        let reference = reference_time(parse("2020-01-01T00:00")).expect("a time");
+        let dir = std::env::temp_dir().join(format!("ve-history-outside-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("a directory");
+        let origin = Origin {
+            id: "test",
+            label: "Test",
+        };
+        for variable in [Variable::SurfaceCurrent, Variable::SeaSurfaceTemperature] {
+            let n = written.window.len();
+            let field = Field {
+                variable,
+                u: (0..n).map(|k| 10.0 + (k % 7) as f32).collect(),
+                v: if variable.is_scalar() {
+                    Vec::new()
+                } else {
+                    vec![0.0; n]
+                },
+            };
+            let bytes = encode_hour(written.grid, reference, 0, &[field]).expect("messages");
+            let path = dir.join(format!("{variable:?}.grib2"));
+            std::fs::write(&path, &bytes).expect("written");
+            let err = if variable.is_scalar() {
+                temperature_layer(&origin, &path, (0, 0), 24, &reading).map(|_| ())
+            } else {
+                fetched_layer(&origin, &path, (0, 0), 1, &reading).map(|_| ())
+            }
+            .expect_err("outside the region");
+            assert_eq!(err.kind(), "outside-region", "{variable:?}: {err}");
+            let said = err.to_string();
+            assert!(said.contains(&path.display().to_string()), "{said}");
+            assert!(said.contains("160°"), "{said}");
+            // And the file it was written for reads.
+            if variable.is_scalar() {
+                temperature_layer(&origin, &path, (0, 0), 24, &written).expect("inside");
+            } else {
+                fetched_layer(&origin, &path, (0, 0), 1, &written).expect("inside");
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **Fetches on purpose** (invariant 5's history exception): one hour
+    /// of ERA5 and one of Copernicus MULTIOBS, each written globally and for
+    /// a 20 by 20 degree region, with the four file sizes printed.
+    ///
+    /// `VE_TEST_LIVE=1 cargo test -p ve-app --release --lib
+    /// live_regional_fetches -- --ignored --nocapture`
+    #[test]
+    #[ignore = "reaches ERA5 and the Copernicus Marine Data Store"]
+    fn live_regional_fetches_write_smaller_files() {
+        if std::env::var_os("VE_TEST_LIVE").is_none() {
+            eprintln!("VE_TEST_LIVE is not set; nothing fetched");
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("ve-live-fetch-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("a directory");
+        let box20 = region(-30.0, -10.0, 30.0, 50.0, false, Resolution::Deg025);
+        // Across 180 degrees, which is the Marine Data Store's own seam: two
+        // subsets of one step.
+        let pacific = region(170.0, -170.0, -10.0, 10.0, false, Resolution::Deg025);
+        type Opener = Box<dyn Fn() -> ve_zarr::Result<Box<dyn ve_zarr::FieldSource>>>;
+        let sources: [(&str, Opener); 2] = [
+            ("era5-wind", Box::new(|| Archive::Era5Wind.open())),
+            ("multiobs", Box::new(|| ve_zarr::Product::Multiobs.open())),
+        ];
+        for (id, open) in &sources {
+            let mut written = Vec::new();
+            for region in [None, Some(box20), Some(pacific)] {
+                let extent = Extent::of(&settings_with(Resolution::Deg025, region));
+                let started = std::time::Instant::now();
+                let mut source = open().expect("opens");
+                source.set_window(extent.window);
+                let source = Arc::<dyn ve_zarr::FieldSource>::from(source);
+                // ERA5: a fixed final hour. MULTIOBS: two days before its
+                // newest, which is written by then.
+                let hour = if *id == "era5-wind" {
+                    parse("2026-01-15T12:00")
+                } else {
+                    let (_, last) = source.coverage().expect("coverage");
+                    (last.hours_since_unix_epoch() - 48) * HOUR
+                };
+                let path = fetch_source_to_file(
+                    &Origin { id, label: id },
+                    &source,
+                    (hour, hour),
+                    &[hour],
+                    false,
+                    &dir,
+                    &extent,
+                    |_| {},
+                )
+                .expect("fetched");
+                let bytes = std::fs::metadata(&path).expect("a file").len();
+                eprintln!(
+                    "{id} {}: {bytes} bytes, {} x {}, {:.1} s, {}",
+                    if region.is_some() {
+                        "regional"
+                    } else {
+                        "global"
+                    },
+                    extent.grid.ni,
+                    extent.grid.nj,
+                    started.elapsed().as_secs_f64(),
+                    path.display()
+                );
+                written.push(path);
+            }
+            // The region holds what the globe holds at its nodes, whichever
+            // way it was fetched.
+            let frame = |path: &Path| {
+                let read = ve_grib::import::read_file(path, None).expect("reads");
+                read.sequences[0].frames[0].grid.clone()
+            };
+            let global = frame(&written[0]);
+            let mut compared = 0;
+            for path in &written[1..] {
+                let regional = frame(path);
+                for j in 0..regional.nj {
+                    for i in 0..regional.ni {
+                        let lon = regional.lon0 + f64::from(i) * regional.dlon;
+                        let lat = regional.lat0 - f64::from(j) * regional.dlat;
+                        let (a, b) = (global.sample(lon, lat), regional.sample(lon, lat));
+                        assert_eq!(a.is_some(), b.is_some(), "{id} at {lon}, {lat}");
+                        if let (Some(a), Some(b)) = (a, b) {
+                            assert!(
+                                (a.u - b.u).abs() < 5e-3 && (a.v - b.v).abs() < 5e-3,
+                                "{id} at {lon}, {lat}: {a:?} {b:?}"
+                            );
+                            compared += 1;
+                        }
+                    }
+                }
+            }
+            eprintln!("{id}: {compared} nodes agree");
+            assert!(compared > 0);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     fn request(start: i64, end: i64) -> HistoryRequest {
         HistoryRequest {

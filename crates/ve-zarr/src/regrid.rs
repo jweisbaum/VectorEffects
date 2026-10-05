@@ -13,7 +13,9 @@
 //! bleeding a ring of NaN one cell outwards. A node with no present
 //! neighbour at all stays missing.
 
-use crate::source::{NI, NJ};
+use std::ops::Range;
+
+use crate::source::Window;
 
 /// A regular grid whose values sit at cell centres, rows in ascending or
 /// descending latitude as `dlat` says, columns spanning the full circle.
@@ -64,17 +66,28 @@ impl CellGrid {
 /// Panics if `values.len()` is not `src.len()`, or if the grid does not span
 /// the full circle. Both are programming errors, not data errors.
 pub fn to_era5_grid(src: CellGrid, values: &[f32]) -> Vec<f32> {
+    to_era5_window(src, values, &Window::global())
+}
+
+/// [`to_era5_grid`] at only the nodes `window` covers, in the window's own
+/// order: what the whole grid would be, cropped, without computing the rest.
+/// Only the source cells [`native_window`] names are read, so a reader that
+/// fetched just those may leave every other cell NaN.
+///
+/// # Panics
+/// As [`to_era5_grid`].
+pub fn to_era5_window(src: CellGrid, values: &[f32], window: &Window) -> Vec<f32> {
     assert_eq!(values.len(), src.len(), "field does not match its grid");
     assert!(
         ((src.nlon as f64) * src.dlon - 360.0).abs() < 1e-6,
         "source grid must span the full circle"
     );
 
-    let mut out = Vec::with_capacity((NI * NJ) as usize);
-    for j in 0..NJ {
+    let mut out = Vec::with_capacity(window.len());
+    for j in window.rows() {
         let lat = 90.0 - (j as f64) * 0.25;
         let (j0, j1, t) = row_neighbours(src, lat);
-        for i in 0..NI {
+        for i in window.columns() {
             let lon = (i as f64) * 0.25;
             let (i0, i1, s) = column_neighbours(src, lon);
             let candidates = [
@@ -99,6 +112,95 @@ pub fn to_era5_grid(src: CellGrid, values: &[f32]) -> Vec<f32> {
         }
     }
     out
+}
+
+/// The source cells a window's nodes are interpolated from: one block of
+/// rows, and the columns as one block or, where they cross the source's own
+/// first column, two. Each is a cell wider every way than the nodes need,
+/// so a node that lands exactly on a cell boundary is never a cell short.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NativeWindow {
+    /// Source rows, in the source's own order.
+    pub rows: Range<usize>,
+    /// Source columns: one range, or two when the window crosses the
+    /// source's seam — the east part first, from the column it starts at to
+    /// the end of the row, then from column 0.
+    pub columns: Vec<Range<usize>>,
+}
+
+impl NativeWindow {
+    /// Whether this is every cell of `src`.
+    #[allow(
+        clippy::single_range_in_vec_init,
+        reason = "a list of column ranges, which has one range unless it crosses the seam"
+    )]
+    pub fn is_whole(&self, src: CellGrid) -> bool {
+        self.rows == (0..src.nlat) && self.columns == [0..src.nlon]
+    }
+}
+
+/// The cells of `src` that the nodes of `window` read.
+#[allow(
+    clippy::single_range_in_vec_init,
+    reason = "a list of column ranges, which has one range unless it crosses the seam"
+)]
+pub fn native_window(src: CellGrid, window: &Window) -> NativeWindow {
+    if window.is_global() {
+        return NativeWindow {
+            rows: 0..src.nlat,
+            columns: vec![0..src.nlon],
+        };
+    }
+    // Rows: the fractional row of the window's northern and southern
+    // nodes, whichever way the source runs, and the pair bracketing each.
+    let row_of = |j: u32| (90.0 - f64::from(j) * 0.25 - src.lat0) / src.dlat;
+    let (a, b) = (row_of(window.j0), row_of(window.j0 + window.nj - 1));
+    let (lo, hi) = (a.min(b).floor() - 1.0, a.max(b).floor() + 2.0);
+    let last = (src.nlat - 1) as f64;
+    let rows = (lo.clamp(0.0, last) as usize)..(hi.clamp(0.0, last) as usize + 1);
+
+    // Columns: from the cell west of the first node to the one east of the
+    // last, as a start and a count that may run past the row's end.
+    let first = (f64::from(window.i0) * 0.25 - src.lon0).rem_euclid(360.0) / src.dlon;
+    let width = f64::from(window.ni - 1) * 0.25 / src.dlon;
+    let start = first.floor() as i64 - 1;
+    let count = ((first + width).floor() as i64 + 2 - start + 1) as usize;
+    let n = src.nlon;
+    let columns = if count >= n {
+        vec![0..n]
+    } else {
+        let start = start.rem_euclid(n as i64) as usize;
+        if start + count <= n {
+            vec![start..start + count]
+        } else {
+            vec![start..n, 0..start + count - n]
+        }
+    };
+    NativeWindow { rows, columns }
+}
+
+/// Puts a block read off the source — `rows` by `columns`, row-major in the
+/// source's order — where it belongs in a whole-grid buffer.
+///
+/// # Panics
+/// Panics if the block is not `rows.len() * columns.len()` values.
+pub fn place<T: Copy>(
+    src: CellGrid,
+    buffer: &mut [T],
+    rows: Range<usize>,
+    columns: Range<usize>,
+    block: &[T],
+) {
+    let width = columns.len();
+    assert_eq!(
+        block.len(),
+        rows.len() * width,
+        "block does not match its window"
+    );
+    for (k, row) in rows.enumerate() {
+        let at = row * src.nlon + columns.start;
+        buffer[at..at + width].copy_from_slice(&block[k * width..(k + 1) * width]);
+    }
 }
 
 /// The two source rows bracketing `lat`, and the fraction of the way from the
@@ -128,6 +230,7 @@ fn column_neighbours(src: CellGrid, lon: f64) -> (usize, usize, f64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::source::NI;
 
     const G: CellGrid = CellGrid::GLOBCURRENT;
 
@@ -248,6 +351,113 @@ mod tests {
             (at(&out, 0.0, 359.75) - -0.25).abs() < 1e-3,
             "359.75 is -0.25"
         );
+    }
+
+    /// The cells [`native_window`] names are all a window's nodes read: a
+    /// field with every other cell NaN regrids, on the window, exactly as the
+    /// whole field does cropped. Across the antimeridian (the source's own
+    /// seam), across the prime meridian, at a pole, and on a finer grid whose
+    /// latitudes run north to south.
+    #[test]
+    fn a_windowed_regrid_reads_only_its_native_window() {
+        let windows = [
+            Window {
+                i0: 640,
+                ni: 161,
+                j0: 320,
+                nj: 81,
+            },
+            Window {
+                i0: 1360,
+                ni: 161,
+                j0: 120,
+                nj: 81,
+            },
+            Window {
+                i0: 720,
+                ni: 1440,
+                j0: 0,
+                nj: 81,
+            },
+            Window {
+                i0: 720,
+                ni: 1440,
+                j0: 600,
+                nj: 121,
+            },
+            Window {
+                i0: 3,
+                ni: 1,
+                j0: 719,
+                nj: 2,
+            },
+        ];
+        let eighth = CellGrid {
+            lat0: 89.9375,
+            dlat: -0.125,
+            nlat: 1440,
+            lon0: 0.0625,
+            dlon: 0.125,
+            nlon: 2880,
+        };
+        for src in [G, eighth] {
+            let full: Vec<f32> = (0..src.len())
+                .map(|k| ((k * 7919) % 1000) as f32 / 10.0)
+                .collect();
+            let whole = to_era5_grid(src, &full);
+            for w in windows {
+                let native = native_window(src, &w);
+                let mut sparse = vec![f32::NAN; src.len()];
+                for cols in &native.columns {
+                    for r in native.rows.clone() {
+                        for c in cols.clone() {
+                            sparse[r * src.nlon + c] = full[r * src.nlon + c];
+                        }
+                    }
+                }
+                let windowed = to_era5_window(src, &sparse, &w);
+                let ni = NI as usize;
+                let whole = &whole;
+                let cropped: Vec<f32> = w
+                    .rows()
+                    .flat_map(|j| w.columns().map(move |i| whole[j * ni + i]))
+                    .collect();
+                assert_eq!(windowed, cropped, "{w:?} on {src:?}");
+                assert!(!native.is_whole(src), "{w:?} read the whole grid");
+            }
+        }
+    }
+
+    /// Across the source's own first column the cells are two blocks, the
+    /// east part first; elsewhere one.
+    #[test]
+    fn a_native_window_splits_only_at_the_sources_seam() {
+        // GlobCurrent runs from -179.875: 160 E to 160 W crosses its seam.
+        let across = native_window(
+            G,
+            &Window {
+                i0: 640,
+                ni: 161,
+                j0: 320,
+                nj: 81,
+            },
+        );
+        assert_eq!(across.columns.len(), 2);
+        assert_eq!(across.columns[0].end, G.nlon);
+        assert_eq!(across.columns[1].start, 0);
+        // 20 W to 20 E is in the middle of its row.
+        let middle = native_window(
+            G,
+            &Window {
+                i0: 1360,
+                ni: 161,
+                j0: 120,
+                nj: 81,
+            },
+        );
+        assert_eq!(middle.columns.len(), 1);
+        // The global window is every cell, in one piece.
+        assert!(native_window(G, &Window::global()).is_whole(G));
     }
 
     /// The poles lie past the outermost cell centres; they take the nearest

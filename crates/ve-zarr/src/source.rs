@@ -56,6 +56,131 @@ pub struct Field {
     pub v: Vec<f32>,
 }
 
+impl Field {
+    /// The part of the field `window` covers, rows north to south and
+    /// columns west to east from the window's first, wrapping past the last
+    /// column of the grid. A scalar field's empty `v` stays empty.
+    ///
+    /// # Panics
+    /// Panics if the field is not on the common grid: a source hands back
+    /// either the whole grid or the window it was given, and only the first
+    /// is cropped.
+    pub fn cropped(&self, window: &Window) -> Field {
+        let crop = |values: &[f32]| -> Vec<f32> {
+            if values.is_empty() {
+                return Vec::new();
+            }
+            assert_eq!(values.len(), POINTS_PER_STEP, "a field off the common grid");
+            let ni = NI as usize;
+            let mut out = Vec::with_capacity(window.len());
+            for j in window.rows() {
+                let row = &values[j * ni..(j + 1) * ni];
+                out.extend(window.columns().map(|i| row[i]));
+            }
+            out
+        };
+        Field {
+            variable: self.variable,
+            u: crop(&self.u),
+            v: crop(&self.v),
+        }
+    }
+}
+
+/// The part of the common grid a regional fetch keeps (spec.md 4.10, M102).
+///
+/// Columns are counted from 0 degrees east in GRIB order and may run past
+/// the last column: `i0 + ni` beyond 1440 wraps to column 0, which is how a
+/// window across the prime meridian stays one block. A window across 180
+/// degrees needs no wrap at all, since GRIB longitudes run on through it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Window {
+    /// First column, `0..1440`.
+    pub i0: u32,
+    /// Columns, at most 1440.
+    pub ni: u32,
+    /// First row, from 90 degrees north.
+    pub j0: u32,
+    /// Rows.
+    pub nj: u32,
+}
+
+impl Default for Window {
+    fn default() -> Self {
+        Self::global()
+    }
+}
+
+impl Window {
+    /// The whole grid, from the north pole and the prime meridian.
+    pub const fn global() -> Self {
+        Self {
+            i0: 0,
+            ni: NI as u32,
+            j0: 0,
+            nj: NJ as u32,
+        }
+    }
+
+    /// The window of the common grid holding `target`'s nodes, snapped
+    /// outward to the grid. A lattice that goes all the way round takes
+    /// every column, starting at its own first longitude so the columns are
+    /// in the order its grid definition states; the whole earth is
+    /// [`Window::global`], whose first column is the prime meridian, as
+    /// every global file has always been written.
+    pub fn of(target: &ve_core::regrid::TargetGrid) -> Self {
+        const EPS: f64 = 1e-9;
+        const D: f64 = 0.25;
+        let north = target.lat0.min(90.0);
+        let south = (target.lat0 - f64::from(target.nj.saturating_sub(1)) * target.dlat).max(-90.0);
+        let j0 = (((90.0 - north) / D) + EPS).floor().max(0.0) as u32;
+        let j1 = ((((90.0 - south) / D) - EPS).ceil() as u32).min(NJ as u32 - 1);
+        let nj = j1.saturating_sub(j0) + 1;
+
+        let full = f64::from(target.ni) * target.dlon >= 360.0 - EPS;
+        if full && j0 == 0 && nj == NJ as u32 {
+            return Self::global();
+        }
+        let first = (target.lon0.rem_euclid(360.0) / D + EPS).floor();
+        let i0 = (first as u32) % NI as u32;
+        let ni = if full {
+            NI as u32
+        } else {
+            let width = f64::from(target.ni.saturating_sub(1)) * target.dlon;
+            let last = ((target.lon0.rem_euclid(360.0) + width) / D - EPS).ceil();
+            ((last - first) as u32 + 1).min(NI as u32)
+        };
+        Self { i0, ni, j0, nj }
+    }
+
+    /// Values in one field on the window.
+    pub fn len(&self) -> usize {
+        self.ni as usize * self.nj as usize
+    }
+
+    /// Whether the window holds nothing. A window made by [`Window::of`]
+    /// never does.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Whether this is the whole grid as it is.
+    pub fn is_global(&self) -> bool {
+        *self == Self::global()
+    }
+
+    /// The grid's rows the window covers, north to south.
+    pub fn rows(&self) -> std::ops::Range<usize> {
+        self.j0 as usize..(self.j0 + self.nj) as usize
+    }
+
+    /// The grid's columns the window covers, west to east, wrapped.
+    pub fn columns(&self) -> impl Iterator<Item = usize> + use<> {
+        let (i0, ni) = (self.i0 as usize, self.ni as usize);
+        (0..ni).map(move |k| (i0 + k) % NI as usize)
+    }
+}
+
 /// A store that can be walked hour by hour.
 pub trait FieldSource: Send + Sync {
     /// Short name, for logs and messages.
@@ -86,8 +211,16 @@ pub trait FieldSource: Send + Sync {
     /// Every step whose valid time falls in `[start, end]`, inclusive.
     fn steps_in_range(&self, start: Utc, end: Utc) -> Result<Vec<Step>>;
 
-    /// Reads every field for one step.
+    /// Reads every field for one step: on the whole common grid, or on the
+    /// window last given to [`FieldSource::set_window`] by a source that
+    /// subsets at the server. A caller tells them apart by length.
     fn read_step(&self, step: &Step) -> Result<Vec<Field>>;
+
+    /// Asks for only `window` of every later read, where the source can
+    /// subset at the server (spec.md 4.10, M102). The default ignores it: a
+    /// store whose chunks are whole globes, or whose files are, downloads the
+    /// globe either way, and the caller crops what comes back.
+    fn set_window(&mut self, _window: Window) {}
 }
 
 /// Selects the steps of a sorted hour list that fall in a range, as a helper
@@ -252,6 +385,12 @@ impl FieldSource for Combined {
             fields.extend(member.read_step(&own)?);
         }
         Ok(fields)
+    }
+
+    fn set_window(&mut self, window: Window) {
+        for member in &mut self.members {
+            member.set_window(window);
+        }
     }
 }
 

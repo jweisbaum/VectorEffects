@@ -125,7 +125,7 @@ package.json   Root npm workspace: owns the Tauri CLI and every script
 ```
 
 **Dependency direction:** `ve-app` → everything; `ve-render` → `ve-core`;
-`ve-grib` → `ve-core`; `ve-zarr` → `ve-hdf5`. Never the reverse, and
+`ve-grib` → `ve-core`; `ve-zarr` → `ve-core`, `ve-hdf5`. Never the reverse, and
 `ve-core` and `ve-hdf5` depend on none of them.
 
 ---

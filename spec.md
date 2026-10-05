@@ -1177,6 +1177,26 @@ memory. A project has to open the same way on a train as on a desk, and a
 layer whose field only exists while a connection does would be a layer that
 sometimes is not there.
 
+**A regional project's fetch writes its region** (M102). The project's
+region is snapped outward onto the sources' 0.25° lattice — a 0.1° project's
+edges are not on it — and the file states that grid: Ni, Nj and its own
+first point, the longitude in GRIB's `[0, 360)`, so a region across 180° is
+one contiguous block and one across 0° has Lo2 below Lo1. The file stays at
+0.25° whatever the project's resolution; only the extent follows the
+project. **Sources that can subset at the server do**: the Copernicus Marine
+stores read the window's cells through array subsets, two of them where the
+window crosses the store's own first column, and the NOAA ERDDAP datasets
+through index subscripts, two requests where it crosses the dataset's seam —
+180° on a `LonPM180` dataset, the prime meridian on one that runs 0..360.
+**The rest download the globe and crop before writing**: ERA5 and
+GlobCurrent keep one whole-globe chunk per step, and Seawinds, CMC and the
+ASCAT passes are whole files or merged whole, so for them the bandwidth is
+the same and only the disk shrinks. The file name carries the region's key
+after the range, so a global and a regional fetch of the same hours never
+share a file; a global project's name, grid and bytes are what they were.
+A fetched file that covers none of the region is refused naming the file and
+the region, as an import is (R10).
+
 **It aligns the way an imported forecast does.** The file's forecast hours
 count from its own first hour, so the first hour of the range lands on the
 project's first step and the rest follow at their own spacing — §4.8's rule,

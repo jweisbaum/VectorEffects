@@ -3679,7 +3679,7 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
-### M102 — Fetches keep only the region (part 1: the writer)
+### M102 — Fetches keep only the region (part 1: the writer; part 2: the fetches)
 
 R6 of the regional-projects design. `ve_grib::GridSpec` gains a first point
 (`la1_udeg`, `lo1_udeg` in `[0, 360e6)`); `GridSpec::global` is today's grid
@@ -3701,6 +3701,42 @@ ruling was `grib_dump -O`, `grib_ls`, `grib_get_data`), on four files from
 174,240 wrong on the cap), both sides of each seam included (179.75 / −180 /
 −179.75; −0.25 / 0 / 0.25). The visual viewer step moves to the final in-app
 pass.
+
+**Part 2: the fetches** (R5). `ve_zarr::source::Window { i0, ni, j0, nj }` is
+a block of the common 1440×721 grid in GRIB order, columns from 0°E and
+wrapping past 1440; `Window::of(&TargetGrid)` snaps a lattice outward onto
+it (the whole earth is `Window::global()`), and `Field::cropped` takes it.
+`FieldSource::set_window` defaults to nothing; `ArcoStore` and `ErddapStore`
+override it, `Combined` forwards it. `regrid::native_window` names the
+source cells a window's nodes read (a cell of margin each way; two column
+blocks across the source's own seam) and `to_era5_window` regrids only those
+nodes — `a_windowed_regrid_reads_only_its_native_window` holds it equal to
+the whole regrid cropped, with every other cell NaN. ARCO reads
+`arco::subset_for`'s one or two `ArraySubset`s; ERDDAP's `step_requests`
+makes one or two `[i0:stride:last]` / `[0:stride:i1]` requests in the
+dataset's own indices. Which datasets are `LonPM180` (OISST, Geo-Polar) or
+0..360 (CCMP) is read off their axes, not declared, so the split follows
+whichever seam the dataset has. In `ve-app`, `history::Extent::of(settings)`
+is the fetch's `GridSpec` (via `GridSpec::of_lattice` at 250,000 µ°), its
+window, its region and its read-back crop: the region is re-snapped with
+`Region::snapped(.., Resolution::Deg025)` from `bounds_deg()`, falling back
+to the globe for a full circle that rounds out to both poles.
+`fetch_source_to_file` takes it, crops any whole-grid field (`Extent::fit`),
+pads empties to `window.len()`, and names the file
+`{id}-{start}-{end}-{region.key()}.grib2`; a global project's path, name
+and bytes are unchanged. `fetched_layer`/`temperature_layer` map a
+`GribError::OutsideRegion` through `AppError::outside_region` (the Task 3
+finding). `ve-zarr` now depends on `ve-core` for `TargetGrid`.
+
+Measured live (`live_regional_fetches_write_smaller_files`, `#[ignore]`d,
+`VE_TEST_LIVE=1`; it fetches on purpose), one hour, 16-bit packing, a
+20°×20° box (30–10°W, 30–50°N) and a 20°×20° box across 180°: ERA5
+4,153,380 bytes global, 26,664 regional (81×81); MULTIOBS 2,533,988 global,
+26,664 regional — 1/156 and 1/95 of the global file. Every node of both
+regional files agrees with the global file's (13,122 per source). The
+MULTIOBS read itself took 7.0 s regional against 8.9 s global: its
+time-chunked store's spatial chunks are large, so the server-side window
+saves less time than it saves disk.
 
 ### M101 — Imports read only the region
 

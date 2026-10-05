@@ -20,8 +20,10 @@ use zarrs::array::ArraySubset;
 
 use crate::error::{Result, ZarrError};
 use crate::parallel::try_join;
-use crate::regrid::{CellGrid, to_era5_grid};
-use crate::source::{Field, FieldSource, Step, Variable, step_at_hour, steps_between};
+#[cfg(test)]
+use crate::regrid::to_era5_grid;
+use crate::regrid::{CellGrid, native_window, place, to_era5_window};
+use crate::source::{Field, FieldSource, Step, Variable, Window, step_at_hour, steps_between};
 use crate::store::{ReadArray, open_array, open_http, read_axis_f32, read_err, read_time_axis};
 use crate::time::Utc;
 
@@ -79,6 +81,9 @@ pub struct ArcoStore {
     times: Vec<i64>,
     /// The packed values are kelvin, and leave here in Celsius.
     kelvin: bool,
+    /// What every read asks the server for (M102): the whole grid unless a
+    /// regional fetch said otherwise.
+    window: Window,
 }
 
 impl std::fmt::Debug for ArcoStore {
@@ -176,6 +181,36 @@ pub fn cell_grid_of(lat: &[f32], lon: &[f32]) -> Result<CellGrid> {
         dlon: 360.0 / lon.len() as f64,
         nlon: lon.len(),
     })
+}
+
+/// The subsets of one time step a window reads: this time, this level if
+/// the store has one, and the rows and columns [`native_window`] names —
+/// one block, or two where the window crosses the store's first column.
+///
+/// The global window is one subset of every row and column, which is what
+/// every read asked for before there were regional projects.
+pub fn subset_for(
+    window: &Window,
+    grid: CellGrid,
+    index: u64,
+    level: Option<u64>,
+) -> Vec<ArraySubset> {
+    let native = native_window(grid, window);
+    let rows = native.rows.start as u64..native.rows.end as u64;
+    native
+        .columns
+        .iter()
+        .map(|columns| {
+            let mut ranges: Vec<Range<u64>> = Vec::with_capacity(4);
+            ranges.push(index..index + 1);
+            if let Some(level) = level {
+                ranges.push(level..level + 1);
+            }
+            ranges.push(rows.clone());
+            ranges.push(columns.start as u64..columns.end as u64);
+            ArraySubset::new_with_ranges(&ranges)
+        })
+        .collect()
 }
 
 /// Reads a numeric attribute, with a default.
@@ -354,6 +389,7 @@ impl ArcoStore {
             offset,
             fill,
             times,
+            window: Window::global(),
         })
     }
 
@@ -362,18 +398,48 @@ impl ArcoStore {
         self.grid
     }
 
-    /// The subset one time step of a field is.
-    fn slice(&self, index: u64) -> ArraySubset {
-        // One range per dimension: this time, this level if there is one,
-        // and the whole of every row and column.
-        let mut ranges: Vec<Range<u64>> = Vec::with_capacity(4);
-        ranges.push(index..index + 1);
-        if let Some(level) = self.level {
-            ranges.push(level..level + 1);
+    /// One step of an array, on the store's whole grid: the window's
+    /// subsets read through `read`, and every cell outside them `missing`.
+    fn gather<T: Copy>(
+        &self,
+        index: u64,
+        what: &str,
+        missing: T,
+        read: impl Fn(&ArraySubset) -> Result<Vec<T>>,
+    ) -> Result<Vec<T>> {
+        let subsets = subset_for(&self.window, self.grid, index, self.level);
+        let mut blocks = Vec::with_capacity(subsets.len());
+        for subset in &subsets {
+            let block = read(subset)?;
+            if block.len() != subset.num_elements_usize() {
+                return Err(ZarrError::Layout(format!(
+                    "{what} at step {index} holds {} values, expected {}",
+                    block.len(),
+                    subset.num_elements_usize()
+                )));
+            }
+            blocks.push(block);
         }
-        ranges.push(0..self.grid.nlat as u64);
-        ranges.push(0..self.grid.nlon as u64);
-        ArraySubset::new_with_ranges(&ranges)
+        if let [whole] = subsets.as_slice()
+            && whole.num_elements_usize() == self.grid.len()
+        {
+            return Ok(blocks.pop().unwrap_or_default());
+        }
+        let mut out = vec![missing; self.grid.len()];
+        for (subset, block) in subsets.iter().zip(&blocks) {
+            let ranges = subset.to_ranges();
+            let [.., rows, columns] = ranges.as_slice() else {
+                continue;
+            };
+            place(
+                self.grid,
+                &mut out,
+                rows.start as usize..rows.end as usize,
+                columns.start as usize..columns.end as usize,
+                block,
+            );
+        }
+        Ok(out)
     }
 
     /// The per-cell measurement time at one step, in seconds since the Unix
@@ -384,16 +450,11 @@ impl ArcoStore {
             return Ok(None);
         };
         let what = format!("the {} measurement time", self.spec.name);
-        let raw = array
-            .retrieve_array_subset::<Vec<f64>>(&self.slice(index))
-            .map_err(read_err(&what))?;
-        if raw.len() != self.grid.len() {
-            return Err(ZarrError::Layout(format!(
-                "{what} at step {index} holds {} values, expected {}",
-                raw.len(),
-                self.grid.len()
-            )));
-        }
+        let raw = self.gather(index, &what, *fill, |subset| {
+            array
+                .retrieve_array_subset::<Vec<f64>>(subset)
+                .map_err(read_err(&what))
+        })?;
         Ok(Some(
             raw.into_iter()
                 .map(|r| unpack_time(r, *fill, *base_s))
@@ -424,29 +485,23 @@ impl ArcoStore {
     /// One component at one step, on the store's own grid, in physical units
     /// with NaN where masked.
     fn read_native(&self, array: &ReadArray, index: u64, name: &str) -> Result<Vec<f32>> {
-        let subset = self.slice(index);
         let what = format!("the {} {name} field", self.spec.name);
-        let raw: Vec<i64> = match self.packed {
-            Packed::I16 => array
-                .retrieve_array_subset::<Vec<i16>>(&subset)
-                .map_err(read_err(&what))?
-                .into_iter()
-                .map(i64::from)
-                .collect(),
-            Packed::I32 => array
-                .retrieve_array_subset::<Vec<i32>>(&subset)
-                .map_err(read_err(&what))?
-                .into_iter()
-                .map(i64::from)
-                .collect(),
-        };
-        if raw.len() != self.grid.len() {
-            return Err(ZarrError::Layout(format!(
-                "{what} at step {index} holds {} values, expected {}",
-                raw.len(),
-                self.grid.len()
-            )));
-        }
+        let raw: Vec<i64> = self.gather(index, &what, self.fill, |subset| {
+            Ok(match self.packed {
+                Packed::I16 => array
+                    .retrieve_array_subset::<Vec<i16>>(subset)
+                    .map_err(read_err(&what))?
+                    .into_iter()
+                    .map(i64::from)
+                    .collect(),
+                Packed::I32 => array
+                    .retrieve_array_subset::<Vec<i32>>(subset)
+                    .map_err(read_err(&what))?
+                    .into_iter()
+                    .map(i64::from)
+                    .collect(),
+            })
+        })?;
         Ok(raw
             .into_iter()
             .map(|r| unpack(r, self.fill, self.scale, self.offset))
@@ -488,7 +543,7 @@ impl FieldSource for ArcoStore {
             }
             return Ok(vec![Field {
                 variable: self.spec.variable,
-                u: to_era5_grid(self.grid, &values),
+                u: to_era5_window(self.grid, &values, &self.window),
                 v: Vec::new(),
             }]);
         }
@@ -496,8 +551,8 @@ impl FieldSource for ArcoStore {
             || self.read_native(&self.u, step.index, "u"),
             || self.read_native(&self.v, step.index, "v"),
         )?;
-        let u = to_era5_grid(self.grid, &u);
-        let v = to_era5_grid(self.grid, &v);
+        let u = to_era5_window(self.grid, &u, &self.window);
+        let v = to_era5_window(self.grid, &v, &self.window);
         // A field with nothing in it is a time the store lists but has not
         // written yet: just after midnight the time axis already names the
         // new day. That is an empty field, not a failure — the newest steps
@@ -509,6 +564,12 @@ impl FieldSource for ArcoStore {
             v,
         }])
     }
+
+    /// The Marine Data Store answers a subset with only the chunks it
+    /// touches, so a regional fetch asks for its window (M102).
+    fn set_window(&mut self, window: Window) {
+        self.window = window;
+    }
 }
 
 #[cfg(test)]
@@ -517,6 +578,63 @@ mod tests {
 
     fn axis(first: f32, step: f32, count: usize) -> Vec<f32> {
         (0..count).map(|i| first + step * i as f32).collect()
+    }
+
+    /// A regional read asks the store for its window's cells and no others:
+    /// the rows and columns round 40 N..60 N, 20 W..20 E on a grid that
+    /// starts at -179.875 and runs north, at the surface level; and two
+    /// blocks for a window across the store's seam at 180 degrees.
+    #[test]
+    fn arco_reads_only_the_window() {
+        let grid = CellGrid::GLOBCURRENT;
+        let w = Window {
+            i0: 1360,
+            ni: 161,
+            j0: 120,
+            nj: 81,
+        };
+        // 60 N is row (60 + 89.875) / 0.25 = 599.5, 40 N is 519.5: rows 519
+        // to 600 bracket them, and a row more each side is 518..602. 340 E is
+        // column 639.5 from -179.875, 20 E is 799.5: 638..802 likewise.
+        let subsets = subset_for(&w, grid, 7, Some(0));
+        assert_eq!(
+            subsets,
+            [ArraySubset::new_with_ranges(&[
+                7..8,
+                0..1,
+                518..602,
+                638..802
+            ])]
+        );
+
+        let across = Window {
+            i0: 640,
+            ni: 161,
+            j0: 320,
+            nj: 81,
+        };
+        let subsets = subset_for(&across, grid, 7, None);
+        assert_eq!(
+            subsets,
+            [
+                // 160 E is column 1359.5, so from 1358 to the end of the row,
+                ArraySubset::new_with_ranges(&[7..8, 318..402, 1358..1440]),
+                // and 200 E (-160) is column 79.5, so from 0 to 81.
+                ArraySubset::new_with_ranges(&[7..8, 318..402, 0..82]),
+            ]
+        );
+        let cells: u64 = subsets.iter().map(ArraySubset::num_elements).sum();
+        assert!(
+            cells * 50 < grid.len() as u64,
+            "{cells} cells of {}",
+            grid.len()
+        );
+
+        // The whole grid is one subset of everything, as it always was.
+        assert_eq!(
+            subset_for(&Window::global(), grid, 7, None),
+            [ArraySubset::new_with_ranges(&[7..8, 0..720, 0..1440])]
+        );
     }
 
     /// The two grids these stores are published on, read off their axes.

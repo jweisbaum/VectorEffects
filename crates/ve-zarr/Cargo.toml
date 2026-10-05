@@ -17,6 +17,9 @@ serde_json = { workspace = true, features = ["preserve_order"] }
 tracing = { workspace = true }
 # NOAA's Blended Seawinds arrive as NetCDF-4, which is HDF5 (M96).
 ve-hdf5 = { workspace = true }
+# A regional fetch's window is the project's lattice (M102); `ve-core`
+# depends on nothing here, so the direction stays one way.
+ve-core = { workspace = true }
 
 # `default-features = false` is load-bearing. The default set turns on
 # `blosc`, which builds c-blosc and its bundled Snappy through a C++

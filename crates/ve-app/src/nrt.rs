@@ -32,7 +32,7 @@ use ve_zarr::{FieldSource, Product};
 use crate::commands::AppState;
 use crate::error::{AppError, Context, Result};
 use crate::history::{
-    HistoryProgress, MAX_FETCHED_STEPS, Origin, fetch_source_to_file, fetched_layer,
+    Extent, HistoryProgress, MAX_FETCHED_STEPS, Origin, fetch_source_to_file, fetched_layer,
     temperature_layer,
 };
 use crate::projects::{ProjectSummary, with_session};
@@ -238,12 +238,12 @@ pub fn nrt_import(
     mut on_progress: impl FnMut(HistoryProgress),
 ) -> Result<NrtOutcome> {
     let products = products_of(request)?;
-    let (step_hours, step_count, crop) = with_session(state, |session| {
+    let (step_hours, step_count, extent) = with_session(state, |session| {
         let settings = &session.require_open()?.project.settings;
         Ok((
             settings.step_hours.hours(),
             settings.step_count,
-            crate::import::crop_for(settings),
+            Extent::of(settings),
         ))
     })?;
     let period = period(now_unix_s, request.days, step_hours)?;
@@ -297,7 +297,10 @@ pub fn nrt_import(
         });
         let fetched = open(*product)
             .doing("reach", format!("\"{}\"", origin.label))
-            .and_then(|source| {
+            .and_then(|mut source| {
+                // A store that subsets at the server fetches only the
+                // region (M102); the rest fetch the globe and are cropped.
+                source.set_window(extent.window);
                 let source = Arc::<dyn FieldSource>::from(source);
                 fetch_source_to_file(
                     &origin,
@@ -306,6 +309,7 @@ pub fn nrt_import(
                     times,
                     true,
                     &directory,
+                    &extent,
                     |arrived| {
                         on_progress(HistoryProgress {
                             archive: origin.label.to_owned(),
@@ -317,9 +321,9 @@ pub fn nrt_import(
             })
             .and_then(|path| {
                 if product.variable().is_scalar() {
-                    temperature_layer(&origin, &path, range, product.period_hours(), crop.as_ref())
+                    temperature_layer(&origin, &path, range, product.period_hours(), &extent)
                 } else {
-                    fetched_layer(&origin, &path, range, product.period_hours(), crop.as_ref())
+                    fetched_layer(&origin, &path, range, product.period_hours(), &extent)
                 }
             });
         done += times.len() as u32;
