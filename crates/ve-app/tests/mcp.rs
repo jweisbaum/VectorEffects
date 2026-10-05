@@ -951,6 +951,98 @@ async fn the_descriptions_fit_and_the_entry_points_say_whose_they_are() {
     client.cancel().await.expect("close");
 }
 
+/// Every tool says what it does to the person's work, as the MCP
+/// annotations every client can read (Codex prompts on them). A tool the
+/// table does not know, or a table entry no tool has, fails here: that is
+/// the step `CLAUDE.md`'s MCP recipe adds for every new tool.
+#[tokio::test]
+async fn every_tool_is_classified_and_nothing_else_is() {
+    let root = TempRoot::new("effects");
+    let app = mock_app(&root);
+    let (port, token) = serve(&app);
+    let client = client(port, &token).await;
+    let tools = client.list_all_tools().await.expect("tools");
+    let listed: std::collections::BTreeSet<&str> = tools.iter().map(|t| t.name.as_ref()).collect();
+    let table: std::collections::BTreeSet<&str> = ve_app::mcp::tools::effects::TABLE
+        .iter()
+        .map(|(n, _)| *n)
+        .collect();
+    assert_eq!(listed, table, "the effect table and the tool list differ");
+    for tool in &tools {
+        let a = tool
+            .annotations
+            .as_ref()
+            .unwrap_or_else(|| panic!("{} has no annotations", tool.name));
+        for (hint, value) in [
+            ("readOnlyHint", a.read_only_hint),
+            ("destructiveHint", a.destructive_hint),
+            ("idempotentHint", a.idempotent_hint),
+            ("openWorldHint", a.open_world_hint),
+        ] {
+            assert!(
+                value.is_some(),
+                "{}: {hint} is missing, which a client reads as true",
+                tool.name
+            );
+        }
+    }
+    client.cancel().await.expect("close");
+}
+
+/// The hints that decide a prompt, checked against what the tools do —
+/// Codex's rule (`requires_mcp_tool_approval`): destructive asks; read-only
+/// runs; otherwise it runs only when neither destructive nor open-world.
+#[tokio::test]
+async fn the_hints_say_what_the_tools_do() {
+    let root = TempRoot::new("hints");
+    let app = mock_app(&root);
+    let (port, token) = serve(&app);
+    let client = client(port, &token).await;
+    let tools = client.list_all_tools().await.expect("tools");
+    let codex_asks = |name: &str| {
+        let a = tools
+            .iter()
+            .find(|t| t.name == name)
+            .unwrap_or_else(|| panic!("{name} is listed"))
+            .annotations
+            .clone()
+            .unwrap_or_else(|| panic!("{name} has annotations"));
+        if a.destructive_hint.unwrap_or(true) {
+            return true;
+        }
+        if a.read_only_hint.unwrap_or(false) {
+            return false;
+        }
+        a.open_world_hint.unwrap_or(true)
+    };
+    for runs in [
+        "layers_list",
+        "field_sample",
+        "screenshot",
+        "object_create",
+        "storm_create",
+        "undo",
+        "view_focus",
+        "import_grib",
+    ] {
+        assert!(!codex_asks(runs), "{runs} should run without asking");
+    }
+    for asks in [
+        "project_save",
+        "export_grib",
+        "export_zarr",
+        "import_nrt",
+        "import_history",
+        "project_open",
+        "project_close",
+        "project_new",
+        "invoke",
+    ] {
+        assert!(codex_asks(asks), "{asks} should ask");
+    }
+    client.cancel().await.expect("close");
+}
+
 /// Every schema is one a strict client accepts. The reference is the MCP
 /// specification as the official TypeScript SDK enforces it: a property's
 /// schema is an object, and a tool's output schema describes an *object* —
