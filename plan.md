@@ -3701,8 +3701,11 @@ Tests: `a_request_with_a_region_snaps_it`,
 `a_global_file_makes_a_global_project` (grib_import.rs);
 `project_new_with_a_region` (mcp.rs). **Deferred:** the MCP agent scenario
 (`tools/mcp-scenarios/run.sh`, "a project covering the Bering Sea"), by the
-controller's decision. **Not done:** a regional file that is not lat/lon
-(projected or unstructured) still makes a global project.
+controller's decision. **Review fixes:** the MCP `region` is declared with its schema and read
+with `tools::typed` (a string or malformed object is a readable refusal);
+`region_of_lattice` has unit tests; a projected or unstructured file and a
+Zarr store seed their region from the extent of their non-missing nodes
+(`region_of_data`); ICON-D2 checked with the real file (ignored test).
 
 ### M103 — Exports on the region
 

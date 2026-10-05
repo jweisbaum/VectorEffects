@@ -329,6 +329,31 @@ async fn project_new_with_a_region() {
 }
 
 #[tokio::test]
+async fn a_malformed_region_is_a_readable_refusal() {
+    let root = TempRoot::new("project-region-bad");
+    let app = mock_app(&root);
+    let (port, token) = serve(&app);
+    let client = client(port, &token).await;
+    // A client with no usable schema sends the object as a string: read.
+    let mut args = new_project_args("Text");
+    args["region"] = json!("{\"west\": 160, \"east\": -160, \"south\": 50, \"north\": 70}");
+    let summary = call(&client, "project_new", args).await;
+    assert_eq!(summary["grid_ni"], 41);
+    // A malformed one reaches the model as a tool error naming the field.
+    let mut args = new_project_args("Bad");
+    args["discard_unsaved"] = json!(true);
+    args["region"] = json!({ "west": "left", "south": 1 });
+    let message = call_err(&client, "project_new", args).await;
+    assert!(message.contains("region"), "{message}");
+    let mut args = new_project_args("Bad");
+    args["discard_unsaved"] = json!(true);
+    args["region"] = json!("somewhere cold");
+    let message = call_err(&client, "project_new", args).await;
+    assert!(message.contains("region"), "{message}");
+    client.cancel().await.expect("close");
+}
+
+#[tokio::test]
 async fn unsaved_work_is_refused_without_discard() {
     let root = TempRoot::new("dirty");
     let app = mock_app(&root);

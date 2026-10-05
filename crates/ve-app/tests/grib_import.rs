@@ -890,3 +890,40 @@ fn a_global_file_makes_a_global_project() {
     assert!(summary.region.is_none());
     assert_eq!((summary.grid_ni, summary.grid_nj), (360, 181));
 }
+
+/// ICON-D2 is on an unstructured mesh over Germany, resampled onto the
+/// global lattice; the project it makes must be regional on Germany
+/// (decision R9). Real file, not committed:
+/// `VE_TEST_GRIBS=~/temp_test_gribs cargo test -p ve-app --release
+/// --test grib_import -- --ignored --nocapture`.
+#[test]
+#[ignore = "needs DWD's ICON-D2 files in $VE_TEST_GRIBS/icon_regional"]
+fn an_unstructured_regional_file_seeds_a_regional_project() {
+    let base = std::env::var_os("VE_TEST_GRIBS")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from(std::env::var_os("HOME").expect("HOME")).join("temp_test_gribs")
+        })
+        .join("icon_regional");
+    let root = TempRoot::new("icon-d2");
+    let mut bytes = std::fs::read(
+        base.join("icon-d2_germany_icosahedral_single-level_2026100412_000_2d_u_10m.grib2"),
+    )
+    .expect("u");
+    bytes.extend(
+        std::fs::read(
+            base.join("icon-d2_germany_icosahedral_single-level_2026100412_000_2d_v_10m.grib2"),
+        )
+        .expect("v"),
+    );
+    let path = root.0.join("d2.grib2");
+    std::fs::write(&path, bytes).expect("write");
+    let app = fresh(&root);
+    let summary =
+        import::grib_project(&app, path.to_string_lossy().into_owned(), false).expect("create");
+    let region = summary.region.expect("regional");
+    println!("{region:?} {}x{}", summary.grid_ni, summary.grid_nj);
+    assert!(region.west < 6.0 && region.east > 15.0, "{region:?}");
+    assert!(region.south < 47.5 && region.north > 55.0, "{region:?}");
+    assert!(region.east - region.west < 30.0 && region.north - region.south < 20.0);
+}

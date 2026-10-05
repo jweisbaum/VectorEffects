@@ -283,6 +283,68 @@ pub(crate) fn region_of_lattice(
     .ok()
 }
 
+/// The region a *resampled* lattice asks for: the extent of its nodes that
+/// hold a value, or `None` for a global project (decision R9).
+///
+/// A projected or unstructured file has no lattice of its own and is put on
+/// the global one, where everything its grid does not reach is missing. Its
+/// extent is therefore what is present: latitude from the first and last rows
+/// holding any value, longitude the whole circle less its largest run of
+/// columns holding none (so a field across 180 degrees is one arc, not a
+/// band round the world). No gap means a full circle. Snapped outward.
+pub(crate) fn region_of_data(
+    grid: &ve_core::raster::RasterGrid,
+    resolution: Resolution,
+) -> Option<ve_core::region::Region> {
+    if !grid.wraps {
+        // A patch has its own edges; absence of a gap says nothing.
+        return region_of_lattice(grid, resolution);
+    }
+    let (ni, nj) = (grid.ni as usize, grid.nj as usize);
+    let mut row_has = vec![false; nj];
+    let mut col_has = vec![false; ni];
+    for (j, row) in grid.uv.chunks(ni).enumerate() {
+        for (i, [u, v]) in row.iter().enumerate() {
+            if !ve_core::raster::is_missing(*u) && !ve_core::raster::is_missing(*v) {
+                row_has[j] = true;
+                col_has[i] = true;
+            }
+        }
+    }
+    let first_row = row_has.iter().position(|&h| h)?;
+    let last_row = row_has.iter().rposition(|&h| h)?;
+    let north = grid.lat0 - first_row as f64 * grid.dlat;
+    let south = grid.lat0 - last_row as f64 * grid.dlat;
+    // The largest circular run of empty columns: its far side is the west
+    // edge, its near side the east.
+    let (mut best_len, mut best_start) = (0usize, 0usize);
+    let mut run = 0usize;
+    for k in 0..2 * ni {
+        if col_has[k % ni] {
+            run = 0;
+        } else {
+            run += 1;
+            if run > best_len && run < ni {
+                best_len = run;
+                best_start = k + 1 - run;
+            }
+        }
+    }
+    let full_circle = best_len == 0;
+    let lon_of = |i: usize| grid.lon0 + (i % ni) as f64 * grid.dlon;
+    let west = lon_of(best_start + best_len);
+    let east = lon_of(best_start + ni - 1);
+    ve_core::region::Region::snapped(
+        west,
+        east,
+        south.max(-90.0),
+        north.min(90.0),
+        full_circle,
+        resolution,
+    )
+    .ok()
+}
+
 /// Creates a project shaped by a GRIB2 file and imports the file into it.
 #[tauri::command(async)]
 pub fn new_project_from_grib(
@@ -320,6 +382,11 @@ pub fn grib_project(
         import::read_messages_reporting(&path, &|done, total| opening.source(0, done, total * 2))
             .doing("read the GRIB file at", path.display())?;
     let resolution = nearest_resolution(import::nominal_spacing(&messages).unwrap_or(1.0));
+    // A file with no lattice of its own is put on the global one, so its
+    // extent is read from where it has values (decision R9).
+    let resampled = messages
+        .iter()
+        .any(|m| !matches!(m.header.grid, ve_grib::decode::Grid::LatLon(_)));
     let mut cache = std::collections::BTreeMap::new();
     let sequences = {
         let unpacked = messages.len();
@@ -329,11 +396,20 @@ pub fn grib_project(
         })?
     };
     let mut imported = import::Imported { sequences, skipped };
-    let settings = settings_for(&imported.sequences).ok_or_else(|| {
+    let mut settings = settings_for(&imported.sequences).ok_or_else(|| {
         AppError::Grib(ve_grib::GribError::NoVectorField(
             "the file holds no time step to build a project from".to_owned(),
         ))
     })?;
+    if resampled
+        && let Some(first) = imported
+            .sequences
+            .iter()
+            .flat_map(|s| s.frames.first())
+            .next()
+    {
+        settings.region = region_of_data(&first.grid, settings.resolution);
+    }
     // A file that is not global makes a regional project (decision R9), and
     // is then read the way that project will read it on every reopening: onto
     // the region's lattice, so a save and a load hold the same rasters.
@@ -516,6 +592,85 @@ mod tests {
     use ve_core::raster::{RasterFrame, RasterGrid, RasterSequence};
 
     use super::*;
+
+    fn lattice(ni: u32, nj: u32, lon0: f64, lat0: f64, d: f64) -> ve_core::raster::RasterGrid {
+        ve_core::raster::RasterGrid::new(
+            ni,
+            nj,
+            lon0,
+            lat0,
+            d,
+            d,
+            vec![[1.0, 0.0]; (ni * nj) as usize],
+        )
+        .expect("grid")
+    }
+
+    #[test]
+    fn a_global_lattice_seeds_no_region() {
+        let grid = lattice(360, 181, -180.0, 90.0, 1.0);
+        assert!(region_of_lattice(&grid, Resolution::Deg1).is_none());
+    }
+
+    #[test]
+    fn a_wrapping_band_is_a_full_circle_region() {
+        let grid = lattice(360, 121, -180.0, 60.0, 1.0);
+        let region = region_of_lattice(&grid, Resolution::Deg1).expect("a band");
+        assert!(region.is_full_circle());
+        assert_eq!(region.bounds_deg(), (-180.0, 180.0, -60.0, 60.0));
+    }
+
+    #[test]
+    fn a_lattice_across_the_antimeridian_keeps_its_arc() {
+        // 170E to 170W: twenty degrees, 21 columns.
+        let grid = lattice(21, 11, 170.0, 10.0, 1.0);
+        let region = region_of_lattice(&grid, Resolution::Deg1).expect("a box");
+        assert_eq!(region.bounds_deg(), (170.0, 190.0, 0.0, 10.0));
+    }
+
+    #[test]
+    fn a_lattice_reaching_the_north_pole_is_a_box_to_the_pole() {
+        let grid = lattice(41, 21, 10.0, 90.0, 1.0);
+        let region = region_of_lattice(&grid, Resolution::Deg1).expect("a cap");
+        assert_eq!(region.bounds_deg(), (10.0, 50.0, 70.0, 90.0));
+    }
+
+    #[test]
+    fn an_extent_that_snaps_to_the_whole_earth_is_global() {
+        // -180 to 180 on a 0.5 degree file repeats the seam column; pole to
+        // pole it is the earth, not a box.
+        let grid = lattice(721, 361, -180.0, 90.0, 0.5);
+        assert!(region_of_lattice(&grid, Resolution::Deg05).is_none());
+    }
+
+    #[test]
+    fn a_resampled_lattice_is_where_it_has_values() {
+        // A 1 degree global lattice holding data only from 175E to 175W and
+        // 40N to 50N, the rest missing.
+        let mut grid = lattice(360, 181, -180.0, 90.0, 1.0);
+        for v in &mut grid.uv {
+            *v = [ve_core::raster::MISSING; 2];
+        }
+        for lat in 40..=50 {
+            for lon in (175..180).chain(-180..=-175) {
+                let j = (90 - lat) as usize;
+                let i = (lon + 180) as usize;
+                grid.uv[j * 360 + i] = [3.0, 4.0];
+            }
+        }
+        let region = region_of_data(&grid, Resolution::Deg1).expect("regional");
+        assert_eq!(region.bounds_deg(), (175.0, 185.0, 40.0, 50.0));
+        // A field everywhere is the earth.
+        let full = lattice(360, 181, -180.0, 90.0, 1.0);
+        assert!(region_of_data(&full, Resolution::Deg1).is_none());
+        // Nothing anywhere is not a region.
+        let mut empty = lattice(360, 5, -180.0, 10.0, 1.0);
+        empty
+            .uv
+            .iter_mut()
+            .for_each(|v| *v = [ve_core::raster::MISSING; 2]);
+        assert!(region_of_data(&empty, Resolution::Deg1).is_none());
+    }
 
     fn sequence(kind: FieldKind, spacing: f64, offsets: &[f64]) -> RasterSequence {
         let ni = (360.0 / spacing).round() as u32;

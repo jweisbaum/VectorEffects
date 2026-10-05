@@ -98,10 +98,10 @@ fn opens_as_wind_and_current_layers_with_the_native_grid_and_clock() {
         wind.frames[0].grid.sample(0.0, 0.0).is_none(),
         "absent shards remain uncovered"
     );
-    assert_eq!(
-        (wind.frames[0].grid.lon0, wind.frames[0].grid.nj),
-        (-180.0, 180)
-    );
+    // The store holds a patch, so the project is regional on it and the
+    // layers keep that region and a node, not the whole native grid.
+    assert!(summary.region.is_some());
+    assert!(wind.frames[0].grid.lon0 > -180.0 && wind.frames[0].grid.nj < 180);
 
     let exported = root.path().join("exported.zarr");
     ve_app::export::run_zarr(
@@ -354,4 +354,35 @@ fn a_regional_project_reads_only_its_region_of_a_store() {
     assert_eq!(sample(&app, 0, FieldKind::Wind), (5.0, 2.0));
     assert_eq!(sample(&app, 1, FieldKind::Wind), (9.0, 2.0));
     assert_eq!(sample(&app, 0, FieldKind::Current), (1.0, 2.0));
+}
+
+/// A store that is not global makes a regional project holding its extent
+/// (decision R9).
+#[test]
+fn a_project_from_a_regional_store_seeds_its_region() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("routing_test");
+    write_store(&path);
+    let grid = zarr::read(&path).unwrap()[0].frames[0].grid.clone();
+    let app = app(root.path());
+    let summary = zarr::zarr_project(&app, path.display().to_string(), false).unwrap();
+    let region = summary.region.expect("a regional project");
+    assert!(!region.full_circle);
+    assert!(
+        summary.grid_ni < 360 && summary.grid_nj < 181,
+        "not the global lattice"
+    );
+    // Every node the store has a value at is inside the region.
+    let mut present = 0;
+    for (k, [u, v]) in grid.uv.iter().enumerate() {
+        if ve_core::raster::is_missing(*u) || ve_core::raster::is_missing(*v) {
+            continue;
+        }
+        present += 1;
+        let lon = grid.lon0 + (k % grid.ni as usize) as f64 * grid.dlon;
+        let lat = grid.lat0 - (k / grid.ni as usize) as f64 * grid.dlat;
+        assert!((lon - region.west).rem_euclid(360.0) <= region.east - region.west);
+        assert!(region.south <= lat && lat <= region.north);
+    }
+    assert!(present > 0);
 }

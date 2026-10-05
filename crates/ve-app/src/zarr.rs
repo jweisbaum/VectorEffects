@@ -227,8 +227,19 @@ pub fn zarr_project(
         |name| name.to_string_lossy().into_owned(),
     )]);
     let sequences = read_reporting(&path, &|done, total| opening.source(0, done, total))?;
-    let settings = crate::import::settings_for(&sequences)
+    let mut settings = crate::import::settings_for(&sequences)
         .ok_or_else(|| AppError::Internal("Zarr has no vector frames".into()))?;
+    // A store is written on the global lattice with its unwritten chunks
+    // missing, so its extent is where it has values (decision R9), found on
+    // the field `settings_for` chose.
+    let chosen = sequences
+        .iter()
+        .find(|s| s.kind == FieldKind::Wind)
+        .or_else(|| sequences.first())
+        .and_then(|s| s.frames.first());
+    if let Some(first) = chosen {
+        settings.region = crate::import::region_of_data(&first.grid, settings.resolution);
+    }
     // A store that is not global makes a regional project (decision R9) and
     // is read as that project will be on reopening: its region, and a node.
     let sequences = if settings.region.is_some() {

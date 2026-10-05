@@ -5,6 +5,7 @@ use rmcp::handler::server::wrapper::{Json, Parameters};
 use rmcp::{tool, tool_router};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use tauri::Manager;
 
 use super::{ToolError, VectorEffects};
@@ -31,7 +32,8 @@ pub struct ProjectNewParams {
     /// longitude (a polar cap: south 60, north 90). Snapped outward to the
     /// grid; fixed for the life of the project.
     #[serde(default)]
-    pub region: Option<crate::projects::RegionRequest>,
+    #[schemars(with = "Option<crate::projects::RegionRequest>")]
+    pub region: Option<Value>,
     /// Discard unsaved changes in the open project. Refused without it.
     #[serde(default)]
     pub discard_unsaved: bool,
@@ -108,13 +110,17 @@ impl<R: tauri::Runtime> VectorEffects<R> {
         &self,
         Parameters(p): Parameters<ProjectNewParams>,
     ) -> std::result::Result<Json<ProjectSummary>, ToolError> {
+        let region = match p.region {
+            None | Some(Value::Null) => None,
+            Some(raw) => super::typed("region", raw)?,
+        };
         let request = crate::projects::NewProjectRequest {
             name: p.name,
             field_kind: p.field_kind,
             resolution: p.resolution,
             step_hours: p.step_hours,
             step_count: p.step_count,
-            region: p.region,
+            region,
         };
         let discard = p.discard_unsaved;
         self.write("project_new", true, move |app| {
