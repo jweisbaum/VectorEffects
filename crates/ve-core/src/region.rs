@@ -89,16 +89,13 @@ impl Region {
         // from a latitude within +-90 never leaves the range.
         let south_s = floor(udeg(south));
         let north_s = ceil(udeg(north));
-        if full_circle {
+        // One coverage, one key: any full turn is canonically west -180.
+        if full_circle || span >= i64::from(FULL_TURN) {
             west_s = -i64::from(FULL_TURN) / 2;
             span = i64::from(FULL_TURN);
         }
         if south_s >= north_s {
             return Err(invalid("the south edge must be below the north edge"));
-        }
-        // After snapping west may reach 180 only from a value just under it.
-        if west_s >= i64::from(FULL_TURN) / 2 {
-            west_s -= i64::from(FULL_TURN);
         }
         let region = Region {
             west_udeg: west_s as i32,
@@ -132,6 +129,9 @@ impl Region {
         .any(|v| v % d != 0)
         {
             return Err(invalid("an edge is not on the resolution's lattice"));
+        }
+        if self.is_full_circle() && self.west_udeg != -FULL_TURN / 2 {
+            return Err(invalid("a full circle starts at -180"));
         }
         if self.is_full_circle() && self.south_udeg == -POLE && self.north_udeg == POLE {
             return Err(invalid("the whole earth is a global project"));
@@ -284,5 +284,120 @@ mod tests {
         };
         assert!(r.validate(Q).is_err());
         assert!(r.validate(Resolution::Deg01).is_ok());
+    }
+
+    #[test]
+    fn malformed_regions_do_not_validate() {
+        let ok = Region {
+            west_udeg: 10_000_000,
+            span_udeg: 10_000_000,
+            north_udeg: 50_000_000,
+            south_udeg: 40_000_000,
+        };
+        assert!(ok.validate(Q).is_ok());
+        let cases = [
+            ("span 0", Region { span_udeg: 0, ..ok }),
+            (
+                "span < 0",
+                Region {
+                    span_udeg: -250_000,
+                    ..ok
+                },
+            ),
+            (
+                "span > 360",
+                Region {
+                    span_udeg: 360_250_000,
+                    ..ok
+                },
+            ),
+            (
+                "west = 180",
+                Region {
+                    west_udeg: 180_000_000,
+                    ..ok
+                },
+            ),
+            (
+                "west < -180",
+                Region {
+                    west_udeg: -180_250_000,
+                    ..ok
+                },
+            ),
+            (
+                "south == north",
+                Region {
+                    south_udeg: 50_000_000,
+                    ..ok
+                },
+            ),
+            (
+                "south > north",
+                Region {
+                    south_udeg: 60_000_000,
+                    ..ok
+                },
+            ),
+            (
+                "south < -90",
+                Region {
+                    south_udeg: -90_250_000,
+                    ..ok
+                },
+            ),
+            (
+                "north > 90",
+                Region {
+                    north_udeg: 90_250_000,
+                    ..ok
+                },
+            ),
+            (
+                "whole earth",
+                Region {
+                    west_udeg: -180_000_000,
+                    span_udeg: 360_000_000,
+                    north_udeg: 90_000_000,
+                    south_udeg: -90_000_000,
+                },
+            ),
+            (
+                "full circle not at -180",
+                Region {
+                    span_udeg: 360_000_000,
+                    north_udeg: 90_000_000,
+                    south_udeg: 60_000_000,
+                    ..ok
+                },
+            ),
+        ];
+        for (name, r) in cases {
+            assert!(r.validate(Q).is_err(), "{name} must not validate");
+        }
+    }
+
+    #[test]
+    fn a_box_that_snaps_to_a_full_turn_is_canonical() {
+        let r = Region::snapped(10.0, 9.9, 60.0, 90.0, false, Q).unwrap();
+        assert!(r.is_full_circle());
+        assert_eq!(r.west_udeg, -180_000_000);
+    }
+
+    #[test]
+    fn a_project_with_an_invalid_region_does_not_validate() {
+        use crate::project::{FieldKind, Project, ProjectSettings, StepHours};
+        let mut p = Project::new(
+            "R",
+            ProjectSettings::new(FieldKind::Wind, Q, StepHours::H3, 4),
+        );
+        assert!(p.validate().is_ok());
+        p.settings.region = Some(Region {
+            west_udeg: 10_000_000,
+            span_udeg: 0,
+            north_udeg: 50_000_000,
+            south_udeg: 40_000_000,
+        });
+        assert!(p.validate().is_err());
     }
 }
