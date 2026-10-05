@@ -13,6 +13,9 @@
  * what this exists to stop.
  */
 
+import type { ProjectRegion } from "../generated/ProjectRegion";
+import { regionContains } from "./extent";
+
 /** What a layer holds, as `LayerNode.source` spells it. */
 export type LayerSourceName = "painted" | "raster" | "zarr" | "image";
 
@@ -99,4 +102,30 @@ export function aimedOffTheMap(
   const target = targetLayer(active, layers);
   if (target === null) return false;
   return layers.some((layer) => layer.id === target && !layer.visible);
+}
+
+/** Why a press on the map starts nothing; each has its own hint. */
+export type PressRefusal = "hidden-layer" | "outside-region";
+
+/**
+ * Whether a press of a field tool is refused, and why (M68, spec 5.1 R8).
+ *
+ * A hidden layer refuses every press, the first and the later ones of a ring
+ * alike. A regional project refuses only a gesture that *starts* outside its
+ * region: an object may straddle the edge, and what lies outside reaches no
+ * export, so a ring's later vertex or a stroke carried over the edge is the
+ * user's to make. `starting` says there is no gesture under way.
+ */
+export function refusePress(press: {
+  active: number | null;
+  layers: ReadonlyArray<{ id: number; visible: boolean }>;
+  region: ProjectRegion | null | undefined;
+  at: { lon: number; lat: number };
+  starting: boolean;
+}): PressRefusal | null {
+  if (aimedOffTheMap(press.active, press.layers)) return "hidden-layer";
+  if (press.starting && press.region && !regionContains(press.region, press.at.lon, press.at.lat)) {
+    return "outside-region";
+  }
+  return null;
 }

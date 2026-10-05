@@ -27,6 +27,7 @@ const catalogue: Record<string, string> = {
   "That point is outside the picture — click a place inside it.": "该点在图片之外——请点击图片内的位置。",
   "Add a layer before using this tool.": "使用此工具前，请先添加图层。",
   "That layer is hidden. Show it before drawing on it.": "该图层已隐藏。请先显示它再在其上绘制。",
+  "Outside this project's region": "在此项目的区域之外",
   "Loading basemap…": "正在加载底图…",
   "Macro Preview": "宏预览",
   "Displace · Drag the selected area to its new position. Escape cancels.": "位移 · 将所选区域拖到新位置。按 Esc 取消。",

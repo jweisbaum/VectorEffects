@@ -3679,6 +3679,78 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M105 — The map is held to the region (part 2: drawn, culled, enforced)
+
+Decision R8 in the running app. `MapView` puts `summary.region` on the camera,
+keyed on the region's value (it never changes, R1), opening a regional
+project on `regionCentre` at `minPxPerDeg`'s fit; the readout's zoom is
+relative to that floor. The overlay is split: `drawOverlayContent` is the old
+`drawOverlay`, and `drawRegionBounds` follows it with `destination-over`, so
+the dim and the edge lie under everything the overlay draws — drawn *first*
+they would be cut by an edge band's `destination-out` knock-out inside any
+selected object that straddles the edge. The dim is the theme's `void` (the
+off-map colour) at the modal scrim's 62%, an even-odd fill of the window
+against `regionMask` (`map/regionMask.ts`: a rectangle computed directly under
+a cylindrical map, `regionRings` walked under a general one, subdivided only
+near the window, so a zoomed globe does not project tens of thousands of
+points per frame); the edge is 1 px in the graticule colour. A ring a horizon
+or a seam cuts is outlined and not filled. `visibleTiles` drops a tile that
+`regionMeetsBox` says misses the region; `mapTiles` is the window's whole set,
+which the renderer's basemap and the backdrops use, so land outside the region
+is dimmed rather than gone. `allowed.ts` gains `refusePress` with reasons
+`hidden-layer` and `outside-region`: every press on a hidden layer is refused
+(M68), and outside the region only one that starts a gesture; the cursor shows
+the refusal on hover. The brush, shapes, operators, a selected region's fill,
+the eraser and the macro insert are covered; the eraser and the insert now
+also refuse a hidden layer with its hint, which the cursor already said.
+Hint *"Outside this project's region"* in all nine languages.
+
+Tests: `camera.test.ts` (Pacific at 20 px/°: no tile wholly west of 150°E or
+outside the box, both sides of the antimeridian kept; Arctic cap under polar
+stereographic: no tile south of 60°N, all four quadrants kept; global and
+`mapTiles` unchanged), `allowed.test.ts` (0°,0° refused in the Pacific, 179°E,
+179°W and the corner allowed, a cap at every longitude and its pole, a gesture
+under way allowed, hidden before outside), `regionMask.test.ts` (rectangle
+equals the projected corners; the near copy either side of the antimeridian;
+Mercator cap; a circle about the pole for both caps under stereographic and
+orthographic; the Pacific box whole on the globe; an Antarctic cap down to its
+pole line under Robinson; outlined not filled when a horizon cuts it).
+
+In the app (driver on port 5199, `VE_AUTOMATION_ROOT` scratch; projects made
+by `new_project` with a region, a stroke inside and one straddling the edge,
+saved and opened through `__veOpen`). Three spaced captures each; the third is
+the one judged, and all three agreed:
+- Pacific (160°E–160°W, 10°S–10°N), at its minimum zoom under equirectangular,
+  Mercator, the globe and stereographic: the 2:1 box fills the 1.95:1 window,
+  so only a thin dimmed band and the edge line show above and below (and a
+  sliver at the sides on the globe); the straddling stroke runs to the right
+  edge, which is 160°W.
+- Arctic (60–90°N) under the globe and stereographic: a circle about the pole
+  with its edge line, the world outside dimmed with its land still drawn; the
+  straddling stroke's field stops at the tile boundary just outside the
+  circle (whole tiles that meet the cap are drawn), under the dim. Under
+  equirectangular and Mercator the window is wholly inside the cap (Iceland
+  and Scandinavia at its 60°N foot) — nothing to dim.
+- Antarctic (90–60°S) under stereographic: the same circle round Antarctica;
+  Mercator shows the window inside the cap at the projection's edge.
+- Panned into an edge (zoomed six wheel steps, dragged 2,000 px): the Pacific
+  window stops at the box's east edge with no exterior; the Arctic globe stays
+  within the cap about the pole.
+- Refusal: on the Arctic under stereographic, a brush press in the window's
+  corner (outside the cap) shows the not-allowed cursor, adds no object and
+  puts the hint up; one at the centre draws.
+
+Turn timing (`regionMask`, `panBy`, `zoomAbout` and `visibleTiles` imported
+from the app's own Vite modules in its WebKit, 2880×1590, per call). Globe,
+global / Pacific / Arctic: pan 0.00 / 0.03 / 0.04 ms, wheel zoom (up to ten
+clamps through `cameraWithAnchor`) 0.02 / 0.08 / 0.38 ms, mask 0 / 0.07 /
+0.09 ms. Through the app's own handlers, per pointer move 0.08 / 0.13 /
+0.18 ms and per wheel event 0.05 / 0.12 / 0.57 ms. Stereographic alike. The
+regional cost is real (the cap's fit walks ~300 samples per clamp) but under
+0.6 ms of a 16 ms frame, so the fit is not memoised. `visibleTiles` measured
+3.4 ms global against 3.4 ms Arctic at the same camera; the in-app 1 / 3 / 4.5 ms
+spread was the regional cameras' deeper zoom, not the cull.
+
 ### M105 — The map is held to the region (part 1: the camera)
 
 Decision R8, the camera maths. `Camera.region?: ProjectRegion` rides on the

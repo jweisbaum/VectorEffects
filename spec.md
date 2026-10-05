@@ -1696,6 +1696,19 @@ is available in cylindrical views.
   as the cylindrical case is. A region a fixed map cuts at its own seam (a
   Pacific region under Robinson centred on Greenwich) has a box as wide as
   the map. A global project's camera is unchanged.
+- **The map shows the region** (R8, M105). A regional project opens on the
+  region's centre at the zoom that fits it. The world outside the region is
+  dimmed — the theme's off-map colour at the modal scrim's 62%, an even-odd
+  fill of the window against the region's rings — and the region's edge is
+  drawn 1 px in the graticule colour. Both lie under everything else on the
+  overlay. A region a globe's horizon or a fixed map's seam cuts is outlined
+  and not dimmed, since it has no whole inside to fill against. No field tile
+  wholly outside the region is requested (`visibleTiles`); the basemap and
+  the backdrops are drawn through the window's whole set (`mapTiles`), so the
+  land outside is dimmed rather than missing. A field tool's press that would
+  *start* a gesture outside the region is refused with the hint *"Outside
+  this project's region"*, and the cursor says so on hover, as for a hidden
+  layer (M68); a gesture already under way may cross the edge.
 
 ### 5.2 Basemap
 

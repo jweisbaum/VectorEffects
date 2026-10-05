@@ -27,6 +27,7 @@ const catalogue: Record<string, string> = {
   "That point is outside the picture — click a place inside it.": "その点は画像の外にあります。画像内の場所をクリックしてください。",
   "Add a layer before using this tool.": "このツールを使う前にレイヤーを追加してください。",
   "That layer is hidden. Show it before drawing on it.": "そのレイヤーは非表示です。描く前に表示してください。",
+  "Outside this project's region": "このプロジェクトの領域の外です",
   "Loading basemap…": "ベースマップを読み込み中…",
   "Macro Preview": "マクロのプレビュー",
   "Displace · Drag the selected area to its new position. Escape cancels.": "ずらす · 選択した範囲を新しい位置へドラッグしてください。Esc でキャンセルします。",

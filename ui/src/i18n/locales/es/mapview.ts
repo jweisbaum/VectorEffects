@@ -27,6 +27,7 @@ const catalogue: Record<string, string> = {
   "That point is outside the picture — click a place inside it.": "Ese punto está fuera de la imagen: haga clic en un lugar dentro de ella.",
   "Add a layer before using this tool.": "Añada una capa antes de usar esta herramienta.",
   "That layer is hidden. Show it before drawing on it.": "Esa capa está oculta. Muéstrela antes de dibujar en ella.",
+  "Outside this project's region": "Fuera de la región de este proyecto",
   "Loading basemap…": "Cargando el mapa base…",
   "Macro Preview": "Vista previa de macro",
   "Displace · Drag the selected area to its new position. Escape cancels.": "Desplazar · Arrastre el área seleccionada a su nueva posición. Esc cancela.",

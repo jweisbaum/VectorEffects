@@ -8,7 +8,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { layerTakes, macroFitsLayer, type LayerSourceName, type ToolKindOfWork } from "./allowed";
+import { layerTakes, macroFitsLayer, refusePress, type LayerSourceName, type ToolKindOfWork } from "./allowed";
 
 const SOURCES: LayerSourceName[] = ["painted", "raster", "zarr", "image"];
 const WORK: ToolKindOfWork[] = ["adds", "edits", "neither"];
@@ -78,5 +78,52 @@ describe("macro placement", () => {
     for (const override of [{visible:false}, {locked:true}, {source:"raster"}, {source:"zarr"}, {source:"image"}]) {
       expect(macroFitsLayer(macro, 1, [{...layers[0]!, ...override}])).toBe(false);
     }
+  });
+});
+
+/**
+ * A gesture that starts outside a regional project's region is refused
+ * (spec 5.1, R8), the way one aimed at a hidden layer is (M68): before the
+ * stroke rather than on release. One that started inside may leave it.
+ */
+describe("a press against the project's region", () => {
+  const pacific = { west: 160, east: 200, south: -10, north: 10, full_circle: false };
+  const antarctic = { west: -180, east: 180, south: -90, north: -60, full_circle: true };
+  const visible = [{ id: 1, visible: true }];
+  const press = (region: typeof pacific | null, lon: number, lat: number, starting = true) =>
+    refusePress({ active: null, layers: visible, region, at: { lon, lat }, starting });
+
+  it("refuses a gesture that starts outside it", () => {
+    expect(press(pacific, 0, 0)).toBe("outside-region");
+    expect(press(pacific, 150, 0)).toBe("outside-region");
+    expect(press(pacific, 180, 20)).toBe("outside-region");
+  });
+
+  it("allows one inside it, either side of the antimeridian", () => {
+    expect(press(pacific, 179, 0)).toBeNull();
+    expect(press(pacific, -179, 5)).toBeNull();
+    expect(press(pacific, -160, -10)).toBeNull();
+  });
+
+  it("holds a polar cap at every longitude", () => {
+    expect(press(antarctic, 123, -75)).toBeNull();
+    expect(press(antarctic, -179.5, -90)).toBeNull();
+    expect(press(antarctic, 0, -50)).toBe("outside-region");
+  });
+
+  /** A ring's later vertices may straddle the edge; only the start is held. */
+  it("lets a gesture already under way go outside", () => {
+    expect(press(pacific, 0, 0, false)).toBeNull();
+  });
+
+  it("refuses nothing in a global project", () => {
+    expect(press(null, 0, 0)).toBeNull();
+  });
+
+  it("says the layer is hidden before it says where", () => {
+    expect(refusePress({ active: 1, layers: [{ id: 1, visible: false }], region: pacific, at: { lon: 0, lat: 0 }, starting: true }))
+      .toBe("hidden-layer");
+    expect(refusePress({ active: 1, layers: [{ id: 1, visible: false }], region: pacific, at: { lon: 180, lat: 0 }, starting: false }))
+      .toBe("hidden-layer");
   });
 });

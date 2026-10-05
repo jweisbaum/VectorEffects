@@ -20,6 +20,7 @@ import {
   glyphLattice,
   glyphStepDegrees,
   visibleTiles,
+  mapTiles,
   zoomAbout,
   type Camera,
   type Viewport,
@@ -502,5 +503,64 @@ describe("the cylindrical projections (M11)", () => {
     expect(project(camera, view, point)).toEqual(
       project({ ...camera, projection: "equirectangular" }, view, point),
     );
+  });
+});
+
+/**
+ * A regional project asks for no field tile outside its region (spec 5.1,
+ * R8): the backend would render a tile that reaches no export and is dimmed
+ * on screen. The basemap and the backdrops are the window's, and keep theirs.
+ */
+describe("the tiles of a regional project", () => {
+  const pacific = { west: 160, east: 200, south: -10, north: 10, full_circle: false };
+  const arctic = { west: -180, east: 180, south: 60, north: 90, full_circle: true };
+  const wide: Viewport = { width: 1600, height: 800 };
+  /** A tile's extent as drawn: its world copy's offset applied. */
+  const drawn = (t: { z: number; x: number; y: number; lonOffset: number }) => {
+    const b = tileBounds(t.z, t.x, t.y);
+    return { ...b, west: b.west + t.lonOffset, east: b.east + t.lonOffset };
+  };
+  /** Longitude east of 160°E on the arc, unwrapped against the region. */
+  const fromWest = (lon: number) => ((lon - 160) % 360 + 360) % 360;
+
+  it("drops every tile wholly outside a box across the antimeridian", () => {
+    // 80° of window over a 40° region: the window shows 140°E to 140°W.
+    const cam: Camera = { centerLon: 180, centerLat: 0, pxPerDeg: 20 };
+    const global = visibleTiles(cam, wide);
+    expect(global.some((t) => drawn(t).east <= 150)).toBe(true);
+
+    const tiles = visibleTiles({ ...cam, region: pacific }, wide);
+    expect(tiles.length).toBeGreaterThan(0);
+    for (const t of tiles) {
+      const b = drawn(t);
+      // Nothing wholly west of 150°E (nor of 160°E, the region's edge)...
+      expect(b.east, `${t.z}/${t.x}/${t.y}`).toBeGreaterThan(150);
+      // ...nor wholly east of 160°W, nor beyond its latitudes.
+      expect(fromWest(b.west) < 40 || fromWest(b.east) > 0).toBe(true);
+      expect(b.south).toBeLessThan(10);
+      expect(b.north).toBeGreaterThan(-10);
+    }
+    // Both sides of the antimeridian are still asked for.
+    expect(tiles.some((t) => drawn(t).west >= 180 || drawn(t).east <= -170 || tileBounds(t.z, t.x, t.y).west < -170)).toBe(true);
+    expect(tiles.some((t) => tileBounds(t.z, t.x, t.y).east > 170)).toBe(true);
+  });
+
+  it("drops the tiles south of a polar cap under the polar stereographic", () => {
+    const cam = clampCamera({ centerLon: 0, centerLat: 90, pxPerDeg: 1, region: arctic, projection: "stereographic" }, wide);
+    const { region: _cap, ...globalCam } = cam;
+    const global = visibleTiles(globalCam, wide);
+    expect(global.some((t) => tileBounds(t.z, t.x, t.y).north <= 60)).toBe(true);
+    const tiles = visibleTiles(cam, wide);
+    expect(tiles.length).toBeGreaterThan(0);
+    for (const t of tiles) expect(tileBounds(t.z, t.x, t.y).north).toBeGreaterThan(60);
+    // Every longitude is still there round the pole.
+    const columns = new Set(tiles.map((t) => Math.floor(tileBounds(t.z, t.x, t.y).west / 90)));
+    expect(columns.size).toBe(4);
+  });
+
+  it("leaves a global project's tiles as they were", () => {
+    const cam: Camera = { centerLon: 180, centerLat: 0, pxPerDeg: 20 };
+    expect(mapTiles(cam, wide)).toEqual(visibleTiles(cam, wide));
+    expect(mapTiles({ ...cam, region: pacific }, wide)).toEqual(visibleTiles(cam, wide));
   });
 });

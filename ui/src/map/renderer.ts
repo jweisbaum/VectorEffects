@@ -24,6 +24,7 @@ import {
   tileRows,
   tileBounds,
   visibleBounds,
+  mapTiles,
   visibleTiles,
 } from "./camera";
 import { destination } from "./geo";
@@ -1663,6 +1664,9 @@ export class MapRenderer {
     // Which tiles each camera sees, once per frame rather than once per pass:
     // the raster and the glyphs walk the same set.
     const tiles = visibleTiles(state.camera, state.view);
+    // The basemap is the window's, not the field's: a regional project's
+    // field stops at its region, and the land outside is dimmed, not gone.
+    const baseTiles = state.camera.region ? mapTiles(state.camera, state.view) : tiles;
     const sourceTiles = source ? visibleTiles(source, state.view) : [];
     this.sourceCoverageReady = false;
     // Avoid sampling the render target while drawing into it. The mask is a
@@ -1692,8 +1696,8 @@ export class MapRenderer {
     this.drawBackdrops(state, replacing);
     const onGpu = projectedOnGpu(projectionFor(state.camera));
     const overBase = replacing.length > 0;
-    if (onGpu && !overBase) this.drawGlobeBase(state, tiles, "land", lod, drawGeographicTile);
-    else if (general && !overBase) this.projectedSurface.drawBase(state.camera, state.view, tiles, "land", lod, drawGeographicTile);
+    if (onGpu && !overBase) this.drawGlobeBase(state, baseTiles, "land", lod, drawGeographicTile);
+    else if (general && !overBase) this.projectedSurface.drawBase(state.camera, state.view, baseTiles, "land", lod, drawGeographicTile);
 
     // --- Land and coastlines ---
     gl.useProgram(this.geoProgram);
@@ -1717,8 +1721,8 @@ export class MapRenderer {
     this.drawBackdrops(state, overlaying);
 
     const drawCoast = () => {
-      if (onGpu && !overBase) this.drawGlobeBase(state, tiles, "coast", lod, drawGeographicTile);
-      else if (general && !overBase) this.projectedSurface.drawBase(state.camera, state.view, tiles, "coast", lod, drawGeographicTile);
+      if (onGpu && !overBase) this.drawGlobeBase(state, baseTiles, "coast", lod, drawGeographicTile);
+      else if (general && !overBase) this.projectedSurface.drawBase(state.camera, state.view, baseTiles, "coast", lod, drawGeographicTile);
       if (coast && !general && !overBase) {
         gl.useProgram(this.geoProgram);
         gl.bindVertexArray(coast.vao);

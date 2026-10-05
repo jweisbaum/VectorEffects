@@ -23,7 +23,7 @@ import {
 import { defaultCentre, generalMap, mapExtent, mapTransform } from "./projections/general";
 import type { GeographicMesh, MeshTriangle } from "./projections/mesh";
 import type { ProjectRegion } from "../generated/ProjectRegion";
-import { clampToRegion, regionCentre, regionFitPxPerDeg } from "./extent";
+import { clampToRegion, regionCentre, regionFitPxPerDeg, regionMeetsBox } from "./extent";
 import {
   buildPlaneMeshData, trianglesOf, virtualOf,
   type PlaneBox, type PlaneMeshData, type PlaneMeshRequest,
@@ -377,8 +377,33 @@ export function tileRows(z: number): number {
  * The result always covers the whole viewport. If the ideal level would need
  * more tiles than `budget`, a coarser level is chosen instead of returning a
  * partial list — an unpainted corner is a far worse artefact than soft pixels.
+ *
+ * These are the *field's* tiles, so a regional project's stop at its region
+ * (spec 5.1, R8): a tile wholly outside it reaches no export, and the map
+ * dims what lies there. `mapTiles` is the window's whole set.
  */
 export function visibleTiles(
+  camera: Camera,
+  view: Viewport,
+  budget = 192,
+): VisibleTile[] {
+  const tiles = mapTiles(camera, view, budget);
+  const region = camera.region;
+  if (!region) return tiles;
+  return tiles.filter((tile) => {
+    const b = tileBounds(tile.z, tile.x, tile.y);
+    return regionMeetsBox(region, { ...b, west: b.west + tile.lonOffset, east: b.east + tile.lonOffset });
+  });
+}
+
+/**
+ * Every tile the window shows, whatever the project's region: what the
+ * basemap and the backdrops are drawn through. A regional project dims the
+ * world outside its region rather than blanking it (spec 5.1, R8), so the
+ * land and an OpenStreetMap or chart backdrop stay drawn there; only the
+ * field's tiles, `visibleTiles`, stop at the region's edge.
+ */
+export function mapTiles(
   camera: Camera,
   view: Viewport,
   budget = 192,

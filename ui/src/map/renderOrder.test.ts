@@ -52,7 +52,7 @@ describe("the order the map draws in", () => {
    * depths go on top of it.
    */
   it("puts them over the basemap's land", () => {
-    expect(at('this.drawGlobeBase(state, tiles, "land"')).toBeLessThan(
+    expect(at('this.drawGlobeBase(state, baseTiles, "land"')).toBeLessThan(
       at("this.drawBackdrops(state, overlaying)"),
     );
   });
@@ -63,7 +63,7 @@ describe("the order the map draws in", () => {
    */
   it("draws the map tiles before the basemap they replace", () => {
     expect(at("this.drawBackdrops(state, replacing)")).toBeLessThan(
-      at('this.drawGlobeBase(state, tiles, "land"'),
+      at('this.drawGlobeBase(state, baseTiles, "land"'),
     );
     expect(render).toContain("const overBase = replacing.length > 0");
   });

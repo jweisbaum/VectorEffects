@@ -61,6 +61,7 @@ import {
   visibleBounds,
   project as toScreen,
   unproject,
+  mapTiles,
   visibleTiles,
   zoomAbout,
   onProjectedMeshReady,
@@ -191,9 +192,13 @@ import { imagesOverField } from "./imageStack";
 import {
   aimedOffTheMap,
   layerTakes,
+  refusePress,
   type LayerSourceName,
   type ToolKindOfWork,
 } from "./allowed";
+import type { ProjectRegion } from "../generated/ProjectRegion";
+import { regionCentre, regionContains as inProjectRegion } from "./extent";
+import { regionMask } from "./regionMask";
 import { macroFitsLayer } from "./allowed";
 import { knownGradients, loadGradients, stopsOf } from "../gradients";
 
@@ -719,6 +724,32 @@ export default function MapView({
     (): boolean => aimedOffTheMap(activeLayerRef.current, layerStackRef.current),
     [],
   );
+  /**
+   * Whether the pointer is outside a regional project's region (spec 5.1,
+   * R8), for the cursor. A ref, written per pointer report: state here would
+   * re-render the map view at pointer rate.
+   */
+  const pointerOutsideRegion = useRef(false);
+  /**
+   * Refuses a field tool's press, with the hint that says why, and answers
+   * whether it did (`allowed.ts`). Every press is refused on a hidden layer
+   * (M68); outside the project's region, only one that would *start* a
+   * gesture, since an object may straddle the edge (R8).
+   */
+  const refusedPress = useCallback((at: { lon: number; lat: number }, starting: boolean): boolean => {
+    const refusal = refusePress({
+      active: activeLayerRef.current,
+      layers: layerStackRef.current,
+      region: cameraRef.current.region,
+      at,
+      starting,
+    });
+    if (refusal === null) return false;
+    setHint(refusal === "hidden-layer"
+      ? t("That layer is hidden. Show it before drawing on it.")
+      : t("Outside this project's region"));
+    return true;
+  }, []);
   /**
    * The last frame whose tiles were all on screen. A frame that is not yet
    * draws its missing tiles from this one, dimmed, rather than blank.
@@ -1676,7 +1707,8 @@ export default function MapView({
     // pointer move. Only a changed figure notifies: the readout re-renders
     // when the number does, not every frame.
     const zoomPercent = Math.round(
-      (cameraRef.current.pxPerDeg / minPxPerDeg(viewRef.current, projectionFor(cameraRef.current))) * 100,
+      (cameraRef.current.pxPerDeg /
+        minPxPerDeg(viewRef.current, projectionFor(cameraRef.current), cameraRef.current.region)) * 100,
     );
     if (readoutStore.current && readoutStore.current.get().zoomPercent !== zoomPercent) {
       readoutStore.current.set({ zoomPercent });
@@ -1693,6 +1725,9 @@ export default function MapView({
     // The tiles this frame draws, which the backdrops are asked for too: a
     // backdrop that fetched a different set would be a second viewport.
     const viewTiles = visibleTiles(cameraRef.current, viewRef.current);
+    // The window's whole set for the backdrops: a regional project dims
+    // what lies outside its region and does not blank it (R8).
+    const windowTiles = cameraRef.current.region ? mapTiles(cameraRef.current, viewRef.current) : viewTiles;
     const alignment = alignStore.current!.get();
     const mapPoint = alignment.layer !== null && alignment.expecting === "map";
     if (!mapPoint) alignBasemap.current = null;
@@ -1776,7 +1811,7 @@ export default function MapView({
                 return token === null || token === undefined ? [] : [{ layer, stack, token }];
               }),
             },
-            viewTiles,
+            windowTiles,
           ) ?? []),
       images:
         recordingRef.current?.preview_revision !== undefined &&
@@ -2771,6 +2806,37 @@ export default function MapView({
     projectRef.current = project;
     requestDraw();
   }, [project, requestDraw]);
+
+  /**
+   * The project's region, onto the camera (spec 5.1, R8).
+   *
+   * It rides on the camera as the projection does, so every path through
+   * `clampCamera` holds the window to it. Keyed on its value rather than the
+   * summary: the region never changes after creation (R1), so this runs when
+   * a project with another region is opened and on no edit. A regional
+   * project opens on its region's centre at the zoom that fits it; a global
+   * one keeps the camera it had.
+   */
+  const regionKey = project.region ? JSON.stringify(project.region) : "";
+  useEffect(() => {
+    const region = regionKey ? (JSON.parse(regionKey) as ProjectRegion) : undefined;
+    const { region: _previous, ...camera } = cameraRef.current;
+    if (!region) {
+      if (_previous === undefined) return;
+      cameraRef.current = clampCamera(camera, viewRef.current);
+    } else {
+      const centre = regionCentre(region);
+      const projection = projectionFor(camera);
+      cameraRef.current = clampCamera({
+        ...camera,
+        centerLon: centre.lon,
+        centerLat: centre.lat,
+        pxPerDeg: minPxPerDeg(viewRef.current, projection, region),
+        region,
+      }, viewRef.current);
+    }
+    requestDraw();
+  }, [regionKey, requestDraw]);
   // The preview is served under its own revision (D71): its tiles are other
   // tiles, so the map redraws when it comes, moves and goes.
   useEffect(() => {
@@ -3424,7 +3490,7 @@ export default function MapView({
     [],
   );
 
-  const drawOverlay = useCallback(() => {
+  const drawOverlayContent = useCallback(() => {
     const canvas = overlayRef.current;
     const context = canvas?.getContext("2d");
     if (!canvas || !context) return;
@@ -4223,6 +4289,52 @@ export default function MapView({
     units,
   ]);
 
+  /**
+   * The project's region on the overlay (spec 5.1, R8): the world outside it
+   * dimmed, and its edge in the graticule's colour.
+   *
+   * Drawn *under* everything else on the overlay, by `destination-over`
+   * after the rest, rather than first: an edge band knocks its inside out
+   * with `destination-out`, which would cut the dim away under any selected
+   * object that straddles the edge. Under `destination-over` what is drawn
+   * first lies on top, so the edge goes before the dim. The dim is the
+   * theme's off-map colour at the start screen's modal scrim, 62%.
+   */
+  const drawRegionBounds = useCallback(() => {
+    const context = overlayRef.current?.getContext("2d");
+    const view = viewRef.current;
+    const mask = context ? regionMask(cameraRef.current, view) : null;
+    if (!context || !mask) return;
+    const trace = () => {
+      for (const ring of mask.rings) {
+        ring.forEach((p, i) => (i === 0 ? context.moveTo(p.x, p.y) : context.lineTo(p.x, p.y)));
+        if (mask.closed) context.closePath();
+      }
+    };
+    context.save();
+    context.globalCompositeOperation = "destination-over";
+    context.beginPath();
+    trace();
+    context.strokeStyle = mapColour("graticule", 0.9);
+    context.lineWidth = Math.max(1, window.devicePixelRatio || 1);
+    context.stroke();
+    // A region a horizon or a seam cuts has no inside to fill against: it is
+    // outlined, and not dimmed, rather than filled through a chord.
+    if (mask.closed) {
+      context.beginPath();
+      context.rect(0, 0, view.width, view.height);
+      trace();
+      context.fillStyle = mapColour("void", 0.62);
+      context.fill("evenodd");
+    }
+    context.restore();
+  }, []);
+
+  const drawOverlay = useCallback(() => {
+    drawOverlayContent();
+    drawRegionBounds();
+  }, [drawOverlayContent, drawRegionBounds]);
+
   useEffect(() => {
     drawOverlayRef.current = drawOverlay;
     drawOverlay();
@@ -4577,6 +4689,9 @@ export default function MapView({
             work,
           ) ||
             activeLayerHidden() ||
+            // A gesture may not start outside the project's region (R8);
+            // one under way may cross its edge.
+            (pointerOutsideRegion.current && gestureRef.current === null) ||
             (tool === INSERT && !canInsertMacro())),
       });
       if (canvas.style.cursor !== wanted) canvas.style.cursor = wanted;
@@ -4789,6 +4904,7 @@ export default function MapView({
 
     if (tool === ERASE) {
       const geo = unproject(cameraRef.current, viewRef.current, point);
+      if (refusedPress(geo, true)) return;
       const brush = eraserRef.current;
       eraseDrag.current = {
         points: [[geo.lon, geo.lat]],
@@ -4803,6 +4919,7 @@ export default function MapView({
     if (tool === INSERT) {
       if (macroId === null || !canInsertMacro()) return;
       const geo = unproject(cameraRef.current, viewRef.current, point);
+      if (refusedPress(geo, true)) return;
       void api
         .insertMacro(macroId, geo.lon, geo.lat, stepRef.current, activeLayer)
         .then(onProjectChanged)
@@ -5032,6 +5149,8 @@ export default function MapView({
       // into a region. A region is map space, so what is made from it is a
       // projected stamp (D55) — the px unit.
       if (region !== null && editsRegion(tool) && regionContains(region, geo.lon, geo.lat)) {
+        // Refused as a stroke from here would be (M68, R8).
+        if (refusedPress(geo, true)) return;
         void commitGesture(regionGesture(region), { ...toolState, unit: "px" }, schema, tool);
         return;
       }
@@ -5224,6 +5343,8 @@ export default function MapView({
     {
       const geo = unproject(cameraRef.current, viewRef.current, point);
       const image = imageLayersRef.current.find((image) => image.layer === activeLayer);
+      const projectRegion = cameraRef.current.region;
+      pointerOutsideRegion.current = projectRegion !== undefined && !inProjectRegion(projectRegion, geo.lon, geo.lat);
       const handle = tool === HAND && image && imageResizeHandleAt(image, cameraRef.current,
         viewRef.current, point, 9 * (window.devicePixelRatio || 1));
       applyCursor(
@@ -5783,10 +5904,7 @@ export default function MapView({
       // to the layers that *are* visible, a liquify's most of all, since its
       // preview displaces the rendered field itself and has no layer of its
       // own to displace.
-      if (activeLayerHidden()) {
-        setHint(t("That layer is hidden. Show it before drawing on it."));
-        return;
-      }
+      if (refusedPress(geo, gestureRef.current === null)) return;
       const kind = gestureKind(schema, toolState.values);
       const at: [number, number] = [geo.lon, geo.lat];
       const current = gestureRef.current;
@@ -5819,7 +5937,7 @@ export default function MapView({
       drawOverlay();
     },
     [
-      activeLayerHidden,
+      refusedPress,
       commitGesture,
       finishGesture,
       near,

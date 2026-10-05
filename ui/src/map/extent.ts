@@ -273,3 +273,26 @@ export function clampToRegion(camera: Camera, view: Viewport): Camera {
   if (!centre) return { ...camera, pxPerDeg };
   return { ...camera, centerLon: centre.lon, centerLat: centre.lat, pxPerDeg };
 }
+
+/**
+ * Whether a tile's extent overlaps the region by more than an edge.
+ *
+ * `west` and `east` may carry a world copy's offset; longitude is compared on
+ * the circle, so a tile at 170°W meets a box whose unwrapped east is 200.
+ * Touching only along an edge is not meeting: such a tile has nothing of the
+ * region in it to draw.
+ */
+export function regionMeetsBox(
+  region: ProjectRegion,
+  box: { west: number; east: number; south: number; north: number },
+): boolean {
+  if (box.south >= region.north || box.north <= region.south) return false;
+  if (region.full_circle || box.east - box.west >= 360) return true;
+  // Bring the box's west into [region.west, region.west + 360) and test the
+  // arc, then the copy one turn below for a box straddling region.west.
+  const shift = Math.floor((box.west - region.west) / 360) * 360;
+  for (const k of [shift, shift + 360]) {
+    if (box.west - k < region.east && box.east - k > region.west) return true;
+  }
+  return false;
+}
