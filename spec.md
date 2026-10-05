@@ -356,6 +356,24 @@ that fails (no width, past a pole, the whole earth) is refused with that
 reason in words. The project summary reports `region` with `east` unwrapped
 (`west + span`, above 180 across the antimeridian) and the lattice's own
 `grid_ni` and `grid_nj`. The MCP `project_new` takes the same `region`.
+**The form** (M104, decision R9) asks *Extent: Global | Regional*. Regional
+shows a 2:1 equirectangular picker drawing the basemap's coarsest coast about
+a centre longitude: dragging on empty space draws a box (the drag's direction
+decides the wrap, as the marquee's does), dragging inside it moves it by
+whole cells, Shift-drag turns the map, and a drag held near either side
+turns it by itself, so a box can be drawn across 180° without leaving the
+canvas. Below it, the four edges (*North*, *South*, *West*, *East*) are the
+source of truth: each is clamped to its range and snapped outward on commit
+by a display mirror of `Region::snapped` (Rust snaps again and is the
+authority), and the picker only writes them. *Full circle* sets the span to
+360°; *Arctic* and *Antarctic* fill a cap from 60° to the pole, editable
+afterwards. A full circle from pole to pole says *Choose Global for the
+whole earth* and disables Create. The grid size and export estimate count
+the region's nodes. With a project open, the New project dialog also offers
+*Use current view*, the map's visible box (a view a whole turn wide is a
+full circle). A regional project's status bar shows *Region: 160°E – 160°W,
+10°S – 10°N* beside its grid size, hemispheres rather than signs, formatted
+at the view (`formatRegion`); a full circle reads *all longitudes*.
 **A project made from a file** (GRIB or Zarr) is global when the file's
 lattice is, and otherwise regional on the file's extent snapped outward, so no
 node is cut off; a full-circle lattice that misses a pole is a band. The file

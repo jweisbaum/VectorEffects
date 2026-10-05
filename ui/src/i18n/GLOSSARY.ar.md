@@ -85,6 +85,8 @@ Esc). Projection names are transliterated (ميركاتور، ميلر، لام�
 | shortcut | اختصار |
 | capture (region capture) | التقاط |
 | region | منطقة |
+| extent (global or regional project) | النطاق |
+| full circle (every longitude) | دائرة كاملة |
 | speed filter | مرشح السرعة |
 | lock / locked | قفل / مقفلة |
 | visible / hidden | مرئية / مخفية |

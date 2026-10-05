@@ -1,3 +1,7 @@
+import type { ProjectRegion } from "../generated/ProjectRegion";
+import type { RegionRequest } from "../generated/RegionRequest";
+import { normalizeLon, regionNodes } from "./regionPick";
+
 /** Project file extension. Mirrors `ve_core::io::EXTENSION`. */
 export const EXTENSION = "veproj";
 
@@ -28,9 +32,16 @@ export function gridSize(resolutionDeg: number): { ni: number; nj: number } {
   };
 }
 
-/** Rough size of the GRIB this project would export, in bytes. */
-export function estimatedGribBytes(resolutionDeg: number, stepCount: number): number {
-  const { ni, nj } = gridSize(resolutionDeg);
+/**
+ * Rough size of the GRIB this project would export, in bytes: of the whole
+ * earth, or of `region`'s lattice when it has one.
+ */
+export function estimatedGribBytes(
+  resolutionDeg: number,
+  stepCount: number,
+  region: RegionRequest | null = null,
+): number {
+  const { ni, nj } = region === null ? gridSize(resolutionDeg) : regionNodes(region, resolutionDeg);
   // Two components, 16-bit packing, plus a little for section headers.
   return ni * nj * 2 * 2 * stepCount;
 }
@@ -64,4 +75,29 @@ export function mpsFromKnots(knots: number): number {
  */
 export function displayDirection(convention: string, azimuthToward: number): number {
   return convention === "from" ? (azimuthToward + 180) % 360 : azimuthToward;
+}
+
+const number = (degrees: number) => String(Math.round(Math.abs(degrees) * 100) / 100);
+
+function formatLon(lon: number): string {
+  const n = normalizeLon(lon);
+  if (n === 0 || n === -180) return `${number(n)}°`;
+  return `${number(n)}°${n > 0 ? "E" : "W"}`;
+}
+
+function formatLat(lat: number): string {
+  if (lat === 0) return "0°";
+  return `${number(lat)}°${lat > 0 ? "N" : "S"}`;
+}
+
+/**
+ * A project's region as the status bar shows it: west – east, then south –
+ * north, with hemispheres rather than signs. `lon` is null for a full
+ * circle, which the caller says in words.
+ */
+export function formatRegion(region: ProjectRegion): { lon: string | null; lat: string } {
+  return {
+    lon: region.full_circle ? null : `${formatLon(region.west)} – ${formatLon(region.east)}`,
+    lat: `${formatLat(region.south)} – ${formatLat(region.north)}`,
+  };
 }

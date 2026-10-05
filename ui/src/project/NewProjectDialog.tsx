@@ -18,8 +18,11 @@ export default function NewProjectDialog({
   discardUnsaved,
   onCreated,
   onCancel,
+  viewBounds,
 }: {
   discardUnsaved: boolean;
+  /** The open map's view, offered as the region (*Use current view*). */
+  viewBounds?: (() => [number, number, number, number] | null) | undefined;
   onCreated: (project: ProjectSummary) => void;
   onCancel: () => void;
 }) {
@@ -53,7 +56,12 @@ export default function NewProjectDialog({
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <h2>{t("New project")}</h2>
         <div className="start-new">
-          <NewProjectForm disabled={busy} submitLabel={t("Create project")} onSubmit={create} />
+          <NewProjectForm
+            disabled={busy}
+            submitLabel={t("Create project")}
+            onSubmit={create}
+            viewBounds={viewBounds}
+          />
         </div>
         {error !== null && <p className="error">{error}</p>}
         <div className="modal-actions">

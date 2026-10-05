@@ -1,8 +1,12 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import NumberField from "../NumberField";
+import { onReveal } from "../help/highlight";
 import { useT } from "../i18n";
 import type { NewProjectRequest } from "../generated/NewProjectRequest";
+import type { RegionRequest } from "../generated/RegionRequest";
+import RegionPicker from "./RegionPicker";
+import { DEFAULT_REGION, isWholeEarth, regionNodes, snapEdges } from "./regionPick";
 import {
   MAX_STEPS,
   RESOLUTIONS,
@@ -25,20 +29,34 @@ export default function NewProjectForm({
   disabled = false,
   submitLabel,
   onSubmit,
+  viewBounds,
 }: {
   disabled?: boolean;
   submitLabel: string;
   onSubmit: (request: NewProjectRequest) => void;
+  /** The open map's view, for *Use current view*: only with a project open. */
+  viewBounds?: (() => [number, number, number, number] | null) | undefined;
 }) {
   const t = useT();
   const [name, setName] = useState(() => t("Untitled"));
   const [resolution, setResolution] = useState<string>("0.25");
   const [stepHours, setStepHours] = useState(3);
   const [stepCount, setStepCount] = useState(24);
+  // Global or a region (spec.md 4.2, R9). The region is kept while Global is
+  // chosen, so switching back does not lose a box drawn a moment ago.
+  const [regional, setRegional] = useState(false);
+  const [region, setRegion] = useState<RegionRequest>(DEFAULT_REGION);
+
+  // The Help search's way to the region's controls.
+  useEffect(() => onReveal("new:regional", () => setRegional(true)), []);
 
   const resolutionDeg = Number(resolution);
-  const { ni, nj } = gridSize(resolutionDeg);
-  const exportBytes = estimatedGribBytes(resolutionDeg, stepCount);
+  // The edges as they will be on this resolution's lattice.
+  const shown = snapEdges(region, resolutionDeg);
+  const chosen = regional ? shown : null;
+  const wholeEarth = chosen !== null && isWholeEarth(chosen);
+  const { ni, nj } = chosen === null ? gridSize(resolutionDeg) : regionNodes(chosen, resolutionDeg);
+  const exportBytes = estimatedGribBytes(resolutionDeg, stepCount, chosen);
   const durationHours = stepHours * (stepCount - 1);
 
   const submit = () =>
@@ -50,8 +68,8 @@ export default function NewProjectForm({
       resolution,
       step_hours: stepHours,
       step_count: stepCount,
-      // The picker arrives with the form (M104, part 2).
-      region: null,
+      // As drawn: Rust snaps it again and is the authority on the lattice.
+      region: regional ? region : null,
     });
 
   return (
@@ -71,6 +89,18 @@ export default function NewProjectForm({
           ))}
         </select>
       </label>
+
+      <label data-feature="new:extent">
+        {t("Extent")}
+        <select value={regional ? "regional" : "global"} onChange={(e) => setRegional(e.target.value === "regional")}>
+          <option value="global">{t("Global")}</option>
+          <option value="regional">{t("Regional")}</option>
+        </select>
+      </label>
+
+      {regional && (
+        <RegionPicker value={shown} resolution={resolution} onChange={setRegion} viewBounds={viewBounds} />
+      )}
 
       <label data-feature="new:time-step">
         {t("Time step")}
@@ -94,11 +124,15 @@ export default function NewProjectForm({
         })}
         <br />
         <span className="warn-note">
-          {t("Resolution and time step cannot be changed later.")}
+          {regional
+            ? t("Resolution, time step and region cannot be changed later.")
+            : t("Resolution and time step cannot be changed later.")}
         </span>
       </p>
 
-      <button className="primary" onClick={submit} disabled={disabled}>
+      {wholeEarth && <p className="error">{t("Choose Global for the whole earth")}</p>}
+
+      <button className="primary" onClick={submit} disabled={disabled || wholeEarth}>
         {submitLabel}
       </button>
     </>

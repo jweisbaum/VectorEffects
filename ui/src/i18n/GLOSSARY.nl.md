@@ -78,6 +78,8 @@ and spatiebalk; arrow keys are "pijltoets omhoog/omlaag/links/rechts".
 | shortcut | sneltoets |
 | capture (region capture) | opname |
 | region | gebied |
+| extent (global or regional project) | omvang |
+| full circle (every longitude) | volledige cirkel |
 | speed filter | snelheidsfilter |
 | lock / locked | vergrendelen / vergrendeld |
 | visible / hidden | zichtbaar / verborgen |

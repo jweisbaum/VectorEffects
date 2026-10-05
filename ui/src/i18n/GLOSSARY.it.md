@@ -79,6 +79,8 @@ Keys: Invio, Esc, Maiusc, Canc, Opzione, Ctrl, Cmd, Spazio, Tab, frecce.
 | shortcut | scorciatoia |
 | capture (region capture) | cattura |
 | region | regione |
+| extent (global or regional project) | estensione |
+| full circle (every longitude) | giro completo |
 | speed filter | filtro di velocità |
 | lock / locked | blocca / bloccato |
 | visible / hidden | visibile / nascosto |

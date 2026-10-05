@@ -3679,6 +3679,69 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M104 — Choosing a region (part 2: the form)
+
+Decision R9, the interface half. `NewProjectForm` asks *Extent: Global |
+Regional*; Regional shows `RegionPicker`: a 2:1 equirectangular canvas
+drawing the basemap's coarsest coast (`api.basemap()`, parsed once) about an
+unwrapped centre longitude. A drag on empty space draws a box with its ends
+rounded to the nearest node, its wrap decided by the drag's direction
+(`dragRegion` over `marqueeBounds`); a drag inside moves it by whole cells;
+Shift-drag turns the map; and a drag held in either margin turns it by itself
+(`followCentre`, on a 50 ms timer as well as on pointer reports), which is
+how a box is drawn across 180°. The four `NumberField`s are the source of
+truth, clamped to their range and snapped outward on commit by `snapEdges`,
+a display mirror of `Region::snapped` in micro-degrees (Rust snaps again and
+is the authority; the request is sent as drawn). *Full circle*, *Arctic* and
+*Antarctic* (`{-180, 180, 60, 90, true}` and `{-180, 180, -90, -60, true}`,
+editable after); a full circle pole to pole says *Choose Global for the whole
+earth* and disables Create. The grid size and `estimatedGribBytes(res, steps,
+region)` count the region's nodes (`regionNodes`). `NewProjectDialog` passes
+the map's `bounds()` for *Use current view* (`regionFromView`: a view a turn
+wide is a full circle). The status bar shows *Region: 160°E – 160°W, 10°S –
+10°N* beside the grid size (`formatRegion` in `project/format.ts`; a full
+circle reads *all longitudes*). Every string in nine languages, *extent* and
+*full circle* in every glossary, a *Regional projects* section on the
+Projects help page in every language, and eight Help search entries
+(`new:extent`, `new:region-picker`, `new:region-edges`,
+`new:region-full-circle`, `new:region-arctic`, `new:region-antarctic`,
+`new:region-view`, `shell:region`), the region's ones revealed by
+`new:regional`, which the form handles by choosing Regional. The ids follow
+the form's existing `new:` area rather than the brief's `project:` names,
+which are the Project menu's.
+
+Tests: `regionPick.test.ts` (a rightward drag 170°E → 170°W is 20°, the
+leftward one 340°, a whole turn is a full circle, latitudes clamped, the
+canvas follows the drag past 180°, snapping 10.1 → 10 and 19.9 → 20 and
+across the antimeridian, the presets, the whole earth, node counts and the
+estimate, moving a box, the current view, the status-bar text);
+`RegionPicker.test.tsx` (typed edges arrive snapped, *Full circle* spans
+360, pole-to-pole refuses Create, the request carries the region and none
+for Global, *Use current view*).
+
+**In the application** (driver, `VE_AUTOMATION_ROOT` scratch, port 5199):
+from the start screen, Regional, a Shift-drag turning the picker to 180° and
+a drag from 160°E to 160°W drew a box straddling the antimeridian in the
+middle of the canvas, between New Guinea and Hawaii (capture
+`form-antimeridian`). A pointer is a whole pixel, half a degree on the
+712-px canvas, so the drawn edges read 159.75, −160.25, −9.75, 10 (161 × 80):
+the fields, not the drag, are for an exact box; *Arctic* filled the top band of the canvas all the way
+across, the West/East fields gone and the estimate 1440 × 121, about 16 MB
+(`form-arctic`); South −90 then showed the refusal with Create disabled; the
+edges typed back to 160, −160, −10, 10 created a project whose status bar
+read *Region: 160°E – 160°W, 10°S – 10°N*, 161 × 81 grid, and whose map
+opened on the central Pacific with the Solomons in the bottom-left corner
+(`capture-t10-opened-antimeridian`). Then Project → New… (answering Don't
+save), Regional, *Use current view* filled 160, −160, −10.5, 10.5 — the view
+is a little taller than the region it is held to — and the new project
+opened on the same water reading *Region: 160°E – 160°W, 10.5°S – 10.5°N*
+(`capture-t10-opened-view`). The endpoint's DOM screenshot shows neither a
+canvas's pixels nor a control's state, so the picker's own pixels were
+pasted over its place and the selects' values logged beside the picture; the
+pictures' Resolution/Extent selects and the Arctic checkbox show their
+defaults for that reason. *Open from GRIB* on a regional file was exercised
+by part 1's tests, not through the dialog here (a native file dialog).
+
 ### M105 — The map is held to the region (part 2: drawn, culled, enforced)
 
 Decision R8 in the running app. `MapView` puts `summary.region` on the camera,

@@ -670,6 +670,36 @@ body {
 .start-panel .start-new button.primary { margin-top: 12px; }
 .warn-note { color: var(--warning); }
 
+/* The region picker (spec.md 4.2): a 2:1 map to drag a box on, the four
+   edges, and the presets. */
+.region-picker { margin: 4px 0 10px; }
+.region-canvas {
+  display: block;
+  width: 100%;
+  aspect-ratio: 2 / 1;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: crosshair;
+  touch-action: none;
+}
+.region-hint { font-size: 12px; margin: 4px 0 8px; }
+.region-edges { display: grid; grid-template-columns: 1fr 1fr; column-gap: 12px; }
+.start-new .region-edges label { grid-template-columns: 4rem 1fr; }
+.start-new .region-edges input { min-width: 0; }
+.region-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.start-new .region-actions label.region-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 8px 0 0;
+}
+.start-new .region-actions button { padding: 5px 12px; }
+/* In the dialog `.modal label` is a column and `.modal input` a text box's
+   width: the checkbox sits beside its words, and the edges keep a row each. */
+.modal .region-actions label.region-check { flex-direction: row; color: var(--text); font-size: 13px; }
+.modal .region-check input[type="checkbox"] { width: auto; margin: 0; }
+.modal .region-edges label { flex-direction: row; align-items: center; justify-content: space-between; margin: 4px 0; }
+
 .start-panel button,
 .modal .start-new button {
   background: var(--raised);

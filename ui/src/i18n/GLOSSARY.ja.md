@@ -78,6 +78,8 @@ except around placeholders where the English has one.
 | shortcut | ショートカット |
 | capture (region capture) | キャプチャ |
 | region | 領域 |
+| extent (global or regional project) | 範囲 |
+| full circle (every longitude) | 全周 |
 | speed filter | 速度フィルター |
 | lock / locked | ロック / ロック中 |
 | visible / hidden | 表示 / 非表示 |

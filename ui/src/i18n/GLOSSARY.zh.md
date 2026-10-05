@@ -94,6 +94,8 @@ Enter, Delete stay in Latin; Backspace = 退格键, Space = 空格键.
 | shortcut | 快捷键 |
 | capture (region capture) | 捕获 |
 | region | 区域 |
+| extent (global or regional project) | 范围 |
+| full circle (every longitude) | 全周 |
 | speed filter | 速度过滤器 |
 | lock / locked | 锁定 / 已锁定 |
 | visible / hidden | 可见 / 已隐藏 |

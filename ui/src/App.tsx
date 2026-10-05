@@ -41,7 +41,9 @@ import SettingsDialog from "./settings/SettingsDialog";
 import type { AppInfo } from "./generated/AppInfo";
 import type { AppSettings } from "./generated/AppSettings";
 import type { CaptureMode } from "./generated/CaptureMode";
+import type { ProjectRegion } from "./generated/ProjectRegion";
 import type { ProjectSummary } from "./generated/ProjectSummary";
+import { formatRegion } from "./project/format";
 import type { TileAddress } from "./generated/TileAddress";
 import type { PositionPick } from "./picking";
 import { DEFAULT_PROJECTION, projectionOf, type ProjectionId } from "./map/projection";
@@ -899,6 +901,7 @@ function EditorApp() {
             setProject(created);
           }}
           onCancel={() => setCreating(null)}
+          viewBounds={viewBounds}
         />
       )}
 
@@ -931,6 +934,7 @@ function EditorApp() {
         <span className="muted">
           {t("{ni} × {nj} grid", { ni: project.grid_ni, nj: project.grid_nj })}
         </span>
+        {project.region !== null && <RegionLine region={project.region} />}
         <span className="spacer" />
         <StatusHint status={status} />
         <span className="spacer" />
@@ -1095,6 +1099,20 @@ function FetchProgressBar({
  * Its own component so the hint store's updates — which arrive per pointer
  * report from the map — re-render this span and nothing else.
  */
+/**
+ * The part of the earth a regional project covers, beside its grid
+ * (spec.md 4.2): hemispheres rather than signs, formatted here at the view.
+ */
+function RegionLine({ region }: { region: ProjectRegion }) {
+  const t = useT();
+  const { lon, lat } = formatRegion(region);
+  return (
+    <span className="muted" data-feature="shell:region">
+      {t("Region: {lon}, {lat}", { lon: lon ?? t("all longitudes"), lat })}
+    </span>
+  );
+}
+
 function StatusHint({ status }: { status: string | null }) {
   const t = useT();
   const state = useHint();

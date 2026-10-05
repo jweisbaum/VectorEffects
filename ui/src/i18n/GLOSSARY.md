@@ -92,6 +92,8 @@ software ("Fare clic per…", "Salva"); Dutch addresses the reader as u.
 | shortcut | atajo | raccourci | Tastenkürzel |
 | capture (region capture) | captura | capture | Aufnahme |
 | region | región | région | Bereich |
+| extent (global or regional project) | extensión | étendue | Ausdehnung |
+| full circle (every longitude) | círculo completo | tour complet | voller Kreis |
 | speed filter | filtro de velocidad | filtre de vitesse | Geschwindigkeitsfilter |
 | lock / locked | bloquear / bloqueada | verrouiller / verrouillé | sperren / gesperrt |
 | visible / hidden | visible / oculta | visible / masqué | sichtbar / ausgeblendet |
