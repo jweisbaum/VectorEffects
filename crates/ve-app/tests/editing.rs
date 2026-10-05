@@ -48,6 +48,7 @@ fn painted(label: &str) -> (TempRoot, AppState) {
             resolution: "1.0".to_owned(),
             step_hours: 3,
             step_count: 12,
+            region: None,
         },
         false,
     )
@@ -896,6 +897,7 @@ fn rotation_is_a_true_bearing_rotation_at_high_latitude() {
             resolution: "1.0".to_owned(),
             step_hours: 3,
             step_count: 4,
+            region: None,
         },
         false,
     )

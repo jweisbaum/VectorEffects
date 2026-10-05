@@ -72,6 +72,7 @@ fn project(state: &AppState) {
             resolution: "1.0".to_owned(),
             step_hours: 3,
             step_count: 6,
+            region: None,
         },
         true,
     )
@@ -167,6 +168,7 @@ fn a_macro_is_as_wide_as_its_frames_even_when_that_is_everything() {
             resolution: "1.0".to_owned(),
             step_hours: 3,
             step_count: 24,
+            region: None,
         },
         false,
     )
@@ -1003,6 +1005,7 @@ fn macro_strategy_is_static_and_missing_frames_are_transparent_or_interpolated()
             resolution: "1.0".into(),
             step_hours: 1,
             step_count: 7,
+            region: None,
         },
         true,
     )

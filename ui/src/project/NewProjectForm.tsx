@@ -50,6 +50,8 @@ export default function NewProjectForm({
       resolution,
       step_hours: stepHours,
       step_count: stepCount,
+      // The picker arrives with the form (M104, part 2).
+      region: null,
     });
 
   return (

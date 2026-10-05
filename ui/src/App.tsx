@@ -354,6 +354,7 @@ function EditorApp() {
             resolution: "0.25",
             step_hours: 3,
             step_count: 24,
+            region: null,
           }),
         );
       }

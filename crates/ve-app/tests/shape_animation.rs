@@ -29,6 +29,7 @@ impl Fixture {
                 resolution: "1.0".into(),
                 step_hours: 1,
                 step_count: 11,
+                region: None,
             },
             false,
         )

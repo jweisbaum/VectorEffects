@@ -55,6 +55,7 @@ fn app(root: &TempRoot) -> AppState {
             resolution: "1.0".to_owned(),
             step_hours: 3,
             step_count: 8,
+            region: None,
         },
         false,
     )

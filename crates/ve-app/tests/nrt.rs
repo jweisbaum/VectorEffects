@@ -58,6 +58,7 @@ fn app(root: &TempRoot, step_hours: u32, step_count: u32) -> AppState {
             resolution: "1.0".to_owned(),
             step_hours,
             step_count,
+            region: None,
         },
         false,
     )

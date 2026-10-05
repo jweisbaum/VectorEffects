@@ -54,6 +54,7 @@ fn open(state: &AppState) {
             resolution: "1.0".to_owned(),
             step_hours: 3,
             step_count: 2,
+            region: None,
         },
         true,
     )

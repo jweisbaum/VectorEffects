@@ -3679,6 +3679,31 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M104 — Choosing a region (part 1: IPC and MCP)
+
+Decision R9, the backend half. `NewProjectRequest.region` is an optional
+`RegionRequest { west, east, south, north, full_circle }`, snapped outward by
+`Region::snapped` (a failure is an `AppError` carrying `InvalidRegion`'s plain
+reason); `ProjectSummary.region` is a `ProjectRegion` whose `east` is
+unwrapped, and `grid_ni`/`grid_nj` are the region's lattice. MCP `project_new`
+takes `region`, and `GUIDE` says when. `import::settings_for` seeds a region
+from the first file's lattice (`region_of_lattice`): global lattice, global
+project; otherwise the extent snapped outward; a wrapping lattice short of a
+pole is a full-circle band; an extent that snaps to the whole earth is global.
+`grib_project` and `zarr_project` then re-read the file onto that region so a
+save and a load hold the same rasters (at the cost of a second read for a
+regional file). The frontend form passes `region: null`; the picker is part 2.
+
+Tests: `a_request_with_a_region_snaps_it`,
+`a_request_across_the_antimeridian_keeps_its_arc`,
+`a_bad_region_says_what_is_wrong` (projects.rs);
+`a_file_that_is_not_global_seeds_its_region`,
+`a_global_file_makes_a_global_project` (grib_import.rs);
+`project_new_with_a_region` (mcp.rs). **Deferred:** the MCP agent scenario
+(`tools/mcp-scenarios/run.sh`, "a project covering the Bering Sea"), by the
+controller's decision. **Not done:** a regional file that is not lat/lon
+(projected or unstructured) still makes a global project.
+
 ### M103 — Exports on the region
 
 Decisions R6 and R7. `export::run` builds its `GridSpec` from

@@ -301,6 +301,34 @@ async fn a_client_creates_a_project_and_the_app_sees_it() {
 }
 
 #[tokio::test]
+async fn project_new_with_a_region() {
+    let root = TempRoot::new("project-region");
+    let app = mock_app(&root);
+    let (port, token) = serve(&app);
+    let client = client(port, &token).await;
+    let mut args = new_project_args("Bering");
+    args["region"] = json!({ "west": 160.0, "east": -160.0, "south": 50.0, "north": 70.0 });
+    let summary = call(&client, "project_new", args).await;
+    assert_eq!(summary["grid_ni"], 41);
+    assert_eq!(summary["grid_nj"], 21);
+    let status = call(&client, "project_status", json!({})).await;
+    let region = &status["project"]["region"];
+    // East is unwrapped: the box runs on past 180.
+    assert_eq!(region["west"], 160.0);
+    assert_eq!(region["east"], 200.0);
+    assert_eq!(region["south"], 50.0);
+    assert_eq!(region["north"], 70.0);
+    assert_eq!(region["full_circle"], false);
+    // A global project reports none.
+    let mut global = new_project_args("Whole");
+    global["discard_unsaved"] = json!(true);
+    call(&client, "project_new", global).await;
+    let status = call(&client, "project_status", json!({})).await;
+    assert!(status["project"]["region"].is_null());
+    client.cancel().await.expect("close");
+}
+
+#[tokio::test]
 async fn unsaved_work_is_refused_without_discard() {
     let root = TempRoot::new("dirty");
     let app = mock_app(&root);

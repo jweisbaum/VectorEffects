@@ -59,6 +59,7 @@ fn new_project(field_kind: &str) -> NewProjectRequest {
         resolution: "1.0".to_owned(),
         step_hours: 3,
         step_count: 2,
+        region: None,
     }
 }
 

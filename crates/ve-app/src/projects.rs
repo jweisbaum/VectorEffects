@@ -17,6 +17,54 @@ use crate::commands::AppState;
 use crate::error::{AppError, Context, Result};
 use crate::session::{OpenProject, Session};
 
+/// The region a project covers, for the map and the inspector.
+///
+/// `east` is unwrapped (`west + span`), so a box across the antimeridian has
+/// east above 180 and the frontend never has to guess the wrap.
+#[derive(Debug, Clone, Serialize, JsonSchema, TS)]
+#[ts(export, export_to = "ProjectRegion.ts")]
+pub struct ProjectRegion {
+    pub west: f64,
+    pub east: f64,
+    pub south: f64,
+    pub north: f64,
+    /// Covers every longitude (a polar cap or a band).
+    pub full_circle: bool,
+}
+
+impl ProjectRegion {
+    fn of(region: &ve_core::region::Region) -> Self {
+        let (west, east, south, north) = region.bounds_deg();
+        Self {
+            west,
+            east,
+            south,
+            north,
+            full_circle: region.is_full_circle(),
+        }
+    }
+}
+
+/// A region as the interface sends it: edges in degrees, `east` read as the
+/// arc east of `west` (spec 4.2). Snapped outward to the lattice by
+/// `ve_core::region::Region::snapped`.
+#[derive(Debug, Clone, Deserialize, Serialize, TS, JsonSchema)]
+#[ts(export, export_to = "RegionRequest.ts")]
+pub struct RegionRequest {
+    /// Western edge, longitude in degrees.
+    pub west: f64,
+    /// Eastern edge: the box runs east from `west` to here, so `160` to
+    /// `-160` is forty degrees across the antimeridian.
+    pub east: f64,
+    /// Southern edge, latitude in degrees.
+    pub south: f64,
+    /// Northern edge, latitude in degrees.
+    pub north: f64,
+    /// Cover every longitude, ignoring `east` (a polar cap or a band).
+    #[serde(default)]
+    pub full_circle: bool,
+}
+
 /// What the frontend needs to know about the open project.
 #[derive(Debug, Clone, Serialize, JsonSchema, TS)]
 #[ts(export, export_to = "ProjectSummary.ts")]
@@ -75,6 +123,9 @@ pub struct ProjectSummary {
     /// its file, not on the document, so an edit must not re-address it. See
     /// `OpenProject::image_token`.
     pub image_token: u64,
+    /// The part of the earth the project covers; absent for a global one
+    /// (spec.md 4.2).
+    pub region: Option<ProjectRegion>,
     /// Whether there is anything to undo.
     pub can_undo: bool,
     /// Whether there is anything to redo.
@@ -84,6 +135,7 @@ pub struct ProjectSummary {
 impl ProjectSummary {
     pub(crate) fn of(open: &OpenProject) -> Self {
         let settings = open.project.settings.clone();
+        let lattice = settings.lattice();
         Self {
             name: open.project.name.clone(),
             path: open.path.as_ref().map(|p| p.to_string_lossy().into_owned()),
@@ -95,8 +147,8 @@ impl ProjectSummary {
             .to_owned(),
             resolution_deg: settings.resolution.degrees(),
             resolution_label: settings.resolution.label().to_owned(),
-            grid_ni: settings.resolution.ni(),
-            grid_nj: settings.resolution.nj(),
+            grid_ni: lattice.ni,
+            grid_nj: lattice.nj,
             step_hours: settings.step_hours.hours(),
             step_count: settings.step_count,
             start_unix_s: settings.start_unix_s,
@@ -119,6 +171,7 @@ impl ProjectSummary {
             object_count: open.project.object_count() as u32,
             revision: open.revision,
             image_token: open.image_token,
+            region: settings.region.as_ref().map(ProjectRegion::of),
             can_undo: open.history.can_undo(),
             can_redo: open.history.can_redo(),
         }
@@ -154,6 +207,10 @@ pub struct NewProjectRequest {
     pub step_hours: u32,
     /// Number of time steps.
     pub step_count: u32,
+    /// The part of the earth to cover; absent for the whole of it. Fixed for
+    /// the life of the project (decision R1).
+    #[serde(default)]
+    pub region: Option<RegionRequest>,
 }
 
 fn default_field_kind() -> String {
@@ -209,12 +266,29 @@ fn parse_step_hours(value: u32) -> Result<StepHours> {
 impl NewProjectRequest {
     /// Validates the request and builds the project settings.
     pub fn into_settings(&self) -> Result<ProjectSettings> {
-        Ok(ProjectSettings::new(
+        let resolution = parse_resolution(&self.resolution)?;
+        let mut settings = ProjectSettings::new(
             parse_field_kind(&self.field_kind)?,
-            parse_resolution(&self.resolution)?,
+            resolution,
             parse_step_hours(self.step_hours)?,
             self.step_count,
-        ))
+        );
+        if let Some(r) = &self.region {
+            // The reason is Region's own, in plain words: a box with no
+            // width, a latitude past the pole, the whole earth.
+            settings.region = Some(
+                ve_core::region::Region::snapped(
+                    r.west,
+                    r.east,
+                    r.south,
+                    r.north,
+                    r.full_circle,
+                    resolution,
+                )
+                .map_err(AppError::from)?,
+            );
+        }
+        Ok(settings)
     }
 }
 
@@ -497,7 +571,51 @@ mod tests {
             resolution: "0.25".to_owned(),
             step_hours: 3,
             step_count: 24,
+            region: None,
         }
+    }
+
+    fn region(west: f64, east: f64, south: f64, north: f64) -> Option<RegionRequest> {
+        Some(RegionRequest {
+            west,
+            east,
+            south,
+            north,
+            full_circle: false,
+        })
+    }
+
+    #[test]
+    fn a_request_with_a_region_snaps_it() {
+        let mut r = request();
+        r.resolution = "1.0".to_owned();
+        r.region = region(10.3, 20.4, 40.2, 50.6);
+        let region = r.into_settings().expect("valid").region.expect("regional");
+        // Outward on every edge.
+        assert_eq!(region.bounds_deg(), (10.0, 21.0, 40.0, 51.0));
+    }
+
+    #[test]
+    fn a_request_across_the_antimeridian_keeps_its_arc() {
+        let mut r = request();
+        r.resolution = "1.0".to_owned();
+        r.region = region(170.0, -160.0, 50.0, 70.0);
+        let region = r.into_settings().expect("valid").region.expect("regional");
+        assert_eq!(region.bounds_deg(), (170.0, 200.0, 50.0, 70.0));
+        let shown = ProjectRegion::of(&region);
+        assert_eq!((shown.west, shown.east), (170.0, 200.0));
+        assert!(!shown.full_circle);
+    }
+
+    #[test]
+    fn a_bad_region_says_what_is_wrong() {
+        let mut r = request();
+        r.region = region(10.0, 10.0, 0.0, 10.0);
+        let message = r.into_settings().expect_err("no width").to_string();
+        assert!(message.contains("no width"), "{message}");
+        r.region = region(0.0, 10.0, -95.0, 10.0);
+        let message = r.into_settings().expect_err("past the pole").to_string();
+        assert!(message.contains("pole"), "{message}");
     }
 
     #[test]

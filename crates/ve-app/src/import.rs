@@ -246,7 +246,41 @@ pub fn settings_for(sequences: &[RasterSequence]) -> Option<ProjectSettings> {
         steps.clamp(1, MAX_STEPS),
     );
     settings.start_unix_s = Some(first.valid_unix_s);
+    settings.region = region_of_lattice(&first.grid, resolution);
     Some(settings)
+}
+
+/// The region a file's lattice asks for, or `None` for a global project
+/// (decision R9).
+///
+/// A file whose lattice is global gives a global project. Any other gives its
+/// own extent snapped **outward** at `resolution`, so no node of the file is
+/// cut off. A lattice that wraps but misses a pole is a full-circle band; and
+/// an extent that snaps to the whole earth is global too.
+pub(crate) fn region_of_lattice(
+    grid: &ve_core::raster::RasterGrid,
+    resolution: Resolution,
+) -> Option<ve_core::region::Region> {
+    let south = grid.lat0 - f64::from(grid.nj - 1) * grid.dlat;
+    let north = grid.lat0;
+    // Past half a cell short of a pole is a cell that is not there.
+    let half = grid.dlat / 2.0;
+    let both_poles = north >= 90.0 - half && south <= -90.0 + half;
+    if grid.wraps && both_poles {
+        return None;
+    }
+    let east = grid.lon0 + f64::from(grid.ni - 1) * grid.dlon;
+    // A refusal here is the whole earth or a degenerate box: the project is
+    // then global, which holds every node of the file.
+    ve_core::region::Region::snapped(
+        grid.lon0,
+        east,
+        south.max(-90.0),
+        north.min(90.0),
+        grid.wraps,
+        resolution,
+    )
+    .ok()
 }
 
 /// Creates a project shaped by a GRIB2 file and imports the file into it.
@@ -294,13 +328,20 @@ pub fn grib_project(
             opening.source(0, (unpacked + frames * 2).min(unpacked * 2), unpacked * 2);
         })?
     };
-    opening.finished();
-    let imported = import::Imported { sequences, skipped };
+    let mut imported = import::Imported { sequences, skipped };
     let settings = settings_for(&imported.sequences).ok_or_else(|| {
         AppError::Grib(ve_grib::GribError::NoVectorField(
             "the file holds no time step to build a project from".to_owned(),
         ))
     })?;
+    // A file that is not global makes a regional project (decision R9), and
+    // is then read the way that project will read it on every reopening: onto
+    // the region's lattice, so a save and a load hold the same rasters.
+    if settings.region.is_some() {
+        let mut project = Project::new("scratch".to_owned(), settings.clone());
+        imported = resample_into(&mut project, &path)?;
+    }
+    opening.finished();
     let name = path
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())

@@ -192,6 +192,7 @@ fn import_undo_frame_edits_filters_and_reopen_use_the_existing_raster_path() {
             resolution: "1.0".into(),
             step_hours: 1,
             step_count: 6,
+            region: None,
         },
         false,
     )
@@ -322,6 +323,7 @@ fn a_regional_project_reads_only_its_region_of_a_store() {
             resolution: "1.0".to_owned(),
             step_hours: 3,
             step_count: 2,
+            region: None,
         },
         false,
     )

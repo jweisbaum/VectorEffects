@@ -50,6 +50,7 @@ fn painted(label: &str) -> (TempRoot, AppState) {
             resolution: "1.0".to_owned(),
             step_hours: 3,
             step_count: 2,
+            region: None,
         },
         false,
     )
@@ -105,6 +106,7 @@ fn a_brush_from_a_ring_paints_inside_the_ring_only() {
             resolution: "1.0".to_owned(),
             step_hours: 3,
             step_count: 2,
+            region: None,
         },
         false,
     )

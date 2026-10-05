@@ -58,6 +58,7 @@ fn project(label: &str) -> (TempRoot, AppState) {
             resolution: "1.0".to_owned(),
             step_hours: 3,
             step_count: 4,
+            region: None,
         },
         false,
     )
@@ -555,6 +556,7 @@ fn whole_map_animated_copy_cost() {
             resolution: "0.25".to_owned(),
             step_hours: 3,
             step_count: 24,
+            region: None,
         },
         false,
     )

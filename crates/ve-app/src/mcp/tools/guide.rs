@@ -102,7 +102,7 @@ pub const GUIDE: &str = concat!(
    d. To animate any object: object_set with auto_key true at each step that matters, giving every property that changes there. On a gradient `circle`, SpeedMin is the wind at the CENTRE and SpeedMax the wind at the RIM, whatever the names suggest.
    e. Check with field_sample (numbers) or screenshot (picture), then export_grib or export_zarr if a file was asked for; a drawn project has no dates, so give it a reference time.
 
-A project that is already open may hold the user's unsaved work: project_status says, and project_new refuses to discard it unless told to. Ask, or project_save it first.
+A project about one place (the Bering Sea, the Arctic, a coast) takes a region on project_new: west, east (the arc east of west, so 160 to -160 crosses 180), south, north; a polar cap is full_circle true. Smaller grid, smaller files. The region cannot change later.\n\nA project that is already open may hold the user's unsaved work: project_status says, and project_new refuses to discard it unless told to. Ask, or project_save it first.
 
 Conventions: positions are [lon, lat] in degrees, longitude -180 to 180. Speeds are m/s (1 kt = 0.514 m/s). A direction is the azimuth the flow moves TOWARD, degrees clockwise from north — the opposite of a meteorological \"from\" bearing. Times are UTC. File paths must be absolute or begin with ~/. A choice option is {\"kind\":\"choice\",\"index\":i} indexing the option's variants. Every edit is undoable (undo; history_list is that undo list, not past weather) and shows on the map as it is made."
 );

@@ -227,11 +227,20 @@ pub fn zarr_project(
         |name| name.to_string_lossy().into_owned(),
     )]);
     let sequences = read_reporting(&path, &|done, total| opening.source(0, done, total))?;
+    let settings = crate::import::settings_for(&sequences)
+        .ok_or_else(|| AppError::Internal("Zarr has no vector frames".into()))?;
+    // A store that is not global makes a regional project (decision R9) and
+    // is read as that project will be on reopening: its region, and a node.
+    let sequences = if settings.region.is_some() {
+        read_for(&path, &settings, &|done, total| {
+            opening.source(0, done, total)
+        })?
+    } else {
+        sequences
+    };
     opening.finished();
     with_session(state, |session| {
         crate::projects::refuse_to_discard(session, discard_unsaved)?;
-        let settings = crate::import::settings_for(&sequences)
-            .ok_or_else(|| AppError::Internal("Zarr has no vector frames".into()))?;
         let name = path
             .file_stem()
             .map(|s| s.to_string_lossy().into_owned())

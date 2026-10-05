@@ -181,6 +181,7 @@ fn check_centre(centre: &str) {
                 resolution: "0.25".to_owned(),
                 step_hours: 3,
                 step_count: 3,
+                region: None,
             },
             false,
         )

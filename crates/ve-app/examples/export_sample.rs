@@ -30,6 +30,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             resolution: "1.0".to_owned(),
             step_hours: 6,
             step_count: 3,
+            region: None,
         },
         false,
     )?;

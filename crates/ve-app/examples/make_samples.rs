@@ -45,6 +45,7 @@ fn project(
             resolution: resolution.to_owned(),
             step_hours,
             step_count: steps,
+            region: None,
         },
         true,
     )?;

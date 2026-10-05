@@ -61,6 +61,7 @@ fn state(root: &TempRoot, step_hours: u32, step_count: u32) -> AppState {
             resolution: "1.0".to_owned(),
             step_hours,
             step_count,
+            region: None,
         },
         false,
     )
@@ -861,4 +862,31 @@ fn a_global_project_keeps_the_whole_file() {
     let read = ve_grib::import::read_file(std::path::Path::new(&grib), None).expect("read");
     assert_eq!((grids[0].ni, grids[0].nj), (360, 181));
     assert_eq!(grids[0].hash, read.sequences[0].frames[0].grid.hash);
+}
+
+/// A file that covers only part of the earth makes a regional project whose
+/// region holds every node of the file (decision R9).
+#[test]
+fn a_file_that_is_not_global_seeds_its_region() {
+    let root = TempRoot::new("seed-region");
+    let app = fresh(&root);
+    let path = write_patch(&root, "patch.grib2");
+    let summary = import::grib_project(&app, path, false).expect("create");
+    let region = summary.region.expect("a regional project");
+    assert!(region.west <= 0.0 && region.east >= 10.0, "{region:?}");
+    assert!(region.south <= 80.0 && region.north >= 90.0, "{region:?}");
+    assert_eq!(region.east - region.west, 10.0, "no wider than the file");
+    assert_eq!((summary.grid_ni, summary.grid_nj), (11, 11));
+    let grids = first_grids(&app);
+    assert_eq!((grids[0].ni, grids[0].nj), (11, 11), "the whole patch");
+}
+
+#[test]
+fn a_global_file_makes_a_global_project() {
+    let root = TempRoot::new("seed-global");
+    let app = fresh(&root);
+    let path = write_file(&root, "wind.grib2", &[FieldKind::Wind], &[0, 3]);
+    let summary = import::grib_project(&app, path, false).expect("create");
+    assert!(summary.region.is_none());
+    assert_eq!((summary.grid_ni, summary.grid_nj), (360, 181));
 }

@@ -25,6 +25,13 @@ pub struct ProjectNewParams {
     /// (step_count - 1) x step_hours hours. `import_history` resizes it to
     /// the range it downloads, so any value does before one.
     pub step_count: u32,
+    /// Cover only part of the earth. Omit for the whole of it. West, east,
+    /// south and north are degrees; east is the arc east of west, so a box
+    /// over the Bering Sea is west 160, east -160. `full_circle` covers every
+    /// longitude (a polar cap: south 60, north 90). Snapped outward to the
+    /// grid; fixed for the life of the project.
+    #[serde(default)]
+    pub region: Option<crate::projects::RegionRequest>,
     /// Discard unsaved changes in the open project. Refused without it.
     #[serde(default)]
     pub discard_unsaved: bool,
@@ -107,6 +114,7 @@ impl<R: tauri::Runtime> VectorEffects<R> {
             resolution: p.resolution,
             step_hours: p.step_hours,
             step_count: p.step_count,
+            region: p.region,
         };
         let discard = p.discard_unsaved;
         self.write("project_new", true, move |app| {

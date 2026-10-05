@@ -348,6 +348,21 @@ project has). A **full-circle** region (a polar cap) covers every longitude
 and wraps like the global grid: no duplicated column. The whole earth is not
 a region; it is a global project. The region is immutable after creation.
 
+**Creating one** (M104). `new_project` takes an optional `region` of `west`,
+`east`, `south`, `north` in degrees and `full_circle`: `east` is read as the
+arc east of `west` (so `160` to `-160` is forty degrees across the
+antimeridian), and `Region::snapped` snaps it outward to the resolution; a box
+that fails (no width, past a pole, the whole earth) is refused with that
+reason in words. The project summary reports `region` with `east` unwrapped
+(`west + span`, above 180 across the antimeridian) and the lattice's own
+`grid_ni` and `grid_nj`. The MCP `project_new` takes the same `region`.
+**A project made from a file** (GRIB or Zarr) is global when the file's
+lattice is, and otherwise regional on the file's extent snapped outward, so no
+node is cut off; a full-circle lattice that misses a pole is a band. The file
+is then read the way the project will read it on reopening. A GRIB that is
+not on a lat/lon grid is resampled onto the global lattice first and so makes
+a global project.
+
 **Grid resolution does not affect the preview.** It governs the exported file
 and nothing else: preview tiles are sized by zoom, so a 0.1° project pans and
 zooms exactly as fast as a 1° one. Choosing the finest grid costs export time

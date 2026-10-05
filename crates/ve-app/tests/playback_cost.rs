@@ -61,6 +61,7 @@ fn project(label: &str, steps: u32) -> (TempRoot, AppState) {
             resolution: "0.25".to_owned(),
             step_hours: 1,
             step_count: steps,
+            region: None,
         },
         false,
     )
