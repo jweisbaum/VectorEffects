@@ -360,11 +360,12 @@ reason in words. The project summary reports `region` with `east` unwrapped
 lattice is, and otherwise regional on the file's extent snapped outward, so no
 node is cut off; a full-circle lattice that misses a pole is a band. The file
 is then read the way the project will read it on reopening. A GRIB that is
-not on a lat/lon grid, and a Zarr store (written on the global lattice, its
-unwritten chunks missing), is judged by where it has values: latitude from the
+not on a lat/lon grid (resampled onto the global lattice) is judged by where it
+has values: latitude from the
 first and last rows holding any, longitude the whole circle less its largest
 run of empty columns (so a field across 180 degrees is one arc), snapped
-outward.
+outward. A Zarr store is on the routing layout's global lattice and so makes a
+global project, however little of it holds values.
 
 **Grid resolution does not affect the preview.** It governs the exported file
 and nothing else: preview tiles are sized by zoom, so a 0.1° project pans and

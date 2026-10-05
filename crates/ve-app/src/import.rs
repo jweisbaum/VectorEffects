@@ -263,9 +263,9 @@ pub(crate) fn region_of_lattice(
 ) -> Option<ve_core::region::Region> {
     let south = grid.lat0 - f64::from(grid.nj - 1) * grid.dlat;
     let north = grid.lat0;
-    // Past half a cell short of a pole is a cell that is not there.
-    let half = grid.dlat / 2.0;
-    let both_poles = north >= 90.0 - half && south <= -90.0 + half;
+    // A lattice one row short of a pole still reaches it: the routing
+    // stores leave the south pole row out (ve-zarr's `Layout`).
+    let both_poles = north >= 90.0 - grid.dlat / 2.0 && south <= -90.0 + grid.dlat * 1.5;
     if grid.wraps && both_poles {
         return None;
     }
@@ -609,6 +609,12 @@ mod tests {
     #[test]
     fn a_global_lattice_seeds_no_region() {
         let grid = lattice(360, 181, -180.0, 90.0, 1.0);
+        assert!(region_of_lattice(&grid, Resolution::Deg1).is_none());
+    }
+
+    #[test]
+    fn a_lattice_one_row_short_of_the_south_pole_is_still_global() {
+        let grid = lattice(360, 180, -180.0, 90.0, 1.0);
         assert!(region_of_lattice(&grid, Resolution::Deg1).is_none());
     }
 
