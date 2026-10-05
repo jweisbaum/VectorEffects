@@ -20,12 +20,11 @@
  */
 
 import type { ProjectRegion } from "../generated/ProjectRegion";
-import { MAX_PX_PER_DEG, type Camera, type GeoPoint, type Viewport } from "./camera";
+import { MAX_PX_PER_DEG, normalizeLon as norm, type Camera, type GeoPoint, type Viewport } from "./camera";
 import { containsLon } from "./marquee";
 import { DEFAULT_PROJECTION, projectionOf, type Projection } from "./projection";
 import { defaultCentre, mapTransform, type Box, type GeneralMap, type XY } from "./projections/general";
 
-const norm = (lon: number) => ((((lon + 180) % 360) + 360) % 360) - 180;
 const clamp = (value: number, lo: number, hi: number) => Math.min(Math.max(value, lo), hi);
 
 /** The pole a full-circle region reaches, if any. */
@@ -37,25 +36,26 @@ function poleOf(region: ProjectRegion): 90 | -90 | null {
 }
 
 /**
- * The region's boundary, subdivided so no step exceeds `stepDeg`.
+ * The region's boundary as separate closed rings, subdivided so no step
+ * exceeds `stepDeg`; what an even-odd fill of the exterior draws over.
  *
- * A rectangle is one closed ring — south edge west to east, east edge, north
- * edge back, west edge — with its longitudes *unwrapped* (east may exceed
- * 180), so the ring never jumps across the antimeridian; a caller that needs
- * [-180, 180) normalises. A cap is one parallel, closed: -180 to 180 at the
- * edge away from its pole. A full-circle band, which touches neither pole,
- * has two parallels: its south one and then its north one, each closed.
+ * A rectangle is one ring — south edge west to east, east edge, north edge
+ * back, west edge — with its longitudes *unwrapped* (east may exceed 180),
+ * so the ring never jumps across the antimeridian; a caller that needs
+ * [-180, 180) normalises. A cap is one parallel, -180 to 180 at the edge
+ * away from its pole. A full-circle band, which touches neither pole, is two
+ * parallels: its south one and its north one.
  */
-export function regionOutline(region: ProjectRegion, stepDeg = 2): GeoPoint[] {
+export function regionRings(region: ProjectRegion, stepDeg = 2): GeoPoint[][] {
   const parallel = (lat: number): GeoPoint[] => {
     const n = Math.max(1, Math.ceil(360 / stepDeg));
     return Array.from({ length: n + 1 }, (_, i) => ({ lon: -180 + (360 * i) / n, lat }));
   };
   if (region.full_circle) {
     const pole = poleOf(region);
-    if (pole === 90) return parallel(region.south);
-    if (pole === -90) return parallel(region.north);
-    return [...parallel(region.south), ...parallel(region.north)];
+    if (pole === 90) return [parallel(region.south)];
+    if (pole === -90) return [parallel(region.north)];
+    return [parallel(region.south), parallel(region.north)];
   }
   const { west, east, south, north } = region;
   const edge = (a: GeoPoint, b: GeoPoint): GeoPoint[] => {
@@ -67,7 +67,15 @@ export function regionOutline(region: ProjectRegion, stepDeg = 2): GeoPoint[] {
   };
   const sw = { lon: west, lat: south }, se = { lon: east, lat: south };
   const ne = { lon: east, lat: north }, nw = { lon: west, lat: north };
-  return [...edge(sw, se), ...edge(se, ne), ...edge(ne, nw), ...edge(nw, sw), { ...sw }];
+  return [[...edge(sw, se), ...edge(se, ne), ...edge(ne, nw), ...edge(nw, sw), { ...sw }]];
+}
+
+/**
+ * The region's boundary as one point list: `regionRings` concatenated. A
+ * band's two parallels follow one another; use `regionRings` to draw it.
+ */
+export function regionOutline(region: ProjectRegion, stepDeg = 2): GeoPoint[] {
+  return regionRings(region, stepDeg).flat();
 }
 
 /** Whether a position lies in the region. Longitude is read on the arc. */

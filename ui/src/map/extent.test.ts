@@ -13,10 +13,12 @@ import {
   type Viewport,
 } from "./camera";
 import {
+  clampToRegion,
   regionCentre,
   regionContains,
   regionFitPxPerDeg,
   regionOutline,
+  regionRings,
 } from "./extent";
 
 const pacific: ProjectRegion = { west: 160, east: 200, south: -10, north: 10, full_circle: false };
@@ -42,6 +44,36 @@ describe("the region outline", () => {
     expect(ring.every((p) => p.lat === 60)).toBe(true);
     expect(ring[0]!.lon).toBe(-180);
     expect(ring[ring.length - 1]!.lon).toBe(180);
+  });
+});
+
+describe("regionRings", () => {
+  const closed = (ring: { lon: number; lat: number }[]) => {
+    const a = ring[0]!, b = ring[ring.length - 1]!;
+    // A parallel closes at the same place one turn round: -180 and 180.
+    return a.lat === b.lat && (a.lon === b.lon || Math.abs(b.lon - a.lon) === 360);
+  };
+
+  it("is one ring for a box, one for a cap and two for a band, each closed", () => {
+    const band: ProjectRegion = { west: -180, east: 180, south: -30, north: 40, full_circle: true };
+    const antarctic: ProjectRegion = { west: -180, east: 180, south: -90, north: -55, full_circle: true };
+    const cases: [ProjectRegion, number[]][] = [
+      [pacific, [-10]], [arctic, [60]], [antarctic, [-55]], [band, [-30, 40]],
+    ];
+    for (const [region, lats] of cases) {
+      const rings = regionRings(region, 2);
+      expect(rings).toHaveLength(lats.length);
+      rings.forEach((ring, i) => {
+        expect(closed(ring)).toBe(true);
+        expect(ring[0]!.lat).toBe(lats[i]);
+      });
+    }
+  });
+
+  it("is what the outline concatenates", () => {
+    const band: ProjectRegion = { west: -180, east: 180, south: -30, north: 40, full_circle: true };
+    expect(regionOutline(band, 5)).toEqual(regionRings(band, 5).flat());
+    expect(regionOutline(pacific, 5)).toEqual(regionRings(pacific, 5)[0]);
   });
 });
 
@@ -136,9 +168,13 @@ describe("the camera held to the region (R8)", () => {
   });
 
   it("a global camera is untouched", () => {
-    const cam = { centerLon: 10, centerLat: 20, pxPerDeg: 3 };
-    expect(clampCamera(cam, view)).toEqual(clampCamera({ ...cam }, view));
-    expect(clampCamera(cam, view)).not.toHaveProperty("region");
+    const cam: Camera = { centerLon: 10, centerLat: 20, pxPerDeg: 10 };
+    // No region: the very same object back, not a copy.
+    expect(clampToRegion(cam, view)).toBe(cam);
+    // Inside the world's limits (floor min(800/360, 600/180) = 2.2 px/°; the
+    // window is 60° tall, so the centre may sit anywhere within ±60°), the
+    // whole clamp hands back the same centre and zoom and adds no region.
+    expect(clampCamera(cam, view)).toEqual({ centerLon: 10, centerLat: 20, pxPerDeg: 10 });
   });
 
   it("keeps the region through a zoom and a change of projection", () => {
