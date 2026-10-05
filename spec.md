@@ -307,6 +307,7 @@ new-project dialog no longer asks for it.
 | `resolution` | `Deg1` \| `Deg0_5` \| `Deg0_25` \| `Deg0_1` | Yes |
 | `step_hours` | `1` \| `3` \| `6` \| `24` | Yes |
 | `step_count` | `1..=240` | No |
+| `region` | absent (global) \| a box on the resolution's lattice (§4.2) | Yes |
 | `direction_convention` | `From` \| `Toward` | No (display only) |
 | `name` | text | No — edited in place from the title bar, undoably (M25) |
 
@@ -335,6 +336,17 @@ Origin at `(lon 0, lat 90)`, scanning west→east then north→south.
 | 0.1° | 3600 | 1801 | 6,483,600 | 25.9 MB |
 
 There is no duplicated column at longitude 360. Rows exist at both poles.
+
+**Regional projects** (M100). A project may carry a `region` instead of
+covering the earth: a box stored as integer micro-degrees (`west`, `span`
+eastward from the west edge, `north`, `south`), every edge a multiple of the
+resolution, snapped *outward* from what was drawn. The span rather than an
+east longitude lets a box cross the antimeridian with no special case. The
+project's lattice is then the region's nodes, edges inclusive, north-west
+first, on the same global lattice (so a node is the same node a global
+project has). A **full-circle** region (a polar cap) covers every longitude
+and wraps like the global grid: no duplicated column. The whole earth is not
+a region; it is a global project. The region is immutable after creation.
 
 **Grid resolution does not affect the preview.** It governs the exported file
 and nothing else: preview tiles are sized by zoom, so a 0.1° project pans and

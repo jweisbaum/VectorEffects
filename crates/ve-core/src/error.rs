@@ -26,6 +26,13 @@ pub enum CoreError {
     #[error("step count {0} is out of range 1..=240")]
     InvalidStepCount(u32),
 
+    /// A project's region is malformed or off its lattice.
+    #[error("invalid region: {reason}")]
+    InvalidRegion {
+        /// What is wrong with it.
+        reason: String,
+    },
+
     /// An object's active range extends past the project's last step.
     #[error("object '{object}' ends at step {end}, past the last step {last}")]
     RangeOutOfBounds {

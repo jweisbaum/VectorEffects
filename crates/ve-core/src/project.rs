@@ -211,9 +211,22 @@ pub struct ProjectSettings {
     /// which older projects did not have and would not have chosen.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub colour_gradients: Option<crate::colour::ColourGradients>,
+    /// The part of the earth the project covers; `None` is the whole of it
+    /// (spec.md 4.2). Immutable after creation, like the resolution: every
+    /// import is cropped to it and every export written on it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub region: Option<crate::region::Region>,
 }
 
 impl ProjectSettings {
+    /// The lattice this project exports on and crops every import to.
+    pub fn lattice(&self) -> crate::regrid::TargetGrid {
+        match self.region {
+            Some(region) => region.lattice(self.resolution),
+            None => self.resolution.target_grid(),
+        }
+    }
+
     /// The colour scale this project draws with.
     ///
     /// The default for the field kind until someone sets one, so a project
@@ -245,6 +258,7 @@ impl ProjectSettings {
             start_unix_s: None,
             colour_scale: None,
             colour_gradients: None,
+            region: None,
             direction_convention: match field_kind {
                 FieldKind::Wind => DirectionConvention::From,
                 FieldKind::Current => DirectionConvention::Toward,
@@ -609,6 +623,9 @@ impl Project {
         }
         if self.settings.step_count == 0 || self.settings.step_count > MAX_STEPS {
             return Err(CoreError::InvalidStepCount(self.settings.step_count));
+        }
+        if let Some(region) = &self.settings.region {
+            region.validate(self.settings.resolution)?;
         }
 
         let last = self.settings.last_step();

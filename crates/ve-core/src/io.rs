@@ -910,6 +910,33 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_regional_project_round_trips() {
+        let dir = TempDir::new();
+        let path = dir.path("regional.veproj");
+        let mut project = sample();
+        project.settings.region = Some(
+            crate::region::Region::snapped(160.0, -160.0, -10.0, 10.0, false, Resolution::Deg025)
+                .unwrap(),
+        );
+        save(&project, &path).unwrap();
+        let loaded = load(&path).unwrap();
+        assert_eq!(loaded.settings, project.settings);
+        assert!(loaded.settings.region.is_some());
+    }
+
+    #[test]
+    fn a_project_without_a_region_is_global() {
+        let project = sample();
+        let mut json = serde_json::to_value(&project.settings).unwrap();
+        // A global project never writes the key, and an older file lacks it.
+        assert!(json.get("region").is_none());
+        json.as_object_mut().unwrap().remove("region");
+        let settings: ProjectSettings = serde_json::from_value(json).unwrap();
+        assert_eq!(settings.region, None);
+        assert_eq!(settings.lattice(), settings.resolution.target_grid());
+    }
+
     /// The motion flags are a document field like any other, and an object
     /// that was never told to move must save nothing at all (spec.md 9.3).
     #[test]
@@ -1290,7 +1317,12 @@ mod tests {
     fn the_archive_holds_no_unexpected_entries() {
         let dir = TempDir::new();
         let path = dir.path("t.veproj");
-        save(&sample(), &path).unwrap();
+        let mut project = sample();
+        project.settings.region = Some(
+            crate::region::Region::snapped(160.0, -160.0, -10.0, 10.0, false, Resolution::Deg025)
+                .unwrap(),
+        );
+        save(&project, &path).unwrap();
 
         let file = std::fs::File::open(&path).unwrap();
         let mut archive = zip::ZipArchive::new(file).unwrap();

@@ -22,6 +22,7 @@ pub mod io;
 pub mod keyframe;
 pub mod project;
 pub mod raster;
+pub mod region;
 pub mod regrid;
 pub mod schema;
 pub mod shape_animation;

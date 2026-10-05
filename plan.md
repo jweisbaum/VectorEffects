@@ -3679,6 +3679,16 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M100 — A project may cover a region
+
+Part 1 of regional projects (design: `docs/superpowers/specs/2026-10-05-regional-projects-design.md`).
+`ve_core::region::Region` is a box in integer micro-degrees with an eastward
+span, snapped outward to the resolution's lattice; `ProjectSettings.region`
+is optional, absent from a global project's file (no schema bump), and
+`ProjectSettings::lattice()` is the region's nodes or the global grid.
+`Project::validate` checks it. Nothing consumes it yet: imports, export and
+the UI follow in later parts.
+
 ### M99 — The auto scale spans sea-surface temperature
 
 The user's instruction of 2026-10-03: auto scale should work the same with
