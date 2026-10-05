@@ -2,6 +2,7 @@
 //! drives the application, on only while the setting says so.
 
 pub mod capture;
+pub mod claude_settings;
 pub mod clients;
 pub mod desktop;
 pub mod events;
