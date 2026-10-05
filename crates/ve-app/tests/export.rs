@@ -1072,6 +1072,25 @@ fn an_arctic_export_holds_the_pole_once() {
     assert_eq!(u.la2, 80_000_000);
     assert_eq!((u.lo1, u.lo2), (180_000_000, 179_750_000));
     assert_eq!(u.values.len(), 1440 * 41);
+    // The pole itself (row 0, column 0, longitude -180) and the last column,
+    // a step short of the seam, two degrees down.
+    for (row, column, lon, lat) in [
+        (0usize, 0usize, -180.0, 90.0),
+        (8, 1439, 179.75, 88.0),
+        (8, 0, -180.0, 88.0),
+    ] {
+        let (eu, ev) = field_at(&project, lon, lat);
+        assert!((eu - 20.0).abs() < 0.01, "painted at ({lon}, {lat})");
+        let index = row * 1440 + column;
+        assert!(
+            (u.values[index] - eu).abs() < 0.01,
+            "u at row {row} column {column}"
+        );
+        assert!(
+            (decoded[1].values[index] - ev).abs() < 0.01,
+            "v at row {row} column {column}"
+        );
+    }
 }
 
 #[test]
@@ -1112,6 +1131,19 @@ fn a_regional_zarr_export_writes_only_the_regions_chunks() {
         "only the shards the region intersects"
     );
 
+    // One node inside the region, one outside it in the same chunk: the
+    // stroke runs on to 60°E, so 31°E is painted in the field and absent here.
+    let (inside, _) = field_at(&project, 10.0, 0.0);
+    assert!((zarr_u(&path, 10.0, 0.0) - inside).abs() < 0.05);
+    assert!(
+        zarr_u(&path, 31.0, 0.0).is_nan(),
+        "31°E is outside the region"
+    );
+    assert!(
+        zarr_u(&path, -31.0, 0.0).is_nan(),
+        "31°W is outside the region"
+    );
+
     // The metadata is the global store's, to the letter.
     let metadata: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(path.join("data/zarr.json")).expect("metadata"),
@@ -1131,4 +1163,114 @@ fn the_estimate_counts_the_regions_points() {
         vec![[0.0, 0.0], [1.0, 0.0]],
     );
     assert_eq!(export::estimate(&project, 16).points_per_message, 61 * 41);
+}
+
+/// The first parameter at step 0 of the store at a node on the 1° lattice
+/// (row 0 is 90°N, column 0 is -180°).
+fn zarr_u(path: &std::path::Path, lon: f64, lat: f64) -> f32 {
+    use ve_zarr::export::f16;
+    use zarrs::array::{Array, ArraySubset};
+    use zarrs::filesystem::FilesystemStore;
+    let store = std::sync::Arc::new(FilesystemStore::new(path).expect("store"));
+    let array = Array::open(store, "/data").expect("open");
+    let row = (90.0 - lat).round() as u64;
+    let column = (lon + 180.0).round() as u64;
+    let cell: Vec<f16> = array
+        .retrieve_array_subset(&ArraySubset::new_with_ranges(&[
+            0..1,
+            0..1,
+            row..row + 1,
+            column..column + 1,
+        ]))
+        .expect("cell");
+    cell[0].to_f32()
+}
+
+fn shards_present(path: &std::path::Path) -> Vec<(usize, usize)> {
+    let mut present = Vec::new();
+    for lat in 0..4usize {
+        for lon in 0..5usize {
+            if path.join(format!("data/c/0/0/{lat}/{lon}")).is_file() {
+                present.push((lat, lon));
+            }
+        }
+    }
+    present
+}
+
+#[test]
+fn a_regional_zarr_export_across_the_antimeridian() {
+    let root = TempRoot::new("regional-zarr-180");
+    // 165°E to 165°W, 7°S to 7°N: the edges fall inside tiles, so the chunks
+    // at the edges are partly covered. The stroke runs well past both.
+    let project = regional_project(
+        "1.0",
+        (165.0, -165.0, -7.0, 7.0, false),
+        vec![[150.0, 0.0], [180.0, 0.0], [-150.0, 0.0]],
+    );
+    let path = root.0.join("out.zarr");
+    export::run_zarr(
+        &project,
+        &zarr_request(&path),
+        &AtomicBool::new(false),
+        |_| {},
+    )
+    .expect("export");
+
+    // Longitude bands 0 (the store's west end) and 4 (its east end), where
+    // the region lives on either side of the seam; latitude bands 1 and 2
+    // either side of row 90.
+    assert_eq!(shards_present(&path), [(1, 0), (1, 4), (2, 0), (2, 4)]);
+
+    for (lon, lat) in [(170.0, 0.0), (179.0, 0.0), (-179.0, 0.0), (-170.0, 3.0)] {
+        let (expected, _) = field_at(&project, lon, lat);
+        assert!((expected - 20.0).abs() < 0.01);
+        let got = zarr_u(&path, lon, lat);
+        assert!((got - expected).abs() < 0.05, "({lon}, {lat}) holds {got}");
+    }
+    // Just outside, in the partly covered chunks on each side.
+    assert!(zarr_u(&path, 164.0, 0.0).is_nan(), "164°E");
+    assert!(zarr_u(&path, -164.0, 0.0).is_nan(), "164°W");
+    assert!(zarr_u(&path, 170.0, 8.0).is_nan(), "8°N");
+}
+
+#[test]
+fn an_arctic_zarr_export_writes_only_the_cap() {
+    let root = TempRoot::new("regional-zarr-arctic");
+    // A ring at 75°N. The cap reaches down to 74°N, so the chunk holding
+    // 71–80°N is partly covered, and the ring paints below the cap's edge.
+    let ring: Vec<[f64; 2]> = (0..=8)
+        .map(|k| {
+            let lon = -180.0 + 45.0 * f64::from(k);
+            [if lon >= 180.0 { lon - 360.0 } else { lon }, 75.0]
+        })
+        .collect();
+    let project = regional_project("1.0", (-180.0, 180.0, 74.0, 90.0, true), ring);
+    let path = root.0.join("out.zarr");
+    export::run_zarr(
+        &project,
+        &zarr_request(&path),
+        &AtomicBool::new(false),
+        |_| {},
+    )
+    .expect("export");
+
+    let shards = shards_present(&path);
+    assert!(!shards.is_empty());
+    assert!(
+        shards.iter().all(|&(lat, _)| lat == 0),
+        "nothing south of 70°N is stored: {shards:?}"
+    );
+    // Painted and in the cap, on both sides of the seam and at the prime
+    // meridian.
+    for lon in [179.0, -179.0, 0.0, 90.0] {
+        let (expected, _) = field_at(&project, lon, 76.0);
+        assert!((expected - 20.0).abs() < 0.01, "painted at {lon}");
+        let got = zarr_u(&path, lon, 76.0);
+        assert!((got - expected).abs() < 0.05, "{lon}°E holds {got}");
+    }
+    // Painted in the field, below the cap's edge: absent from the store.
+    let (painted, _) = field_at(&project, 0.0, 73.0);
+    assert!((painted - 20.0).abs() < 0.01);
+    assert!(zarr_u(&path, 0.0, 73.0).is_nan(), "73°N is outside the cap");
 }

@@ -4693,23 +4693,23 @@ Key field values:
   degrees.
 - `La1` = 90 000 000, `Lo1` = 0, `La2` = −90 000 000, `Lo2` = 360 000 000 − Di. for a global
   grid, which keeps its prime-meridian start so a global export's bytes never
-  move. A regional project's export (M103) is on that grid: the lattice of the
-project's region at its resolution, edges inclusive, `Ni` × `Nj` of the
-region's, and the size estimate (§12.4) counts those points.
-
-| Region | La1 | Lo1 | La2 | Lo2 | Ni × Nj at 1° |
-|---|---|---|---|---|---|
-| 30°W–30°E, 20°S–20°N | 20 000 000 | 330 000 000 | −20 000 000 | 30 000 000 | 61 × 41 |
-| 170°E–170°W, 10°S–10°N | 10 000 000 | 170 000 000 | −10 000 000 | 190 000 000 | 21 × 21 |
-| Arctic cap, 80°N–90°N, all longitudes (0.25°) | 90 000 000 | 180 000 000 | 80 000 000 | 179 750 000 | 1440 × 41 |
-
-ecCodes reads all three without warning and returns the painted value at a
-painted node. A regional grid (M102) writes its own corner: `La1` the north row,
+  move. A regional grid (M102, written by the export of M103) is the lattice
+  of the project's region at its resolution, edges inclusive, `Ni` × `Nj` of
+  the region's, and the size estimate (§12.4) counts those points. It writes
+  its own corner: `La1` the north row,
   `Lo1` the west column in GRIB's `[0, 360)` (only `ve-grib` converts),
   `La2` = `La1` − (Nj−1)·Di, `Lo2` = (`Lo1` + (Ni−1)·Di) mod 360. A region
   across 180° is contiguous (`Lo1` 160 000 000, `Lo2` 200 000 000); across 0°
   `Lo2` < `Lo1`, which GRIB allows; a polar cap has Ni = 360/d and `Lo2` =
-  `Lo1` − Di mod 360.
+  `Lo1` − Di mod 360. Examples, which ecCodes reads without warning and
+  returns the painted value at a painted node:
+
+  | Region | La1 | Lo1 | La2 | Lo2 | Ni × Nj |
+  |---|---|---|---|---|---|
+  | 30°W–30°E, 20°S–20°N (1°) | 20 000 000 | 330 000 000 | −20 000 000 | 30 000 000 | 61 × 41 |
+  | 170°E–170°W, 10°S–10°N (1°) | 10 000 000 | 170 000 000 | −10 000 000 | 190 000 000 | 21 × 21 |
+  | Arctic cap, 80°N–90°N, all longitudes (0.25°) | 90 000 000 | 180 000 000 | 80 000 000 | 179 750 000 | 1440 × 41 |
+
 - **Resolution and component flags** = `0x30` — i and j increments given, u/v
   resolved relative to easterly/northerly directions (earth-relative, not
   grid-relative). This matters: consumers will otherwise rotate the vectors.
