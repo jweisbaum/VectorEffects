@@ -487,6 +487,31 @@ pub struct McpSettings {
     pub enabled: bool,
     pub port: u16,
     pub token: String,
+    /// What a client may do without asking the person first. Applied when an
+    /// Add button is pressed (`mcp::clients`), not when it changes.
+    #[serde(default)]
+    pub ask: McpAsk,
+    /// The Claude Code permission rules the last *Add to Claude Code* wrote,
+    /// so the next one replaces exactly those and never a rule the person
+    /// wrote themselves (`mcp::claude_settings`).
+    #[serde(default)]
+    pub claude_rules: Vec<String>,
+}
+
+/// Which MCP tools a client may run without asking (spec.md 8.8), by their
+/// effect (`mcp::tools::effects`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "McpAsk.ts")]
+pub enum McpAsk {
+    /// Ask only before what leaves VectorEffects or cannot be undone: saving,
+    /// exporting, downloading, discarding, and `invoke`.
+    #[default]
+    Outside,
+    /// Ask before every tool: each client's own default.
+    Everything,
+    /// Never ask.
+    Nothing,
 }
 
 /// The port a fresh install listens on when the service is first enabled.
@@ -498,6 +523,8 @@ impl Default for McpSettings {
             enabled: false,
             port: DEFAULT_MCP_PORT,
             token: String::new(),
+            ask: McpAsk::default(),
+            claude_rules: Vec::new(),
         }
     }
 }
@@ -1252,6 +1279,14 @@ pub fn chart_status(state: tauri::State<'_, AppState>) -> Result<crate::charts::
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_settings_file_from_before_the_choice_reads_as_the_default() {
+        let old = r#"{"mcp":{"enabled":true,"port":47391,"token":"t"}}"#;
+        let s: AppSettings = serde_json::from_str(old).expect("reads");
+        assert_eq!(s.mcp.ask, McpAsk::Outside);
+        assert!(s.mcp.claude_rules.is_empty());
+    }
 
     #[test]
     fn regional_and_custom_projections_survive_settings_round_trips() {

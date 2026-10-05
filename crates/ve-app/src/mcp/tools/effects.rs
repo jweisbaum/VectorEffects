@@ -10,6 +10,8 @@
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::model::ToolAnnotations;
 
+use crate::settings::McpAsk;
+
 /// What a tool does, coarsely enough to decide whether to ask first.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Effect {
@@ -124,6 +126,15 @@ pub fn annotations(effect: Effect) -> ToolAnnotations {
     )
 }
 
+/// Whether a tool of `effect` may run without asking under the choice `ask`.
+pub fn runs_without_asking(effect: Effect, ask: McpAsk) -> bool {
+    match ask {
+        McpAsk::Everything => false,
+        McpAsk::Nothing => true,
+        McpAsk::Outside => matches!(effect, Effect::Read | Effect::Edit | Effect::View),
+    }
+}
+
 /// Sets every routed tool's annotations from the table. A tool the table
 /// does not know is left without, which the integration test refuses.
 pub fn apply<S>(router: &mut ToolRouter<S>) {
@@ -131,5 +142,35 @@ pub fn apply<S>(router: &mut ToolRouter<S>) {
         if let Some(effect) = effect_of(name) {
             route.attr.annotations = Some(annotations(effect));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn what_runs_without_asking_under_each_choice() {
+        for e in [Effect::Read, Effect::Edit, Effect::View] {
+            assert!(runs_without_asking(e, McpAsk::Outside), "{e:?}");
+        }
+        for e in [
+            Effect::Files,
+            Effect::Network,
+            Effect::Discard,
+            Effect::Anything,
+        ] {
+            assert!(!runs_without_asking(e, McpAsk::Outside), "{e:?}");
+        }
+        assert!(
+            TABLE
+                .iter()
+                .all(|&(_, e)| !runs_without_asking(e, McpAsk::Everything))
+        );
+        assert!(
+            TABLE
+                .iter()
+                .all(|&(_, e)| runs_without_asking(e, McpAsk::Nothing))
+        );
     }
 }

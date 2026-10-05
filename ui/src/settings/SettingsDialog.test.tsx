@@ -145,7 +145,7 @@ const settings: AppSettings = {
   chart_directory: "",
   projection: "equirectangular",
   auto_scale: false,
-  mcp: { enabled: false, port: 47391, token: "" },
+  mcp: { enabled: false, port: 47391, token: "", ask: "outside", claude_rules: [] },
 };
 
 let container: HTMLDivElement;
