@@ -1195,7 +1195,10 @@ the same and only the disk shrinks. The file name carries the region's key
 after the range, so a global and a regional fetch of the same hours never
 share a file; a global project's name, grid and bytes are what they were.
 A fetched file that covers none of the region is refused naming the file and
-the region, as an import is (R10).
+the region, as an import is (R10). A near-real-time fetch's first time is written even when it
+is empty inside the region, as the empty message that holds the period's
+origin: a region can be empty where the globe is not, and writing nothing
+would let the layer's second time land on step 0.
 
 **It aligns the way an imported forecast does.** The file's forecast hours
 count from its own first hour, so the first hour of the range lands on the

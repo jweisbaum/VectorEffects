@@ -76,6 +76,9 @@ struct Fake {
     /// Whether each node differs from the next, so a message has something
     /// to pack: a constant field packs to no data section at all.
     textured: bool,
+    /// Hours whose field is empty from 150 E to 135 W — across a region at
+    /// 160 E to 160 W — and present everywhere else.
+    blank_inside: Vec<i64>,
 }
 
 impl Fake {
@@ -85,6 +88,7 @@ impl Fake {
             times: unix_times.iter().map(|t| t / HOUR).collect(),
             unwritten: Vec::new(),
             textured: false,
+            blank_inside: Vec::new(),
         })
     }
 
@@ -94,6 +98,21 @@ impl Fake {
             times: unix_times.iter().map(|t| t / HOUR).collect(),
             unwritten: Vec::new(),
             textured: true,
+            blank_inside: Vec::new(),
+        })
+    }
+
+    fn boxed_blank_inside(
+        variable: Variable,
+        unix_times: &[i64],
+        blank: &[i64],
+    ) -> Box<dyn FieldSource> {
+        Box::new(Self {
+            variable,
+            times: unix_times.iter().map(|t| t / HOUR).collect(),
+            unwritten: Vec::new(),
+            textured: false,
+            blank_inside: blank.iter().map(|t| t / HOUR).collect(),
         })
     }
 
@@ -107,6 +126,7 @@ impl Fake {
             times: unix_times.iter().map(|t| t / HOUR).collect(),
             unwritten: unwritten.iter().map(|t| t / HOUR).collect(),
             textured: false,
+            blank_inside: Vec::new(),
         })
     }
 }
@@ -142,7 +162,21 @@ impl FieldSource for Fake {
             }]);
         }
         let speed = (step.valid_time.hour + 1) as f32;
-        let u = if self.textured {
+        let blank = self
+            .blank_inside
+            .contains(&step.valid_time.hours_since_unix_epoch());
+        let u = if blank {
+            // GRIB columns 600..900 are 150 E to 225 E (135 W).
+            (0..ve_zarr::POINTS_PER_STEP)
+                .map(|k| {
+                    if (600..900).contains(&(k % ve_zarr::NI as usize)) {
+                        f32::NAN
+                    } else {
+                        speed
+                    }
+                })
+                .collect()
+        } else if self.textured {
             (0..ve_zarr::POINTS_PER_STEP)
                 .map(|k| speed + (k % 97) as f32 * 0.01)
                 .collect()
@@ -735,4 +769,61 @@ fn a_regional_projects_fetched_layer_holds_its_region() {
     assert_eq!((grid.ni, grid.nj), (161, 81));
     assert!(grid.sample(-179.5, 0.0).is_some());
     assert!(grid.sample(0.0, 0.0).is_none());
+    // Every edge of the region is in the file and holds the field: the
+    // first frame is midnight's, an eastward current of hour 0 plus one.
+    for (lon, lat) in [
+        (160.0, 0.0),
+        (-160.0, 0.0),
+        (180.0, 10.0),
+        (180.0, -10.0),
+        (160.0, 10.0),
+        (-160.0, -10.0),
+    ] {
+        let uv = grid
+            .sample(lon, lat)
+            .unwrap_or_else(|| panic!("no node at {lon}, {lat}"));
+        assert_eq!((uv.u, uv.v), (1.0, 0.0), "at {lon}, {lat}");
+    }
+}
+
+/// A regional fetch whose first time has data elsewhere on the globe but
+/// none inside the region still holds the period's origin: that time is the
+/// empty message that keeps the file's first hour on step 0, not nothing,
+/// so the importer does not rebase the second day onto step 0.
+#[test]
+fn a_regional_first_time_empty_inside_the_region_keeps_its_place() {
+    let root = TempRoot::new("blank-inside");
+    let state = app(&root, 1, 24);
+    make_regional(&state);
+    let open = |_: Product| -> ve_zarr::Result<Box<dyn FieldSource>> {
+        Ok(Fake::boxed_blank_inside(
+            Variable::SurfaceCurrent,
+            &[OCT_1, OCT_1 + DAY],
+            &[OCT_1],
+        ))
+    };
+    nrt::nrt_import(
+        &state,
+        &request(&["duacs"], 1, true, true),
+        NOW,
+        open,
+        |_| {},
+    )
+    .expect("import");
+    let mut session = state.session.lock().expect("lock");
+    let project = &session.require_open().expect("open").project;
+    let frames = &project.layers[1].raster.as_ref().expect("a raster").frames;
+    let offsets: Vec<f64> = frames.iter().map(|f| f.offset_hours).collect();
+    assert_eq!(offsets, [0.0, 24.0]);
+    assert_eq!(frames[1].valid_unix_s, OCT_1 + DAY);
+    let settings = &project.settings;
+    let shown = |step: u32| {
+        project.layers[1]
+            .imported_frame(settings, step)
+            .and_then(|frame| frame.grid.sample(170.0, 0.0))
+            .map(|uv| uv.u)
+    };
+    assert_eq!(shown(0), None, "the empty first day shows nothing");
+    // The second midnight: hour 0 plus one, on its own day.
+    assert_eq!(shown(24), Some(1.0));
 }

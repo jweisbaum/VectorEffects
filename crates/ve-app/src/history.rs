@@ -104,7 +104,17 @@ impl Extent {
             Resolution::Deg025,
         )
         .map(|snapped| snapped.lattice(Resolution::Deg025))
-        .unwrap_or_else(|_| Resolution::Deg025.target_grid());
+        .unwrap_or_else(|err| {
+            // A full circle whose edges snap out to both poles is the
+            // globe, which is not a region; that is the expected refusal.
+            let rounds_to_globe = region.is_full_circle()
+                && (south / 0.25).floor() * 0.25 <= -90.0
+                && (north / 0.25).ceil() * 0.25 >= 90.0;
+            if !rounds_to_globe {
+                tracing::warn!(?region, %err, "the region did not re-snap to 0.25 degrees; fetching the globe");
+            }
+            Resolution::Deg025.target_grid()
+        });
         Self {
             grid: GridSpec::of_lattice(&lattice, SOURCE_UDEG),
             window: Window::of(&lattice),
@@ -771,8 +781,15 @@ pub(crate) fn fetch_source_to_file(
                     // first message that holds the origin is the one
                     // exception, and it is the step with no source.
                     let built = fields.and_then(|fields| {
-                        let unwritten =
-                            step.is_some() && fields.iter().all(|f| f.u.iter().all(|x| x.is_nan()));
+                        // The first time of a padded fetch holds the origin
+                        // whether or not it has anything inside the window: a
+                        // region can be empty where the globe is not, and
+                        // writing nothing there would let the importer rebase
+                        // the file onto its second time.
+                        let holds_origin = pad_first && position == 0;
+                        let unwritten = step.is_some()
+                            && !holds_origin
+                            && fields.iter().all(|f| f.u.iter().all(|x| x.is_nan()));
                         if unwritten {
                             Ok(Vec::new())
                         } else {
@@ -1143,6 +1160,18 @@ mod tests {
         let extent = Extent::of(&settings_with(Resolution::Deg01, Some(cases[4].0)));
         assert_eq!(extent.grid.ni, 84);
         assert_eq!(extent.grid.lo1_udeg, 349_750_000);
+    }
+
+    /// A 0.1 degree full circle from 89.9 S to 89.9 N snaps out to both
+    /// poles at 0.25 degrees, which is the globe: fetched as the global grid,
+    /// still named for its region.
+    #[test]
+    fn a_full_circle_that_rounds_to_both_poles_fetches_the_globe() {
+        let r = region(-180.0, 180.0, -89.9, 89.9, true, Resolution::Deg01);
+        let extent = Extent::of(&settings_with(Resolution::Deg01, Some(r)));
+        assert_eq!(extent.grid, GRID);
+        assert!(extent.window.is_global());
+        assert!(extent.file_name("x", (1, 2)).contains(&r.key()));
     }
 
     /// A global project's fetch is what it always was: the global grid, the
