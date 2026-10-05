@@ -133,7 +133,8 @@ pub struct ExportEstimate {
 /// An upper bound including a bitmap. Missing cells have no packed value;
 /// constant fields need no packed data, so their files can be much smaller.
 pub fn estimate(project: &Project, bits: u8) -> ExportEstimate {
-    let points = project.settings.resolution.point_count();
+    let lattice = project.settings.lattice();
+    let points = u64::from(lattice.ni) * u64::from(lattice.nj);
     let messages = project.settings.step_count * 2 * project.kinds_present().len() as u32;
     // `bits` per packed value, rounded up to whole octets per message, plus a
     // little for section headers.
@@ -239,11 +240,9 @@ pub fn run(
 ) -> Result<ExportResult> {
     let started = std::time::Instant::now();
     let settings = &project.settings;
-    let grid = GridSpec::global(
-        settings.resolution.ni(),
-        settings.resolution.nj(),
-        settings.resolution.micro_degrees(),
-    );
+    // The project's own lattice: the whole earth for a global project (the
+    // same bytes as ever) and the region's nodes for a regional one (R6).
+    let grid = GridSpec::of_lattice(&settings.lattice(), settings.resolution.micro_degrees());
 
     let reference_time = ReferenceTime {
         year: request.year,
@@ -424,13 +423,23 @@ pub fn run_zarr(
         let grib_points: Vec<(f64, f64)> = grid.points().collect();
         let ni = layout.shape[3] as usize;
         let nj = layout.shape[2] as usize;
-        let points: Vec<ve_core::LonLat> = (0..nj)
-            .flat_map(|row| (0..ni).map(move |column| row * ni + (column + ni / 2) % ni))
-            .map(|index| {
-                let (lon, lat) = grib_points[index];
-                ve_core::LonLat { lon, lat }
-            })
-            .collect();
+        // A regional project evaluates only its own nodes (R7): `cells` holds
+        // each one's index in the plane, `points` its position, in plane order.
+        // Everything else stays NaN and the writer drops all-NaN chunks.
+        let mut cells: Vec<usize> = Vec::new();
+        let mut points: Vec<ve_core::LonLat> = Vec::new();
+        for row in 0..nj {
+            for column in 0..ni {
+                let (lon, lat) = grib_points[row * ni + (column + ni / 2) % ni];
+                if settings
+                    .region
+                    .is_none_or(|region| region.contains(lon, lat))
+                {
+                    cells.push(row * ni + column);
+                    points.push(ve_core::LonLat { lon, lat });
+                }
+            }
+        }
         drop(grib_points);
         let kinds = project.kinds_present();
         let plane = ni * nj;
@@ -477,10 +486,10 @@ pub fn run_zarr(
                         FieldKind::Wind => (0, plane),
                         FieldKind::Current => (2 * plane, 3 * plane),
                     };
-                    for (index, sample) in samples.iter().enumerate() {
+                    for (&cell, sample) in cells.iter().zip(&samples) {
                         if sample.coverage > 0.0 {
-                            frame[u_plane + index] = f16::from_f32(sample.uv.u);
-                            frame[v_plane + index] = f16::from_f32(sample.uv.v);
+                            frame[u_plane + cell] = f16::from_f32(sample.uv.u);
+                            frame[v_plane + cell] = f16::from_f32(sample.uv.v);
                         }
                     }
                 }

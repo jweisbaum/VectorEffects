@@ -3679,6 +3679,28 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M103 — Exports on the region
+
+Decisions R6 and R7. `export::run` builds its `GridSpec` from
+`GridSpec::of_lattice(&settings.lattice(), …)`, so a regional GRIB export is
+written on the region's own lattice (La1/Lo1 at the north-west node, Lo1 in
+`[0, 360)`) and a global one takes the old `global` path, byte for byte —
+`the_encoding_is_identical_on_every_platform` is untouched. `estimate` counts
+the lattice's points. `run_zarr` keeps the global `Layout` and the global
+point order but evaluates only the nodes `Region::contains` accepts, leaving
+the rest `NaN`; the writer's all-NaN rule shrinks the store to the region's
+chunks, and `ExportZarrResult.chunks` reports those. `routing_layout.rs`'s
+text equality still holds.
+
+Tests (`ve-app/tests/export.rs`): the regional header and a painted node
+against `CpuEvaluator`; a region across 180° with values on both sides; an
+Arctic cap with Ni = 1440 and row 0 at 90°N; the Zarr shards present being
+exactly the four basins the region meets; the estimate. **Checked with
+ecCodes** (`grib_dump -O` clean, headers as in spec §12.2, `grib_get_data`
+equal to the painted 20 m/s). wgrib2 is not installed here and the visual
+viewer check is left to the in-app pass. **Pending CI:** the three-platform
+byte-identity run of the export tests.
+
 ### M102 — Fetches keep only the region (part 1: the writer; part 2: the fetches)
 
 R6 of the regional-projects design. `ve_grib::GridSpec` gains a first point

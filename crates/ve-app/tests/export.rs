@@ -936,3 +936,199 @@ fn zarr_export_cost_at_quarter_degree() {
         result.chunks, result.bytes, result.elapsed_ms
     );
 }
+
+// ---- Regional projects (M103) ----
+
+/// A one-degree (or `resolution`) project holding one eastward stroke along
+/// `points` at 20 m/s, whose region is set afterwards: the stroke is painted
+/// as a person would and the export is what the region cuts out of it.
+fn regional_project(
+    resolution: &str,
+    region: (f64, f64, f64, f64, bool),
+    points: Vec<[f64; 2]>,
+) -> ve_core::Project {
+    let root = TempRoot::new("regional-setup");
+    let state = app(&root);
+    let mut request = new_project("wind");
+    request.resolution = resolution.to_owned();
+    projects::create(&state, request, false).expect("create");
+    edit::paint(
+        &state,
+        BrushStroke {
+            points,
+            size_km: 1000.0,
+            speed_mps: 20.0,
+            direction_toward_deg: 90.0,
+            feather: 0.0,
+            layer: None,
+            ..Default::default()
+        },
+    )
+    .expect("paint");
+    let mut project = {
+        let mut session = state.session.lock().expect("lock");
+        session.require_open().expect("open").project.clone()
+    };
+    let (west, east, south, north, full) = region;
+    project.settings.region = Some(
+        ve_core::region::Region::snapped(
+            west,
+            east,
+            south,
+            north,
+            full,
+            project.settings.resolution,
+        )
+        .expect("region"),
+    );
+    project
+}
+
+fn export_grib(project: &ve_core::Project, label: &str) -> Vec<ve_grib::reader::Decoded> {
+    let root = TempRoot::new(label);
+    let path = root.0.join("out.grib2");
+    export::run(project, &request(&path), &AtomicBool::new(false), |_| {}).expect("export");
+    messages(&std::fs::read(&path).expect("read"))
+}
+
+/// The field the evaluator gives at a node, which the file must carry.
+fn field_at(project: &ve_core::Project, lon: f64, lat: f64) -> (f32, f32) {
+    use ve_render::evaluator::FieldEvaluator;
+    let scene = ve_render::scene::flatten_kind(project, 0, ve_core::FieldKind::Wind);
+    let sample = ve_render::cpu::CpuEvaluator
+        .evaluate_samples(&scene, &[ve_core::LonLat { lon, lat }])
+        .expect("evaluate")[0];
+    (sample.uv.u, sample.uv.v)
+}
+
+#[test]
+fn a_regional_grib_export_is_on_the_region() {
+    let project = regional_project(
+        "1.0",
+        (-30.0, 30.0, -20.0, 20.0, false),
+        vec![[-20.0, 0.0], [0.0, 0.0], [20.0, 0.0]],
+    );
+    let decoded = export_grib(&project, "regional");
+    let u = &decoded[0];
+    // 61 columns by 41 rows: the region's nodes, edges included, from the
+    // north-west corner. Longitude 330 is -30 in GRIB's [0, 360).
+    assert_eq!((u.ni, u.nj), (61, 41));
+    assert_eq!((u.la1, u.la2), (20_000_000, -20_000_000));
+    assert_eq!((u.lo1, u.lo2), (330_000_000, 30_000_000));
+    assert_eq!(u.values.len(), 61 * 41);
+
+    // The node at (10°E, 0°): row 20, column 40.
+    let index = 20 * 61 + 40;
+    let (eu, ev) = field_at(&project, 10.0, 0.0);
+    assert!(
+        (eu - 20.0).abs() < 0.01 && ev.abs() < 0.01,
+        "sanity {eu} {ev}"
+    );
+    assert!((u.values[index] - eu).abs() < 0.01, "{}", u.values[index]);
+    assert!((decoded[1].values[index] - ev).abs() < 0.01);
+    // Inside the region, off the stroke: undefined.
+    assert!(u.values[2 * 61 + 5].is_nan());
+}
+
+#[test]
+fn a_regional_export_across_the_antimeridian() {
+    let project = regional_project(
+        "1.0",
+        (170.0, -170.0, -10.0, 10.0, false),
+        vec![[175.0, 0.0], [180.0, 0.0], [-175.0, 0.0]],
+    );
+    let decoded = export_grib(&project, "antimeridian");
+    let u = &decoded[0];
+    // Contiguous in GRIB longitudes: 170 to 190, not a wrap.
+    assert_eq!((u.ni, u.nj), (21, 21));
+    assert_eq!((u.lo1, u.lo2), (170_000_000, 190_000_000));
+    // Column 10 is the antimeridian itself, column 6 is 176°E and column 14
+    // is 176°W: the stroke is present on both sides.
+    let row = 10 * 21;
+    for (column, lon) in [(6usize, 176.0), (10, 180.0), (14, -176.0)] {
+        let (eu, _) = field_at(&project, lon, 0.0);
+        assert!((eu - 20.0).abs() < 0.01);
+        assert!(
+            (u.values[row + column] - eu).abs() < 0.01,
+            "column {column} holds {}",
+            u.values[row + column]
+        );
+    }
+}
+
+#[test]
+fn an_arctic_export_holds_the_pole_once() {
+    let project = regional_project(
+        "0.25",
+        (-180.0, 180.0, 80.0, 90.0, true),
+        vec![[0.0, 89.0], [90.0, 89.0], [180.0, 89.0]],
+    );
+    let decoded = export_grib(&project, "arctic");
+    let u = &decoded[0];
+    assert_eq!((u.ni, u.nj), (1440, 41));
+    // Row 0 is the pole, and the grid's last column stops a step short of
+    // the first: the seam is not repeated.
+    assert_eq!(u.la1, 90_000_000);
+    assert_eq!(u.la2, 80_000_000);
+    assert_eq!((u.lo1, u.lo2), (180_000_000, 179_750_000));
+    assert_eq!(u.values.len(), 1440 * 41);
+}
+
+#[test]
+fn a_regional_zarr_export_writes_only_the_regions_chunks() {
+    let root = TempRoot::new("regional-zarr");
+    // The stroke runs well outside the region on both sides.
+    let project = regional_project(
+        "1.0",
+        (-30.0, 30.0, -20.0, 20.0, false),
+        vec![[-60.0, 0.0], [0.0, 0.0], [60.0, 0.0]],
+    );
+    let path = root.0.join("out.zarr");
+    let result = export::run_zarr(
+        &project,
+        &zarr_request(&path),
+        &AtomicBool::new(false),
+        |_| {},
+    )
+    .expect("export");
+
+    // Tiles 15..=21 across (-30..30) by the two the stroke's band reaches.
+    assert_eq!(result.chunks, 14);
+    // The store is sharded by ocean basin. -30..30 by -20..20 touches lat
+    // bands 1 and 2 and lon bands 2 and 3, so four shard files exist and
+    // the other sixteen are not files at all.
+    // Shard files are data/c/<time>/0/<lat band>/<lon band>.
+    let mut present: Vec<(usize, usize)> = Vec::new();
+    for lat in 0..4usize {
+        for lon in 0..5usize {
+            if path.join(format!("data/c/0/0/{lat}/{lon}")).is_file() {
+                present.push((lat, lon));
+            }
+        }
+    }
+    assert_eq!(
+        present,
+        [(1, 2), (1, 3), (2, 2), (2, 3)],
+        "only the shards the region intersects"
+    );
+
+    // The metadata is the global store's, to the letter.
+    let metadata: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(path.join("data/zarr.json")).expect("metadata"),
+    )
+    .expect("json");
+    assert_eq!(
+        metadata["chunk_grid"]["configuration"]["chunk_shapes"],
+        serde_json::json!([24, 4, [20, 70, 60, 30], [80, 40, 80, 100, 60]])
+    );
+}
+
+#[test]
+fn the_estimate_counts_the_regions_points() {
+    let project = regional_project(
+        "1.0",
+        (-30.0, 30.0, -20.0, 20.0, false),
+        vec![[0.0, 0.0], [1.0, 0.0]],
+    );
+    assert_eq!(export::estimate(&project, 16).points_per_message, 61 * 41);
+}

@@ -4599,6 +4599,16 @@ nonetheless evaluated at the very point the GRIB export evaluates it (the
 GRIB lattice's points, re-ordered, never recomputed), so the two exports of
 one project agree cell for cell wherever both have the cell.
 
+**A regional project writes the global-shaped store with only its region's
+chunks** (M103, R7). The routing consumer wraps longitude over the whole
+axis and expects it ascending from −180°, so a store with regional axes
+would be silently misread: the axes, the shape, the shard layout and the
+metadata are the global ones, byte for byte. Only the nodes the region
+contains are evaluated; every other cell stays `NaN`, and the rule above —
+a chunk of nothing but `NaN` is never written, a shard with no chunk is never
+a file — makes the store the size of the region. `chunks` in the result
+counts the chunks written.
+
 Wind and current are evaluated from the same CPU export path as GRIB2. A
 project that does not contain one kind writes NaN for that pair. Cells with
 no evaluated coverage are NaN as well, preserving the land mask; a covered
@@ -4683,7 +4693,18 @@ Key field values:
   degrees.
 - `La1` = 90 000 000, `Lo1` = 0, `La2` = −90 000 000, `Lo2` = 360 000 000 − Di. for a global
   grid, which keeps its prime-meridian start so a global export's bytes never
-  move. A regional grid (M102) writes its own corner: `La1` the north row,
+  move. A regional project's export (M103) is on that grid: the lattice of the
+project's region at its resolution, edges inclusive, `Ni` × `Nj` of the
+region's, and the size estimate (§12.4) counts those points.
+
+| Region | La1 | Lo1 | La2 | Lo2 | Ni × Nj at 1° |
+|---|---|---|---|---|---|
+| 30°W–30°E, 20°S–20°N | 20 000 000 | 330 000 000 | −20 000 000 | 30 000 000 | 61 × 41 |
+| 170°E–170°W, 10°S–10°N | 10 000 000 | 170 000 000 | −10 000 000 | 190 000 000 | 21 × 21 |
+| Arctic cap, 80°N–90°N, all longitudes (0.25°) | 90 000 000 | 180 000 000 | 80 000 000 | 179 750 000 | 1440 × 41 |
+
+ecCodes reads all three without warning and returns the painted value at a
+painted node. A regional grid (M102) writes its own corner: `La1` the north row,
   `Lo1` the west column in GRIB's `[0, 360)` (only `ve-grib` converts),
   `La2` = `La1` − (Nj−1)·Di, `Lo2` = (`Lo1` + (Ni−1)·Di) mod 360. A region
   across 180° is contiguous (`Lo1` 160 000 000, `Lo2` 200 000 000); across 0°
