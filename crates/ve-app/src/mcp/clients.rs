@@ -24,6 +24,7 @@ use ts_rs::TS;
 use crate::commands::AppState;
 use crate::error::{AppError, Context, Result};
 use crate::projects::with_session;
+use crate::settings::McpAsk;
 
 /// The name the service is registered under, in every client.
 pub const SERVER_NAME: &str = "vectoreffects";
@@ -190,7 +191,18 @@ fn run(
 /// whatever else the person put on it (`enabled`, a timeout) is theirs. A
 /// `bearer_token_env_var` is dropped, since Codex would send that token
 /// rather than the header's.
-pub fn codex_config_with_entry(existing: &str, url: &str, token: &str) -> Result<String> {
+///
+/// `ask` sets `default_tools_approval_mode` where the tools' annotations
+/// cannot say it: for the default choice Codex's own `auto` mode reads them
+/// and asks only before what they mark destructive or open-world, so the key
+/// is removed. `[mcp_servers.vectoreffects.tools.*]` tables are the person's
+/// own "always allow" answers and are never touched.
+pub fn codex_config_with_entry(
+    existing: &str,
+    url: &str,
+    token: &str,
+    ask: McpAsk,
+) -> Result<String> {
     let not_a_table = |what: &str| AppError::Doing {
         doing: "add the MCP service to",
         what: "Codex's config.toml".to_owned(),
@@ -219,6 +231,17 @@ pub fn codex_config_with_entry(existing: &str, url: &str, token: &str) -> Result
     headers.insert("Authorization", format!("Bearer {token}").into());
     entry.insert("http_headers", toml_edit::value(headers));
     entry.remove("bearer_token_env_var");
+    match ask {
+        McpAsk::Outside => {
+            entry.remove("default_tools_approval_mode");
+        }
+        McpAsk::Everything => {
+            entry.insert("default_tools_approval_mode", toml_edit::value("prompt"));
+        }
+        McpAsk::Nothing => {
+            entry.insert("default_tools_approval_mode", toml_edit::value("approve"));
+        }
+    }
     Ok(document.to_string())
 }
 
@@ -226,7 +249,7 @@ pub fn codex_config_with_entry(existing: &str, url: &str, token: &str) -> Result
 ///
 /// Refused when the folder is not there: that is Codex not being installed,
 /// and making the folder would only hide it.
-pub fn register_codex(codex_home: &Path, url: &str, token: &str) -> Result<()> {
+pub fn register_codex(codex_home: &Path, url: &str, token: &str, ask: McpAsk) -> Result<()> {
     if !codex_home.is_dir() {
         return Err(AppError::Doing {
             doing: "add the MCP service to",
@@ -243,7 +266,7 @@ pub fn register_codex(codex_home: &Path, url: &str, token: &str) -> Result<()> {
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => String::new(),
         Err(err) => return Err(err).doing("read", file.display()),
     };
-    let updated = codex_config_with_entry(&existing, url, token)?;
+    let updated = codex_config_with_entry(&existing, url, token, ask)?;
     // Beside the file and then renamed over it, so a failure half way leaves
     // the person's configuration as it was rather than truncated.
     let staged = codex_home.join(".config.toml.vectoreffects");
@@ -302,6 +325,16 @@ pub fn mcp_register_client(
             let claude_home =
                 super::skill::claude_home(&home, std::env::var_os("CLAUDE_CONFIG_DIR"));
             let skill = super::skill::install_for_claude_code(&claude_home)?;
+            // Last, so the rules exist only once the server they name does.
+            // What was written is remembered, so the next registration
+            // replaces exactly that (`claude_settings`).
+            let rules = super::claude_settings::rules_for(mcp.ask);
+            super::claude_settings::write_rules(&claude_home, &mcp.claude_rules, &rules)?;
+            let file = state.paths.settings_file();
+            with_session(&state, |session| {
+                session.settings.mcp.claude_rules = rules;
+                session.save_settings(&file)
+            })?;
             Ok(McpRegistered {
                 skill: Some(skill.display().to_string()),
             })
@@ -317,6 +350,7 @@ pub fn mcp_register_client(
                 &codex_home(&home, std::env::var_os("CODEX_HOME")),
                 &url,
                 &mcp.token,
+                mcp.ask,
             )?;
             Ok(McpRegistered { skill: None })
         }
@@ -329,13 +363,52 @@ mod tests {
 
     const URL: &str = "http://127.0.0.1:47391/mcp";
 
+    /// `codex mcp get vectoreffects` on such a file reports
+    /// `default_tools_approval_mode: approve` (checked by hand against
+    /// codex-cli 0.155.1); its meaning is `requires_mcp_tool_approval_for_mode`
+    /// in openai/codex `core/src/mcp_tool_call.rs`.
+    #[test]
+    fn codex_gets_the_approval_mode_annotations_cannot_express() {
+        let outside = codex_config_with_entry("", URL, "t", McpAsk::Outside).expect("edit");
+        assert!(
+            !outside.contains("default_tools_approval_mode"),
+            "{outside}"
+        );
+        let every = codex_config_with_entry("", URL, "t", McpAsk::Everything).expect("edit");
+        assert!(
+            every.contains("default_tools_approval_mode = \"prompt\""),
+            "{every}"
+        );
+        let never = codex_config_with_entry(&every, URL, "t", McpAsk::Nothing).expect("edit");
+        assert!(
+            never.contains("default_tools_approval_mode = \"approve\""),
+            "{never}"
+        );
+        assert!(!never.contains("\"prompt\""), "{never}");
+        let back = codex_config_with_entry(&never, URL, "t", McpAsk::Outside).expect("edit");
+        assert!(!back.contains("default_tools_approval_mode"), "{back}");
+    }
+
+    #[test]
+    fn the_persons_own_codex_tool_approvals_are_kept() {
+        let before = "[mcp_servers.vectoreffects]\nurl = \"x\"\n\n[mcp_servers.vectoreffects.tools.layers_list]\napproval_mode = \"approve\"\n";
+        let after = codex_config_with_entry(before, URL, "t", McpAsk::Everything).expect("edit");
+        let parsed: toml_edit::DocumentMut = after.parse().expect("valid toml");
+        assert_eq!(
+            parsed["mcp_servers"]["vectoreffects"]["tools"]["layers_list"]["approval_mode"]
+                .as_str(),
+            Some("approve"),
+            "{after}"
+        );
+    }
+
     /// The reference is Codex's own reader: `codex mcp get` on a file of this
     /// shape reports `transport: streamable_http` and an `Authorization`
     /// header (checked by hand against codex-cli 0.154.0). Here the file is
     /// read back by a TOML parser and the two values looked up.
     #[test]
     fn an_empty_codex_config_gains_the_entry() {
-        let text = codex_config_with_entry("", URL, "tok_abc").expect("edit");
+        let text = codex_config_with_entry("", URL, "tok_abc", McpAsk::Outside).expect("edit");
         assert!(text.contains("[mcp_servers.vectoreffects]"), "{text}");
         assert!(!text.contains("[mcp_servers]\n"), "{text}");
         let parsed: toml_edit::DocumentMut = text.parse().expect("valid toml");
@@ -350,7 +423,7 @@ mod tests {
     #[test]
     fn a_codex_config_keeps_everything_that_is_not_the_entry() {
         let before = "# mine\nmodel = \"o3\"  # keep\n\n[mcp_servers.other]\ncommand = \"npx\"\n\n[mcp_servers.vectoreffects]\nurl = \"http://127.0.0.1:1/mcp\"\nenabled = false\nbearer_token_env_var = \"OLD\"\nhttp_headers = { Authorization = \"Bearer stale\" }\n\n[profiles.fast]\nmodel = \"mini\"\n";
-        let after = codex_config_with_entry(before, URL, "tok_new").expect("edit");
+        let after = codex_config_with_entry(before, URL, "tok_new", McpAsk::Outside).expect("edit");
         // Every line that is not the two values or the dropped variable.
         for kept in [
             "# mine",
@@ -368,7 +441,7 @@ mod tests {
         assert!(after.contains("Bearer tok_new"), "{after}");
         assert_eq!(after.matches("[mcp_servers.vectoreffects]").count(), 1);
         // Doing it again changes nothing: the button is repeatable.
-        let again = codex_config_with_entry(&after, URL, "tok_new").expect("edit");
+        let again = codex_config_with_entry(&after, URL, "tok_new", McpAsk::Outside).expect("edit");
         assert_eq!(again, after);
     }
 
@@ -377,7 +450,7 @@ mod tests {
         let home = tempfile::tempdir().expect("tempdir");
         let file = home.path().join("config.toml");
         std::fs::write(&file, "model = [unclosed").expect("write");
-        assert!(register_codex(home.path(), URL, "tok").is_err());
+        assert!(register_codex(home.path(), URL, "tok", McpAsk::Outside).is_err());
         let text = std::fs::read_to_string(&file).expect("read");
         assert_eq!(text, "model = [unclosed");
     }
@@ -386,7 +459,7 @@ mod tests {
     fn codex_is_refused_when_its_folder_is_missing() {
         let home = tempfile::tempdir().expect("tempdir");
         let missing = home.path().join(".codex");
-        let err = register_codex(&missing, URL, "tok").expect_err("no folder");
+        let err = register_codex(&missing, URL, "tok", McpAsk::Outside).expect_err("no folder");
         assert!(err.to_string().contains("does not seem to be installed"));
         assert!(!missing.exists(), "the folder must not be made");
     }
@@ -396,7 +469,7 @@ mod tests {
     fn the_codex_config_is_written_owner_only() {
         use std::os::unix::fs::PermissionsExt;
         let home = tempfile::tempdir().expect("tempdir");
-        register_codex(home.path(), URL, "tok").expect("register");
+        register_codex(home.path(), URL, "tok", McpAsk::Outside).expect("register");
         let file = home.path().join("config.toml");
         let mode = std::fs::metadata(&file)
             .expect("metadata")
