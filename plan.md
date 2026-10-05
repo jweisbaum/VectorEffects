@@ -1,5 +1,12 @@
 # VectorEffects — Implementation Plan
 
+**2026-10-04: Prepare 0.1.22 Beta.** A Windows on ARM build, with exports
+checked byte-identical across platforms; ICON-D2, ICON-D2-EPS and ICON-EU-EPS
+meshes, with regional meshes ending where they end; AROME's wide JPEG 2000
+through a patched `hayro-jpeg2000`; end-to-end import tests over every DWD
+and Météo-France model; and the MCP choice of what a client may do without
+asking. Notes in `docs/releases/0.1.22.md`.
+
 **2026-10-03: Prepare 0.1.21 Beta.** The auto scale spans sea-surface
 temperature (M99); even toolbar spacing; the start page's Create project
 spacing and wording. Notes in `docs/releases/0.1.21.md`.
