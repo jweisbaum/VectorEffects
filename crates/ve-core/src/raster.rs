@@ -232,7 +232,8 @@ impl RasterGrid {
 
     /// The part of this lattice a region needs: `target`'s extent grown by
     /// `margin` nodes of the target's own spacing, snapped outward to this
-    /// lattice's nodes. `None` when no node of `self` lies inside it.
+    /// lattice's nodes. `None` when no node of `self` lies inside it, or the
+    /// window is too small to form a grid.
     ///
     /// The margin is what lets the sampler's four-corner blend read a real
     /// node at the region's outermost row and column. Rows clamp at the poles.
@@ -738,6 +739,71 @@ mod tests {
         let c = patch.cropped_to(&target, 1).unwrap();
         assert_eq!((c.lon0, c.ni), (9.0, 12));
         assert_eq!(c.lat0, 50.0);
+        assert_eq!(c.nj, 11);
+        for (lon, lat) in [
+            (9.0, 50.0),
+            (20.0, 50.0),
+            (9.0, 40.0),
+            (20.0, 40.0),
+            (14.5, 45.5),
+        ] {
+            assert_eq!(c.sample(lon, lat), patch.sample(lon, lat), "at {lon},{lat}");
+        }
+    }
+
+    #[test]
+    fn a_crop_of_a_patch_across_180_reaches_it_from_either_side() {
+        // Columns at 170..=179 then -180..=-171.
+        let patch = grid(20, 8, 170.0, 10.0, 1.0, pos(170.0, 10.0));
+        // Window starts west of the patch: only the shifted (-360) reading finds it.
+        let west = TargetGrid {
+            ni: 20,
+            nj: 5,
+            lon0: 160.0,
+            lat0: 8.0,
+            dlon: 1.0,
+            dlat: 1.0,
+        };
+        let c = patch.cropped_to(&west, 1).unwrap();
+        assert_eq!((c.lon0, c.ni, c.nj), (170.0, 11, 7));
+        for lon in [170.0, 175.5, 179.5, -180.0] {
+            assert_eq!(c.sample(lon, 7.0), patch.sample(lon, 7.0), "at {lon}");
+        }
+        // Window past the seam, inside the patch's far half.
+        let east = TargetGrid {
+            ni: 6,
+            nj: 5,
+            lon0: -175.0,
+            lat0: 8.0,
+            dlon: 1.0,
+            dlat: 1.0,
+        };
+        let c = patch.cropped_to(&east, 1).unwrap();
+        assert_eq!((c.lon0, c.ni, c.nj), (-176.0, 6, 7));
+        for lon in [-175.5, -172.0, -171.0] {
+            assert_eq!(c.sample(lon, 7.0), patch.sample(lon, 7.0), "at {lon}");
+        }
+    }
+
+    #[test]
+    fn a_crop_to_the_south_pole_clamps_at_it() {
+        let world = grid(360, 181, -180.0, 90.0, 1.0, pos(-180.0, 90.0));
+        let target = TargetGrid {
+            ni: 360,
+            nj: 31,
+            lon0: -180.0,
+            lat0: -60.0,
+            dlon: 1.0,
+            dlat: 1.0,
+        };
+        let c = world.cropped_to(&target, 1).unwrap();
+        assert_eq!((c.ni, c.nj), (360, 32)); // margin only northward
+        assert_eq!(c.lat0, -59.0);
+        assert!(c.wraps);
+        for lat in [-89.5, -90.0, -59.0] {
+            assert_eq!(c.sample(10.5, lat), world.sample(10.5, lat), "at {lat}");
+            assert!(c.sample(10.5, lat).is_some());
+        }
     }
 
     /// The key the render cache holds tiles under is BLAKE3 over the header
