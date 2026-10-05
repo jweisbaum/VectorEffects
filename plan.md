@@ -3679,6 +3679,29 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M102 — Fetches keep only the region (part 1: the writer)
+
+R6 of the regional-projects design. `ve_grib::GridSpec` gains a first point
+(`la1_udeg`, `lo1_udeg` in `[0, 360e6)`); `GridSpec::global` is today's grid
+and `GridSpec::of_lattice(&TargetGrid, µ°)` maps a project lattice to one —
+a global lattice to `global`, so `the_encoding_is_identical_on_every_platform`
+(0x769b_cfb2_fb07_77c3, 130,530 bytes) is untouched, a regional one to its own
+corner with La2/Lo2 derived and Lo2 taken mod 360. `points()` yields the
+file's order from the first point. Every `GridSpec { .. }` literal in the
+workspace is now `GridSpec::global(..)`; no caller changes behaviour yet
+(export and fetch adopt `of_lattice` in later tasks).
+
+**Checked with ecCodes** (wgrib2 is not installed on this machine, so the
+ruling was `grib_dump -O`, `grib_ls`, `grib_get_data`), on four files from
+`cargo run -p ve-grib --example emit_regional -- DIR`, `u` = node longitude,
+`v` = node latitude: no warnings or errors from `grib_dump -O` on any;
+`grib_ls` gives La1/Lo1/La2/Lo2 of 50/10/40/20 (plain), 10/160/9/200 (across
+180), 10/340/9/20 (across 0, Lo2 < Lo1), 90/180/60/179.75 (Arctic cap);
+`grib_get_data` places every node of all four where the writer put it (0 of
+174,240 wrong on the cap), both sides of each seam included (179.75 / −180 /
+−179.75; −0.25 / 0 / 0.25). The visual viewer step moves to the final in-app
+pass.
+
 ### M101 — Imports read only the region
 
 Part 3 of regional projects (design R4, R10). Every import a regional

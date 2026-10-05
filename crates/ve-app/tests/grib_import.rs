@@ -70,11 +70,7 @@ fn state(root: &TempRoot, step_hours: u32, step_count: u32) -> AppState {
 
 /// A 1° global file: `u` equals the forecast hour everywhere, `v` is 0.
 fn write_file(root: &TempRoot, name: &str, kinds: &[FieldKind], hours: &[u32]) -> String {
-    let grid = GridSpec {
-        ni: 360,
-        nj: 181,
-        micro_degrees: 1_000_000,
-    };
+    let grid = GridSpec::global(360, 181, 1_000_000);
     let mut bytes = Vec::new();
     for &kind in kinds {
         let (pu, pv) = match kind {
@@ -754,11 +750,7 @@ fn regional(root: &TempRoot, west: f64, east: f64, south: f64, north: f64) -> Ap
 
 /// A 1° patch, 0..10 E and 80..90 N: the writer's lattice, cut short.
 fn write_patch(root: &TempRoot, name: &str) -> String {
-    let grid = GridSpec {
-        ni: 11,
-        nj: 11,
-        micro_degrees: 1_000_000,
-    };
+    let grid = GridSpec::global(11, 11, 1_000_000);
     let mut bytes = Vec::new();
     for parameter in [Parameter::WindU, Parameter::WindV] {
         let spec = MessageSpec {

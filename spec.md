@@ -4658,7 +4658,14 @@ Key field values:
   §3.1.
 - **Basic angle** = 0, subdivisions = missing ⇒ coordinates in units of 10⁻⁶
   degrees.
-- `La1` = 90 000 000, `Lo1` = 0, `La2` = −90 000 000, `Lo2` = 360 000 000 − Di.
+- `La1` = 90 000 000, `Lo1` = 0, `La2` = −90 000 000, `Lo2` = 360 000 000 − Di. for a global
+  grid, which keeps its prime-meridian start so a global export's bytes never
+  move. A regional grid (M102) writes its own corner: `La1` the north row,
+  `Lo1` the west column in GRIB's `[0, 360)` (only `ve-grib` converts),
+  `La2` = `La1` − (Nj−1)·Di, `Lo2` = (`Lo1` + (Ni−1)·Di) mod 360. A region
+  across 180° is contiguous (`Lo1` 160 000 000, `Lo2` 200 000 000); across 0°
+  `Lo2` < `Lo1`, which GRIB allows; a polar cap has Ni = 360/d and `Lo2` =
+  `Lo1` − Di mod 360.
 - **Resolution and component flags** = `0x30` — i and j increments given, u/v
   resolved relative to easterly/northerly directions (earth-relative, not
   grid-relative). This matters: consumers will otherwise rotate the vectors.

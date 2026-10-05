@@ -51,11 +51,7 @@ use crate::projects::{ProjectSummary, with_session};
 /// The grid every archive hands its fields back on: ERA5's 0.25 degree global
 /// grid, north to south from the pole and east from the prime meridian, which
 /// is GRIB2 scanning mode 0 exactly.
-const GRID: GridSpec = GridSpec {
-    ni: ve_zarr::NI as u32,
-    nj: ve_zarr::NJ as u32,
-    micro_degrees: 250_000,
-};
+const GRID: GridSpec = GridSpec::global(ve_zarr::NI as u32, ve_zarr::NJ as u32, 250_000);
 
 /// Bits per packed value. Sixteen is a millimetre per second over any wind or
 /// current the archives hold, far finer than either is measured to.
@@ -1164,11 +1160,7 @@ mod tests {
     /// global one so the round trip costs nothing.
     #[test]
     fn encoded_hours_read_back_on_the_steps_they_name() {
-        let grid = GridSpec {
-            ni: 3,
-            nj: 2,
-            micro_degrees: 90_000_000,
-        };
+        let grid = GridSpec::global(3, 2, 90_000_000);
         // 2020-01-01T00:00Z, the range's first hour, with the second three
         // hours after it: an off-by-one in either would show.
         let reference = reference_time(parse("2020-01-01T00:00")).expect("a time");

@@ -37,11 +37,7 @@ fn lattice(west: f64, east: f64, south: f64, north: f64, full_circle: bool) -> T
 /// A 0.25° global wind file whose `u` is the node's longitude in
 /// `[-180, 180)` and whose `v` is its latitude.
 fn global_file() -> Vec<u8> {
-    let grid = GridSpec {
-        ni: 1440,
-        nj: 721,
-        micro_degrees: 250_000,
-    };
+    let grid = GridSpec::global(1440, 721, 250_000);
     let (mut u, mut v) = (Vec::new(), Vec::new());
     for (lon, lat) in grid.points() {
         u.push(lon as f32);
@@ -428,11 +424,7 @@ fn an_icon_mesh_onto_a_region_builds_a_regional_neighbour_set() {
 /// by it too: it is held in memory like any other lattice.
 #[test]
 fn a_temperature_file_is_cropped_to_the_region() {
-    let grid = GridSpec {
-        ni: 360,
-        nj: 181,
-        micro_degrees: 1_000_000,
-    };
+    let grid = GridSpec::global(360, 181, 1_000_000);
     let values = vec![15.0 + 273.15; grid.point_count() as usize];
     let spec = MessageSpec {
         parameter: Parameter::WaterTemperature,

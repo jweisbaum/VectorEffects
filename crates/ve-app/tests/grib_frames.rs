@@ -69,11 +69,7 @@ fn state(root: &TempRoot, step_hours: u32, step_count: u32) -> AppState {
 
 /// A 1° global wind file whose `u` is the forecast hour and whose `v` is 0.
 fn write_file(root: &TempRoot, name: &str, hours: &[u32]) -> String {
-    let grid = GridSpec {
-        ni: 360,
-        nj: 181,
-        micro_degrees: 1_000_000,
-    };
+    let grid = GridSpec::global(360, 181, 1_000_000);
     let count = grid.point_count() as usize;
     let mut bytes = Vec::new();
     for &hour in hours {

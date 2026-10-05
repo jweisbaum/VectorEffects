@@ -13,11 +13,7 @@ use ve_grib::writer::{GridSpec, MessageSpec, Parameter, ReferenceTime, message};
 
 /// A ten-degree grid: small enough to write four times in a test.
 fn grid() -> GridSpec {
-    GridSpec {
-        ni: 36,
-        nj: 19,
-        micro_degrees: 10_000_000,
-    }
+    GridSpec::global(36, 19, 10_000_000)
 }
 
 fn spec(bits: u8) -> MessageSpec {

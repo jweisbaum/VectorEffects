@@ -16,11 +16,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let path = std::env::args()
         .nth(1)
         .unwrap_or_else(|| "sample.grib2".to_owned());
-    let grid = GridSpec {
-        ni: 360,
-        nj: 181,
-        micro_degrees: 1_000_000,
-    };
+    let grid = GridSpec::global(360, 181, 1_000_000);
 
     let points: Vec<(f64, f64)> = grid.points().collect();
     let u: Vec<f32> = points

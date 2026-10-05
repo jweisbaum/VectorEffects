@@ -239,11 +239,11 @@ pub fn run(
 ) -> Result<ExportResult> {
     let started = std::time::Instant::now();
     let settings = &project.settings;
-    let grid = GridSpec {
-        ni: settings.resolution.ni(),
-        nj: settings.resolution.nj(),
-        micro_degrees: settings.resolution.micro_degrees(),
-    };
+    let grid = GridSpec::global(
+        settings.resolution.ni(),
+        settings.resolution.nj(),
+        settings.resolution.micro_degrees(),
+    );
 
     let reference_time = ReferenceTime {
         year: request.year,
@@ -374,11 +374,11 @@ pub fn run_zarr(
 
     let started = std::time::Instant::now();
     let settings = &project.settings;
-    let grid = GridSpec {
-        ni: settings.resolution.ni(),
-        nj: settings.resolution.nj(),
-        micro_degrees: settings.resolution.micro_degrees(),
-    };
+    let grid = GridSpec::global(
+        settings.resolution.ni(),
+        settings.resolution.nj(),
+        settings.resolution.micro_degrees(),
+    );
     let layout = ZarrLayout::new(
         grid.micro_degrees,
         settings.step_count,

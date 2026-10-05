@@ -22,11 +22,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     std::fs::create_dir_all(&out)?;
     let out = out.canonicalize()?;
     let path = out.join("wind.grib2");
-    let grid = GridSpec {
-        ni: 1440,
-        nj: 721,
-        micro_degrees: 250_000,
-    };
+    let grid = GridSpec::global(1440, 721, 250_000);
     let mut file = std::io::BufWriter::new(std::fs::File::create(&path)?);
     for step in 0..steps {
         for parameter in [Parameter::WindU, Parameter::WindV] {

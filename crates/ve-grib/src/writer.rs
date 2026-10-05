@@ -21,6 +21,7 @@ use std::io::Write;
 
 use crate::error::{GribError, Result};
 use crate::packing::{self, Packed};
+use ve_core::regrid::TargetGrid;
 
 /// Missing-value marker for a one-octet field.
 const MISSING_U8: u8 = 0xff;
@@ -99,7 +100,9 @@ impl Parameter {
     }
 }
 
-/// A global regular lat/lon grid.
+/// A regular lat/lon grid: the whole globe, or a region of it (spec.md 12.2).
+///
+/// Scanning is always west to east, north to south from the first point.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GridSpec {
     /// Points along a parallel.
@@ -108,27 +111,91 @@ pub struct GridSpec {
     pub nj: u32,
     /// Grid spacing in micro-degrees.
     pub micro_degrees: u32,
+    /// Latitude of the first (northernmost) row, micro-degrees.
+    pub la1_udeg: i32,
+    /// Longitude of the first column in GRIB's `[0, 360e6)` micro-degrees.
+    pub lo1_udeg: u32,
 }
 
+const FULL_CIRCLE_UDEG: i64 = 360_000_000;
+
 impl GridSpec {
+    /// The global grid: first point at 90°N on the prime meridian, which is
+    /// where every global export has always started.
+    pub const fn global(ni: u32, nj: u32, micro_degrees: u32) -> Self {
+        Self {
+            ni,
+            nj,
+            micro_degrees,
+            la1_udeg: 90_000_000,
+            lo1_udeg: 0,
+        }
+    }
+
+    /// The grid a project's lattice is written on (R6).
+    ///
+    /// A global lattice maps to [`GridSpec::global`] and not to a first point
+    /// of 180°: the project lattice starts at -180 but every global GRIB we
+    /// have written starts at the prime meridian, and that file's bytes must
+    /// not move. A regional lattice takes its own corner; its longitude is
+    /// converted to GRIB's `[0, 360)` here, so a region across 180° is
+    /// contiguous (Lo1 160e6, Lo2 200e6) and one across 0° has Lo2 < Lo1.
+    pub fn of_lattice(target: &TargetGrid, micro_degrees: u32) -> Self {
+        let la1 = (target.lat0 * 1e6).round() as i32;
+        let spans = i64::from(target.ni) * i64::from(micro_degrees);
+        let rows = (i64::from(target.nj) - 1) * i64::from(micro_degrees);
+        if target.lon0 == -180.0
+            && spans == FULL_CIRCLE_UDEG
+            && la1 == 90_000_000
+            && rows == FULL_CIRCLE_UDEG / 2
+        {
+            return Self::global(target.ni, target.nj, micro_degrees);
+        }
+        let lo1 = ((target.lon0 * 1e6).round() as i64).rem_euclid(FULL_CIRCLE_UDEG);
+        Self {
+            ni: target.ni,
+            nj: target.nj,
+            micro_degrees,
+            la1_udeg: la1,
+            lo1_udeg: lo1 as u32,
+        }
+    }
+
     /// Total grid points.
     pub fn point_count(self) -> u64 {
         u64::from(self.ni) * u64::from(self.nj)
     }
 
+    /// Latitude of the last row, micro-degrees (La2).
+    fn la2_udeg(self) -> i32 {
+        self.la1_udeg - (self.nj.saturating_sub(1) * self.micro_degrees) as i32
+    }
+
+    /// Longitude of the last column in `[0, 360e6)` (Lo2). A grid across the
+    /// prime meridian gives a value below Lo1, which GRIB allows.
+    fn lo2_udeg(self) -> u32 {
+        let last = i64::from(self.lo1_udeg)
+            + i64::from(self.ni.saturating_sub(1)) * i64::from(self.micro_degrees);
+        last.rem_euclid(FULL_CIRCLE_UDEG) as u32
+    }
+
     /// Grid positions in GRIB scanning order.
     ///
-    /// West to east from longitude 0, north to south from latitude 90.
-    /// Longitudes come back normalised to [-180, 180) for sampling, but the
-    /// *order* is the file's, starting at the prime meridian.
+    /// West to east from the first point, north to south. Longitudes come
+    /// back normalised to [-180, 180) for sampling, but the *order* is the
+    /// file's.
     pub fn points(self) -> impl Iterator<Item = (f64, f64)> {
         let delta = f64::from(self.micro_degrees) / 1e6;
+        let lat1 = f64::from(self.la1_udeg) / 1e6;
+        let lon1 = f64::from(self.lo1_udeg) / 1e6;
         (0..self.nj).flat_map(move |j| {
-            let lat = 90.0 - f64::from(j) * delta;
+            let lat = lat1 - f64::from(j) * delta;
             (0..self.ni).map(move |i| {
-                let lon = f64::from(i) * delta;
-                let normalised = if lon >= 180.0 { lon - 360.0 } else { lon };
-                (normalised, lat.clamp(-90.0, 90.0))
+                let mut lon = lon1 + f64::from(i) * delta;
+                while lon >= 180.0 {
+                    lon -= 360.0;
+                }
+                (lon, lat.clamp(-90.0, 90.0))
             })
         })
     }
@@ -283,13 +350,15 @@ fn section3(grid: GridSpec) -> Vec<u8> {
     put_u32(&mut out, 0); // basic angle: 0 means units of 1e-6 degrees
     put_u32(&mut out, MISSING_U32); // subdivisions of the basic angle
 
-    put_i32_sm(&mut out, 90_000_000); // La1
-    put_i32_sm(&mut out, 0); // Lo1: the prime meridian
+    // Template 3.0 octets 47-50 La1, 51-54 Lo1 (WMO Code Table 3.1 grid).
+    put_i32_sm(&mut out, grid.la1_udeg); // La1
+    put_i32_sm(&mut out, grid.lo1_udeg as i32); // Lo1, in [0, 360e6)
     // 0x30: i and j increments are given, and u/v are earth-relative rather
     // than grid-relative. Without the latter, consumers rotate the vectors.
     put_u8(&mut out, 0x30);
-    put_i32_sm(&mut out, -90_000_000); // La2
-    put_i32_sm(&mut out, 360_000_000i32 - grid.micro_degrees as i32); // Lo2
+    // Octets 56-59 La2, 60-63 Lo2. Lo2 may be below Lo1 across 0 degrees.
+    put_i32_sm(&mut out, grid.la2_udeg()); // La2
+    put_i32_sm(&mut out, grid.lo2_udeg() as i32); // Lo2
     put_u32(&mut out, grid.micro_degrees); // Di
     put_u32(&mut out, grid.micro_degrees); // Dj
     put_u8(&mut out, 0x00); // scanning mode: +i, -j, i consecutive
@@ -506,11 +575,7 @@ mod tests {
     use super::*;
 
     fn grid() -> GridSpec {
-        GridSpec {
-            ni: 360,
-            nj: 181,
-            micro_degrees: 1_000_000,
-        }
+        GridSpec::global(360, 181, 1_000_000)
     }
 
     /// A field with holes in it is written with a bitmap and read back with

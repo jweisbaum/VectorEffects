@@ -28,11 +28,7 @@ fn reference_time() -> ReferenceTime {
 }
 
 fn grid() -> GridSpec {
-    GridSpec {
-        ni: 360,
-        nj: 181,
-        micro_degrees: 1_000_000,
-    }
+    GridSpec::global(360, 181, 1_000_000)
 }
 
 /// `u` rises with longitude, `v` with latitude, both offset by the hour.
@@ -176,11 +172,7 @@ fn junk_between_messages_is_skipped_and_junk_alone_is_refused() {
 #[test]
 fn water_temperature_reads_back_in_celsius() {
     use ve_grib::writer::{GridSpec, MessageSpec, Parameter, ReferenceTime, message_masked};
-    let grid = GridSpec {
-        ni: 4,
-        nj: 3,
-        micro_degrees: 90_000_000,
-    };
+    let grid = GridSpec::global(4, 3, 90_000_000);
     let message = |forecast_hour: u32, celsius: f32| {
         let mut values = vec![celsius + 273.15; 12];
         values[5] = f32::NAN;

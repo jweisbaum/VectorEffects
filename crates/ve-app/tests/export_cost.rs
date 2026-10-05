@@ -56,11 +56,11 @@ fn where_the_export_time_goes() {
     for resolution in [Resolution::Deg05, Resolution::Deg025] {
         let project = project(resolution);
         let settings = &project.settings;
-        let grid = GridSpec {
-            ni: settings.resolution.ni(),
-            nj: settings.resolution.nj(),
-            micro_degrees: settings.resolution.micro_degrees(),
-        };
+        let grid = GridSpec::global(
+            settings.resolution.ni(),
+            settings.resolution.nj(),
+            settings.resolution.micro_degrees(),
+        );
         let points: Vec<ve_core::LonLat> = grid
             .points()
             .map(|(lon, lat)| ve_core::LonLat { lon, lat })

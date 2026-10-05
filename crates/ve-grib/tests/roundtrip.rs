@@ -40,21 +40,9 @@ fn spec(grid: GridSpec, parameter: Parameter, hour: u32) -> MessageSpec {
 
 fn grids() -> Vec<GridSpec> {
     vec![
-        GridSpec {
-            ni: 360,
-            nj: 181,
-            micro_degrees: 1_000_000,
-        },
-        GridSpec {
-            ni: 720,
-            nj: 361,
-            micro_degrees: 500_000,
-        },
-        GridSpec {
-            ni: 1440,
-            nj: 721,
-            micro_degrees: 250_000,
-        },
+        GridSpec::global(360, 181, 1_000_000),
+        GridSpec::global(720, 361, 500_000),
+        GridSpec::global(1440, 721, 250_000),
     ]
 }
 
@@ -229,11 +217,7 @@ fn the_encoding_is_identical_on_every_platform() {
         hash
     }
 
-    let grid = GridSpec {
-        ni: 360,
-        nj: 181,
-        micro_degrees: 1_000_000,
-    };
+    let grid = GridSpec::global(360, 181, 1_000_000);
     let values: Vec<f32> = grid
         .points()
         .map(|(lon, lat)| ((lat / 90.0) * 25.0 + (lon / 180.0) * 5.0) as f32)
@@ -258,4 +242,102 @@ fn the_encoding_is_identical_on_every_platform() {
         0x769b_cfb2_fb07_77c3,
         "encoding changed; re-record deliberately or find the non-determinism"
     );
+}
+
+// --- Regional grids (M102, R6) -------------------------------------------------
+
+use ve_core::regrid::TargetGrid;
+
+const Q: u32 = 250_000;
+
+fn target(lon0: f64, lat0: f64, ni: u32, nj: u32) -> TargetGrid {
+    TargetGrid {
+        ni,
+        nj,
+        lon0,
+        lat0,
+        dlon: 0.25,
+        dlat: 0.25,
+    }
+}
+
+/// A message whose `u` is the node's longitude, so a value that landed on the
+/// wrong node shows as the wrong number.
+fn positional(grid: GridSpec) -> Vec<u8> {
+    let u: Vec<f32> = grid.points().map(|(lon, _)| lon as f32).collect();
+    message(&spec(grid, Parameter::WindU, 0), &u).expect("u")
+}
+
+#[test]
+fn a_regional_grid_header_names_its_corners() {
+    let grid = GridSpec::of_lattice(&target(10.0, 50.0, 41, 41), Q);
+    let d = decode(&message(&spec(grid, Parameter::WindU, 0), &vec![0.0; 41 * 41]).unwrap());
+    assert_eq!(
+        (d.la1, d.lo1, d.la2, d.lo2, d.ni, d.nj),
+        (50_000_000, 10_000_000, 40_000_000, 20_000_000, 41, 41)
+    );
+}
+
+#[test]
+fn a_grid_across_the_antimeridian_is_contiguous_in_grib_longitude() {
+    // 160E ... 160W is 40 degrees: 161 columns at 0.25.
+    let grid = GridSpec::of_lattice(&target(160.0, 10.0, 161, 5), Q);
+    let bytes = positional(grid);
+    let d = decode(&bytes);
+    assert_eq!((d.lo1, d.lo2), (160_000_000, 200_000_000));
+    let at = |i: usize| d.values[i];
+    // Column 79 is 179.75, column 80 is the seam, written as -180.
+    assert_eq!(at(79), 179.75);
+    assert_eq!(at(80), -180.0);
+    assert_eq!(at(81), -179.75);
+    // Our own decoder places the same nodes the same way.
+    let read = ve_grib::decode::read_all(&bytes).expect("decodes");
+    let m = &read.messages[0];
+    let ve_grib::decode::Grid::LatLon(g) = m.header.grid else {
+        panic!("lat/lon")
+    };
+    assert_eq!((g.lo1, g.lo2), (160.0, 200.0));
+    assert_eq!(m.values[79], 179.75);
+    assert_eq!(m.values[80], -180.0);
+    assert_eq!(m.values[160], -160.0);
+}
+
+#[test]
+fn a_grid_across_the_prime_meridian_has_lo2_below_lo1() {
+    let grid = GridSpec::of_lattice(&target(-20.0, 10.0, 161, 5), Q);
+    let bytes = positional(grid);
+    let d = decode(&bytes);
+    assert_eq!((d.lo1, d.lo2), (340_000_000, 20_000_000));
+    assert_eq!(d.values[0], -20.0);
+    assert_eq!(d.values[79], -0.25);
+    assert_eq!(d.values[80], 0.0);
+    assert_eq!(d.values[160], 20.0);
+    let read = ve_grib::decode::read_all(&bytes).expect("decodes");
+    let m = &read.messages[0];
+    assert_eq!(m.values[79], -0.25);
+    assert_eq!(m.values[80], 0.0);
+    assert_eq!(m.values[160], 20.0);
+}
+
+#[test]
+fn a_polar_cap_header() {
+    let grid = GridSpec::of_lattice(&target(-180.0, 90.0, 1440, 121), Q);
+    let d = decode(&message(&spec(grid, Parameter::WindU, 0), &vec![0.0; 1440 * 121]).unwrap());
+    assert_eq!(d.ni, 1440);
+    assert_eq!((d.la1, d.la2), (90_000_000, 60_000_000));
+    assert_eq!((d.lo1, d.lo2), (180_000_000, 179_750_000));
+}
+
+#[test]
+fn a_global_lattice_keeps_the_prime_meridian_start() {
+    let grid = GridSpec::of_lattice(&target(-180.0, 90.0, 1440, 721), Q);
+    assert_eq!(grid, GridSpec::global(1440, 721, Q));
+}
+
+#[test]
+fn a_southern_region_runs_below_its_first_row() {
+    let grid = GridSpec::of_lattice(&target(-60.0, -30.0, 9, 9), Q);
+    let d = decode(&message(&spec(grid, Parameter::WindU, 0), &[0.0; 81]).unwrap());
+    assert_eq!((d.la1, d.la2), (-30_000_000, -32_000_000));
+    assert_eq!((d.lo1, d.lo2), (300_000_000, 302_000_000));
 }
