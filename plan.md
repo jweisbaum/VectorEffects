@@ -3774,7 +3774,8 @@ and not by eye in a viewer.
   active.
 - A `.veproj` seeded by `new_project_from_grib` from the ICON-D2 file
   (704 B) keeps no regrid entry, so it searches again on open. This is the
-  deferred M104 note about the seeding pass.
+  deferred M104 note about the seeding pass. *Fixed in the final review
+  fixes below.*
 - A driver script that slices a layer header's text in the middle of an
   emoji returns a lone surrogate, and the endpoint never answers it.
 
@@ -3790,6 +3791,24 @@ and not by eye in a viewer.
   `captureState`, `clipboardState` and `frameClipboardState`.
 - **Pending CI:** byte-identical exports across the three platforms
   (CLAUDE.md *Changing GRIB output* step 4).
+
+**Final review fixes.** The review of the whole branch found seven issues, and each
+fix has a test that failed before it.
+`Region::contains` had a one-sided tolerance, so a GRIB-order longitude a few ULP
+west of the west edge wrapped to 360°. At 0.1° that is 102 of the 3,600
+meridians, −103.8 among them, and a regional Zarr export left that column NaN.
+The tolerance is now symmetric, and the TypeScript mirrors (`containsLon`, both
+`regionContains`) match it. The new-project form disables Create, and shows
+no grid, for a box with no height or width (`regionProblem`).
+A project made from an ICON file keeps the neighbour sets its read built. A
+regional project from a lat/lon GRIB or a Zarr store crops the sequences it
+already read (`crop_sequences`, `zarr::crop_read`), which gives the same hash
+as reopening it. Debug, a 0.25° 481 × 321 × 48-step patch: 160 ms
+before, 105 ms after. ARCO and ERDDAP read a window's two seam subsets
+together. The Zarr dialog states the store's global layout and that only the
+region's chunks are written. DoD after: fmt and clippy clean; workspace
+1,573 passed, 0 failed, 43 ignored; ui:test 109 files, 1,104 passed,
+1 skipped; typecheck and check:offline clean.
 
 ### M104 — Choosing a region (part 2: the form)
 

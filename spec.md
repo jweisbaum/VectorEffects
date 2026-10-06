@@ -368,7 +368,10 @@ by a display mirror of `Region::snapped` (Rust snaps again and is the
 authority), and the picker only writes them. *Full circle* sets the span to
 360°; *Arctic* and *Antarctic* fill a cap from 60° to the pole, editable
 afterwards. A full circle from pole to pole says *Choose Global for the
-whole earth* and disables Create. The grid size and export estimate count
+whole earth* and disables Create; so does a box whose North is not above its
+South (*North must be above South*) or whose West and East are the same
+(*West and East must differ*), which then shows no grid size at all rather
+than a negative one. The grid size and export estimate count
 the region's nodes. With a project open, the New project dialog also offers
 *Use current view*, the map's visible box (a view a whole turn wide is a
 full circle). A regional project's status bar shows *Region: 160°E – 160°W,
@@ -376,8 +379,13 @@ full circle). A regional project's status bar shows *Region: 160°E – 160°W,
 at the view (`formatRegion`); a full circle reads *all longitudes*.
 **A project made from a file** (GRIB or Zarr) is global when the file's
 lattice is, and otherwise regional on the file's extent snapped outward, so no
-node is cut off; a full-circle lattice that misses a pole is a band. The file
-is then read the way the project will read it on reopening. A GRIB that is
+node is cut off; a full-circle lattice that misses a pole is a band. The project
+then holds what it will read on reopening: a lat/lon file's or a store's
+sequences are cropped in memory to the region and a node, which is the
+regional read hash for hash without decoding the file a second time; a
+resampled file is read again onto the region's lattice, and the neighbour
+sets that read builds (an ICON mesh's) go with the project, so its first
+save holds them. A GRIB that is
 not on a lat/lon grid (resampled onto the global lattice) is judged by where it
 has values: latitude from the
 first and last rows holding any, longitude the whole circle less its largest
@@ -4701,7 +4709,9 @@ shard file is `data/c/<time>/0/<lat band>/<lon band>`.
 value and is left out of its shard's index, and a shard with no chunk in it
 is not a file — what zarr-python does, and what makes a regional project's
 store the size of the region rather than of the globe. A reader that
-follows the specification reads both as NaN.
+follows the specification reads both as NaN. The export dialog states the
+store's global layout (1440 × 720 at 0.25°), not the project's lattice, and
+for a regional project adds *Only the region's chunks are written*.
 
 The shards are written by `ve-zarr` itself rather than through `zarrs`, so
 that a shard can be streamed: the largest at 0.1° hourly is 400 MB of
@@ -4759,7 +4769,7 @@ Key field values:
   §3.1.
 - **Basic angle** = 0, subdivisions = missing ⇒ coordinates in units of 10⁻⁶
   degrees.
-- `La1` = 90 000 000, `Lo1` = 0, `La2` = −90 000 000, `Lo2` = 360 000 000 − Di. for a global
+- `La1` = 90 000 000, `Lo1` = 0, `La2` = −90 000 000, `Lo2` = 360 000 000 − Di for a global
   grid, which keeps its prime-meridian start so a global export's bytes never
   move. A regional grid (M102, written by the export of M103) is the lattice
   of the project's region at its resolution, edges inclusive, `Ni` × `Nj` of
@@ -4871,7 +4881,7 @@ Recorded so they are not accidentally designed out:
 - Additional GRIB parameters (pressure, temperature, wave fields).
 - A project's region changed after creation, by duplicating the project at
   the new extent (§4.2). The region is immutable, like the resolution:
-  regional projects themselves shipped in M100–M106, and growing one means
+  regional projects themselves shipped in M100–M105, and growing one means
   re-fetching every history layer.
 - Tracing an imported forecast into objects, and interpolating between an
   imported file's time steps rather than holding (§4.8).

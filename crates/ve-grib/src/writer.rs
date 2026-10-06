@@ -11,10 +11,11 @@
 //! this wrong and decoders report a grid somewhere near the north pole with a
 //! nonsensical extent.
 //!
-//! **The grid starts at longitude 0, not -180.** Scanning mode 0 runs west to
-//! east from `Lo1` and north to south from `La1`, so the first value is at
-//! (0 degrees east, 90 degrees north) and the row wraps through the
-//! antimeridian. Everything inside the application works in [-180, 180); this
+//! **A global grid starts at longitude 0, not -180.** Scanning mode 0 runs
+//! west to east from `Lo1` and north to south from `La1`, so a global grid's
+//! first value is at (0 degrees east, 90 degrees north) and the row wraps
+//! through the antimeridian. A regional grid starts at its own north-west
+//! corner, its `Lo1` in `[0, 360)` (see [`GridSpec::of_lattice`]). Everything inside the application works in [-180, 180); this
 //! is the one place that converts.
 
 use std::io::Write;
@@ -350,7 +351,7 @@ fn section3(grid: GridSpec) -> Vec<u8> {
     put_u32(&mut out, 0); // basic angle: 0 means units of 1e-6 degrees
     put_u32(&mut out, MISSING_U32); // subdivisions of the basic angle
 
-    // Template 3.0 octets 47-50 La1, 51-54 Lo1 (WMO Code Table 3.1 grid).
+    // Template 3.0 octets 47-50 La1, 51-54 Lo1 (GRIB2 template 3.0).
     put_i32_sm(&mut out, grid.la1_udeg); // La1
     put_i32_sm(&mut out, grid.lo1_udeg as i32); // Lo1, in [0, 360e6)
     // 0x30: i and j increments are given, and u/v are earth-relative rather
