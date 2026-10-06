@@ -4869,7 +4869,10 @@ Recorded so they are not accidentally designed out:
 
 - Duplicate a project at a different grid resolution.
 - Additional GRIB parameters (pressure, temperature, wave fields).
-- Region-limited grids.
+- A project's region changed after creation, by duplicating the project at
+  the new extent (§4.2). The region is immutable, like the resolution:
+  regional projects themselves shipped in M100–M106, and growing one means
+  re-fetching every history layer.
 - Tracing an imported forecast into objects, and interpolating between an
   imported file's time steps rather than holding (§4.8).
 - Scriptable/batch export.

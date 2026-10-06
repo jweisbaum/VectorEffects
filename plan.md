@@ -3679,6 +3679,118 @@ is one undo entry and the picture follows the hand. The cursor over the
 picture is `move` rather than the hand's usual `grab`, since a drag there
 does not pan. Tests in `place.test.ts` and `cursor.test.ts`.
 
+### M106 — Regional projects: the close-out
+
+The whole feature in the running application, on one regional project that
+crosses 180°. This milestone measured and checked; it changed no code. spec
+§14 now lists *a project's region changed after creation, by duplicating*
+in place of "region-limited grids", which M100–M105 built.
+
+**The pass.** Driver on port 5199 with `VE_AUTOMATION_ROOT` set to a
+scratch root, so every fetched file landed in that root's `history/` and
+none in the application's own data directory (checked). The project
+commands went through the application's own IPC (`__TAURI_INTERNALS__.invoke`,
+started and then polled). The painting and the reopening went through the
+interface.
+1. `new_project`: *Pacific seam*, 160°E – 160°W, 10°S – 10°N, 0.25°,
+   161 × 81, 24 hourly steps.
+2. `import_grib` of `era5-wind-globcurrent.grib2`: global, 0.25°, 164 MB,
+   wind and current for 2023-01-10, 24 h. It took 1.0 s and added two
+   layers, cropped to the region.
+3. `import_history` of ERA5 wind for the same 24 h, then `import_nrt` of
+   MULTIOBS. The NRT request was `days: 2` because the UTC day had turned
+   and MULTIOBS ends at 2026-10-04 23Z; the timeline's 24 steps keep the
+   24 hours of 2026-10-04.
+4. Painting across the seam:
+   - A stroke 170°E → 170°W at 6°S, 20 m/s toward 70°, 700 km wide, sent
+     through `add_brush_stroke` onto a new painted layer.
+   - A brush drag by hand across the window's middle (≈172°E → 172°W at
+     3°N), with the tool's defaults of 10 m/s toward 0°. The synthetic moves
+     need `getCoalescedEvents` stubbed, or the stroke is one stamp.
+5. Saved, closed and reopened through `__veOpen`, which took 2.6 s until
+   the map showed the project. The summary still read the region, 6 layers
+   and 2 objects. `sample_field` gave 20 m/s toward 70° on the 6°S stroke
+   and 10 m/s toward 0° on the 3°N one, at 170°/175°/180°/−175°/−170°.
+6. GRIB and Zarr exports.
+
+| What | Global, same hours | Regional | Ratio |
+|---|---|---|---|
+| `history/` ERA5, 24 h | 99,681,120 B | 1,262,016 B | 1.27 % (79×) |
+| `history/` MULTIOBS, 24 h | 60,815,712 B | 1,262,016 B | 2.08 % (48×) |
+| `.veproj` with ICON-D2 at 0.1° | 111,256 B (regrid entry 19,474,108 B raw) | 77,650 B (131,727 B raw) | 70 % on disk, 0.68 % raw |
+| `open_cost`: open the saved project | 0.331–0.346 s | 0.353–0.360 s (20° N Atlantic) | — |
+| `open_cost`: project from the file | 0.387–0.438 s | 0.318–0.354 s | — |
+
+Notes on the table:
+- **Fetch times.** ERA5 took 34–56 s either way; it downloads the globe,
+  as R5 says. MULTIOBS took 35–39 s regional against 20 s global: across
+  180° its window is two ARCO subsets read one after the other (M102's
+  finding).
+- **ICON-D2 on disk.** The global set compresses 99 %, because almost
+  every node is missing, so the on-disk saving is far smaller than the raw
+  one. The regional project is 243 × 149 (3.9°W – 20.3°E, 43.2 – 58°N).
+  Both projects give the same value at 10°E 50°N: 0.866 m/s toward 302.35°.
+- **`open_cost`.** Release build, `VE_TEST_OPEN_GRIB` set to the file
+  above, four runs each.
+- **Exports.** The GRIB is 2,524,032 B: 96 messages (wind and current u/v,
+  24 steps), written in 129 ms, against an estimate of 2,682,624 B. The Zarr
+  is 2,041,152 B, 15 chunks, written in 9.8 s; only `data/c/0/0/{1,2}/{0,4}`
+  are written.
+
+**Checked with ecCodes.** wgrib2 is not installed here.
+- `grib_dump -O` gives no warning or error.
+- `grib_ls` gives Ni 161, Nj 81, La1 10, Lo1 160, La2 −10, Lo2 200,
+  increment 0.25, shapeOfTheEarth 6.
+- `grib_get_data` on the first step, at 6°S and longitudes 170/175/180/185/190:
+  u = 18.794, v = 6.8405 at every node, which is 20·sin 70° and 20·cos 70°.
+- At 3°N and longitudes 172/178/180/182/188: u = 0.0001, v = 10.0002.
+- So both strokes run unbroken across 180° in the file, point toward the
+  azimuth they were painted with, and have u and v neither swapped nor
+  inverted. One node outside the stroke (165°E) carries the imported field.
+
+**The independent viewer.** XyGrib opened the file, but `screencapture`
+on this machine has no Screen Recording permission and returned only the
+wallpaper and menu bar. So the arrows were checked numerically, as above,
+and not by eye in a viewer.
+
+**Captures** (driver scratch, not committed): `capture-t11-opened-3`,
+`-painted-3` and `-reopened-3`, three of each and the last one judged.
+- The region fills the 1.95:1 window, so no exterior is dimmed at this zoom
+  (as in M105).
+- The yellow 20 m/s band at 6°S runs from about 167°E to 167°W.
+- The teal 10 m/s band at 3°N runs across the middle of the window.
+- Its barbs' staffs point south. Wind toward north comes from the south,
+  so this is correct.
+- The 20 m/s band's barbs point west-south-west, which is where wind toward
+  70° comes from.
+- The imported field shows around both bands.
+
+**Seen on the way.** None of these is the region's doing.
+- The project was built by raw IPC in the same session and then opened, and
+  in that case the interface kept the active layer it had picked while the
+  project was being built. That layer was an imported one, *Currents*, so the
+  first brush press showed the not-allowed cursor and added nothing. Clicking
+  *Seam paint* fixed it. A project opened in a fresh session had *Seam paint*
+  active.
+- A `.veproj` seeded by `new_project_from_grib` from the ICON-D2 file
+  (704 B) keeps no regrid entry, so it searches again on open. This is the
+  deferred M104 note about the seeding pass.
+- A driver script that slices a layer header's text in the middle of an
+  emoji returns a lone surrogate, and the endpoint never answers it.
+
+**Definition of done.**
+- `cargo fmt --all --check`: clean.
+- `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- `VE_FORCE_CPU=1 cargo test --workspace`: 1,566 passed, 0 failed,
+  43 ignored.
+- `npm run ui:typecheck`: clean.
+- `npm run ui:test`: 108 files, 1,097 passed, 1 skipped.
+- `npm run check:offline`: passed.
+- Every `api.*` method has a caller, except three that already had none:
+  `captureState`, `clipboardState` and `frameClipboardState`.
+- **Pending CI:** byte-identical exports across the three platforms
+  (CLAUDE.md *Changing GRIB output* step 4).
+
 ### M104 — Choosing a region (part 2: the form)
 
 Decision R9, the interface half. `NewProjectForm` asks *Extent: Global |
