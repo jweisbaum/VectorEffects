@@ -9,7 +9,7 @@
  */
 
 import type { RegionRequest } from "../generated/RegionRequest";
-import { marqueeBounds } from "../map/marquee";
+import { containsLon, EDGE_DEG, marqueeBounds } from "../map/marquee";
 
 /** A point under the picker. `lon` is unwrapped about the canvas's centre. */
 export interface PickPoint {
@@ -140,12 +140,32 @@ export function isWholeEarth(req: RegionRequest): boolean {
   return regionSpan(req) >= 360 && req.south <= -90 && req.north >= 90;
 }
 
+/** Why a request is not a region `Region::snapped` would make. */
+export type RegionProblem = "whole-earth" | "no-height" | "no-width";
+
+/**
+ * What Rust would refuse in `req` on a lattice of `resolutionDeg`, or `null`:
+ * a box whose snapped north is not above its south, one with no width, or the
+ * whole earth, which is a global project. The form disables Create on any of
+ * them rather than letting the backend say so.
+ */
+export function regionProblem(req: RegionRequest, resolutionDeg: number): RegionProblem | null {
+  const s = snapEdges(req, resolutionDeg);
+  if (s.north <= s.south) return "no-height";
+  if (!s.full_circle && regionSpan(s) === 0) return "no-width";
+  if (isWholeEarth(s)) return "whole-earth";
+  return null;
+}
+
 /**
  * The lattice the region's export holds, as `Region::lattice` counts it:
  * both edges are nodes, except round a full circle, which holds no
- * duplicated column — as the global grid does not.
+ * duplicated column — as the global grid does not. A box with no height or
+ * no width holds no nodes.
  */
 export function regionNodes(req: RegionRequest, resolutionDeg: number): { ni: number; nj: number } {
+  const problem = regionProblem(req, resolutionDeg);
+  if (problem === "no-height" || problem === "no-width") return { ni: 0, nj: 0 };
   const s = snapEdges(req, resolutionDeg);
   const columns = Math.round(regionSpan(s) / resolutionDeg);
   return {
@@ -169,8 +189,8 @@ export function moveRegion(start: RegionRequest, dLon: number, dLat: number): Re
 
 /** Whether a point lies in the box, edges included. */
 export function regionContains(req: RegionRequest, lon: number, lat: number): boolean {
-  if (lat < req.south || lat > req.north) return false;
-  return req.full_circle || mod360(lon - req.west) <= regionSpan(req);
+  if (lat < req.south - EDGE_DEG || lat > req.north + EDGE_DEG) return false;
+  return req.full_circle || containsLon(req, lon);
 }
 
 /**

@@ -33,10 +33,21 @@ export function marqueeBounds(
   };
 }
 
-/** Whether `lon` lies in the arc running east from `west` to `east`. */
+/**
+ * How far past an edge, in degrees, a longitude still counts as on it: far
+ * below any lattice's spacing, far above a float's drift. `ve_core`'s
+ * `Region::contains` uses the same.
+ */
+export const EDGE_DEG = 1e-9;
+
+/**
+ * Whether `lon` lies in the arc running east from `west` to `east`. The
+ * tolerance is on both sides: shifted before the wrap, a longitude a few ULP
+ * west of `west` does not wrap round to 360° east of it.
+ */
 export function containsLon(bounds: MarqueeBounds, lon: number): boolean {
-  const span = mod360(bounds.east - bounds.west);
-  return mod360(lon - bounds.west) <= span;
+  const span = mod360(bounds.east - bounds.west + EDGE_DEG) - EDGE_DEG;
+  return mod360(lon - bounds.west + EDGE_DEG) <= span + 2 * EDGE_DEG;
 }
 
 function mod360(degrees: number): number {

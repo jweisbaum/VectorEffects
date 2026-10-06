@@ -7,9 +7,12 @@ import {
   followCentre,
   isWholeEarth,
   moveRegion,
+  normalizeLon,
   pickerToLonLat,
+  regionContains,
   regionFromView,
   regionNodes,
+  regionProblem,
   regionSpan,
   snapEdges,
 } from "./regionPick";
@@ -141,5 +144,38 @@ describe("the region as the status bar shows it", () => {
     expect(formatRegion({ west: -5.25, east: 0, south: 0, north: 50.5, full_circle: false }))
       .toEqual({ lon: "5.25°W – 0°", lat: "0° – 50.5°N" });
     expect(formatRegion({ west: -180, east: 180, south: 60, north: 90, full_circle: true }).lon).toBeNull();
+  });
+});
+
+describe("regionContains on the lattice", () => {
+  it("holds a meridian a few ULP west of the west edge", () => {
+    const lons = Array.from({ length: 3600 }, (_, i) => {
+      let lon = 0 + i * 0.1;
+      while (lon >= 180) lon -= 360;
+      return lon;
+    });
+    for (let k = 0; k < 3600; k++) {
+      const west = Math.round(-1800 + k) / 10;
+      const req = { west, east: normalizeLon(west + 1), south: 0, north: 10, full_circle: false };
+      const held = lons.filter((lon) => regionContains(req, lon, 5)).length;
+      expect(held, `west ${west}`).toBe(11);
+    }
+  });
+});
+
+describe("regionProblem", () => {
+  it("names what makes a box no region at all", () => {
+    expect(regionProblem({ west: 10, east: 20, south: 40, north: 50, full_circle: false }, 0.25)).toBeNull();
+    expect(regionProblem({ west: 10, east: 20, south: 50, north: 40, full_circle: false }, 0.25)).toBe("no-height");
+    expect(regionProblem({ west: 10, east: 20, south: 40, north: 40, full_circle: false }, 0.25)).toBe("no-height");
+    expect(regionProblem({ west: 10, east: 10, south: 40, north: 50, full_circle: false }, 0.25)).toBe("no-width");
+    // A full circle has width whatever east says, and the whole earth is Global.
+    expect(regionProblem({ ...ARCTIC, east: -180 }, 0.25)).toBeNull();
+    expect(regionProblem({ ...ARCTIC, south: -90 }, 0.25)).toBe("whole-earth");
+  });
+
+  it("counts no nodes, never a negative number, for a box that is not one", () => {
+    expect(regionNodes({ west: 10, east: 20, south: 50, north: 40, full_circle: false }, 0.25)).toEqual({ ni: 0, nj: 0 });
+    expect(regionNodes({ west: 10, east: 10, south: 40, north: 50, full_circle: false }, 0.25)).toEqual({ ni: 0, nj: 0 });
   });
 });

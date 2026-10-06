@@ -21,7 +21,7 @@
 
 import type { ProjectRegion } from "../generated/ProjectRegion";
 import { MAX_PX_PER_DEG, normalizeLon as norm, type Camera, type GeoPoint, type Viewport } from "./camera";
-import { containsLon } from "./marquee";
+import { containsLon, EDGE_DEG } from "./marquee";
 import { DEFAULT_PROJECTION, projectionOf, type Projection } from "./projection";
 import { defaultCentre, mapTransform, type Box, type GeneralMap, type XY } from "./projections/general";
 
@@ -80,7 +80,7 @@ export function regionOutline(region: ProjectRegion, stepDeg = 2): GeoPoint[] {
 
 /** Whether a position lies in the region. Longitude is read on the arc. */
 export function regionContains(region: ProjectRegion, lon: number, lat: number): boolean {
-  if (lat < region.south || lat > region.north) return false;
+  if (lat < region.south - EDGE_DEG || lat > region.north + EDGE_DEG) return false;
   if (region.full_circle) return true;
   return containsLon(region, lon);
 }

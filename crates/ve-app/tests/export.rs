@@ -1169,13 +1169,18 @@ fn the_estimate_counts_the_regions_points() {
 /// The first parameter at step 0 of the store at a node on the 1° lattice
 /// (row 0 is 90°N, column 0 is -180°).
 fn zarr_u(path: &std::path::Path, lon: f64, lat: f64) -> f32 {
+    zarr_u_on(path, lon, lat, 1.0)
+}
+
+/// [`zarr_u`] on a lattice of `degrees`.
+fn zarr_u_on(path: &std::path::Path, lon: f64, lat: f64, degrees: f64) -> f32 {
     use ve_zarr::export::f16;
     use zarrs::array::{Array, ArraySubset};
     use zarrs::filesystem::FilesystemStore;
     let store = std::sync::Arc::new(FilesystemStore::new(path).expect("store"));
     let array = Array::open(store, "/data").expect("open");
-    let row = (90.0 - lat).round() as u64;
-    let column = (lon + 180.0).round() as u64;
+    let row = ((90.0 - lat) / degrees).round() as u64;
+    let column = ((lon + 180.0) / degrees).round() as u64;
     let cell: Vec<f16> = array
         .retrieve_array_subset(&ArraySubset::new_with_ranges(&[
             0..1,
@@ -1233,6 +1238,37 @@ fn a_regional_zarr_export_across_the_antimeridian() {
     assert!(zarr_u(&path, 164.0, 0.0).is_nan(), "164°E");
     assert!(zarr_u(&path, -164.0, 0.0).is_nan(), "164°W");
     assert!(zarr_u(&path, 170.0, 8.0).is_nan(), "8°N");
+}
+
+/// At 0.1° the export's longitudes, `0 + i·0.1` wrapped, land a few ULP west
+/// of some meridians; -103.8 is one. With that meridian as the region's west
+/// edge the column must still be written, not left NaN.
+#[test]
+fn a_fine_regional_zarr_export_writes_its_west_column() {
+    let root = TempRoot::new("regional-zarr-west");
+    let project = regional_project(
+        "0.1",
+        (-103.8, -103.0, 0.0, 1.0, false),
+        vec![[-110.0, 0.5], [-103.4, 0.5], [-97.0, 0.5]],
+    );
+    let path = root.0.join("out.zarr");
+    export::run_zarr(
+        &project,
+        &zarr_request(&path),
+        &AtomicBool::new(false),
+        |_| {},
+    )
+    .expect("export");
+    for lon in [-103.8, -103.4, -103.0] {
+        let (expected, _) = field_at(&project, lon, 0.5);
+        assert!((expected - 20.0).abs() < 0.01, "painted at {lon}");
+        let got = zarr_u_on(&path, lon, 0.5, 0.1);
+        assert!((got - expected).abs() < 0.05, "{lon}°E holds {got}");
+    }
+    assert!(
+        zarr_u_on(&path, -103.9, 0.5, 0.1).is_nan(),
+        "west of the region"
+    );
 }
 
 #[test]

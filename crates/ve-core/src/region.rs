@@ -14,6 +14,9 @@ use crate::regrid::TargetGrid;
 const MICRO: f64 = 1_000_000.0;
 const FULL_TURN: i32 = 360_000_000;
 const POLE: i32 = 90_000_000;
+/// How far outside an edge, in degrees, a point still counts as on it: far
+/// below any lattice's spacing, far above a float's drift.
+const EDGE: f64 = 1e-9;
 
 /// A box of the earth, in integer micro-degrees.
 ///
@@ -171,9 +174,12 @@ impl Region {
             f64::from(self.south_udeg) / MICRO,
             f64::from(self.north_udeg) / MICRO,
         );
+        // The tolerance is on both sides: shifting by it before the wrap keeps
+        // a point a few ULP west of the west edge from wrapping to 360° east.
         let in_lon = self.is_full_circle()
-            || (lon - west).rem_euclid(360.0) <= f64::from(self.span_udeg) / MICRO + 1e-9;
-        in_lon && south - 1e-9 <= lat && lat <= north + 1e-9
+            || (lon - west + EDGE).rem_euclid(360.0)
+                <= f64::from(self.span_udeg) / MICRO + 2.0 * EDGE;
+        in_lon && south - EDGE <= lat && lat <= north + EDGE
     }
 
     /// `(west, east, south, north)` in degrees, east **unwrapped**: it is
@@ -374,6 +380,41 @@ mod tests {
         ];
         for (name, r) in cases {
             assert!(r.validate(Q).is_err(), "{name} must not validate");
+        }
+    }
+
+    /// Every meridian of every lattice, as west edge and as east edge, against
+    /// longitudes made the way `ve_grib::GridSpec::points` makes them:
+    /// `0 + i·Δ`, wrapped by subtracting 360. Those land a few ULP either side
+    /// of the exact meridian, and a one-sided tolerance read a point a hair
+    /// west of the west edge as 360° east of it, dropping the region's west
+    /// column from a Zarr export.
+    #[test]
+    fn every_meridian_holds_its_column_as_west_and_east_edge() {
+        for res in Resolution::ALL {
+            let d = res.micro_degrees() as i32;
+            let delta = f64::from(res.micro_degrees()) / 1e6;
+            let ni = FULL_TURN / d;
+            let lons: Vec<f64> = (0..ni)
+                .map(|i| {
+                    let mut lon = 0.0 + f64::from(i) * delta;
+                    while lon >= 180.0 {
+                        lon -= 360.0;
+                    }
+                    lon
+                })
+                .collect();
+            // Ten columns wide, so eleven nodes edges included.
+            for k in 0..ni {
+                let r = Region {
+                    west_udeg: -FULL_TURN / 2 + k * d,
+                    span_udeg: 10 * d,
+                    north_udeg: 10_000_000,
+                    south_udeg: 0,
+                };
+                let held = lons.iter().filter(|&&lon| r.contains(lon, 5.0)).count();
+                assert_eq!(held, 11, "{} at {res:?}", r.key());
+            }
         }
     }
 

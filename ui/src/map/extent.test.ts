@@ -85,6 +85,23 @@ describe("regionContains", () => {
     expect(regionContains(pacific, 170, 11)).toBe(false);
   });
 
+  it("holds a meridian a few ULP west of the west edge", () => {
+    // Longitudes made as the export makes them: 0 + i·0.1, wrapped. Some
+    // land a hair west of the exact meridian (-103.8 is one); the west
+    // column must not wrap to 360° east.
+    const lons = Array.from({ length: 3600 }, (_, i) => {
+      let lon = 0 + i * 0.1;
+      while (lon >= 180) lon -= 360;
+      return lon;
+    });
+    for (let k = 0; k < 3600; k++) {
+      const west = Math.round(-1800 + k) / 10;
+      const region: ProjectRegion = { west, east: west + 1, south: 0, north: 10, full_circle: false };
+      const held = lons.filter((lon) => regionContains(region, lon, 5)).length;
+      expect(held, `west ${west}`).toBe(11);
+    }
+  });
+
   it("holds every longitude of a cap, the pole included", () => {
     expect(regionContains(arctic, -179.9, 61)).toBe(true);
     expect(regionContains(arctic, 37, 90)).toBe(true);
