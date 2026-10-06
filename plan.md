@@ -1,5 +1,11 @@
 # VectorEffects — Implementation Plan
 
+**2026-10-05: Prepare 0.1.23 Beta.** Regional projects (M100–M106): a
+project covers the whole earth or a rectangle that may cross the date line
+or reach a pole; imports, history and near-real-time downloads and both
+exports are kept to it, and the map is held to it. Notes in
+`docs/releases/0.1.23.md`.
+
 **2026-10-04: Prepare 0.1.22 Beta.** A Windows on ARM build, with exports
 checked byte-identical across platforms; ICON-D2, ICON-D2-EPS and ICON-EU-EPS
 meshes, with regional meshes ending where they end; AROME's wide JPEG 2000
