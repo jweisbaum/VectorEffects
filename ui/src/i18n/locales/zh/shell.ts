@@ -95,6 +95,7 @@ const catalogue: Record<string, string> = {
   "Exported Zarr V3 ({chunks} chunks, {size}) in {seconds} s": "已导出 Zarr V3（{chunks} 个数据块，{size}），用时 {seconds} 秒",
   "Export Zarr V3": "导出 Zarr V3",
   "u/v 10 m wind + u/v total surface current · Float16 · Zstd · land masked": "u/v 10 米风 + u/v 表层总海流 · Float16 · Zstd · 陆地已掩蔽",
+  "Only the region's chunks are written": "只写入区域的数据块",
   "New project": "新建项目",
   "Create project": "创建项目",
   "Untitled": "未命名",

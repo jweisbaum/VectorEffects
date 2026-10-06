@@ -95,6 +95,7 @@ const catalogue: Record<string, string> = {
   "Exported Zarr V3 ({chunks} chunks, {size}) in {seconds} s": "Zarr V3（{chunks} チャンク、{size}）を {seconds} 秒で書き出しました",
   "Export Zarr V3": "Zarr V3 の書き出し",
   "u/v 10 m wind + u/v total surface current · Float16 · Zstd · land masked": "u/v 10 m 風 + u/v 表層海流（合計）· Float16 · Zstd · 陸地はマスク",
+  "Only the region's chunks are written": "領域のチャンクだけが書き出されます",
   "New project": "新規プロジェクト",
   "Create project": "プロジェクトを作成",
   "Untitled": "名称未設定",

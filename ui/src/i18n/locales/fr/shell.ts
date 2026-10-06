@@ -95,6 +95,7 @@ const catalogue: Record<string, string> = {
   "Exported Zarr V3 ({chunks} chunks, {size}) in {seconds} s": "Zarr V3 exporté ({chunks} blocs, {size}) en {seconds} s",
   "Export Zarr V3": "Exporter en Zarr V3",
   "u/v 10 m wind + u/v total surface current · Float16 · Zstd · land masked": "vent u/v à 10 m + courant de surface total u/v · Float16 · Zstd · terres masquées",
+  "Only the region's chunks are written": "Seuls les blocs de la région sont écrits",
   "New project": "Nouveau projet",
   "Create project": "Créer le projet",
   "Untitled": "Sans titre",

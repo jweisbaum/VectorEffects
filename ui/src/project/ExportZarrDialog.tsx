@@ -68,6 +68,11 @@ export default function ExportZarrDialog({
     }
   };
 
+  // The store is always the global routing layout, whose rows stop one short
+  // of the south pole; a regional project fills only its own chunks of it.
+  const storeNi = Math.round(360 / project.resolution_deg);
+  const storeNj = Math.round(180 / project.resolution_deg);
+
   const percent =
     progress && progress.total > 0 ? Math.round((progress.step / progress.total) * 100) : 0;
 
@@ -78,8 +83,14 @@ export default function ExportZarrDialog({
         <p className="muted modal-summary">
           {t("u/v 10 m wind + u/v total surface current · Float16 · Zstd · land masked")}
           <br />
-          {project.grid_ni} × {project.grid_nj} ·{" "}
+          {storeNi} × {storeNj} ·{" "}
           {t("{count} steps every {hours} h", { count: project.step_count, hours: project.step_hours })}
+          {project.region !== null && (
+            <>
+              <br />
+              {t("Only the region's chunks are written")}
+            </>
+          )}
         </p>
 
         <fieldset disabled={running}>
