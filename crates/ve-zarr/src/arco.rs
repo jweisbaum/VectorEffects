@@ -400,17 +400,17 @@ impl ArcoStore {
 
     /// One step of an array, on the store's whole grid: the window's
     /// subsets read through `read`, and every cell outside them `missing`.
-    fn gather<T: Copy>(
+    fn gather<T: Copy + Send>(
         &self,
         index: u64,
         what: &str,
         missing: T,
-        read: impl Fn(&ArraySubset) -> Result<Vec<T>>,
+        read: impl Fn(&ArraySubset) -> Result<Vec<T>> + Sync,
     ) -> Result<Vec<T>> {
         let subsets = subset_for(&self.window, self.grid, index, self.level);
-        let mut blocks = Vec::with_capacity(subsets.len());
-        for subset in &subsets {
-            let block = read(subset)?;
+        // A window across 180° is two subsets, read together as u and v are.
+        let mut blocks = crate::parallel::try_all(&subsets, &read)?;
+        for (subset, block) in subsets.iter().zip(&blocks) {
             if block.len() != subset.num_elements_usize() {
                 return Err(ZarrError::Layout(format!(
                     "{what} at step {index} holds {} values, expected {}",
@@ -418,7 +418,6 @@ impl ArcoStore {
                     subset.num_elements_usize()
                 )));
             }
-            blocks.push(block);
         }
         if let [whole] = subsets.as_slice()
             && whole.num_elements_usize() == self.grid.len()

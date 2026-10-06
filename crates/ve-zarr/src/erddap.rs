@@ -273,14 +273,18 @@ impl ErddapStore {
                 }
             })
             .collect();
-        for (indices, rows, columns) in requests {
-            let expected = rows.len() * columns.len();
+        // A window across 180° is two requests, sent together as the parts
+        // of an ARCO window are; the answers are placed in request order.
+        let bodies = crate::parallel::try_all(&requests, |(indices, _, _)| {
             let query = names
                 .iter()
                 .map(|name| format!("{name}{indices}"))
                 .collect::<Vec<_>>()
                 .join(",");
-            let bytes = self.fetch.get(&self.url(&query))?;
+            self.fetch.get(&self.url(&query))
+        })?;
+        for ((_, rows, columns), bytes) in requests.into_iter().zip(bodies) {
+            let expected = rows.len() * columns.len();
             let file = File::parse(&bytes)?;
             for (name, buffer) in names.iter().zip(&mut out) {
                 let block = self.unpacked(&file, name, expected)?;
