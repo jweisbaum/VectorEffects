@@ -49,6 +49,27 @@ pub fn read_for(
     }
 }
 
+/// Sequences [`read_reporting`] read whole, as [`read_for`] would have read
+/// them for `settings`: a regional project's region and a node round it,
+/// cropped in memory rather than decoded a second time, and the same refusal
+/// for a store that misses the region. A global project's are unchanged.
+///
+/// Equal hash for hash to `read_for`, since a store's frames are lat/lon and
+/// `read_for` crops each one the same way.
+pub fn crop_read(
+    path: &Path,
+    sequences: Vec<RasterSequence>,
+    settings: &ProjectSettings,
+) -> Result<Vec<RasterSequence>> {
+    let (Some(region), Some(target)) = (settings.region, crate::import::crop_for(settings)) else {
+        return Ok(sequences);
+    };
+    ve_grib::import::crop_sequences(sequences, &target, 1).map_err(|err| match err {
+        ve_grib::GribError::OutsideRegion => AppError::outside_region(path.display(), &region),
+        other => AppError::Internal(other.to_string()),
+    })
+}
+
 fn read_store(
     path: &Path,
     settings: Option<&ProjectSettings>,
@@ -230,14 +251,9 @@ pub fn zarr_project(
     let settings = crate::import::settings_for(&sequences)
         .ok_or_else(|| AppError::Internal("Zarr has no vector frames".into()))?;
     // A store that is not global makes a regional project (decision R9) and
-    // is read as that project will be on reopening: its region, and a node.
-    let sequences = if settings.region.is_some() {
-        read_for(&path, &settings, &|done, total| {
-            opening.source(0, done, total)
-        })?
-    } else {
-        sequences
-    };
+    // holds what that project reads on reopening: its region, and a node,
+    // cropped from what was just read rather than read again.
+    let sequences = crop_read(&path, sequences, &settings)?;
     opening.finished();
     with_session(state, |session| {
         crate::projects::refuse_to_discard(session, discard_unsaved)?;

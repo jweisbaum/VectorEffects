@@ -538,6 +538,63 @@ fn paired(us: &[f32], vs: &[f32]) -> Vec<[f32; 2]> {
         .collect()
 }
 
+/// Crops sequences that were read whole onto a regional lattice, plus `margin`
+/// nodes round it, as a regional read would have cropped each frame.
+///
+/// For **lat/lon** sequences only: a lat/lon frame read with a crop is
+/// [`RasterGrid::cropped_to`] of the frame read without one, so cropping in
+/// memory gives the same lattices, the same offsets and the same sequence hash
+/// as reading the file again for the region — without decoding it twice. A
+/// resampled frame is on the target it was resampled onto and has to be read
+/// again instead.
+///
+/// A frame that misses the region is dropped and the offsets are counted from
+/// the first frame kept, as [`sequences`] does; a sequence left with none is
+/// dropped; and when none is left at all the file is
+/// [`GribError::OutsideRegion`]. Frames that crop to the same lattice share
+/// it.
+pub fn crop_sequences(
+    sequences: Vec<RasterSequence>,
+    target: &TargetGrid,
+    margin: u32,
+) -> Result<Vec<RasterSequence>> {
+    let mut shared: BTreeMap<[u8; 32], Arc<RasterGrid>> = BTreeMap::new();
+    let mut out = Vec::with_capacity(sequences.len());
+    for sequence in sequences {
+        // Each frame's crop is a copy and a hash of its own, so they are made
+        // across the pool, as the regional read makes its frames.
+        let crops: Vec<Option<RasterGrid>> = sequence
+            .frames
+            .par_iter()
+            .map(|frame| frame.grid.cropped_to(target, margin))
+            .collect();
+        let mut frames = Vec::with_capacity(sequence.frames.len());
+        let mut first_time = None;
+        for (frame, grid) in sequence.frames.iter().zip(crops) {
+            let Some(grid) = grid else {
+                continue;
+            };
+            let grid = shared
+                .entry(grid.hash)
+                .or_insert_with(|| Arc::new(grid))
+                .clone();
+            let first = *first_time.get_or_insert(frame.valid_unix_s);
+            frames.push(RasterFrame {
+                offset_hours: (frame.valid_unix_s - first) as f64 / 3600.0,
+                valid_unix_s: frame.valid_unix_s,
+                grid,
+            });
+        }
+        if !frames.is_empty() {
+            out.push(RasterSequence::new(sequence.kind, frames).map_err(GribError::Malformed)?);
+        }
+    }
+    if out.is_empty() {
+        return Err(GribError::OutsideRegion);
+    }
+    Ok(out)
+}
+
 /// What an import found in a file.
 #[derive(Debug, Clone)]
 pub struct Imported {

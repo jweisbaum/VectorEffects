@@ -369,3 +369,45 @@ fn a_store_on_the_global_lattice_makes_a_global_project() {
     assert!(summary.region.is_none());
     assert_eq!((summary.grid_ni, summary.grid_nj), (360, 181));
 }
+
+/// A regional project made from a store crops what was read whole rather than
+/// reading it again; that must be exactly what reopening it reads.
+#[test]
+fn cropping_a_store_read_whole_is_the_regional_read() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("routing_test");
+    write_store(&path);
+    let whole = zarr::read(&path).unwrap();
+    let mut settings = ve_core::project::ProjectSettings::new(
+        FieldKind::Wind,
+        ve_core::project::Resolution::Deg1,
+        ve_core::project::StepHours::H3,
+        2,
+    );
+    for (west, east, south, north, full) in [
+        (-40.0, -20.0, 40.0, 60.0, false),
+        (170.0, -170.0, -10.0, 10.0, false),
+        (-180.0, 180.0, 60.0, 90.0, true),
+    ] {
+        settings.region = Some(
+            ve_core::region::Region::snapped(west, east, south, north, full, settings.resolution)
+                .unwrap(),
+        );
+        let cropped = zarr::crop_read(&path, whole.clone(), &settings).unwrap();
+        let read = zarr::read_for(&path, &settings, &|_, _| {}).unwrap();
+        let hashes = |s: &[ve_core::raster::RasterSequence]| -> Vec<[u8; 32]> {
+            s.iter().map(|s| s.hash).collect()
+        };
+        assert_eq!(
+            hashes(&cropped),
+            hashes(&read),
+            "{west} {east} {south} {north}"
+        );
+    }
+    settings.region = None;
+    let global = zarr::crop_read(&path, whole.clone(), &settings).unwrap();
+    assert_eq!(
+        global[0].hash, whole[0].hash,
+        "a global project is not cropped"
+    );
+}

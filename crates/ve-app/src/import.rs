@@ -411,12 +411,29 @@ pub fn grib_project(
         settings.region = region_of_data(&first.grid, settings.resolution);
     }
     // A file that is not global makes a regional project (decision R9), and
-    // is then read the way that project will read it on every reopening: onto
-    // the region's lattice, so a save and a load hold the same rasters.
-    if settings.region.is_some() {
-        let mut project = Project::new("scratch".to_owned(), settings.clone());
-        imported = resample_into(&mut project, &path)?;
-    }
+    // holds what that project will read on every reopening: the region's
+    // lattice, so a save and a load hold the same rasters. A lat/lon file is
+    // cropped in memory, which is the regional read without the second
+    // decode; a resampled one was put on the global lattice and is read
+    // again onto the region's.
+    //
+    // The neighbour sets the read built go with the project either way, so
+    // its first save holds them and its first reopening does not search
+    // again.
+    let regrid = match settings.region {
+        None => cache,
+        Some(_) if !resampled => {
+            imported.sequences =
+                ve_grib::import::crop_sequences(imported.sequences, &settings.lattice(), 1)
+                    .map_err(|err| grib_error(err, &path, &settings, "import the GRIB file at"))?;
+            Default::default()
+        }
+        Some(_) => {
+            let mut project = Project::new("scratch".to_owned(), settings.clone());
+            imported = resample_into(&mut project, &path)?;
+            project.regrid
+        }
+    };
     opening.finished();
     let name = path
         .file_stem()
@@ -426,7 +443,8 @@ pub fn grib_project(
 
     with_session(state, |session| {
         crate::projects::refuse_to_discard(session, discard_unsaved)?;
-        let project = Project::new(name, settings);
+        let mut project = Project::new(name, settings);
+        project.regrid = regrid;
         tracing::info!(
             name = %project.name,
             path = %path.display(),

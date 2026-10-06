@@ -463,3 +463,45 @@ fn a_temperature_file_is_cropped_to_the_region() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Cropping what was read whole is the regional read, hash for hash: the
+/// project made from a file crops in memory, and reopening it reads the file
+/// for the region.
+#[test]
+fn cropping_a_whole_read_is_the_regional_read() {
+    for target in [
+        lattice(10.0, 30.0, 40.0, 60.0, false),
+        lattice(170.0, -170.0, -10.0, 10.0, false),
+        lattice(-180.0, 180.0, 70.0, 90.0, true),
+    ] {
+        let messages = || decode::read_all(&global_file()).expect("decodes").messages;
+        let whole = import::sequences(messages(), None).expect("whole");
+        let cropped = import::crop_sequences(whole, &target, 1).expect("crops");
+        let mut cache = BTreeMap::new();
+        let mut resampling = Resampling::regional(target, &mut cache);
+        let read = import::sequences(messages(), Some(&mut resampling)).expect("regional");
+        assert_eq!(cropped.len(), read.len());
+        for (a, b) in cropped.iter().zip(&read) {
+            assert_eq!(a.hash, b.hash);
+        }
+    }
+    let whole =
+        import::sequences(decode::read_all(&global_file()).unwrap().messages, None).unwrap();
+    let mut outside = whole[0].frames[0].grid.as_ref().clone();
+    // A patch at the north pole, against a region on the equator.
+    outside = outside
+        .cropped_to(&lattice(0.0, 5.0, 80.0, 90.0, false), 0)
+        .expect("patch");
+    let patch = ve_core::raster::RasterSequence::new(
+        FieldKind::Wind,
+        vec![ve_core::raster::RasterFrame {
+            offset_hours: 0.0,
+            valid_unix_s: 0,
+            grid: Arc::new(outside),
+        }],
+    )
+    .unwrap();
+    let err = import::crop_sequences(vec![patch], &lattice(0.0, 5.0, -5.0, 5.0, false), 1)
+        .expect_err("outside");
+    assert!(matches!(err, GribError::OutsideRegion), "{err:?}");
+}

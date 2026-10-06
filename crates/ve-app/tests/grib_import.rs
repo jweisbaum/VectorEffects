@@ -927,3 +927,206 @@ fn an_unstructured_regional_file_seeds_a_regional_project() {
     assert!(region.south < 47.5 && region.north > 55.0, "{region:?}");
     assert!(region.east - region.west < 30.0 && region.north - region.south < 20.0);
 }
+
+// --- A project from an ICON file ------------------------------------------
+
+/// ICON-EPS global R02B06, the mesh the bundled grid asset holds.
+const R02B06: [u8; 16] = [
+    0xae, 0x48, 0x7d, 0x14, 0xfe, 0x2e, 0x11, 0xe4, 0xaf, 0x85, 0xe5, 0x0a, 0x2a, 0x56, 0xa3, 0x60,
+];
+
+/// Swaps a message's grid definition for template 3.101 naming `uuid`, and
+/// fixes the total length. The writer only writes lat/lon grids, so a lat/lon
+/// message of the mesh's cell count is written first; the data section does
+/// not care which grid the values are on.
+fn as_unstructured(message: Vec<u8>, count: u32, uuid: [u8; 16]) -> Vec<u8> {
+    let mut at = 16;
+    loop {
+        let length = u32::from_be_bytes(message[at..at + 4].try_into().unwrap()) as usize;
+        if message[at + 4] == 3 {
+            let mut s3 = Vec::with_capacity(35);
+            s3.extend(35u32.to_be_bytes());
+            s3.push(3);
+            s3.push(0); // template
+            s3.extend(count.to_be_bytes());
+            s3.push(0); // no optional list
+            s3.push(0);
+            s3.extend(101u16.to_be_bytes());
+            s3.push(6); // the sphere of 6 371 229 m
+            s3.extend([0, 0, 24]); // number of the grid used
+            s3.push(1); // number in reference
+            s3.extend(uuid);
+            let mut out = message[..at].to_vec();
+            out.extend(s3);
+            out.extend(&message[at + length..]);
+            let total = out.len() as u64;
+            out[8..16].copy_from_slice(&total.to_be_bytes());
+            return out;
+        }
+        at += length;
+    }
+}
+
+/// A one-step ICON R02B06 wind file whose `u` is each cell's longitude and `v`
+/// its latitude; with `patch`, every cell outside `(west, east, south, north)`
+/// is missing.
+fn write_icon(root: &TempRoot, name: &str, patch: Option<(f64, f64, f64, f64)>) -> String {
+    let (_, centres) = ve_grib::icon::bundled(&R02B06)
+        .expect("the asset parses")
+        .expect("R02B06 is bundled");
+    let count = centres.len();
+    let inside = |k: usize| {
+        let (lon, lat) = (f64::from(centres.lon[k]), f64::from(centres.lat[k]));
+        patch.is_none_or(|(w, e, s, n)| (w..=e).contains(&lon) && (s..=n).contains(&lat))
+    };
+    let mut bytes = Vec::new();
+    for (parameter, of) in [
+        (Parameter::WindU, &centres.lon),
+        (Parameter::WindV, &centres.lat),
+    ] {
+        let values: Vec<f32> = (0..count)
+            .map(|k| if inside(k) { of[k] } else { f32::NAN })
+            .collect();
+        let spec = MessageSpec {
+            parameter,
+            grid: GridSpec::global(count as u32, 1, 1_000_000),
+            reference_time: ReferenceTime {
+                year: 2026,
+                month: 9,
+                day: 3,
+                hour: 0,
+                minute: 0,
+                second: 0,
+            },
+            forecast_hour: 0,
+            centre: 255,
+            bits: 16,
+        };
+        let written = ve_grib::writer::message_masked(&spec, &values).expect("message");
+        bytes.extend(as_unstructured(written, count as u32, R02B06));
+    }
+    let path = root.0.join(name);
+    std::fs::write(&path, bytes).expect("write grib");
+    path.to_string_lossy().into_owned()
+}
+
+fn open_regrid_len(app: &AppState) -> Vec<usize> {
+    let session = app.session.lock().expect("lock");
+    let project = &session.open.as_ref().expect("open").project;
+    project.regrid.values().map(|set| set.len()).collect()
+}
+
+/// A project made from an ICON file keeps the neighbour sets its import
+/// built, so its first save holds them and its first reopen does not search
+/// again — global or regional.
+#[test]
+fn a_project_from_an_icon_file_keeps_its_neighbour_sets() {
+    let root = TempRoot::new("icon-regrid");
+    let app = fresh(&root);
+    let path = write_icon(&root, "icon-patch.grib2", Some((10.0, 20.0, 40.0, 50.0)));
+    let summary = import::grib_project(&app, path, false).expect("create");
+    assert!(summary.region.is_some(), "a patch makes a regional project");
+    let lattice = {
+        let session = app.session.lock().expect("lock");
+        session
+            .open
+            .as_ref()
+            .expect("open")
+            .project
+            .settings
+            .lattice()
+    };
+    assert_eq!(
+        open_regrid_len(&app),
+        vec![lattice.len()],
+        "the region's set, handed over from the read"
+    );
+
+    let path = write_icon(&root, "icon-global.grib2", None);
+    let summary = import::grib_project(&app, path, true).expect("create");
+    assert!(
+        summary.region.is_none(),
+        "a global mesh makes a global project"
+    );
+    let lattice = {
+        let session = app.session.lock().expect("lock");
+        session
+            .open
+            .as_ref()
+            .expect("open")
+            .project
+            .settings
+            .lattice()
+    };
+    assert_eq!(open_regrid_len(&app), vec![lattice.len()]);
+}
+
+/// A 0.25° patch, 0..120 E and 10..90 N, of `steps` 3-hourly steps whose `u`
+/// varies with the node and the step, so every frame and every crop differs.
+fn write_large_patch(root: &TempRoot, name: &str, steps: u32) -> String {
+    let grid = GridSpec::global(481, 321, 250_000);
+    let mut bytes = Vec::new();
+    for step in 0..steps {
+        for (parameter, scale) in [(Parameter::WindU, 1.0f32), (Parameter::WindV, -1.0)] {
+            let values: Vec<f32> = grid
+                .points()
+                .map(|(lon, lat)| scale * (lon as f32 * 0.1 + lat as f32 * 0.05 + step as f32))
+                .collect();
+            let spec = MessageSpec {
+                parameter,
+                grid,
+                reference_time: ReferenceTime {
+                    year: 2026,
+                    month: 9,
+                    day: 3,
+                    hour: 0,
+                    minute: 0,
+                    second: 0,
+                },
+                forecast_hour: step * 3,
+                centre: 255,
+                bits: 16,
+            };
+            bytes.extend(message(&spec, &values).unwrap());
+        }
+    }
+    let path = root.0.join(name);
+    std::fs::write(&path, bytes).expect("write grib");
+    path.to_string_lossy().into_owned()
+}
+
+fn sequence_hashes(app: &AppState) -> Vec<[u8; 32]> {
+    let session = app.session.lock().expect("lock");
+    let project = &session.open.as_ref().expect("open").project;
+    project
+        .layers
+        .iter()
+        .filter_map(|l| l.raster.as_ref())
+        .map(|s| s.hash)
+        .collect()
+}
+
+/// A regional project made from a lat/lon file holds exactly what reopening
+/// it reads: the sequences cropped in memory, hash for hash, as the file read
+/// again for the region. The time to make it is printed.
+#[test]
+fn a_regional_project_from_a_file_holds_what_its_reopening_reads() {
+    let root = TempRoot::new("seed-crop");
+    let app = fresh(&root);
+    let path = write_large_patch(&root, "patch.grib2", 48);
+    let started = std::time::Instant::now();
+    let summary = import::grib_project(&app, path, false).expect("create");
+    println!(
+        "grib_project, 0.25° 481x321 patch, 48 steps: {:?}",
+        started.elapsed()
+    );
+    assert!(summary.region.is_some());
+    let created = sequence_hashes(&app);
+    assert_eq!(created.len(), 1);
+
+    let project_path = root.0.join("seeded.veproj");
+    projects::save_as(&app, project_path.to_string_lossy().into_owned()).expect("save");
+    projects::close_open(&app, true).expect("close");
+    projects::open(&app, project_path.to_string_lossy().into_owned(), false).expect("open");
+    assert_eq!(sequence_hashes(&app), created);
+}
