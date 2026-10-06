@@ -231,6 +231,8 @@ const catalogue: Record<string, string> = {
   "Use current view": "使用当前视图",
   "Resolution, time step and region cannot be changed later.": "分辨率、时间步长和区域创建后不能更改。",
   "Choose Global for the whole earth": "整个地球请选择“全球”",
+  "North must be above South": "北必须在南之上",
+  "West and East must differ": "西和东不能相同",
   "Region: {lon}, {lat}": "区域：{lon}，{lat}",
   "all longitudes": "全部经度",
   "Global covers the whole earth; Regional covers the part you choose. It cannot be changed later.": "全球覆盖整个地球；区域覆盖您选择的部分。创建后不能更改。",

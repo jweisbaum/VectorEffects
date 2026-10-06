@@ -231,6 +231,8 @@ const catalogue: Record<string, string> = {
   "Use current view": "Huidige weergave gebruiken",
   "Resolution, time step and region cannot be changed later.": "Resolutie, tijdstap en gebied kunnen later niet worden gewijzigd.",
   "Choose Global for the whole earth": "Kies Wereldwijd voor de hele aarde",
+  "North must be above South": "Noord moet boven Zuid liggen",
+  "West and East must differ": "West en Oost moeten verschillen",
   "Region: {lon}, {lat}": "Gebied: {lon}, {lat}",
   "all longitudes": "alle lengtegraden",
   "Global covers the whole earth; Regional covers the part you choose. It cannot be changed later.": "Wereldwijd beslaat de hele aarde, Regionaal het deel dat u kiest. Dit kan later niet worden gewijzigd.",

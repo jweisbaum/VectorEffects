@@ -109,6 +109,31 @@ describe("the new-project form", () => {
     expect(button("Create project").disabled).toBe(true);
   });
 
+  it("refuses a box with no height or no width, and shows no negative grid", async () => {
+    await act(async () => root.render(<NewProjectForm submitLabel="Create project" onSubmit={() => {}} />));
+    const extent = container.querySelector<HTMLSelectElement>('[data-feature="new:extent"] select')!;
+    await act(async () => {
+      extent.value = "regional";
+      extent.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(button("Create project").disabled).toBe(false);
+
+    // North below South.
+    await type(input("North"), "-20");
+    expect(container.textContent).toContain("North must be above South");
+    expect(container.textContent).not.toMatch(/-\d/);
+    expect(container.textContent).not.toContain(" grid ");
+    expect(button("Create project").disabled).toBe(true);
+
+    // Back to a height, then no width.
+    await type(input("North"), "60");
+    expect(button("Create project").disabled).toBe(false);
+    await type(input("East"), String(input("West").value));
+    expect(container.textContent).toContain("West and East must differ");
+    expect(container.textContent).not.toContain(" grid ");
+    expect(button("Create project").disabled).toBe(true);
+  });
+
   it("sends the region with the request, and none for Global", async () => {
     const submitted: NewProjectRequest[] = [];
     await act(async () =>

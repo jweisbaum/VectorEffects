@@ -231,6 +231,8 @@ const catalogue: Record<string, string> = {
   "Use current view": "Utiliser la vue actuelle",
   "Resolution, time step and region cannot be changed later.": "La résolution, le pas de temps et la région ne pourront plus être modifiés.",
   "Choose Global for the whole earth": "Choisissez Global pour la Terre entière",
+  "North must be above South": "Nord doit être au-dessus de Sud",
+  "West and East must differ": "Ouest et Est doivent différer",
   "Region: {lon}, {lat}": "Région : {lon}, {lat}",
   "all longitudes": "toutes les longitudes",
   "Global covers the whole earth; Regional covers the part you choose. It cannot be changed later.": "Global couvre la Terre entière ; Régional, la partie que vous choisissez. Ce choix ne pourra plus être modifié.",

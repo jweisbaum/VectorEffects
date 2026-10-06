@@ -231,6 +231,8 @@ const catalogue: Record<string, string> = {
   "Use current view": "現在の表示を使う",
   "Resolution, time step and region cannot be changed later.": "解像度、時間間隔、領域は後から変更できません。",
   "Choose Global for the whole earth": "地球全体には「全球」を選んでください",
+  "North must be above South": "北は南より上にしてください",
+  "West and East must differ": "西と東は異なる値にしてください",
   "Region: {lon}, {lat}": "領域: {lon}、{lat}",
   "all longitudes": "全経度",
   "Global covers the whole earth; Regional covers the part you choose. It cannot be changed later.": "全球は地球全体、地域は選んだ部分を対象にします。後から変更できません。",

@@ -231,6 +231,8 @@ const catalogue: Record<string, string> = {
   "Use current view": "استخدام العرض الحالي",
   "Resolution, time step and region cannot be changed later.": "لا يمكن تغيير الدقة والخطوة الزمنية والمنطقة لاحقًا.",
   "Choose Global for the whole earth": "اختر «عالمي» للأرض كلها",
+  "North must be above South": "يجب أن يكون الشمال فوق الجنوب",
+  "West and East must differ": "يجب أن يختلف الغرب عن الشرق",
   "Region: {lon}, {lat}": "المنطقة: {lon}، {lat}",
   "all longitudes": "كل خطوط الطول",
   "Global covers the whole earth; Regional covers the part you choose. It cannot be changed later.": "«عالمي» يغطي الأرض كلها، و«إقليمي» يغطي الجزء الذي تختاره. لا يمكن تغييره لاحقًا.",

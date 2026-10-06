@@ -6,7 +6,7 @@ import { useT } from "../i18n";
 import type { NewProjectRequest } from "../generated/NewProjectRequest";
 import type { RegionRequest } from "../generated/RegionRequest";
 import RegionPicker from "./RegionPicker";
-import { DEFAULT_REGION, isWholeEarth, regionNodes, snapEdges } from "./regionPick";
+import { DEFAULT_REGION, regionNodes, regionProblem, snapEdges } from "./regionPick";
 import {
   MAX_STEPS,
   RESOLUTIONS,
@@ -54,7 +54,7 @@ export default function NewProjectForm({
   // The edges as they will be on this resolution's lattice.
   const shown = snapEdges(region, resolutionDeg);
   const chosen = regional ? shown : null;
-  const wholeEarth = chosen !== null && isWholeEarth(chosen);
+  const problem = chosen === null ? null : regionProblem(chosen, resolutionDeg);
   const { ni, nj } = chosen === null ? gridSize(resolutionDeg) : regionNodes(chosen, resolutionDeg);
   const exportBytes = estimatedGribBytes(resolutionDeg, stepCount, chosen);
   const durationHours = stepHours * (stepCount - 1);
@@ -119,10 +119,15 @@ export default function NewProjectForm({
       </label>
 
       <p className="start-implications muted">
-        {t("{ni} × {nj} grid · covers {hours} h · export about {size}", {
-          ni, nj, hours: durationHours, size: formatBytes(exportBytes),
-        })}
-        <br />
+        {/* A box that is no region has no grid to describe. */}
+        {problem !== "no-height" && problem !== "no-width" && (
+          <>
+            {t("{ni} × {nj} grid · covers {hours} h · export about {size}", {
+              ni, nj, hours: durationHours, size: formatBytes(exportBytes),
+            })}
+            <br />
+          </>
+        )}
         <span className="warn-note">
           {regional
             ? t("Resolution, time step and region cannot be changed later.")
@@ -130,9 +135,11 @@ export default function NewProjectForm({
         </span>
       </p>
 
-      {wholeEarth && <p className="error">{t("Choose Global for the whole earth")}</p>}
+      {problem === "whole-earth" && <p className="error">{t("Choose Global for the whole earth")}</p>}
+      {problem === "no-height" && <p className="error">{t("North must be above South")}</p>}
+      {problem === "no-width" && <p className="error">{t("West and East must differ")}</p>}
 
-      <button className="primary" onClick={submit} disabled={disabled || wholeEarth}>
+      <button className="primary" onClick={submit} disabled={disabled || problem !== null}>
         {submitLabel}
       </button>
     </>
