@@ -1,6 +1,21 @@
 /** The layer panel, the properties panel, the speed filter, the history list and the history import. */
 const catalogue: Record<string, string> = {
-  "Fetches past times from the public archives and adds one layer for each. Times are UTC and land on the hour.": "从公开存档下载过去时次的数据，每个存档添加一个图层。时间为 UTC，取整点。",
+  "Checking archive": "正在检查档案",
+  "Reading archive index": "正在读取档案索引",
+  "Downloading history": "正在下载历史数据",
+  "Decoding history": "正在解码历史数据",
+  "Preparing fields": "正在准备数据场",
+  "Writing history": "正在写入历史数据",
+  "Adding history layers": "正在添加历史数据图层",
+  "History ready": "历史数据已就绪",
+  "{source} · {phase}": "{source} · {phase}",
+  "{source} · {phase} · {percent}% · {megabytes} MB": "{source} · {phase} · {percent}% · {megabytes} MB",
+  "Checking available archive dates…": "正在检查档案的可用日期…",
+  "Could not check archive availability: {reason}": "无法检查档案可用性：{reason}",
+  "Could not verify the available dates for {source}. Close this dialog and try again.": "无法验证{source}的可用日期。请关闭此对话框并重试。",
+  "{source} is available from {start} to {end} UTC. Choose a date range within these limits.": "{source}的可用范围为{start}至{end} UTC。请选择此范围内的日期。",
+
+  "Fetches past times using the historical data source selected in Settings and adds one layer for each archive. Times are UTC and land on the hour.": "使用设置中选择的历史数据源获取过去的数据，并为每个档案添加一个图层。时间为UTC整点。",
   "Start (UTC)": "开始（UTC）",
   "End (UTC)": "结束（UTC）",
   "Move the timeline’s start to {time} UTC": "将时间轴起点移到 {time} UTC",

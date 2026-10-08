@@ -1,5 +1,126 @@
 # VectorEffects — Implementation Plan
 
+**2026-10-08: Responsive Hindsight progress and live history date limits.**
+The application log shows two roughly 32-second batch reads, each followed
+by file-write updates in a fraction of a second. Report measured index,
+download, decode and resampling work during batches; overlap shard reads
+under a shared eight-request cap and retain the existing cache and batching.
+Discover Hindsight bounds from a fresh paginated completion-record listing
+and source coordinates, and use published bounds for Open Data. Show source
+names and exact UTC limits in the history dialog, block invalid or unknown
+ranges, and enforce the same limits in the backend. No hard-coded dates or
+five-month assumption. Validate live mirrors, streaming/cache progress,
+pagination, changing/sparse coverage and inclusive UI/backend boundaries.
+
+Validation: 1,596 Rust workspace tests pass (44 ignored), and all 1,117 UI
+tests pass (one skipped). The byte-progress test observes a half-finished
+response before allowing its remaining bytes through, then verifies that a
+cache hit advances work without increasing network bytes. The index test
+reaches eight simultaneous reads; with the same 30 ms simulated index
+latency, a complete fixture read takes 1.268 s with serialized indexes and
+0.688 s with concurrent indexes. No wall-clock timing assertion is used.
+The UI tests cover loading/failure, both inclusive endpoints, each selected
+archive, changed coverage on reopening and progress before the first hour
+has finished. Production UI build/type checking, formatting, Clippy and the
+offline check pass.
+
+Live R2 and Tigris downloads retain checksum 331.923229 for the 24-hour,
+5×5 North Atlantic fixture and produce updates during the batch. R2 gave
+22 updates with the first 0.11 s after opening, and Tigris 20 updates with
+the first 0.11 s after opening. Whole cold runs took 11.13 s and 5.99 s;
+the old R2 binary varied from 91.48 s to 5.28 s across two runs, so these
+network timings do not establish a general speedup. Source lookup timings
+also varied (R2 7–43 s), during which the interface shows checking activity.
+
+On October 8 the live bounds were January 1, 2000 00:00 UTC through May 4,
+2026 23:00 UTC on R2 and May 7, 2026 23:00 UTC on Tigris. These are observed
+results, not code constants. Anonymous S3 returns 403 for ListObjectsV2 of
+`hindsight/.historysyncer/complete/`; the app therefore cannot verify its
+dates and blocks imports from that source until listing is permitted. It
+does not substitute another mirror's dates or the preallocated time axis.
+
+**2026-10-08: Prevent the startup theme flash.** Keep the native window
+hidden while loading application preferences, apply the saved preset or
+custom palette before mounting the shell, and reveal only after React has
+committed. Pass those settings into the editor so it never resets to the
+default palette during mount. Failed preference IPC falls back to defaults
+and still reveals the app. Validate delayed settings, custom/light themes,
+StrictMode, and the failure fallback.
+The native page-load hook also hides an already visible window before a
+reload; Vite's initial dependency reload otherwise exposed an unthemed page.
+
+Validation: four startup regressions pass, as do the existing theme and
+beta-gate tests. Production UI build/type checking and the offline check
+pass. The full UI run passed 1,109 tests and skipped one, with one unrelated
+timeline test timing out during concurrent native compilation; all 11
+timeline tests and the four startup tests passed in the focused rerun.
+Native WebKit checks also pass for a fresh launch and a forced page reload:
+the visible window has the saved custom palette, its light control scheme,
+and the exact configured background colour. The final page-load hook passes
+Clippy in the automation-enabled native build.
+
+**2026-10-08: Fix Hindsight imports stopping on empty chunks.** Reproduced
+the worker panic with a global read of a partly populated shard: zarrs
+0.23.14's range-discovery helper adds the missing-chunk sentinels and
+overflows. A documented local dependency patch skips these entries and
+rejects malformed overflowing ranges, retaining Hindsight prefetch and
+batching. Regression coverage checks populated vectors, empty neighbours
+and absent shards. Worker panic details now reach the application log.
+
+Validation: the new global-read test reproduced the integer-overflow panic
+before the patch and passes afterward. Live S3, R2 and Tigris reads across
+a sparse polar/North Atlantic region return matching wind/current values
+and missing samples. All 1,587 Rust workspace tests pass (44 ignored),
+along with workspace Clippy with warnings denied and formatting. The
+vendored upstream crate emits five existing warnings with this feature set.
+
+**2026-10-08: Name Whirlwind mirrors in Settings.** The historical data
+source labels include Source 1 (S3), Source 2 (R2), and Source 3 (Tigris) in
+every supported language. Stored source identifiers remain unchanged.
+
+**2026-10-08: Whirlwind Hindsight download performance.** Combine wind and
+current reads while preserving separate files/layers; batch requested hours
+within time chunks under a working-buffer limit; prefetch shard ranges in
+merged, bounded parallel requests; retain version-checked metadata and
+compressed ranges in an evictable disk cache. Open Data and near-real-time
+imports keep their existing paths. Validate request reduction, cache reuse
+and invalidation, ordered fields/hours, gaps, regional seams, and live mirrors.
+
+Live development-build check: a 5×5 North Atlantic window, 24 hours and both
+fields, produced the same checksum (331.923229) for separate hourly reads,
+combined batches and both mirrors. R2 took 53.21 s with separate readers,
+39.29 s combined with an empty cache, and 9.53 s with a reused disk cache.
+Tigris took 14.04 s with an empty cache and 3.23 s on repeat. These are single
+local runs, not global-download throughput guarantees. Local HTTP tests
+verify coalescing, overlapping GETs, version validation and cache reuse
+without relying on live timing.
+The anonymous S3 endpoint now also passed the live read (its earlier 403 no
+longer reproduces): two hours from an empty cache took 25.29 s, and 24 hours
+reusing those same chunks took 3.16 s with the same 24-hour checksum.
+
+Validation complete: 1,586 Rust workspace tests passed (43 ignored), plus
+focused cache-corruption and byte-identical combined-vs-hourly GRIB checks
+on the final edits. All 1,106 frontend tests passed (one skipped). Workspace
+Clippy with warnings denied, formatting, frontend type checking, and the
+offline check passed. No Open Data or near-real-time behavior changed.
+
+**2026-10-07: Historical data source selection.** Add a persisted Settings
+choice for unchanged Open Data imports and three Whirlwind Hindsight mirrors
+(S3, R2, Tigris), using the verified `whirlwind-hindsight/hindsight` location.
+Extend the routing Zarr reader to remote byte-range storage, authenticated
+read-only S3 requests, regional reads, bounded caching and completion markers.
+Validate settings persistence, UI selection, source isolation, missing data,
+coordinate alignment and live mirror reads.
+
+Validation: 1,580 Rust workspace tests passed (43 ignored) and 1,106
+frontend tests passed (one skipped). Frontend type
+checking and production build passed, workspace Clippy passed with warnings
+denied, and formatting and the offline checks passed. Live R2 and Tigris
+reads returned matching wind and current samples for two consecutive hours
+in a North Atlantic window; the cached second hour took 0.03–0.04 seconds.
+The configured anonymous S3 endpoint currently refuses object reads with
+HTTP 403; no S3 credential or automatic fallback is used.
+
 **2026-10-05: Prepare 0.1.23 Beta.** Regional projects (M100–M106): a
 project covers the whole earth or a rectangle that may cross the date line
 or reach a pole; imports, history and near-real-time downloads and both
@@ -12,6 +133,15 @@ meshes, with regional meshes ending where they end; AROME's wide JPEG 2000
 through a patched `hayro-jpeg2000`; end-to-end import tests over every DWD
 and Météo-France model; and the MCP choice of what a client may do without
 asking. Notes in `docs/releases/0.1.22.md`.
+
+**2026-10-02: Separate the development port from other Vite projects.** Vite,
+Tauri's `devUrl` and the WebDriver tools default to 5183. This lets
+VectorEffects start while WhirlwindPolarSolver is using 5173. The driver's
+`VE_DEV_PORT` override remains available for additional instances.
+
+Validation: the frontend served the VectorEffects page on 5183 while
+WhirlwindPolarSolver remained on 5173; UI type checking and the WebDriver
+client tests passed. The temporary frontend server was stopped afterward.
 
 **2026-10-03: Prepare 0.1.21 Beta.** The auto scale spans sea-surface
 temperature (M99); even toolbar spacing; the start page's Create project

@@ -49,6 +49,10 @@ use ve_zarr::{Archive, Field, Utc, Variable, Window};
 use crate::commands::AppState;
 use crate::error::{AppError, Context, Result};
 use crate::projects::{ProjectSummary, with_session};
+use crate::settings::HistoricalDataSource;
+
+#[path = "history_hindsight.rs"]
+mod hindsight;
 
 /// The grid every archive hands its fields back on: ERA5's 0.25 degree global
 /// grid, north to south from the pole and east from the prime meridian, which
@@ -219,6 +223,18 @@ pub struct HistoryProgress {
     pub done: u32,
     /// Steps this import will fetch in total, across every archive.
     pub total: u32,
+    /// Measured batch work for Hindsight; other sources retain step progress.
+    #[serde(default)]
+    pub work: Option<HistoryWork>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[ts(export, export_to = "HistoryWork.ts")]
+pub struct HistoryWork {
+    pub phase: String,
+    /// Estimated overall completion, from 0 to 1; never moves backwards.
+    pub fraction: f32,
+    pub downloaded_bytes: u64,
 }
 
 /// What the frontend asks for.
@@ -247,7 +263,8 @@ pub struct HistoryRequest {
 /// service has only this. The coverage is the point: the archives trail the
 /// present by days to months, and a range past the end is refused only after
 /// the client has built a project around it.
-#[derive(Debug, Clone, Serialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, Serialize, schemars::JsonSchema, TS)]
+#[ts(export, export_to = "HistoryArchives.ts")]
 pub struct HistoryArchives {
     /// The present moment, ISO 8601 UTC. A client asked for "the last" of
     /// something has to count back from here, and a model's own sense of
@@ -258,7 +275,8 @@ pub struct HistoryArchives {
 }
 
 /// One archive of [`HistoryArchives`].
-#[derive(Debug, Clone, Serialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, Serialize, schemars::JsonSchema, TS)]
+#[ts(export, export_to = "HistoryArchive.ts")]
 pub struct HistoryArchive {
     /// What `import_history` calls it: "wind" or "current".
     pub field: String,
@@ -266,9 +284,9 @@ pub struct HistoryArchive {
     pub label: String,
     /// What the archive is, in a sentence.
     pub description: String,
-    /// The first hour held, ISO 8601 UTC. Null if the archive was not reached.
+    /// The first hour held, ISO 8601 UTC. Null if unavailable or not published.
     pub first: Option<String>,
-    /// The last hour held, ISO 8601 UTC. Null if the archive was not reached.
+    /// The last hour held, ISO 8601 UTC. Null if unavailable or not published.
     pub last: Option<String>,
     /// Why the archive could not be reached, when it could not.
     pub unreachable: Option<String>,
@@ -288,10 +306,40 @@ pub fn field_of(archive: Archive) -> &'static str {
 /// One thread per archive, and plain threads for the reason `import_history`
 /// gives: the blocking client will not run on the async runtime.
 #[tauri::command(async)]
-pub fn history_archives() -> Result<HistoryArchives> {
+pub fn history_archives(state: tauri::State<'_, AppState>) -> Result<HistoryArchives> {
+    history_archives_for(&state)
+}
+
+/// Catalogue for the selected historical source, also used by MCP.
+pub fn history_archives_for(state: &AppState) -> Result<HistoryArchives> {
+    let provider = with_session(state, |session| Ok(session.settings.historical_data_source))?;
+    if let Some(mirror) = provider.hindsight_provider() {
+        let cache_dir = state.paths.cache_dir.join("hindsight");
+        // reqwest's blocking client must be constructed and dropped outside
+        // Tauri's async runtime, just as it is during the actual import.
+        let opened = std::thread::spawn(move || {
+            use ve_zarr::FieldSource;
+            ve_zarr::hindsight::HindsightStore::open_cached(mirror, &Archive::ALL, &cache_dir)
+                .map(|source| source.coverage())
+        })
+        .join()
+        .map_err(|_| AppError::Internal("the archive reader stopped".into()))?;
+        let (coverage, unreachable) = match opened {
+            Ok(coverage) => (coverage, None),
+            Err(error) => (None, Some(error.to_string())),
+        };
+        return Ok(HistoryArchives {
+            now: chrono::Utc::now().format("%Y-%m-%dT%H:%MZ").to_string(),
+            archives: Archive::ALL.into_iter().map(|archive| HistoryArchive {
+                field: field_of(archive).to_owned(), label: provider.label(archive),
+                description: format!("Whirlwind Hindsight: {}. Bounds come from this mirror's completed chunks; there may be gaps inside them.", archive.label()),
+                first: coverage.map(|(first, _)| first.to_iso()), last: coverage.map(|(_, last)| last.to_iso()), unreachable: unreachable.clone(),
+            }).collect(),
+        });
+    }
     let opened: Vec<_> = Archive::ALL
         .into_iter()
-        .map(|archive| (archive, std::thread::spawn(move || archive.open())))
+        .map(|archive| (archive, std::thread::spawn(move || provider.open(archive))))
         .collect();
     let archives = opened
         .into_iter()
@@ -303,7 +351,7 @@ pub fn history_archives() -> Result<HistoryArchives> {
             };
             HistoryArchive {
                 field: field_of(archive).to_owned(),
-                label: archive.label().to_owned(),
+                label: provider.label(archive),
                 description: match archive {
                     Archive::Era5Wind => {
                         "ERA5 reanalysis 10 m wind: the observed global wind, hourly at 0.25°"
@@ -369,7 +417,13 @@ pub fn import_history<R: tauri::Runtime>(
         })
     })
     .join()
-    .map_err(|_| {
+    .map_err(|panic| {
+        let detail = panic
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| panic.downcast_ref::<&str>().copied())
+            .unwrap_or("non-string panic payload");
+        tracing::error!(%detail, "history import worker panicked");
         AppError::Internal(
             "The history import stopped unexpectedly. Nothing was added to the project; \
              the log has the details."
@@ -390,9 +444,16 @@ pub fn import_history<R: tauri::Runtime>(
 pub fn history_import(
     state: &AppState,
     request: &HistoryRequest,
-    mut on_progress: impl FnMut(HistoryProgress),
+    mut emit_progress: impl FnMut(HistoryProgress),
 ) -> Result<ProjectSummary> {
+    let mut last_progress = None;
+    let mut on_progress = |progress: HistoryProgress| {
+        last_progress = Some(progress.clone());
+        emit_progress(progress);
+    };
     let archives = archives_of(request)?;
+    // Snapshot once: changing Settings during an import cannot mix mirrors.
+    let provider = with_session(state, |session| Ok(session.settings.historical_data_source))?;
 
     // The times the project can actually show. A step serves an imported
     // message only where the file has one for that step's own forecast hour
@@ -424,35 +485,85 @@ pub fn history_import(
 
     // Fetched and written first, outside the session lock: this takes
     // minutes, and the document has to stay readable while it runs.
-    let total = (wanted.len() * archives.len()) as u32;
-    let mut done = 0u32;
-    let mut written = Vec::new();
-    for archive in archives {
-        // Reported before the archive's first chunk as well as after each
-        // one: opening a store costs seconds, and a bar that only moves on
-        // the first completed step is another silence at the start.
-        on_progress(HistoryProgress {
-            archive: archive.label().to_owned(),
-            done,
-            total,
-        });
-        let path = fetch_to_file(archive, request, &wanted, &directory, &extent, |fetched| {
+    let written = if provider.hindsight_provider().is_some() {
+        hindsight::fetch(
+            provider,
+            &archives,
+            request,
+            &wanted,
+            &directory,
+            &state.paths.cache_dir.join("hindsight"),
+            &extent,
+            &mut on_progress,
+        )?
+    } else {
+        let total = (wanted.len() * archives.len()) as u32;
+        let mut done = 0u32;
+        let mut written = Vec::new();
+        // Validate every selected archive before downloading any fields.
+        let sources = archives
+            .into_iter()
+            .map(|archive| {
+                let source = provider
+                    .open(archive)
+                    .doing("reach the archive", provider.label(archive))?;
+                validate_coverage(&provider.label(archive), source.coverage(), request)?;
+                Ok((archive, source))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        for (archive, source) in sources {
+            // Reported before the archive's first chunk as well as after each
+            // one: opening a store costs seconds, and a bar that only moves on
+            // the first completed step is another silence at the start.
             on_progress(HistoryProgress {
-                archive: archive.label().to_owned(),
-                done: done + fetched,
+                archive: provider.label(archive),
+                done,
                 total,
+                work: None,
             });
-        })?;
-        done += wanted.len() as u32;
-        written.push((archive, path));
-    }
+            let path = fetch_to_file(
+                provider,
+                archive,
+                source,
+                request,
+                &wanted,
+                &directory,
+                &extent,
+                |fetched| {
+                    on_progress(HistoryProgress {
+                        archive: provider.label(archive),
+                        done: done + fetched,
+                        total,
+                        work: None,
+                    });
+                },
+            )?;
+            done += wanted.len() as u32;
+            written.push((archive, path));
+        }
+        written
+    };
 
     // Read back before the lock is taken, not under it. Decoding is hundreds
     // of megabytes at the cap, and holding the session for it would freeze
     // every edit and every tile for the length of it.
     let mut layers = Vec::with_capacity(written.len());
-    for (archive, path) in &written {
-        layers.push(history_layer(*archive, path, request, &extent)?);
+    for (index, (archive, path)) in written.iter().enumerate() {
+        if let Some(progress) = &mut last_progress
+            && let Some(work) = &mut progress.work
+        {
+            work.phase = "importing".into();
+            work.fraction = 0.97 + 0.02 * index as f32 / written.len() as f32;
+            emit_progress(progress.clone());
+        }
+        let mut layer = history_layer(*archive, path, request, &extent)?;
+        if let ve_core::document::LayerSource::Zarr {
+            archive: origin, ..
+        } = &mut layer.source
+        {
+            *origin = provider.file_id(*archive);
+        }
+        layers.push(layer);
     }
 
     let summary = with_session(state, |session| {
@@ -507,6 +618,13 @@ pub fn history_import(
         elapsed_s = format!("{:.1}", began.elapsed().as_secs_f64()),
         "history import finished"
     );
+    if let Some(mut progress) = last_progress
+        && let Some(work) = &mut progress.work
+    {
+        work.phase = "complete".into();
+        work.fraction = 1.0;
+        emit_progress(progress);
+    }
     Ok(summary)
 }
 
@@ -607,32 +725,26 @@ fn wanted_hours(request: &HistoryRequest, step_hours: u32, step_count: u32) -> R
 /// The file is named for the archive and the range, so asking for the same
 /// hours twice rewrites one file rather than filling the directory, and so
 /// someone looking in the directory can tell what each file holds.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "one import's source, range, extent and progress callback"
+)]
 fn fetch_to_file(
+    provider: HistoricalDataSource,
     archive: Archive,
+    mut source: Box<dyn ve_zarr::FieldSource>,
     request: &HistoryRequest,
     wanted: &[i64],
     directory: &Path,
     extent: &Extent,
     on_step: impl FnMut(u32),
 ) -> Result<PathBuf> {
-    let started = std::time::Instant::now();
-    let mut source = archive
-        .open()
-        .doing("reach the archive", format!("\"{}\"", archive.label()))?;
     source.set_window(extent.window);
     let source = Arc::<dyn ve_zarr::FieldSource>::from(source);
-    // Opening reads the whole time axis, which is seconds on a cold start and
-    // is silent; saying so is the difference between a slow start and an
-    // apparent hang.
-    tracing::info!(
-        archive = archive.id(),
-        elapsed_s = format!("{:.1}", started.elapsed().as_secs_f64()),
-        "history archive opened"
-    );
     fetch_source_to_file(
         &Origin {
-            id: archive.id(),
-            label: archive.label(),
+            id: &provider.file_id(archive),
+            label: &provider.label(archive),
         },
         &source,
         (request.start_unix_s, request.end_unix_s),
@@ -642,6 +754,29 @@ fn fetch_to_file(
         extent,
         on_step,
     )
+}
+
+fn validate_coverage(
+    label: &str,
+    coverage: Option<(Utc, Utc)>,
+    request: &HistoryRequest,
+) -> Result<()> {
+    let Some((first, last)) = coverage else {
+        return Err(bad_range(&format!(
+            "Could not determine the available dates for {label}. Check the source and try again."
+        )));
+    };
+    // Check the entered range, including any part beyond the project span.
+    if request.start_unix_s < first.hours_since_unix_epoch() * HOUR
+        || request.end_unix_s > last.hours_since_unix_epoch() * HOUR
+    {
+        return Err(bad_range(&format!(
+            "{label} is available from {} to {} (UTC). Choose a date range within these limits.",
+            first.to_iso(),
+            last.to_iso()
+        )));
+    }
+    Ok(())
 }
 
 /// What a fetch is of: enough to name its file, its log lines and its layer.
@@ -1622,6 +1757,33 @@ mod tests {
     /// A UTC hour as Unix seconds, for the tests above.
     fn parse(text: &str) -> i64 {
         Utc::parse(text).expect("a time").hours_since_unix_epoch() * HOUR
+    }
+
+    #[test]
+    fn requested_range_must_fit_live_bounds_including_both_endpoints() {
+        let first = Utc::parse("2011-03-04T06:00").unwrap();
+        let last = Utc::parse("2025-08-09T12:00").unwrap();
+        let mut request = HistoryRequest {
+            archives: vec!["era5-wind".into()],
+            start_unix_s: first.hours_since_unix_epoch() * HOUR,
+            end_unix_s: last.hours_since_unix_epoch() * HOUR,
+            set_start_time: false,
+        };
+        assert!(validate_coverage("fixture source", Some((first, last)), &request).is_ok());
+        request.start_unix_s -= HOUR;
+        let error = validate_coverage("fixture source", Some((first, last)), &request)
+            .unwrap_err()
+            .to_string();
+        for expected in ["fixture source", "2011-03-04", "2025-08-09"] {
+            assert!(error.contains(expected), "{error}");
+        }
+        request.start_unix_s += HOUR;
+        request.end_unix_s += HOUR;
+        // Even if the project can show only the first step, the entered end
+        // must not be silently trimmed into an apparently valid request.
+        assert_eq!(wanted_hours(&request, 1, 1).unwrap().len(), 1);
+        assert!(validate_coverage("fixture source", Some((first, last)), &request).is_err());
+        assert!(validate_coverage("fixture source", None, &request).is_err());
     }
 
     /// Wind is written as wind and current as current. Swapping them would

@@ -1,6 +1,6 @@
 /* System font stack only: no webfont is fetched, ever (invariant 5). */
 :root {
-  /* Default theme while application preferences load. */
+  /* Fallback theme; startup applies preferences before revealing the window. */
   --bg: #364958;
   --surface: #2b3a46;
   --panel: rgba(43, 58, 70, 0.96);
@@ -980,6 +980,11 @@ body {
   display: inline-block;
 }
 .history-progress .progress-fill { display: block; }
+.history-progress .progress-fill.indeterminate { animation: history-preparing 1.2s ease-in-out infinite alternate; }
+@keyframes history-preparing { from { transform: translateX(0); } to { transform: translateX(185%); } }
+@media (prefers-reduced-motion: reduce) {
+  .history-progress .progress-fill.indeterminate { animation: none; }
+}
 
 .modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
 .modal-actions button {

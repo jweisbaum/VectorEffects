@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
 import App from "./App";
+import Startup from "./startup";
 import { api } from "./ipc";
 import "./styles.css";
 
@@ -19,6 +20,6 @@ if (container === null) throw new Error("missing #root element");
 
 createRoot(container).render(
   <StrictMode>
-    <App />
+    <Startup>{settings => <App initialSettings={settings} />}</Startup>
   </StrictMode>,
 );

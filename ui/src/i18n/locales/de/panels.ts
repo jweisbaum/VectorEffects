@@ -1,6 +1,21 @@
 /** The layer panel, the properties panel, the speed filter, the history list and the history import. */
 const catalogue: Record<string, string> = {
-  "Fetches past times from the public archives and adds one layer for each. Times are UTC and land on the hour.": "Lädt vergangene Zeiten aus den öffentlichen Archiven und fügt für jedes Archiv eine Ebene hinzu. Zeiten sind in UTC und fallen auf volle Stunden.",
+  "Checking archive": "Archiv wird geprüft",
+  "Reading archive index": "Archivindex wird gelesen",
+  "Downloading history": "Historische Daten werden heruntergeladen",
+  "Decoding history": "Historische Daten werden dekodiert",
+  "Preparing fields": "Felder werden vorbereitet",
+  "Writing history": "Historische Daten werden geschrieben",
+  "Adding history layers": "Historische Ebenen werden hinzugefügt",
+  "History ready": "Historische Daten bereit",
+  "{source} · {phase}": "{source} · {phase}",
+  "{source} · {phase} · {percent}% · {megabytes} MB": "{source} · {phase} · {percent}% · {megabytes} MB",
+  "Checking available archive dates…": "Verfügbare Archivdaten werden geprüft…",
+  "Could not check archive availability: {reason}": "Archivverfügbarkeit konnte nicht geprüft werden: {reason}",
+  "Could not verify the available dates for {source}. Close this dialog and try again.": "Die verfügbaren Daten für {source} konnten nicht geprüft werden. Schließen Sie diesen Dialog und versuchen Sie es erneut.",
+  "{source} is available from {start} to {end} UTC. Choose a date range within these limits.": "{source} ist vom {start} bis zum {end} UTC verfügbar. Wählen Sie einen Zeitraum innerhalb dieser Grenzen.",
+
+  "Fetches past times using the historical data source selected in Settings and adds one layer for each archive. Times are UTC and land on the hour.": "Lädt vergangene Daten von der in den Einstellungen gewählten Quelle und fügt für jedes Archiv eine Ebene hinzu. Die Zeiten sind volle Stunden in UTC.",
   "Start (UTC)": "Beginn (UTC)",
   "End (UTC)": "Ende (UTC)",
   "Move the timeline’s start to {time} UTC": "Beginn der Zeitleiste auf {time} UTC verschieben",

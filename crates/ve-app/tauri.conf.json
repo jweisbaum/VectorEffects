@@ -1,11 +1,11 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "VectorEffects",
-  "version": "0.1.23",
+  "version": "0.1.24",
   "identifier": "com.vectoreffects.desktop",
   "build": {
     "frontendDist": "../../ui/dist",
-    "devUrl": "http://localhost:5173",
+    "devUrl": "http://localhost:5183",
     "beforeDevCommand": "npm run ui:dev",
     "beforeBuildCommand": "npm run ui:build"
   },
@@ -14,6 +14,7 @@
       {
         "label": "main",
         "title": "VectorEffects",
+        "visible": false,
         "maximized": true,
         "acceptFirstMouse": true,
         "width": 1440,

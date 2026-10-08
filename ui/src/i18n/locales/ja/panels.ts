@@ -1,6 +1,21 @@
 /** The layer panel, the properties panel, the speed filter, the history list and the history import. */
 const catalogue: Record<string, string> = {
-  "Fetches past times from the public archives and adds one layer for each. Times are UTC and land on the hour.": "公開アーカイブから過去の時刻のデータを取得し、それぞれにレイヤーを 1 つ追加します。時刻は UTC で、正時に合わせます。",
+  "Checking archive": "アーカイブを確認中",
+  "Reading archive index": "アーカイブ索引を読み込み中",
+  "Downloading history": "過去データをダウンロード中",
+  "Decoding history": "過去データをデコード中",
+  "Preparing fields": "フィールドを準備中",
+  "Writing history": "過去データを書き込み中",
+  "Adding history layers": "過去データのレイヤーを追加中",
+  "History ready": "過去データの準備完了",
+  "{source} · {phase}": "{source} · {phase}",
+  "{source} · {phase} · {percent}% · {megabytes} MB": "{source} · {phase} · {percent}% · {megabytes} MB",
+  "Checking available archive dates…": "アーカイブで利用可能な日時を確認中…",
+  "Could not check archive availability: {reason}": "アーカイブの利用可能範囲を確認できませんでした：{reason}",
+  "Could not verify the available dates for {source}. Close this dialog and try again.": "{source}で利用可能な日時を確認できませんでした。このダイアログを閉じて、もう一度お試しください。",
+  "{source} is available from {start} to {end} UTC. Choose a date range within these limits.": "{source}は{start}から{end} UTCまで利用できます。この範囲内の日時を選択してください。",
+
+  "Fetches past times using the historical data source selected in Settings and adds one layer for each archive. Times are UTC and land on the hour.": "設定で選択した過去のデータの取得元からデータを取得し、アーカイブごとにレイヤーを追加します。時刻はUTCの正時です。",
   "Start (UTC)": "開始（UTC）",
   "End (UTC)": "終了（UTC）",
   "Move the timeline’s start to {time} UTC": "タイムラインの開始を {time} UTC に移動",

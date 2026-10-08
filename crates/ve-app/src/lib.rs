@@ -105,6 +105,17 @@ pub fn run() -> anyhow::Result<()> {
         builder.plugin(tauri_plugin_webdriver_automation::init())
     };
     builder
+        .on_page_load(|webview, payload| {
+            // A development-server reload replaces the themed document in
+            // an already visible window. Startup reveals it again only once
+            // the new document has loaded and applied saved preferences.
+            if webview.label() == "main"
+                && matches!(payload.event(), tauri::webview::PageLoadEvent::Started)
+                && let Err(error) = webview.window().hide()
+            {
+                tracing::warn!(%error, "could not hide the window while loading its theme");
+            }
+        })
         .manage(state)
         .manage(export::ExportCancel::default())
         .manage(std::sync::Arc::new(render_pool::RenderPool::new()))
@@ -279,6 +290,7 @@ pub fn run() -> anyhow::Result<()> {
                 settings::set_auto_scale,
                 settings::set_display_units,
                 settings::set_temperature_unit,
+                settings::set_historical_data_source,
                 earthdata::earthdata_status,
                 earthdata::set_earthdata_token,
                 settings::set_glyph_appearance,

@@ -6,6 +6,34 @@ workspace so they are neither linted nor formatted as ours. Each is the
 published release unchanged except where listed. Drop a copy when upstream
 makes the change unnecessary.
 
+## `zarrs` 0.23.14
+
+Hindsight prefetch uses `subchunk_byte_range` to merge requests. Upstream
+adds a shard index entry's offset and length without checking the Zarr
+missing-subchunk sentinel `(u64::MAX, u64::MAX)`. A partly populated shard
+therefore panics on overflow in development builds and yields an invalid
+range in release builds. All three Hindsight mirrors encounter these gaps.
+
+The change, in `src/array/codec/array_to_bytes/sharding.rs`: return `None`
+for the sentinel, matching the decoder's fill-value handling, and return a
+codec error if any other entry overflows. Normal populated ranges and
+decoding are unchanged. This range-discovery API is used only by Hindsight
+in VectorEffects; Open Data and near-real-time paths do not call it.
+
+In `src/array/array_sync_sharded_readable_ext.rs`, the exclusively sharded
+index cache releases its global mutex while constructing a missing decoder
+(which reads the remote index). It then inserts or reuses the first completed
+entry under the lock. Otherwise all index requests serialize even when the
+caller supplies independent shard jobs. The non-sharded branch is unchanged.
+
+Held by `global_read_keeps_missing_chunks_in_a_populated_shard_empty` in
+`crates/ve-zarr/src/hindsight.rs`. The fixture includes populated and missing
+chunks in one shard plus wholly absent shards, and checks actual vector
+values and NaNs. Drop this patch when upstream includes both checks; run
+the ve-zarr and history-import tests when updating it. The index-lock change
+is held by `independent_shard_indexes_overlap_instead_of_holding_the_cache_lock`
+beside that test; retain it until upstream also permits concurrent index I/O.
+
 ## `hayro-jpeg2000` 0.4.0
 
 GRIB template 5.40 (JPEG 2000) is decoded by this crate. Upstream refuses any

@@ -13,6 +13,7 @@
  */
 
 import { msg, t } from "../i18n";
+import type { HistoryArchives } from "../generated/HistoryArchives";
 
 /** Seconds in an hour. The archives are hourly and so is the range. */
 const HOUR = 3600;
@@ -155,6 +156,43 @@ export function rangeState(
   return { start, end, steps, problem: null };
 }
 
+/** Intersect only the selected archives, using this dialog's fresh response. */
+export function availableRange(
+  catalogue: HistoryArchives,
+  chosen: readonly string[],
+  start: number | null,
+  end: number | null,
+): { first: string | undefined; last: string | undefined; problem: string | null } {
+  let first = -Infinity;
+  let last = Infinity;
+  const problems: string[] = [];
+  for (const id of chosen) {
+    const archive = catalogue.archives.find((a) => a.field === (id === "era5-wind" ? "wind" : "current"));
+    const from = archive?.first ? Date.parse(archive.first) / 1000 : NaN;
+    const to = archive?.last ? Date.parse(archive.last) / 1000 : NaN;
+    if (!archive || archive.unreachable || !Number.isFinite(from) || !Number.isFinite(to) || to < from) {
+      problems.push(t("Could not verify the available dates for {source}. Close this dialog and try again.", {
+        source: archive?.label ?? id,
+      }) + (archive?.unreachable ? ` ${archive.unreachable}` : ""));
+      continue;
+    }
+    first = Math.max(first, from);
+    last = Math.min(last, to);
+    if ((start !== null && start < from) || (end !== null && end > to)) {
+      problems.push(t("{source} is available from {start} to {end} UTC. Choose a date range within these limits.", {
+        source: archive.label,
+        start: formatUtcHour(from).replace("T", " "),
+        end: formatUtcHour(to).replace("T", " "),
+      }));
+    }
+  }
+  return {
+    first: Number.isFinite(first) ? formatUtcHour(first) : undefined,
+    last: Number.isFinite(last) ? formatUtcHour(last) : undefined,
+    problem: problems.length ? problems.join("\n") : null,
+  };
+}
+
 /** What the default range needs to know about the open project. */
 export interface TimelineShape {
   /** When step 0 is, in UTC seconds, or null if the timeline has no date. */
@@ -168,12 +206,8 @@ export interface TimelineShape {
 /**
  * The instant a year before `nowUnixS`, at midnight UTC on the same date.
  *
- * A year rather than a smaller lag because it is the one offset that is
- * certainly inside both archives. Both trail real time — ERA5's final stream
- * by months with the preliminary ERA5T behind it, GlobCurrent's near-real-time
- * stream by days — and ERA5's own attributes overstate what it holds by about
- * two days on top of that, so anything measured in days is a guess that
- * sometimes lands in a gap.
+ * A year is an initial suggestion for undated projects, not an availability
+ * rule. The dialog verifies it against the selected source's current bounds.
  *
  * Midnight rather than the current hour, because a start on the hour is what
  * an hourly archive has and what a timeline reads cleanly. 29 February rolls

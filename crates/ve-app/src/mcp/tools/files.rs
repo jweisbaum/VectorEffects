@@ -252,9 +252,12 @@ impl<R: tauri::Runtime> VectorEffects<R> {
     async fn history_archives(
         &self,
     ) -> std::result::Result<Json<crate::history::HistoryArchives>, ToolError> {
-        self.run("history_archives", |_| crate::history::history_archives())
-            .await
-            .map(Json)
+        self.run("history_archives", |app| {
+            use tauri::Manager;
+            crate::history::history_archives_for(&app.state::<crate::commands::AppState>())
+        })
+        .await
+        .map(Json)
     }
 
     #[tool(
@@ -296,9 +299,14 @@ impl<R: tauri::Runtime> VectorEffects<R> {
             ctx,
             |h| {
                 (
-                    f64::from(h.done),
+                    h.work.as_ref().map_or(f64::from(h.done), |work| {
+                        f64::from(work.fraction) * f64::from(h.total)
+                    }),
                     Some(f64::from(h.total)),
-                    Some(h.archive.clone()),
+                    Some(h.work.as_ref().map_or_else(
+                        || h.archive.clone(),
+                        |work| format!("{} · {}", h.archive, work.phase),
+                    )),
                 )
             },
         );

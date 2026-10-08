@@ -1,5 +1,12 @@
 /** The Settings dialog and its sections, and their Help search entries. */
 const catalogue: Record<string, string> = {
+  "Historical data": "Données historiques",
+  "Historical data source": "Source des données historiques",
+  "Open Data (Slow)": "Données ouvertes (lent)",
+  "Whirlwind Hindsight (Fast) Source 1 (S3)": "Whirlwind Hindsight (rapide) Source 1 (S3)",
+  "Whirlwind Hindsight (Fast) Source 2 (R2)": "Whirlwind Hindsight (rapide) Source 2 (R2)",
+  "Whirlwind Hindsight (Fast) Source 3 (Tigris)": "Whirlwind Hindsight (rapide) Source 3 (Tigris)",
+  "Choose where new historical wind and current imports are downloaded from.": "Choisissez la source des nouvelles importations historiques de vent et de courants.",
   "Wind barb appearance preview": "Aperçu des barbules de vent",
   "Arrow appearance preview": "Aperçu des flèches",
   "Wind barbs": "Barbules de vent",

@@ -3,6 +3,7 @@ import type { AutosaveMode } from "./AutosaveMode";
 import type { CustomTheme } from "./CustomTheme";
 import type { DistanceUnit } from "./DistanceUnit";
 import type { GlyphSettings } from "./GlyphSettings";
+import type { HistoricalDataSource } from "./HistoricalDataSource";
 import type { McpSettings } from "./McpSettings";
 import type { Shortcut } from "./Shortcut";
 import type { SpeedUnit } from "./SpeedUnit";
@@ -11,57 +12,61 @@ import type { TemperatureUnit } from "./TemperatureUnit";
 /**
  * The application's persisted preferences.
  */
-export type AppSettings = { 
+export type AppSettings = {
+/**
+ * The source used for subsequent history imports; existing layers keep their files.
+ */
+historical_data_source: HistoricalDataSource,
 /**
  * Application-wide appearance; never part of a project or its history.
  */
-theme: string, 
+theme: string,
 /**
  * The interface language, one of [`LANGUAGES`]. A preference of the
  * person, like the theme: no project, export or history reads it.
  */
-language: string, 
+language: string,
 /**
  * Saved custom colours, retained when switching to a bundled theme.
  */
-custom_theme: CustomTheme | null, 
+custom_theme: CustomTheme | null,
 /**
  * Global arrow and wind-barb appearance preferences.
  */
-glyphs: GlyphSettings, 
+glyphs: GlyphSettings,
 /**
  * Global ground-distance display preference.
  */
-distance_unit: DistanceUnit, 
+distance_unit: DistanceUnit,
 /**
  * Global speed display preference.
  */
-speed_unit: SpeedUnit, 
+speed_unit: SpeedUnit,
 /**
  * Global temperature display preference.
  */
-temperature_unit: TemperatureUnit, 
+temperature_unit: TemperatureUnit,
 /**
  * What happens to unsaved work while the user is not saving (D70).
  */
-autosave: AutosaveMode, 
+autosave: AutosaveMode,
 /**
  * Every binding, in the order the dialog lists them.
  */
-shortcuts: Array<Shortcut>, 
+shortcuts: Array<Shortcut>,
 /**
  * The colour-ramp top a *new* wind project gets, in knots.
  */
-default_wind_scale_knots: number, 
+default_wind_scale_knots: number,
 /**
  * And a new current project.
  */
-default_current_scale_knots: number, 
+default_current_scale_knots: number,
 /**
  * Where the macro library lives. Empty means the default under the app
  * data directory (M16).
  */
-macro_directory: string, 
+macro_directory: string,
 /**
  * How the map lays the world out (M11): one of [`PROJECTIONS`].
  *
@@ -72,7 +77,7 @@ macro_directory: string,
  * rather than the project's for exactly that reason: it says how *this*
  * person likes to look at a map, not what the map is.
  */
-projection: string, 
+projection: string,
 /**
  * Whether the colour ramp follows the field in view (M27, spec.md 5.3).
  *
@@ -82,11 +87,11 @@ projection: string,
  * preference like the projection: it changes no stored or exported
  * value, only which colour a speed is drawn in.
  */
-auto_scale: boolean, 
+auto_scale: boolean,
 /**
  * The MCP service (spec.md 8.8). Absent from older files: off.
  */
-mcp: McpSettings, 
+mcp: McpSettings,
 /**
  * Where the S-57 electronic charts live (spec.md 4.11). Empty means
  * none is chosen, and *Display charts* has nothing to show.

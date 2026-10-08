@@ -542,3 +542,48 @@ fn the_mcp_choice_is_saved_and_leaves_the_written_rules_alone() {
     assert_eq!(loaded.mcp.claude_rules, ["mcp__vectoreffects__*"]);
     assert_eq!(loaded.mcp.token, "t");
 }
+
+#[test]
+fn historical_source_defaults_to_open_data_and_each_choice_survives_restart() {
+    use settings::HistoricalDataSource::*;
+    let old: settings::AppSettings = serde_json::from_str(r#"{"theme":"paper"}"#).unwrap();
+    assert_eq!(old.historical_data_source, OpenData);
+    assert_eq!(old.theme, "paper");
+    let root = TempRoot::new("historical-source");
+    for source in [
+        WhirlwindSource1,
+        WhirlwindSource2,
+        WhirlwindSource3,
+        OpenData,
+    ] {
+        let state = app(&root);
+        assert_eq!(
+            settings::historical_data_source_set(&state, source)
+                .unwrap()
+                .historical_data_source,
+            source
+        );
+        assert_eq!(
+            settings::settings_of(&app(&root))
+                .unwrap()
+                .historical_data_source,
+            source
+        );
+    }
+    assert!(serde_json::from_str::<settings::HistoricalDataSource>(r#""unknown""#).is_err());
+}
+
+#[test]
+fn failed_historical_source_save_restores_the_running_preference() {
+    use settings::HistoricalDataSource::*;
+    let root = TempRoot::new("historical-source-failure");
+    let state = app(&root);
+    std::fs::create_dir_all(state.paths.settings_file()).unwrap();
+    assert!(settings::historical_data_source_set(&state, WhirlwindSource2).is_err());
+    assert_eq!(
+        settings::settings_of(&state)
+            .unwrap()
+            .historical_data_source,
+        OpenData
+    );
+}

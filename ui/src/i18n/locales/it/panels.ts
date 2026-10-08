@@ -1,6 +1,21 @@
 /** The layer panel, the properties panel, the speed filter, the history list and the history import. */
 const catalogue: Record<string, string> = {
-  "Fetches past times from the public archives and adds one layer for each. Times are UTC and land on the hour.": "Scarica orari passati dagli archivi pubblici e aggiunge un livello per ciascuno. Gli orari sono UTC e cadono sull'ora esatta.",
+  "Checking archive": "Verifica dell’archivio",
+  "Reading archive index": "Lettura dell’indice dell’archivio",
+  "Downloading history": "Download dei dati storici",
+  "Decoding history": "Decodifica dei dati storici",
+  "Preparing fields": "Preparazione dei campi",
+  "Writing history": "Scrittura dei dati storici",
+  "Adding history layers": "Aggiunta dei livelli storici",
+  "History ready": "Dati storici pronti",
+  "{source} · {phase}": "{source} · {phase}",
+  "{source} · {phase} · {percent}% · {megabytes} MB": "{source} · {phase} · {percent}% · {megabytes} MB",
+  "Checking available archive dates…": "Verifica delle date disponibili nell’archivio…",
+  "Could not check archive availability: {reason}": "Impossibile verificare la disponibilità dell’archivio: {reason}",
+  "Could not verify the available dates for {source}. Close this dialog and try again.": "Impossibile verificare le date disponibili per {source}. Chiudi questa finestra e riprova.",
+  "{source} is available from {start} to {end} UTC. Choose a date range within these limits.": "{source} è disponibile dal {start} al {end} UTC. Scegli un intervallo di date entro questi limiti.",
+
+  "Fetches past times using the historical data source selected in Settings and adds one layer for each archive. Times are UTC and land on the hour.": "Scarica i dati passati dalla fonte storica selezionata nelle Impostazioni e aggiunge un livello per ogni archivio. Gli orari sono in UTC e a ore intere.",
   "Start (UTC)": "Inizio (UTC)",
   "End (UTC)": "Fine (UTC)",
   "Move the timeline’s start to {time} UTC": "Sposta l'inizio della linea temporale a {time} UTC",

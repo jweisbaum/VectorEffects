@@ -1,5 +1,12 @@
 /** The Settings dialog and its sections, and their Help search entries. */
 const catalogue: Record<string, string> = {
+  "Historical data": "البيانات التاريخية",
+  "Historical data source": "مصدر البيانات التاريخية",
+  "Open Data (Slow)": "البيانات المفتوحة (بطيء)",
+  "Whirlwind Hindsight (Fast) Source 1 (S3)": "Whirlwind Hindsight (سريع) المصدر 1 (S3)",
+  "Whirlwind Hindsight (Fast) Source 2 (R2)": "Whirlwind Hindsight (سريع) المصدر 2 (R2)",
+  "Whirlwind Hindsight (Fast) Source 3 (Tigris)": "Whirlwind Hindsight (سريع) المصدر 3 (Tigris)",
+  "Choose where new historical wind and current imports are downloaded from.": "اختر مصدر تنزيل بيانات الرياح والتيارات التاريخية عند استيرادها من جديد.",
   "Wind barb appearance preview": "معاينة مظهر ريش الرياح",
   "Arrow appearance preview": "معاينة مظهر الأسهم",
   "Wind barbs": "ريش الرياح",

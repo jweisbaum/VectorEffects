@@ -1,7 +1,8 @@
 //! Reads ERA5 wind and GlobCurrent surface current from their public Zarr
 //! archives (spec.md 4.10).
 //!
-//! Both archives are anonymous, so no credential is involved. Chunks arrive
+//! The open archives are anonymous. The optional Hindsight mirrors use
+//! public S3 or embedded R2/Tigris reader credentials. Chunks arrive
 //! over HTTPS through [`http`] and are decoded by `zarrs` with the blosc
 //! codec in [`blosc`], which keeps the build free of a C or C++ toolchain.
 //!
@@ -29,12 +30,16 @@ pub mod erddap;
 pub mod error;
 pub mod export;
 pub mod globcurrent;
+pub mod hindsight;
+mod hindsight_cache;
+mod hindsight_progress;
 pub mod http;
 pub mod netcdf3;
 mod parallel;
 pub mod product;
 pub mod regrid;
 pub mod routing;
+mod s3;
 pub mod seawinds;
 pub mod source;
 pub mod stac;

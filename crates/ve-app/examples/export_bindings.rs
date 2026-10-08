@@ -138,6 +138,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ExportResult::export_all(&cfg)?;
     ExportProgress::export_all(&cfg)?;
     HistoryProgress::export_all(&cfg)?;
+    ve_app::history::HistoryArchives::export_all(&cfg)?;
     OpenProgress::export_all(&cfg)?;
     ChartStatus::export_all(&cfg)?;
     GisLayerView::export_all(&cfg)?;

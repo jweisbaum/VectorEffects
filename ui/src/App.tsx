@@ -31,7 +31,7 @@ import { listen } from "@tauri-apps/api/event";
 import { api, HISTORY_LABEL, IpcError, NRT_LABEL } from "./ipc";
 import { reportError, retryError, setMcpActivity, shown, useHint } from "./hint";
 import { isBusy, useBusy } from "./busy";
-import type { HistoryProgress } from "./generated/HistoryProgress";
+import FetchProgressBar from "./FetchProgressBar";
 import type { DocumentChanged } from "./generated/DocumentChanged";
 import type { McpActivity } from "./generated/McpActivity";
 import type { ViewFocus } from "./generated/ViewFocus";
@@ -55,11 +55,11 @@ import { DEFAULT_PROJECTION, projectionOf, type ProjectionId } from "./map/proje
  * scale all come from `ProjectSettings`, so rendering one without a project
  * would mean inventing those values (spec.md 2).
  */
-export default function App() {
-  return <BetaGate><Help><EditorApp /><LoadingScreen /></Help></BetaGate>;
+export default function App({ initialSettings }: { initialSettings: AppSettings | null }) {
+  return <BetaGate><Help><EditorApp initialSettings={initialSettings} /><LoadingScreen /></Help></BetaGate>;
 }
 
-function EditorApp() {
+function EditorApp({ initialSettings }: { initialSettings: AppSettings | null }) {
   const t = useT();
   const [info, setInfo] = useState<AppInfo | null>(null);
   const [project, setProject] = useState<ProjectSummary | null>(null);
@@ -143,7 +143,7 @@ function EditorApp() {
    * The application's settings, loaded once. Every key handler reads the
    * bindings from here, so a rebind changes the key everywhere (M15).
    */
-  const [settings, setSettings] = useState<AppSettings | null>(null);
+  const [settings, setSettings] = useState<AppSettings | null>(initialSettings);
   useLayoutEffect(() => applyTheme(settings?.theme, settings?.custom_theme), [settings?.theme, settings?.custom_theme]);
   /**
    * Whether a picture can be aligned by pointing in the projection on show.
@@ -165,13 +165,6 @@ function EditorApp() {
    * stand down here rather than firing and being refused with an error.
    */
   const [recording, setRecording] = useState<CaptureMode | null>(null);
-  useEffect(() => {
-    // A settings file that will not load costs the preferences and not the
-    // launch: the backend already falls back to the defaults, so a failure
-    // here is a failure to *ask*, and the app runs with none rather than
-    // refusing to start.
-    void api.appSettings().then(setSettings).catch(() => undefined);
-  }, []);
   // The settings file is the authority on the language (spec.md 5.6).
   useEffect(() => {
     if (settings) setLanguage(settings.language);
@@ -1023,73 +1016,6 @@ function BusySpinner() {
       aria-label={on ? busy.labels.map((label) => t(label)).join(", ") : t("Idle")}
       title={on ? busy.labels.map((label) => t(label)).join(" · ") : undefined}
     />
-  );
-}
-
-/**
- * How far a fetch has got (spec.md 4.10, M38): the history import's, or the
- * near-real-time import's (M89), which reports the same way.
- *
- * A fetch is minutes of network with nothing else to look at, and a spinner
- * that only turns cannot tell a slow archive from a stalled one. The backend
- * knows how many steps it will read before it reads the first, so this is a
- * real fraction and not an animation.
- *
- * It is bounded by the busy store rather than by the last event: an import
- * that fails leaves its final progress behind, and the bar has to go when the
- * command does, whichever way it ended. That is also what tells the two
- * imports' bars apart — each shows only while its own command's label is in
- * the busy set, and listens only to its own event.
- *
- * Its own component, and its own subscription, so a progress event re-renders
- * this bar and not the shell.
- */
-function FetchProgressBar({
-  busyLabel,
-  event,
-  waiting,
-}: {
-  /** The command's entry in `LONG_RUNNING`: the bar shows while it is busy. */
-  busyLabel: string;
-  /** The event the backend reports on; its payload is a `HistoryProgress`. */
-  event: string;
-  /** What to say before the first report lands. English, via `msg`. */
-  waiting: string;
-}) {
-  const t = useT();
-  const busy = useBusy();
-  const [progress, setProgress] = useState<HistoryProgress | null>(null);
-  const running = busy.labels.includes(busyLabel);
-
-  useEffect(() => {
-    const pending = listen<HistoryProgress>(event, (report) => {
-      setProgress(report.payload);
-    });
-    return () => {
-      void pending.then((unlisten) => unlisten());
-    };
-  }, [event]);
-
-  // Cleared on the way out, so the next fetch does not open on the last
-  // one's bar before its first event lands.
-  useEffect(() => {
-    if (!running) setProgress(null);
-  }, [running]);
-
-  if (!running) return null;
-  const total = progress?.total ?? 0;
-  const percent = total > 0 ? Math.round(((progress?.done ?? 0) / total) * 100) : 0;
-  const label =
-    progress === null
-      ? t(waiting)
-      : `${progress.archive} · ${progress.done}/${progress.total}`;
-  return (
-    <span className="history-progress" title={label} aria-label={label}>
-      <span className="progress-bar">
-        <span className="progress-fill" style={{ width: `${percent}%` }} />
-      </span>
-      <span className="muted">{label}</span>
-    </span>
   );
 }
 

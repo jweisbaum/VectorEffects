@@ -16,7 +16,7 @@ members = [
 exclude = ["vendor"]
 
 [workspace.package]
-version = "0.1.23"
+version = "0.1.24"
 edition = "2024"
 rust-version = "1.97"
 license = "PolyForm-Noncommercial-1.0.0"
@@ -97,3 +97,5 @@ opt-level = 0
 # changed and when to drop the patch.
 [patch.crates-io]
 hayro-jpeg2000 = { path = "vendor/hayro-jpeg2000" }
+# Hindsight prefetch must skip the Zarr missing-subchunk sentinel.
+zarrs = { path = "vendor/zarrs" }

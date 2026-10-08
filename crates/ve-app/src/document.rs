@@ -55,6 +55,7 @@ fn history_origin(source: &ve_core::document::LayerSource) -> Option<HistoryOrig
         // is what the file holds and is shown when nothing here knows it.
         label: ve_zarr::Archive::parse(archive)
             .map(|found| found.label().to_owned())
+            .or_else(|| crate::settings::HistoricalDataSource::origin_label(archive))
             .or_else(|| ve_zarr::Product::parse(archive).map(|found| found.label().to_owned()))
             .unwrap_or_else(|| archive.clone()),
         archive: archive.clone(),

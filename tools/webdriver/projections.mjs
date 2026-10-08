@@ -29,7 +29,7 @@ const page = createServer((_request, response) => {
 });
 await new Promise((done, reject) => {
   page.once("error", error => error.code === "EADDRINUSE" ? done() : reject(error));
-  page.listen(5173, "127.0.0.1", done);
+  page.listen(5183, "127.0.0.1", done);
 });
 const child = spawn(resolve(process.env.VE_APP_BINARY ?? "target/debug/ve-app"), [], {
   env: { ...process.env, VE_AUTOMATION_ROOT: root }, stdio: ["ignore", "pipe", "pipe"],

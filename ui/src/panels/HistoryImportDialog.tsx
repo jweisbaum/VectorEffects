@@ -16,24 +16,27 @@
  * the steps a project has, so the range worth asking for is the span those
  * steps cover: the timeline's start to the timeline's end. A project with no
  * start time has no date to anchor that to and takes this day a year ago,
- * which is the one offset certainly inside both archives.
+ * as an initial suggestion. Live source bounds must be verified before import.
  *
  * **Rendered through a portal.** The layer panel sits in a stacking context
  * of its own, so a dialog rendered inside it is painted under the timeline
  * whatever its `z-index` says. A modal belongs to the window, not to the
  * panel whose button opened it.
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 
 import type { ProjectSummary } from "../generated/ProjectSummary";
+import type { HistoryArchives } from "../generated/HistoryArchives";
 import { useT } from "../i18n";
+import { api } from "../ipc";
 import {
   ARCHIVES,
   MAX_FETCHED_STEPS,
   defaultRange,
   formatUtcHour,
   rangeState,
+  availableRange,
 } from "./historyRange";
 
 /** What the dialog hands back when the user commits. */
@@ -75,9 +78,25 @@ export default function HistoryImportDialog({
   // the only fact available about when its step 0 is. A project that has one
   // has it for a reason, so overriding it is offered and not assumed.
   const [setStartTime, setSetStartTime] = useState(!dated);
+  const [catalogue, setCatalogue] = useState<HistoryArchives | null>(null);
+  const [availabilityError, setAvailabilityError] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void api.historyArchives().then((reply) => {
+      if (!cancelled) setCatalogue(reply);
+    }).catch((error: unknown) => {
+      if (!cancelled) setAvailabilityError(String(error));
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   const state = rangeState(start, end, chosen, project.step_hours, project.step_count);
-  const ready = state.problem === null && state.start !== null && state.end !== null;
+  const coverage = catalogue ? availableRange(catalogue, chosen, state.start, state.end) : null;
+  const availabilityProblem = availabilityError === null
+    ? coverage?.problem ?? null
+    : t("Could not check archive availability: {reason}", { reason: availabilityError });
+  const problem = availabilityProblem ?? state.problem;
+  const ready = catalogue !== null && problem === null && state.start !== null && state.end !== null;
   const downloads = state.steps * chosen.length;
 
   const toggle = (id: string) =>
@@ -94,7 +113,7 @@ export default function HistoryImportDialog({
       >
         <h2>{t("Import history")}</h2>
         <p className="muted">
-          {t("Fetches past times from the public archives and adds one layer for each. Times are UTC and land on the hour.")}
+          {t("Fetches past times using the historical data source selected in Settings and adds one layer for each archive. Times are UTC and land on the hour.")}
         </p>
 
         <label className="field" data-feature="history-import:start">
@@ -102,6 +121,8 @@ export default function HistoryImportDialog({
           <input
             type="datetime-local"
             step={3600}
+            min={coverage?.first}
+            max={coverage?.last}
             value={start}
             onChange={(event) => setStart(event.target.value)}
           />
@@ -111,6 +132,8 @@ export default function HistoryImportDialog({
           <input
             type="datetime-local"
             step={3600}
+            min={coverage?.first}
+            max={coverage?.last}
             value={end}
             onChange={(event) => setEnd(event.target.value)}
           />
@@ -159,8 +182,8 @@ export default function HistoryImportDialog({
           project's step is named because it is what makes the count smaller
           than the number of hours in the range.
         */}
-        <p className={state.problem === null ? "muted" : "error"}>
-          {state.problem ??
+        <p className={problem === null ? "muted" : "error"} role={problem ? "alert" : "status"} style={{ whiteSpace: "pre-line" }}>
+          {problem ?? (catalogue === null ? t("Checking available archive dates…") :
             (state.steps === 1
               ? downloads === 1
                 ? t("1 step at {hours} h, 1 download in all.", { hours: project.step_hours })
@@ -173,7 +196,7 @@ export default function HistoryImportDialog({
                   steps: state.steps,
                   hours: project.step_hours,
                   downloads,
-                }))}
+                })))}
         </p>
 
         <div className="modal-actions">
@@ -184,10 +207,10 @@ export default function HistoryImportDialog({
             title={
               ready
                 ? t("Fetch {steps} steps from each archive", { steps: state.steps })
-                : t("Up to {max} steps at a time", { max: MAX_FETCHED_STEPS })
+                : problem ?? (catalogue === null ? t("Checking available archive dates…") : t("Up to {max} steps at a time", { max: MAX_FETCHED_STEPS }))
             }
             onClick={() => {
-              if (state.start === null || state.end === null || state.problem !== null) return;
+              if (!ready || state.start === null || state.end === null) return;
               onImport({
                 archives: ARCHIVES.map((a) => a.id).filter((id) => chosen.includes(id)),
                 startUnixS: state.start,

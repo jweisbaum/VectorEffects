@@ -1,5 +1,12 @@
 /** The Settings dialog and its sections, and their Help search entries. */
 const catalogue: Record<string, string> = {
+  "Historical data": "過去のデータ",
+  "Historical data source": "過去のデータの取得元",
+  "Open Data (Slow)": "オープンデータ（低速）",
+  "Whirlwind Hindsight (Fast) Source 1 (S3)": "Whirlwind Hindsight（高速）ソース 1 (S3)",
+  "Whirlwind Hindsight (Fast) Source 2 (R2)": "Whirlwind Hindsight（高速）ソース 2 (R2)",
+  "Whirlwind Hindsight (Fast) Source 3 (Tigris)": "Whirlwind Hindsight（高速）ソース 3 (Tigris)",
+  "Choose where new historical wind and current imports are downloaded from.": "過去の風と海流データを新しく読み込む際のダウンロード元を選択します。",
   "Wind barb appearance preview": "矢羽根の外観のプレビュー",
   "Arrow appearance preview": "矢印の外観のプレビュー",
   "Wind barbs": "矢羽根",

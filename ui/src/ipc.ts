@@ -18,6 +18,7 @@ let renderRequestId = Date.now() * 1000;
 import type { AppErrorPayload } from "./generated/AppErrorPayload";
 import type { AppInfo } from "./generated/AppInfo";
 import type { FieldSample } from "./generated/FieldSample";
+import type { HistoryArchives } from "./generated/HistoryArchives";
 import type { GradientView } from "./generated/GradientView";
 import type { NewProjectRequest } from "./generated/NewProjectRequest";
 import type { BrushStroke } from "./generated/BrushStroke";
@@ -522,6 +523,8 @@ export const api = {
 
   /** Imports a local routing Zarr directory as wind and current layers. */
   importZarr: (path: string) => call<ProjectSummary>("import_zarr", { path }),
+  /** Refreshes the selected history source's available dates on request. */
+  historyArchives: () => call<HistoryArchives>("history_archives"),
   /**
    * Fetches a range of hours from the history archives, one layer each
    * (spec 4.10). The only command that reaches the network, and only because
@@ -680,6 +683,8 @@ export const api = {
   /** How temperatures are shown (M93). Only the display changes; SST is held in °C. */
   setTemperatureUnit: (temperatureUnit: TemperatureUnit) =>
     call<AppSettings>("set_temperature_unit", { temperatureUnit }),
+  setHistoricalDataSource: (source: AppSettings["historical_data_source"]) =>
+    call<AppSettings>("set_historical_data_source", { source }),
   setDefaultScales: (windKnots: number, currentKnots: number) =>
     call<AppSettings>("set_default_scales", { windKnots, currentKnots }),
   // --- Crash recovery (spec.md 4.2, M10) ---

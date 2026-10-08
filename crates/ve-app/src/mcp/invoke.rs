@@ -110,8 +110,8 @@ pub const EXCLUDED: &[&str] = &[
     // and is a person's reading preference that the webview holds too: a
     // client changing it would leave the interface in the old language.
     "set_language",
-    // No state to hand it, which is the one shape the table holds; the
-    // curated tool of the same name carries it.
+    // The curated tool carries archive availability queries for the selected
+    // source, including the network work on plain worker threads.
     "history_archives",
 ];
 
@@ -157,6 +157,7 @@ pub const TABLE: &[(&str, Handler)] = &[
     command!(align_layer, crate::document::align_layer, { layer: u64 }),
     command!(sample_temperature, crate::sst::sample_temperature, { step: u32, lon: f64, lat: f64 }),
     command!(set_temperature_unit, crate::settings::set_temperature_unit, { temperature_unit: crate::settings::TemperatureUnit }),
+    command!(set_historical_data_source, crate::settings::set_historical_data_source, { source: crate::settings::HistoricalDataSource }),
     command!(earthdata_status, crate::earthdata::earthdata_status, {}),
     command!(set_layer_locked, crate::document::set_layer_locked, { layer: u64, locked: bool }),
     command!(move_layer, crate::document::move_layer, { from: usize, to: usize }),

@@ -1043,11 +1043,13 @@ to the hash input is a correctness bug that shows up as stale frames.
 - `visibleTiles` drops a zoom level rather than truncating its list when the
   ideal level exceeds the budget: a retina viewport at mid zoom wants ~286
   tiles, and an unpainted corner is a far worse artefact than soft pixels.
+- **The default dev port is 5183**, shared by Vite, Tauri's `devUrl` and
+  the WebDriver tools, so other projects can use Vite's default 5173.
 - **The driver runs on its own dev port.** `VE_DEV_PORT=5199 node
   tools/webdriver/...` moves Vite *and* the Tauri config's `devUrl`
   together, so a driver run starts beside a `tauri dev` somebody else is
   already using rather than failing on the port or killing what holds it.
-  Check `lsof -nP -iTCP:5173 -sTCP:LISTEN` before assuming a stuck port is
+  Check `lsof -nP -iTCP:5183 -sTCP:LISTEN` before assuming a stuck port is
   yours: the person whose machine this is very likely has their own running.
 - **A command invoked through the driver moves the backend and not the
   interface.** `import_gis` through a raw `invoke` adds the layer and leaves

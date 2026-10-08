@@ -7,7 +7,10 @@ use std::path::Path;
 use std::sync::Arc;
 
 use rayon::prelude::*;
-use zarrs::array::{Array, ArraySubset, data_type};
+use zarrs::array::{
+    Array, ArrayShardedExt, ArrayShardedReadableExt, ArrayShardedReadableExtCache, ArraySubset,
+    data_type,
+};
 use zarrs::config::MetadataRetrieveVersion;
 use zarrs::filesystem::FilesystemStore;
 use zarrs::storage::ReadableStorage;
@@ -113,6 +116,11 @@ impl RoutingStore {
             FilesystemStore::new(path)
                 .map_err(|e| ZarrError::Open(format!("{}: {e}", path.display())))?,
         );
+        Self::from_storage(store)
+    }
+
+    /// Open the same routing layout on a remote or in-memory store.
+    pub fn from_storage(store: ReadableStorage) -> Result<Self> {
         let data = Array::open_opt(store.clone(), "/data", &MetadataRetrieveVersion::V3)
             .map_err(|e| ZarrError::Open(format!("/data: {e}")))?;
         let [nt, np, nj, ni] = data.shape() else {
@@ -219,6 +227,190 @@ impl RoutingStore {
             parameters,
             data,
         })
+    }
+
+    /// The outer time chunk containing an index (used by sync completion markers).
+    pub fn time_chunk(&self, time: usize) -> Result<u64> {
+        self.data
+            .chunk_grid()
+            .chunk_indices(&[time as u64, 0, 0, 0])
+            .map_err(|e| layout(e.to_string()))?
+            .map(|indices| indices[0])
+            .ok_or_else(|| layout("routing time is outside the store"))
+    }
+
+    pub(crate) fn hindsight_shard_cache(&self) -> ArrayShardedReadableExtCache {
+        ArrayShardedReadableExtCache::new(&self.data)
+    }
+
+    pub(crate) fn time_chunk_bounds(&self, chunk: u64) -> Result<Option<Range<usize>>> {
+        let Some(last) = self.times.len().checked_sub(1) else {
+            return Ok(None);
+        };
+        if chunk > self.time_chunk(last)? {
+            return Ok(None);
+        }
+        let Some(subset) = self
+            .data
+            .chunk_grid()
+            .subset(&[chunk, 0, 0, 0])
+            .map_err(|e| layout(e.to_string()))?
+        else {
+            return Ok(None);
+        };
+        let start = subset.start()[0] as usize;
+        let end = (subset.start()[0] + subset.shape()[0]).min(self.times.len() as u64) as usize;
+        Ok((start < end).then_some(start..end))
+    }
+
+    /// Only the Hindsight reader uses this path. Prefetch all wanted inner
+    /// ranges of each shard together, so HTTP can merge them before decoding.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "bounded subset and its share of batch progress"
+    )]
+    pub(crate) fn read_hindsight_subset(
+        &self,
+        storage: &ReadableStorage,
+        cache: &ArrayShardedReadableExtCache,
+        ranges: [Range<usize>; 4],
+        progress: &crate::hindsight_progress::Progress,
+        base: f32,
+        share: f32,
+    ) -> Result<Vec<f32>> {
+        let subset = ArraySubset::new_with_ranges(&ranges.map(|r| r.start as u64..r.end as u64));
+        let options = zarrs::array::codec::api::CodecOptions::default().with_concurrent_target(8);
+        if self.data.is_exclusively_sharded() {
+            let grid = self.data.subchunk_grid();
+            let chunks = grid
+                .chunks_in_array_subset(&subset)
+                .map_err(|e| layout(e.to_string()))?
+                .ok_or_else(|| layout("Hindsight subset is outside the chunk grid"))?;
+            let mut groups = std::collections::BTreeMap::<Vec<u64>, Vec<Vec<u64>>>::new();
+            for indices in chunks.indices() {
+                let origin = grid
+                    .subset(&indices)
+                    .map_err(|e| layout(e.to_string()))?
+                    .ok_or_else(|| layout("Hindsight chunk is outside the grid"))?
+                    .start()
+                    .to_vec();
+                let shard = self
+                    .data
+                    .chunk_grid()
+                    .chunk_indices(&origin)
+                    .map_err(|e| layout(e.to_string()))?
+                    .ok_or_else(|| layout("Hindsight chunk outside array"))?;
+                groups
+                    .entry(shard.to_vec())
+                    .or_default()
+                    .push(indices.to_vec());
+            }
+            // HTTP shares an eight-request cap even across these shard jobs.
+            let pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(8)
+                .build()
+                .map_err(|e| ZarrError::Open(e.to_string()))?;
+            progress.begin("indexing", base, share * 0.1, groups.len() as u64);
+            let groups = pool.install(|| {
+                groups
+                    .into_par_iter()
+                    .map(|(shard, indices)| {
+                        let ranges = indices
+                            .iter()
+                            .map(|indices| {
+                                self.data
+                                    .subchunk_byte_range(cache, indices)
+                                    .map_err(read_err("Hindsight shard index"))
+                            })
+                            .collect::<Result<Vec<_>>>()?
+                            .into_iter()
+                            .flatten()
+                            .collect::<Vec<_>>();
+                        progress.advance("indexing", 1);
+                        Ok((shard, ranges))
+                    })
+                    .collect::<Result<Vec<_>>>()
+            })?;
+            let bytes = groups
+                .iter()
+                .flat_map(|(_, ranges)| ranges)
+                .map(|r| r.length(0))
+                .sum();
+            progress.begin("downloading", base + share * 0.1, share * 0.8, bytes);
+            pool.install(|| {
+                groups
+                    .into_par_iter()
+                    .try_for_each(|(shard, ranges)| -> Result<()> {
+                        if !ranges.is_empty()
+                            && let Some(bytes) = storage
+                                .get_partial_many(
+                                    &self.data.chunk_key(&shard),
+                                    Box::new(ranges.into_iter()),
+                                )
+                                .map_err(|e| ZarrError::Open(e.to_string()))?
+                        {
+                            for part in bytes {
+                                part.map_err(|e| ZarrError::Open(e.to_string()))?;
+                            }
+                        }
+                        Ok(())
+                    })
+            })?;
+        }
+        progress.begin("decoding", base + share * 0.9, share * 0.1, 1);
+        if self.data.data_type().is::<data_type::Float16DataType>() {
+            self.data
+                .retrieve_array_subset_sharded_opt::<Vec<half::f16>>(cache, &subset, &options)
+                .map(|values| values.into_iter().map(half::f16::to_f32).collect())
+                .map_err(read_err("Hindsight fields"))
+        } else {
+            self.data
+                .retrieve_array_subset_sharded_opt(cache, &subset, &options)
+                .map_err(read_err("Hindsight fields"))
+        }
+    }
+
+    /// Read a vector's geographic subset, decoding shared u/v chunks once.
+    pub fn read_pair(
+        &self,
+        time: usize,
+        parameters: [usize; 2],
+        rows: Range<usize>,
+        columns: Range<usize>,
+    ) -> Result<[Vec<f32>; 2]> {
+        let first = parameters[0].min(parameters[1]);
+        let last = parameters[0].max(parameters[1]);
+        if time >= self.times.len()
+            || last >= self.parameters.len()
+            || rows.start >= rows.end
+            || rows.end > self.latitude.len()
+            || columns.start >= columns.end
+            || columns.end > self.longitude.len()
+        {
+            return Err(layout("routing subset is outside the store"));
+        }
+        let cells = rows.len() * columns.len();
+        let subset = ArraySubset::new_with_ranges(&[
+            time as u64..time as u64 + 1,
+            first as u64..last as u64 + 1,
+            rows.start as u64..rows.end as u64,
+            columns.start as u64..columns.end as u64,
+        ]);
+        let options = zarrs::array::codec::api::CodecOptions::default().with_concurrent_target(4);
+        let values: Vec<f32> = if self.data.data_type().is::<data_type::Float16DataType>() {
+            self.data
+                .retrieve_array_subset_opt::<Vec<half::f16>>(&subset, &options)
+                .map(|values| values.into_iter().map(half::f16::to_f32).collect())
+                .map_err(read_err("Hindsight fields"))
+        } else {
+            self.data
+                .retrieve_array_subset_opt(&subset, &options)
+                .map_err(read_err("Hindsight fields"))
+        }?;
+        Ok(parameters.map(|parameter| {
+            let start = (parameter - first) * cells;
+            values[start..start + cells].to_vec()
+        }))
     }
 
     /// Read a time slab in on-disk dimension order. NaNs remain missing;

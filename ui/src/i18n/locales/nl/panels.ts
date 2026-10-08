@@ -1,6 +1,21 @@
 /** The layer panel, the properties panel, the speed filter, the history list and the history import. */
 const catalogue: Record<string, string> = {
-  "Fetches past times from the public archives and adds one layer for each. Times are UTC and land on the hour.": "Haalt tijden uit het verleden op uit de openbare archieven en voegt voor elk archief een laag toe. Tijden zijn in UTC en vallen op het hele uur.",
+  "Checking archive": "Archief controleren",
+  "Reading archive index": "Archiefindex lezen",
+  "Downloading history": "Historische gegevens downloaden",
+  "Decoding history": "Historische gegevens decoderen",
+  "Preparing fields": "Velden voorbereiden",
+  "Writing history": "Historische gegevens schrijven",
+  "Adding history layers": "Historische lagen toevoegen",
+  "History ready": "Historische gegevens gereed",
+  "{source} · {phase}": "{source} · {phase}",
+  "{source} · {phase} · {percent}% · {megabytes} MB": "{source} · {phase} · {percent}% · {megabytes} MB",
+  "Checking available archive dates…": "Beschikbare archiefdatums controleren…",
+  "Could not check archive availability: {reason}": "De beschikbaarheid van het archief kon niet worden gecontroleerd: {reason}",
+  "Could not verify the available dates for {source}. Close this dialog and try again.": "De beschikbare datums voor {source} konden niet worden gecontroleerd. Sluit dit venster en probeer het opnieuw.",
+  "{source} is available from {start} to {end} UTC. Choose a date range within these limits.": "{source} is beschikbaar van {start} tot {end} UTC. Kies een datumbereik binnen deze grenzen.",
+
+  "Fetches past times using the historical data source selected in Settings and adds one layer for each archive. Times are UTC and land on the hour.": "Haalt historische gegevens op uit de bron die in Instellingen is gekozen en voegt voor elk archief een laag toe. De tijden zijn in UTC, op hele uren.",
   "Start (UTC)": "Begin (UTC)",
   "End (UTC)": "Einde (UTC)",
   "Move the timeline’s start to {time} UTC": "Begin van de tijdlijn verplaatsen naar {time} UTC",

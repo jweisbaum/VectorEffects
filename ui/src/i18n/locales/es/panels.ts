@@ -1,6 +1,21 @@
 /** The layer panel, the properties panel, the speed filter, the history list and the history import. */
 const catalogue: Record<string, string> = {
-  "Fetches past times from the public archives and adds one layer for each. Times are UTC and land on the hour.": "Descarga horas pasadas de los archivos históricos públicos y añade una capa por cada uno. Las horas son UTC y en punto.",
+  "Checking archive": "Comprobando archivo",
+  "Reading archive index": "Leyendo el índice del archivo",
+  "Downloading history": "Descargando datos históricos",
+  "Decoding history": "Decodificando datos históricos",
+  "Preparing fields": "Preparando campos",
+  "Writing history": "Escribiendo datos históricos",
+  "Adding history layers": "Añadiendo capas históricas",
+  "History ready": "Datos históricos listos",
+  "{source} · {phase}": "{source} · {phase}",
+  "{source} · {phase} · {percent}% · {megabytes} MB": "{source} · {phase} · {percent}% · {megabytes} MB",
+  "Checking available archive dates…": "Comprobando las fechas disponibles del archivo…",
+  "Could not check archive availability: {reason}": "No se pudo comprobar la disponibilidad del archivo: {reason}",
+  "Could not verify the available dates for {source}. Close this dialog and try again.": "No se pudieron verificar las fechas disponibles de {source}. Cierra este diálogo e inténtalo de nuevo.",
+  "{source} is available from {start} to {end} UTC. Choose a date range within these limits.": "{source} está disponible desde {start} hasta {end} UTC. Elige un intervalo de fechas dentro de estos límites.",
+
+  "Fetches past times using the historical data source selected in Settings and adds one layer for each archive. Times are UTC and land on the hour.": "Descarga datos del pasado desde la fuente de datos históricos seleccionada en Ajustes y añade una capa por cada archivo. Las horas son UTC y exactas.",
   "Start (UTC)": "Inicio (UTC)",
   "End (UTC)": "Fin (UTC)",
   "Move the timeline’s start to {time} UTC": "Mover el inicio de la línea de tiempo a {time} UTC",

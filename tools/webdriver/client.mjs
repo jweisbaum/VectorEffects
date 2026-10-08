@@ -42,7 +42,7 @@ const START_TIMEOUT_MS = 180_000;
  * The negative pid is the group, which is why `launch` detaches: `npm run
  * dev:webdriver` is a wrapper around the Tauri CLI, which starts Vite as its
  * `beforeDevCommand` and then cargo, so signalling the wrapper alone leaves
- * Vite holding port 5173 and the next run cannot start.
+ * Vite holding the dev port and the next run cannot start.
  */
 function signalGroup(child, name) {
   try {
@@ -88,7 +88,7 @@ async function stopTree(child) {
  * and no `Driver` is returned on the losing branches, so a caller that put its
  * cleanup in a `finally` after `await launch(...)` has nothing left to stop
  * with: the whole tree — npm, Vite, cargo, the application — is orphaned, and
- * the next run dies on port 5173. That happened, and the tree had to be found
+ * the next run dies on the dev port. That happened, and the tree had to be found
  * and signalled by hand.
  *
  * `timeoutMs` is how long the port line is waited for. It is a parameter so
@@ -103,13 +103,13 @@ export async function launch({
   // Its own process group, so it can be killed as a tree. `npm run
   // dev:webdriver` is a wrapper around the Tauri CLI, which starts Vite as
   // its `beforeDevCommand` and then cargo: signalling only the wrapper leaves
-  // Vite holding port 5173 and the next run cannot start.
+  // Vite holding the dev port and the next run cannot start.
   // A dev server may already be running — the person whose machine this is
   // very likely has one — so the driver's own runs on a port of its own,
   // named to Vite and to the Tauri config together. Nothing is killed to
   // make room, which is the rule that matters here (see the port note in
   // CLAUDE.md).
-  const devPort = process.env.VE_DEV_PORT ?? "5173";
+  const devPort = process.env.VE_DEV_PORT ?? "5183";
   const child = spawn(
     "npm",
     [

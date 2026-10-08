@@ -1,6 +1,21 @@
 /** The layer panel, the properties panel, the speed filter, the history list and the history import. */
 const catalogue: Record<string, string> = {
-  "Fetches past times from the public archives and adds one layer for each. Times are UTC and land on the hour.": "يجلب أوقاتًا ماضية من الأرشيفات العامة ويضيف طبقة لكل أرشيف. الأوقات بتوقيت UTC وتقع على رأس الساعة.",
+  "Checking archive": "جارٍ التحقق من الأرشيف",
+  "Reading archive index": "جارٍ قراءة فهرس الأرشيف",
+  "Downloading history": "جارٍ تنزيل البيانات التاريخية",
+  "Decoding history": "جارٍ فك ترميز البيانات التاريخية",
+  "Preparing fields": "جارٍ تحضير الحقول",
+  "Writing history": "جارٍ كتابة البيانات التاريخية",
+  "Adding history layers": "جارٍ إضافة طبقات البيانات التاريخية",
+  "History ready": "البيانات التاريخية جاهزة",
+  "{source} · {phase}": "{source} · {phase}",
+  "{source} · {phase} · {percent}% · {megabytes} MB": "{source} · {phase} · {percent}% · {megabytes} م.ب",
+  "Checking available archive dates…": "جارٍ التحقق من التواريخ المتاحة في الأرشيف…",
+  "Could not check archive availability: {reason}": "تعذر التحقق من توفر الأرشيف: {reason}",
+  "Could not verify the available dates for {source}. Close this dialog and try again.": "تعذر التحقق من التواريخ المتاحة للمصدر {source}. أغلق هذا الحوار وحاول مرة أخرى.",
+  "{source} is available from {start} to {end} UTC. Choose a date range within these limits.": "المصدر {source} متاح من {start} إلى {end} بالتوقيت العالمي UTC. اختر نطاقًا زمنيًا ضمن هذه الحدود.",
+
+  "Fetches past times using the historical data source selected in Settings and adds one layer for each archive. Times are UTC and land on the hour.": "يجلب البيانات الماضية من مصدر البيانات التاريخية المحدد في الإعدادات ويضيف طبقة لكل أرشيف. الأوقات بتوقيت UTC وعلى رأس الساعة.",
   "Start (UTC)": "البداية (UTC)",
   "End (UTC)": "النهاية (UTC)",
   "Move the timeline’s start to {time} UTC": "نقل بداية الخط الزمني إلى {time} UTC",

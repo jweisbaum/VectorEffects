@@ -1,6 +1,21 @@
 /** The layer panel, the properties panel, the speed filter, the history list and the history import. */
 const catalogue: Record<string, string> = {
-  "Fetches past times from the public archives and adds one layer for each. Times are UTC and land on the hour.": "Télécharge des heures passées depuis les archives publiques et ajoute un calque pour chacune. Les heures sont en UTC et tombent à l’heure pile.",
+  "Checking archive": "Vérification de l’archive",
+  "Reading archive index": "Lecture de l’index de l’archive",
+  "Downloading history": "Téléchargement des données historiques",
+  "Decoding history": "Décodage des données historiques",
+  "Preparing fields": "Préparation des champs",
+  "Writing history": "Écriture des données historiques",
+  "Adding history layers": "Ajout des calques historiques",
+  "History ready": "Données historiques prêtes",
+  "{source} · {phase}": "{source} · {phase}",
+  "{source} · {phase} · {percent}% · {megabytes} MB": "{source} · {phase} · {percent}% · {megabytes} Mo",
+  "Checking available archive dates…": "Vérification des dates disponibles dans l’archive…",
+  "Could not check archive availability: {reason}": "Impossible de vérifier la disponibilité de l’archive : {reason}",
+  "Could not verify the available dates for {source}. Close this dialog and try again.": "Impossible de vérifier les dates disponibles pour {source}. Fermez cette boîte de dialogue et réessayez.",
+  "{source} is available from {start} to {end} UTC. Choose a date range within these limits.": "{source} est disponible du {start} au {end} UTC. Choisissez une plage de dates comprise dans ces limites.",
+
+  "Fetches past times using the historical data source selected in Settings and adds one layer for each archive. Times are UTC and land on the hour.": "Télécharge les données passées depuis la source historique choisie dans les paramètres et ajoute une couche par archive. Les heures sont en UTC et entières.",
   "Start (UTC)": "Début (UTC)",
   "End (UTC)": "Fin (UTC)",
   "Move the timeline’s start to {time} UTC": "Déplacer le début de la chronologie à {time} UTC",

@@ -529,11 +529,77 @@ impl Default for McpSettings {
     }
 }
 
+/// Where new historical wind and current imports are downloaded from.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "HistoricalDataSource.ts")]
+#[serde(rename_all = "snake_case")]
+pub enum HistoricalDataSource {
+    #[default]
+    OpenData,
+    WhirlwindSource1,
+    WhirlwindSource2,
+    WhirlwindSource3,
+}
+
+impl HistoricalDataSource {
+    pub(crate) fn hindsight_provider(self) -> Option<ve_zarr::hindsight::Provider> {
+        use ve_zarr::hindsight::Provider;
+        match self {
+            Self::OpenData => None,
+            Self::WhirlwindSource1 => Some(Provider::S3),
+            Self::WhirlwindSource2 => Some(Provider::R2),
+            Self::WhirlwindSource3 => Some(Provider::Tigris),
+        }
+    }
+
+    pub(crate) fn open(
+        self,
+        archive: ve_zarr::Archive,
+    ) -> ve_zarr::Result<Box<dyn ve_zarr::FieldSource>> {
+        use ve_zarr::hindsight::{HindsightStore, Provider};
+        let provider = match self {
+            Self::OpenData => return archive.open(),
+            Self::WhirlwindSource1 => Provider::S3,
+            Self::WhirlwindSource2 => Provider::R2,
+            Self::WhirlwindSource3 => Provider::Tigris,
+        };
+        Ok(Box::new(HindsightStore::open(provider, archive)?))
+    }
+
+    pub(crate) fn file_id(self, archive: ve_zarr::Archive) -> String {
+        let source = match self {
+            Self::OpenData => return archive.id().to_owned(),
+            Self::WhirlwindSource1 => "1",
+            Self::WhirlwindSource2 => "2",
+            Self::WhirlwindSource3 => "3",
+        };
+        format!("whirlwind-hindsight-{source}-{}", archive.id())
+    }
+
+    pub(crate) fn origin_label(id: &str) -> Option<String> {
+        let (source, archive) = id.strip_prefix("whirlwind-hindsight-")?.split_once('-')?;
+        if !["1", "2", "3"].contains(&source) {
+            return None;
+        }
+        let archive = ve_zarr::Archive::parse(archive)?;
+        Some(format!(
+            "Whirlwind Hindsight Source {source} — {}",
+            archive.label()
+        ))
+    }
+
+    pub(crate) fn label(self, archive: ve_zarr::Archive) -> String {
+        Self::origin_label(&self.file_id(archive)).unwrap_or_else(|| archive.label().to_owned())
+    }
+}
+
 /// The application's persisted preferences.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "AppSettings.ts")]
 #[serde(default)]
 pub struct AppSettings {
+    /// The source used for subsequent history imports; existing layers keep their files.
+    pub historical_data_source: HistoricalDataSource,
     /// Application-wide appearance; never part of a project or its history.
     pub theme: String,
     /// The interface language, one of [`LANGUAGES`]. A preference of the
@@ -652,6 +718,7 @@ fn supported_projection(id: &str) -> bool {
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
+            historical_data_source: HistoricalDataSource::default(),
             theme: crate::theme::DEFAULT_THEME.to_owned(),
             language: LANGUAGES[0].to_owned(),
             custom_theme: None,
@@ -1005,6 +1072,31 @@ pub fn temperature_unit_set(
     with_session(state, |session| {
         session.settings.temperature_unit = temperature_unit;
         session.save_settings(&file)?;
+        Ok(session.settings.clone())
+    })
+}
+
+/// Selects where subsequent historical-data imports are downloaded from.
+#[tauri::command]
+pub fn set_historical_data_source(
+    state: tauri::State<'_, AppState>,
+    source: HistoricalDataSource,
+) -> Result<AppSettings> {
+    historical_data_source_set(&state, source)
+}
+
+/// Save the source atomically with respect to the in-memory preference.
+pub fn historical_data_source_set(
+    state: &AppState,
+    source: HistoricalDataSource,
+) -> Result<AppSettings> {
+    let file = state.paths.settings_file();
+    with_session(state, |session| {
+        let before = std::mem::replace(&mut session.settings.historical_data_source, source);
+        if let Err(error) = session.save_settings(&file) {
+            session.settings.historical_data_source = before;
+            return Err(error);
+        }
         Ok(session.settings.clone())
     })
 }
@@ -1664,4 +1756,33 @@ pub fn mcp_rotate_token<R: tauri::Runtime>(
     })?;
     service.apply(&app, &mcp);
     Ok(service.status(&mcp))
+}
+
+#[cfg(test)]
+mod historical_source_tests {
+    use super::HistoricalDataSource::*;
+    use ve_zarr::Archive;
+
+    #[test]
+    fn provider_files_do_not_collide_and_provenance_keeps_the_source() {
+        let mut names = std::collections::BTreeSet::new();
+        for archive in Archive::ALL {
+            for source in [
+                OpenData,
+                WhirlwindSource1,
+                WhirlwindSource2,
+                WhirlwindSource3,
+            ] {
+                let id = source.file_id(archive);
+                assert!(names.insert(id.clone()));
+                if source == OpenData {
+                    assert_eq!(id, archive.id());
+                } else {
+                    let label = super::HistoricalDataSource::origin_label(&id).unwrap();
+                    assert!(label.contains("Whirlwind Hindsight Source"));
+                    assert!(label.ends_with(archive.label()));
+                }
+            }
+        }
+    }
 }
