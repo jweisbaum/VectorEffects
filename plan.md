@@ -1,5 +1,24 @@
 # VectorEffects — Implementation Plan
 
+**2026-10-08: Prepare 0.1.25 Beta.** Ship the disabled history Import
+button appearance and matching modal action styles. Versions and lockfiles
+are synchronized, with notes in `docs/releases/0.1.25.md`. The previous
+0.1.24 release completed all five platform builds successfully.
+
+**2026-10-08: Show the history button's disabled state while checking.**
+The history dialog already disables Import until archive availability has
+been verified, but modal action buttons kept their active appearance and
+hover highlight. Dim disabled modal actions, use the default cursor, and
+restrict hover styling to enabled buttons. Retain the existing availability
+and date-range guards.
+
+Validation: all five history dialog tests pass, including delayed and failed
+availability checks. Computed styles confirm disabled/enabled opacity and
+cursor changes. Production UI build/type checking and the offline check
+pass. The full UI run passed 1,114 tests with one skipped and three unrelated
+playback/timeline timeouts; all 29 tests in those two files pass when rerun
+with one worker.
+
 **2026-10-08: Responsive Hindsight progress and live history date limits.**
 The application log shows two roughly 32-second batch reads, each followed
 by file-write updates in a fraction of a second. Report measured index,

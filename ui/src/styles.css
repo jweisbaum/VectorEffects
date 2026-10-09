@@ -996,7 +996,8 @@ body {
   cursor: pointer;
   font: inherit;
 }
-.modal-actions button:hover { background: var(--hover); }
+.modal-actions button:hover:not(:disabled) { background: var(--hover); }
+.modal-actions button:disabled { opacity: 0.45; cursor: default; }
 .modal-actions button.primary {
   background: var(--active);
   border-color: var(--accent);
@@ -1004,7 +1005,7 @@ body {
 }
 /* Discarding unsaved work is the one irreversible button in the app. */
 .modal-actions button.danger { color: var(--error); border-color: var(--danger-border); }
-.modal-actions button.danger:hover { background: var(--danger-surface); }
+.modal-actions button.danger:hover:not(:disabled) { background: var(--danger-surface); }
 
 .modal-narrow { width: min(420px, 92vw); }
 

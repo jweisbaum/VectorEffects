@@ -1240,9 +1240,11 @@ chunk layout. Neither a fixed date nor a fixed lag defines the limits.
 Both requested endpoints must lie within every selected archive's inclusive
 coverage. Otherwise the dialog warns with the source name and exact first
 and last UTC dates and disables Import. Unknown availability also blocks
-Import. Reopening the dialog refreshes the dates, and the backend checks
-the full requested range again before fetching fields. Gaps inside the
-outer coverage remain missing data.
+Import. While checking, the disabled button is visibly dimmed and has no
+clickable cursor or hover highlight; it enables only after availability
+is verified and the requested range is valid. Reopening the dialog refreshes
+the dates, and the backend checks the full requested range again before
+fetching fields. Gaps inside the outer coverage remain missing data.
 
 Hindsight progress includes preparing, reading shard indexes, downloading,
 decoding, resampling, writing files and importing layers. The bar estimates
