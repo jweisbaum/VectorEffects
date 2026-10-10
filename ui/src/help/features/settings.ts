@@ -8,8 +8,6 @@ import type { Feature } from "../features";
 const open = (section: string) => ["settings:", `settings:${section}`];
 
 const features: Feature[] = [
-  { id: "settings:history", label: msg("Historical data source"), description: msg("Choose where new historical wind and current imports are downloaded from."),
-    keywords: [], topic: "settings", reveal: open("history") },
   { id: "settings:appearance", label: msg("Appearance"), description: msg("Theme, language and custom colours for the whole application."),
     keywords: [msg("look"), msg("colours"), msg("dark mode")], topic: "settings", reveal: open("appearance") },
   { id: "settings:theme", label: msg("Theme"), description: msg("Choose the colour theme of the application."),

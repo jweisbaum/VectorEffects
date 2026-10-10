@@ -21,7 +21,6 @@ const settings: AppSettings = {
   distance_unit: "km",
   speed_unit: "kt",
   temperature_unit: "celsius",
-  historical_data_source: "open_data",
   default_wind_scale_knots: 60,
   default_current_scale_knots: 6,
   macro_directory: "",

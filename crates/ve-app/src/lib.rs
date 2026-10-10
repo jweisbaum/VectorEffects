@@ -290,7 +290,6 @@ pub fn run() -> anyhow::Result<()> {
                 settings::set_auto_scale,
                 settings::set_display_units,
                 settings::set_temperature_unit,
-                settings::set_historical_data_source,
                 earthdata::earthdata_status,
                 earthdata::set_earthdata_token,
                 settings::set_glyph_appearance,

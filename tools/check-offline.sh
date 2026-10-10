@@ -76,8 +76,6 @@ hits=$(find crates -name '*.rs' -not -path 'crates/ve-zarr/*' -not -path 'crates
 # signed address on its CloudFront distribution, which is followed without
 # the token, and a redirect to NASA's login page means the token was refused.
 ARCHIVES='storage\.googleapis\.com/gcp-public-data-arco-era5|s3\.waw3-1\.cloudferro\.com/mdl-arco-time|s3\.waw3-1\.cloudferro\.com/mdl-metadata|oceanwatch\.pifsc\.noaa\.gov/erddap|coastwatch\.pfeg\.noaa\.gov/erddap|coastwatch\.noaa\.gov/erddap|coastwatch\.noaa\.gov/data/pub0015/coastwatch/blended/wind/|cmr\.earthdata\.nasa\.gov/search/granules|archive\.podaac\.earthdata\.nasa\.gov/|[a-z0-9]+\.cloudfront\.net/|urs\.earthdata\.nasa\.gov/oauth'
-# User-selected Hindsight mirrors: public S3 and the two credentialed readers.
-ARCHIVES="$ARCHIVES|whirlwind-hindsight\.s3\.us-east-1\.amazonaws\.com/hindsight|3d5456ad10ebc32c8a3c259aa84e6c64\.r2\.cloudflarestorage\.com/whirlwind-hindsight/hindsight|fly\.storage\.tigris\.dev/whirlwind-hindsight/hindsight"
 hits=$(find crates/ve-zarr -name '*.rs' -exec grep -nHE 'https?://' {} + 2>/dev/null \
   | grep -vE "$COMMENT" | grep -vE "$ALLOW" | grep -vE "$ARCHIVES" || true)
 [ -n "$hits" ] && report "unexpected remote host in ve-zarr" "$hits"

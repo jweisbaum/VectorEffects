@@ -683,8 +683,6 @@ export const api = {
   /** How temperatures are shown (M93). Only the display changes; SST is held in °C. */
   setTemperatureUnit: (temperatureUnit: TemperatureUnit) =>
     call<AppSettings>("set_temperature_unit", { temperatureUnit }),
-  setHistoricalDataSource: (source: AppSettings["historical_data_source"]) =>
-    call<AppSettings>("set_historical_data_source", { source }),
   setDefaultScales: (windKnots: number, currentKnots: number) =>
     call<AppSettings>("set_default_scales", { windKnots, currentKnots }),
   // --- Crash recovery (spec.md 4.2, M10) ---

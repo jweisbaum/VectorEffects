@@ -3,7 +3,6 @@ import type { AutosaveMode } from "./AutosaveMode";
 import type { CustomTheme } from "./CustomTheme";
 import type { DistanceUnit } from "./DistanceUnit";
 import type { GlyphSettings } from "./GlyphSettings";
-import type { HistoricalDataSource } from "./HistoricalDataSource";
 import type { McpSettings } from "./McpSettings";
 import type { Shortcut } from "./Shortcut";
 import type { SpeedUnit } from "./SpeedUnit";
@@ -13,10 +12,6 @@ import type { TemperatureUnit } from "./TemperatureUnit";
  * The application's persisted preferences.
  */
 export type AppSettings = {
-/**
- * The source used for subsequent history imports; existing layers keep their files.
- */
-historical_data_source: HistoricalDataSource,
 /**
  * Application-wide appearance; never part of a project or its history.
  */

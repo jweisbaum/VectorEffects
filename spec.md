@@ -1194,66 +1194,16 @@ layers. The calendar button beside the two import buttons asks for a start,
 an end and which archives to read; what comes back is one layer per archive,
 and each one is a GRIB layer in every way that matters.
 
-**Historical data source.** Settings offers Open Data (Slow), the default for
-new and existing installations, and Whirlwind Hindsight (Fast) Source 1 (S3),
-Source 2 (R2) and Source 3 (Tigris). Open Data uses the existing ERA5 and GlobCurrent
-public archives unchanged. The Hindsight mirrors read the routing Zarr v3
-store at `whirlwind-hindsight/hindsight`: anonymous public S3, authenticated
-R2 and authenticated Tigris respectively. The supplied reader credentials
-are embedded in the Rust application; the R2 account API token is not needed
-for S3 object reads. Fetching occurs only on an explicit history request.
-The preference is captured once per import. Provider-specific filenames and
-provenance prevent a source change from overwriting another source's data.
-Hindsight reads geographic subsets with HTTP ranges. Wind and currents share
-one reader and one download when both are selected, while still becoming
-separate GRIB files and layers with their own provenance. Requested hours are
-batched within archive time chunks, with a 256 MiB working-buffer estimate;
-large regions split into smaller batches. Each batch decodes its shared
-compressed chunks once for the selected hours and components. Shard indexes
-are reused, nearby byte ranges are merged into requests of up to 8 MiB (at
-most 16 KiB of intervening bytes), and up to eight independent range GETs run
-at once. The 512 MiB compressed-byte memory cache is shared by both fields.
-
-A disposable 2 GiB disk cache under the application's cache directory reuses
-metadata, coordinates and compressed ranges across imports. Entries are
-isolated by endpoint and object version. Metadata uses conditional GETs;
-each newly opened reader checks a shard's size and ETag before reusing its
-ranges, and conditional range GETs reject an object replaced during a read.
-Objects without a strong ETag do not reuse disk-cached ranges. Cache files
-are checksummed and atomically replaced; a missing, corrupt or unwritable
-cache falls back to fetching. Deleting this cache never removes imported
-GRIB files. No cache refresh runs in the background.
-
-Coordinates determine the grid and component order; missing values remain
-missing. Missing subchunks inside populated shards are skipped during
-prefetch and decoded as fill values; absent data is never a byte range.
-Completion markers determine which time chunks are populated,
-since the time coordinate extends beyond populated data, and are revalidated on each import.
-Changing the setting affects subsequent imports and archive queries only.
-These optimizations apply only to Whirlwind Hindsight: Open Data and
-near-real-time readers retain their existing transport and import pipeline.
-
-Opening the history dialog reads the selected source's current availability.
-Open Data uses its published coverage; each Hindsight mirror lists its own
-completion records and maps them through the actual time coordinate and
-chunk layout. Neither a fixed date nor a fixed lag defines the limits.
-Both requested endpoints must lie within every selected archive's inclusive
-coverage. Otherwise the dialog warns with the source name and exact first
-and last UTC dates and disables Import. Unknown availability also blocks
-Import. While checking, the disabled button is visibly dimmed and has no
-clickable cursor or hover highlight; it enables only after availability
-is verified and the requested range is valid. Reopening the dialog refreshes
-the dates, and the backend checks the full requested range again before
-fetching fields. Gaps inside the outer coverage remain missing data.
-
-Hindsight progress includes preparing, reading shard indexes, downloading,
-decoding, resampling, writing files and importing layers. The bar estimates
-overall completion from measured work in those phases; download updates
-count received bytes and version-validated cache hits, including while a
-range request is still arriving. Network byte counts remain visible and
-download reports are sampled at most ten times a second. Shard indexes and prefetches
-run concurrently, with a shared maximum of eight HTTP requests. An unknown
-preparation phase shows activity rather than a misleading frozen percentage.
+The archives are the public ERA5 and GlobCurrent stores. The history dialog
+reads their published coverage. Both requested endpoints must lie within
+every selected archive's inclusive coverage. Otherwise the dialog warns with
+the archive name and exact first and last UTC dates and disables Import.
+Unknown availability also blocks Import. While checking, the disabled button
+is visibly dimmed and has no clickable cursor or hover highlight; it enables
+only after availability is verified and the requested range is valid.
+Reopening the dialog refreshes the dates, and the backend checks the full
+requested range again before fetching fields. Gaps inside the outer coverage
+remain missing data. Progress reports completed steps and total steps.
 
 **Two archives, one field each.** ERA5 gives 10 m wind and GlobCurrent gives
 the total surface current, both hourly on a 0.25° global grid. Nothing else

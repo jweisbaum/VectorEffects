@@ -24,19 +24,8 @@ afterEach(async () => { await act(async () => { root.unmount(); finish(); }); co
 const bar = () => container.querySelector('[role="progressbar"]');
 async function report(progress: HistoryProgress) { await act(async () => events.get("history://progress")!({ payload: progress })); }
 
-it("shows download work before a single completed hour, and waits for layer import before 100%", async () => {
-  expect(bar()?.hasAttribute("aria-valuenow")).toBe(false);
-  await report({ archive: "R2", done: 0, total: 48, work: { phase: "downloading", fraction: 0.35, downloaded_bytes: 12_500_000 } });
-  expect(bar()?.getAttribute("aria-valuenow")).toBe("35");
-  expect(container.textContent).toContain("Downloading history");
-  expect(container.textContent).toContain("12.5 MB");
-  await report({ archive: "R2", done: 48, total: 48, work: { phase: "importing", fraction: 0.97, downloaded_bytes: 50_000_000 } });
-  expect(bar()?.getAttribute("aria-valuenow")).toBe("97");
-  expect(container.textContent).toContain("Adding history layers");
-});
-
 it("preserves step progress for Open Data/NRT and clears stale events between imports", async () => {
-  await report({ archive: "ERA5", done: 3, total: 4, work: null });
+  await report({ archive: "ERA5", done: 3, total: 4 });
   expect(bar()?.getAttribute("aria-valuenow")).toBe("75");
   expect(container.textContent).toContain("ERA5 · 3/4");
   await act(async () => finish());

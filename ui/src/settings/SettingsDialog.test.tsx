@@ -82,7 +82,6 @@ const held = vi.hoisted(() => {
     chartDirectories: [] as string[],
     themeSet: vi.fn(),
     customThemeSet: vi.fn(),
-    historicalSourceSet: vi.fn(),
   };
 });
 
@@ -114,7 +113,6 @@ vi.mock("../ipc", () => ({
     appSettings: () => Promise.resolve(settings),
     setTheme: held.themeSet,
     setCustomTheme: held.customThemeSet,
-    setHistoricalDataSource: held.historicalSourceSet,
     macroLibrary: () => Promise.resolve(held.library),
     deleteMacros: (id: string | null) => {
       held.deleted.push(id);
@@ -141,7 +139,6 @@ const settings: AppSettings = {
   distance_unit: "km",
   speed_unit: "kt",
   temperature_unit: "celsius",
-  historical_data_source: "open_data",
   default_wind_scale_knots: 60,
   default_current_scale_knots: 6,
   macro_directory: "/macros",
@@ -163,7 +160,6 @@ beforeEach(() => {
   held.temperatures.length = 0;
   held.themeSet.mockReset().mockImplementation((theme: string) => Promise.resolve({ ...settings, theme }));
   held.customThemeSet.mockReset().mockImplementation(custom => Promise.resolve({ ...settings, theme: "custom", custom_theme: custom }));
-  held.historicalSourceSet.mockReset().mockImplementation(source => Promise.resolve({ ...settings, historical_data_source: source }));
   libraryChanges = 0;
   container = document.createElement("div");
   document.body.append(container);
@@ -425,42 +421,5 @@ describe("global unit preferences", () => {
       select!.dispatchEvent(new Event("change", { bubbles: true }));
     });
     expect(held.temperatures).toEqual(["fahrenheit"]);
-  });
-});
-
-describe("historical data source", () => {
-  it("offers all four sources and reports each saved selection without a project", async () => {
-    const changed = vi.fn();
-    await render(changed);
-    const select = container.querySelector<HTMLSelectElement>('[data-feature="settings:history"] select')!;
-    expect(select.value).toBe("open_data");
-    expect([...select.options].map(option => option.textContent)).toEqual([
-      "Open Data (Slow)",
-      "Whirlwind Hindsight (Fast) Source 1 (S3)",
-      "Whirlwind Hindsight (Fast) Source 2 (R2)",
-      "Whirlwind Hindsight (Fast) Source 3 (Tigris)",
-    ]);
-    for (const source of ["whirlwind_source1", "whirlwind_source2", "whirlwind_source3", "open_data"]) {
-      await act(async () => {
-        select.value = source;
-        select.dispatchEvent(new Event("change", { bubbles: true }));
-      });
-      expect(held.historicalSourceSet).toHaveBeenLastCalledWith(source);
-      expect(changed).toHaveBeenLastCalledWith({ ...settings, historical_data_source: source });
-    }
-  });
-
-  it("reports a save failure and keeps the current source", async () => {
-    held.historicalSourceSet.mockRejectedValue(new Error("Settings could not be written"));
-    const changed = vi.fn();
-    await render(changed);
-    const select = container.querySelector<HTMLSelectElement>('[data-feature="settings:history"] select')!;
-    await act(async () => {
-      select.value = "whirlwind_source2";
-      select.dispatchEvent(new Event("change", { bubbles: true }));
-    });
-    expect(changed).not.toHaveBeenCalled();
-    expect(select.value).toBe("open_data");
-    expect(container.querySelector(".modal-error")?.textContent).toContain("Settings could not be written");
   });
 });

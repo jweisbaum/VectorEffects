@@ -1,19 +1,8 @@
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { useBusy } from "./busy";
-import { msg, useT } from "./i18n";
+import { useT } from "./i18n";
 import type { HistoryProgress } from "./generated/HistoryProgress";
-
-const PHASES: Record<string, string> = {
-  preparing: msg("Checking archive"),
-  indexing: msg("Reading archive index"),
-  downloading: msg("Downloading history"),
-  decoding: msg("Decoding history"),
-  resampling: msg("Preparing fields"),
-  writing: msg("Writing history"),
-  importing: msg("Adding history layers"),
-  complete: msg("History ready"),
-};
 
 /**
  * How far a fetch has got (spec.md 4.10, M38): the history import's, or the
@@ -21,8 +10,7 @@ const PHASES: Record<string, string> = {
  *
  * A fetch is minutes of network with nothing else to look at, and a spinner
  * that only turns cannot tell a slow archive from a stalled one. The backend
- * reports actual work. Hindsight includes download bytes and batch phases;
- * other sources use completed steps. Preparation has no known fraction.
+ * reports completed steps.
  *
  * It is bounded by the busy store rather than by the last event: an import
  * that fails leaves its final progress behind, and the bar has to go when the
@@ -67,23 +55,13 @@ export default function FetchProgressBar({
 
   if (!running) return null;
   const total = progress?.total ?? 0;
-  const work = progress?.work;
-  const indeterminate = progress === null || work?.phase === "preparing";
-  const fraction = work?.fraction ?? (total > 0 ? (progress?.done ?? 0) / total : 0);
+  const indeterminate = progress === null;
+  const fraction = total > 0 ? (progress?.done ?? 0) / total : 0;
   const percent = Math.min(100, Math.max(0, Math.floor(fraction * 100)));
   const label =
     progress === null
       ? t(waiting)
-      : work
-        ? indeterminate
-          ? t("{source} · {phase}", { source: progress.archive, phase: t(PHASES[work.phase] ?? "Checking archive") })
-          : t("{source} · {phase} · {percent}% · {megabytes} MB", {
-              source: progress.archive,
-              phase: t(PHASES[work.phase] ?? "Downloading history"),
-              percent,
-              megabytes: (work.downloaded_bytes / 1_000_000).toFixed(1),
-            })
-        : `${progress.archive} · ${progress.done}/${progress.total}`;
+      : `${progress.archive} · ${progress.done}/${progress.total}`;
   return (
     <span className="history-progress" title={label} aria-label={label}>
       <span className="progress-bar" role="progressbar" aria-label={label}

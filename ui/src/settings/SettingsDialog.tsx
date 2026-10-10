@@ -152,7 +152,6 @@ export default function SettingsDialog({
       onReveal("settings:charts", show),
       onReveal("settings:macros", show),
       onReveal("settings:earthdata", show),
-      onReveal("settings:history", show),
       onReveal("settings:mcp", show),
     ];
     return () => { for (const off of offs) off(); };
@@ -425,27 +424,6 @@ export default function SettingsDialog({
               }}
             />
           </label>
-        </section>
-
-        <section data-feature="settings:history">
-          <h3>{t("Historical data")}</h3>
-          <label className="settings-field">
-            {t("Historical data source")}
-            <select
-              value={settings.historical_data_source}
-              onChange={(event) => {
-                setError(null);
-                void api.setHistoricalDataSource(event.target.value as AppSettings["historical_data_source"])
-                  .then(onSettings).catch(report);
-              }}
-            >
-              <option value="open_data">{t("Open Data (Slow)")}</option>
-              <option value="whirlwind_source1">{t("Whirlwind Hindsight (Fast) Source 1 (S3)")}</option>
-              <option value="whirlwind_source2">{t("Whirlwind Hindsight (Fast) Source 2 (R2)")}</option>
-              <option value="whirlwind_source3">{t("Whirlwind Hindsight (Fast) Source 3 (Tigris)")}</option>
-            </select>
-          </label>
-          <p className="muted">{t("Choose where new historical wind and current imports are downloaded from.")}</p>
         </section>
 
         <section data-feature="settings:charts">

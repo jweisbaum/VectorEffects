@@ -1,12 +1,6 @@
 /** The Settings dialog and its sections, and their Help search entries. */
 const catalogue: Record<string, string> = {
   "Historical data": "历史数据",
-  "Historical data source": "历史数据源",
-  "Open Data (Slow)": "开放数据（慢速）",
-  "Whirlwind Hindsight (Fast) Source 1 (S3)": "Whirlwind Hindsight（快速）来源 1 (S3)",
-  "Whirlwind Hindsight (Fast) Source 2 (R2)": "Whirlwind Hindsight（快速）来源 2 (R2)",
-  "Whirlwind Hindsight (Fast) Source 3 (Tigris)": "Whirlwind Hindsight（快速）来源 3 (Tigris)",
-  "Choose where new historical wind and current imports are downloaded from.": "选择新导入的历史风场和洋流数据的下载来源。",
   "Wind barb appearance preview": "风向杆外观预览",
   "Arrow appearance preview": "箭头外观预览",
   "Wind barbs": "风向杆",

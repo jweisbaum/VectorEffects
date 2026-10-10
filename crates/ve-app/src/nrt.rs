@@ -294,7 +294,6 @@ pub fn nrt_import(
             archive: origin.label.to_owned(),
             done,
             total,
-            work: None,
         });
         let fetched = open(*product)
             .doing("reach", format!("\"{}\"", origin.label))
@@ -316,7 +315,6 @@ pub fn nrt_import(
                             archive: origin.label.to_owned(),
                             done: done + arrived,
                             total,
-                            work: None,
                         });
                     },
                 )
