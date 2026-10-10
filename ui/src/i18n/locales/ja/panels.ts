@@ -1,15 +1,5 @@
 /** The layer panel, the properties panel, the speed filter, the history list and the history import. */
 const catalogue: Record<string, string> = {
-  "Checking archive": "アーカイブを確認中",
-  "Reading archive index": "アーカイブ索引を読み込み中",
-  "Downloading history": "過去データをダウンロード中",
-  "Decoding history": "過去データをデコード中",
-  "Preparing fields": "フィールドを準備中",
-  "Writing history": "過去データを書き込み中",
-  "Adding history layers": "過去データのレイヤーを追加中",
-  "History ready": "過去データの準備完了",
-  "{source} · {phase}": "{source} · {phase}",
-  "{source} · {phase} · {percent}% · {megabytes} MB": "{source} · {phase} · {percent}% · {megabytes} MB",
   "Checking available archive dates…": "アーカイブで利用可能な日時を確認中…",
   "Could not check archive availability: {reason}": "アーカイブの利用可能範囲を確認できませんでした：{reason}",
   "Could not verify the available dates for {source}. Close this dialog and try again.": "{source}で利用可能な日時を確認できませんでした。このダイアログを閉じて、もう一度お試しください。",

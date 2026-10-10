@@ -1,6 +1,5 @@
 /** The Settings dialog and its sections, and their Help search entries. */
 const catalogue: Record<string, string> = {
-  "Historical data": "البيانات التاريخية",
   "Wind barb appearance preview": "معاينة مظهر ريش الرياح",
   "Arrow appearance preview": "معاينة مظهر الأسهم",
   "Wind barbs": "ريش الرياح",

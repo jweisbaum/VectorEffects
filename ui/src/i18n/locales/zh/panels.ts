@@ -1,15 +1,5 @@
 /** The layer panel, the properties panel, the speed filter, the history list and the history import. */
 const catalogue: Record<string, string> = {
-  "Checking archive": "正在检查档案",
-  "Reading archive index": "正在读取档案索引",
-  "Downloading history": "正在下载历史数据",
-  "Decoding history": "正在解码历史数据",
-  "Preparing fields": "正在准备数据场",
-  "Writing history": "正在写入历史数据",
-  "Adding history layers": "正在添加历史数据图层",
-  "History ready": "历史数据已就绪",
-  "{source} · {phase}": "{source} · {phase}",
-  "{source} · {phase} · {percent}% · {megabytes} MB": "{source} · {phase} · {percent}% · {megabytes} MB",
   "Checking available archive dates…": "正在检查档案的可用日期…",
   "Could not check archive availability: {reason}": "无法检查档案可用性：{reason}",
   "Could not verify the available dates for {source}. Close this dialog and try again.": "无法验证{source}的可用日期。请关闭此对话框并重试。",

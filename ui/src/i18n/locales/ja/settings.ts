@@ -1,6 +1,5 @@
 /** The Settings dialog and its sections, and their Help search entries. */
 const catalogue: Record<string, string> = {
-  "Historical data": "過去のデータ",
   "Wind barb appearance preview": "矢羽根の外観のプレビュー",
   "Arrow appearance preview": "矢印の外観のプレビュー",
   "Wind barbs": "矢羽根",

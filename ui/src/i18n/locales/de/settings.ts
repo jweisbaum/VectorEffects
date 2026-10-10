@@ -1,6 +1,5 @@
 /** The Settings dialog and its sections, and their Help search entries. */
 const catalogue: Record<string, string> = {
-  "Historical data": "Historische Daten",
   "Wind barb appearance preview": "Vorschau der Windfiedern",
   "Arrow appearance preview": "Vorschau der Pfeile",
   "Wind barbs": "Windfiedern",

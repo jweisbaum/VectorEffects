@@ -1,15 +1,5 @@
 /** The layer panel, the properties panel, the speed filter, the history list and the history import. */
 const catalogue: Record<string, string> = {
-  "Checking archive": "Archief controleren",
-  "Reading archive index": "Archiefindex lezen",
-  "Downloading history": "Historische gegevens downloaden",
-  "Decoding history": "Historische gegevens decoderen",
-  "Preparing fields": "Velden voorbereiden",
-  "Writing history": "Historische gegevens schrijven",
-  "Adding history layers": "Historische lagen toevoegen",
-  "History ready": "Historische gegevens gereed",
-  "{source} · {phase}": "{source} · {phase}",
-  "{source} · {phase} · {percent}% · {megabytes} MB": "{source} · {phase} · {percent}% · {megabytes} MB",
   "Checking available archive dates…": "Beschikbare archiefdatums controleren…",
   "Could not check archive availability: {reason}": "De beschikbaarheid van het archief kon niet worden gecontroleerd: {reason}",
   "Could not verify the available dates for {source}. Close this dialog and try again.": "De beschikbare datums voor {source} konden niet worden gecontroleerd. Sluit dit venster en probeer het opnieuw.",

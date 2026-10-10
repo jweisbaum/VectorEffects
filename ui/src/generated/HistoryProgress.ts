@@ -11,7 +11,6 @@
  * `Deserialize` as well as `Serialize`: `mcp::tools`'s progress relay reads
  * the event back off the bus to forward it to an MCP client.
  */
-
 export type HistoryProgress = {
 /**
  * Which archive is being read, as [`Archive::label`] names it.
@@ -24,5 +23,4 @@ done: number,
 /**
  * Steps this import will fetch in total, across every archive.
  */
-total: number,
-};
+total: number, };
