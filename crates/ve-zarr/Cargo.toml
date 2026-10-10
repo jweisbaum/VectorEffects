@@ -50,14 +50,8 @@ crc32c = "0.6"
 # unified `reqwest` version past 0.13.1, where the old feature stopped existing).
 reqwest = { version = "0.13.2", default-features = false, features = ["blocking", "rustls", "http2"] }
 url = "2"
-# S3-compatible read requests for the Hindsight mirrors.
-hmac = "0.12"
-sha2 = "0.10"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
-lru = "0.16"
 tempfile = "3"
-# Parse the completion-record inventory returned by S3 ListObjectsV2.
-quick-xml = { version = "0.41.0", features = ["serialize"] }
 
 [dev-dependencies]
 serde_json = { workspace = true }

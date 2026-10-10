@@ -6,8 +6,7 @@
 //! trait is three methods over `GET`, so it is written here against the
 //! `reqwest` already in the tree, with rustls.
 //!
-//! Reads only. Open-data stores are anonymous; Hindsight readers sign only
-//! their own endpoint's requests, with redirects disabled.
+//! Reads only. Open-data stores are anonymous.
 
 use std::str::FromStr;
 
@@ -21,11 +20,6 @@ use zarrs_storage::{
 
 use crate::error::{Result, ZarrError};
 
-#[path = "hindsight_http.rs"]
-mod hindsight_http;
-#[path = "hindsight_inventory.rs"]
-mod hindsight_inventory;
-
 /// A Zarr store read over HTTPS.
 #[derive(Debug)]
 pub struct HttpStore {
@@ -35,50 +29,6 @@ pub struct HttpStore {
     /// by every store on the host: the cap is the host's, and a product read
     /// from four stores at once is four stores on one host.
     lane: &'static Lane,
-    credentials: Option<crate::s3::Credentials>,
-    strict_errors: bool,
-    cache: Option<std::sync::Mutex<ReadCache>>,
-    range_gates: Vec<std::sync::Mutex<()>>,
-    disk: Option<std::sync::Arc<std::sync::Mutex<crate::hindsight_cache::DiskCache>>>,
-    progress: Option<std::sync::Arc<crate::hindsight_progress::Progress>>,
-}
-
-/// Per-import compressed bytes. A Hindsight inner chunk contains 72 hours
-/// and every parameter; adjacent hour/component reads reuse its range.
-/// The limit bounds global downloads, and dropping the source releases it.
-#[derive(Debug)]
-struct ReadCache {
-    ranges: lru::LruCache<(String, u64, u64), Bytes>,
-    sizes: lru::LruCache<String, Option<u64>>,
-    versions: lru::LruCache<String, Option<ObjectVersion>>,
-    bytes: usize,
-}
-
-#[derive(Debug, Clone)]
-struct ObjectVersion {
-    size: u64,
-    etag: Option<String>,
-}
-
-const READ_CACHE_BYTES: usize = 512 * 1024 * 1024;
-
-impl ReadCache {
-    fn insert(&mut self, key: (String, u64, u64), bytes: Bytes) {
-        if bytes.len() > READ_CACHE_BYTES {
-            return;
-        }
-        if let Some(before) = self.ranges.pop(&key) {
-            self.bytes -= before.len();
-        }
-        while self.bytes + bytes.len() > READ_CACHE_BYTES || self.ranges.len() >= 16_384 {
-            let Some((_, before)) = self.ranges.pop_lru() else {
-                break;
-            };
-            self.bytes -= before.len();
-        }
-        self.bytes += bytes.len();
-        self.ranges.put(key, bytes);
-    }
 }
 
 /// How many requests the Marine Data Store is sent at once, by this whole
@@ -98,10 +48,6 @@ static MARINE_LANE: std::sync::LazyLock<Lane> = std::sync::LazyLock::new(|| Lane
 
 /// Every other host's, as good as none.
 static OPEN_LANE: std::sync::LazyLock<Lane> = std::sync::LazyLock::new(|| Lane::new(UNCAPPED));
-
-// Index reads and field ranges share this cap even when several shards are
-// being prefetched at once. Open Data retains its original host limits.
-static HINDSIGHT_LANE: std::sync::LazyLock<Lane> = std::sync::LazyLock::new(|| Lane::new(8));
 
 /// The cap for every other host: as good as none. ERA5 on Google is read
 /// as many small range requests multiplexed over one connection, and a cap
@@ -267,48 +213,7 @@ impl HttpStore {
             base,
             client,
             lane: if marine { &MARINE_LANE } else { &OPEN_LANE },
-            credentials: None,
-            strict_errors: false,
-            cache: None,
-            range_gates: Vec::new(),
-            disk: None,
-            progress: None,
         })
-    }
-
-    /// A Hindsight object store. A forbidden read is an error, never missing
-    /// data; redirects are disabled so signed requests stay on this endpoint.
-    pub(crate) fn s3(base: &str, credentials: Option<crate::s3::Credentials>) -> Result<Self> {
-        let mut store = Self::new(base)?;
-        store.client = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(120))
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .map_err(|err| ZarrError::Open(format!("no HTTP client: {err}")))?;
-        store.credentials = credentials;
-        store.strict_errors = true;
-        store.lane = &HINDSIGHT_LANE;
-        store.cache = Some(std::sync::Mutex::new(ReadCache {
-            ranges: lru::LruCache::unbounded(),
-            sizes: lru::LruCache::unbounded(),
-            versions: lru::LruCache::unbounded(),
-            bytes: 0,
-        }));
-        store.range_gates = (0..64).map(|_| std::sync::Mutex::new(())).collect();
-        Ok(store)
-    }
-
-    pub(crate) fn with_disk_cache(mut self, root: &std::path::Path) -> Self {
-        self.disk = crate::hindsight_cache::DiskCache::open(root);
-        self
-    }
-
-    pub(crate) fn with_progress(
-        mut self,
-        progress: std::sync::Arc<crate::hindsight_progress::Progress>,
-    ) -> Self {
-        self.progress = Some(progress);
-        self
     }
 
     fn request(
@@ -316,11 +221,7 @@ impl HttpStore {
         method: reqwest::Method,
         url: &Url,
     ) -> std::result::Result<reqwest::blocking::RequestBuilder, StorageError> {
-        let builder = self.client.request(method.clone(), url.clone());
-        match &self.credentials {
-            Some(credentials) => credentials.sign(builder, &method, url),
-            None => Ok(builder),
-        }
+        Ok(self.client.request(method, url.clone()))
     }
 
     /// The URL a key is read from.
@@ -357,9 +258,6 @@ pub fn get_text(url: &str) -> Result<String> {
 
 impl ReadableStorageTraits for HttpStore {
     fn get(&self, key: &StoreKey) -> std::result::Result<MaybeBytes, StorageError> {
-        if self.strict_errors {
-            return self.hindsight_get(key);
-        }
         let url = self.url(key)?;
         retrying(|| {
             let _place = self.lane.permit();
@@ -373,12 +271,7 @@ impl ReadableStorageTraits for HttpStore {
                     .bytes()
                     .map(Some)
                     .map_err(|err| Retry::Later(failed(err))),
-                // A key that is not there. The S3 endpoint behind Copernicus
-                // Marine answers a missing key with 403 rather than 404, and
-                // a Zarr reader must read both as "no such chunk" or every
-                // probe for an optional key becomes an error.
                 StatusCode::NOT_FOUND => Ok(None),
-                StatusCode::FORBIDDEN if !self.strict_errors => Ok(None),
                 status => {
                     let err = StorageError::Other(format!(
                         "the archive answered {status} for {}",
@@ -406,9 +299,6 @@ impl ReadableStorageTraits for HttpStore {
         key: &StoreKey,
         byte_ranges: ByteRangeIterator<'a>,
     ) -> std::result::Result<MaybeBytesIterator<'a>, StorageError> {
-        if self.strict_errors {
-            return self.hindsight_ranges(key, byte_ranges);
-        }
         let Some(size) = self.size_key(key)? else {
             return Ok(None);
         };
@@ -416,28 +306,6 @@ impl ReadableStorageTraits for HttpStore {
         let mut out: Vec<std::result::Result<Bytes, StorageError>> = Vec::new();
         for range in byte_ranges {
             let (start, end) = (range.start(size), range.end(size));
-            let cache_key = (key.as_str().to_owned(), start, end);
-            // Adjacent hours are read by different workers. Coalesce equal
-            // range misses without serializing requests for distinct chunks.
-            let _gate = if self.range_gates.is_empty() {
-                None
-            } else {
-                use std::hash::{Hash, Hasher};
-                let mut hash = std::collections::hash_map::DefaultHasher::new();
-                cache_key.hash(&mut hash);
-                Some(
-                    self.range_gates[hash.finish() as usize % self.range_gates.len()]
-                        .lock()
-                        .unwrap_or_else(|p| p.into_inner()),
-                )
-            };
-            if let Some(cache) = &self.cache {
-                let mut cache = cache.lock().unwrap_or_else(|p| p.into_inner());
-                if let Some(bytes) = cache.ranges.get(&cache_key) {
-                    out.push(Ok(bytes.clone()));
-                    continue;
-                }
-            }
             let header = HeaderValue::from_str(&format!("bytes={start}-{}", end.saturating_sub(1)))
                 .map_err(|err| StorageError::Other(err.to_string()))?;
             // The same retry and the same cap as a whole read: this is the
@@ -463,9 +331,6 @@ impl ReadableStorageTraits for HttpStore {
                                 "the archive returned less than the range asked for".to_owned(),
                             )));
                         }
-                        // A cached slice must not retain the entire shard
-                        // while only its small visible range counts toward
-                        // the byte limit.
                         Ok(Bytes::copy_from_slice(&whole[start..end]))
                     }
                     status => {
@@ -481,27 +346,12 @@ impl ReadableStorageTraits for HttpStore {
                     }
                 }
             })?;
-            if let Some(cache) = &self.cache {
-                cache
-                    .lock()
-                    .unwrap_or_else(|p| p.into_inner())
-                    .insert(cache_key, bytes.clone());
-            }
             out.push(Ok(bytes));
         }
         Ok(Some(Box::new(out.into_iter())))
     }
 
     fn size_key(&self, key: &StoreKey) -> std::result::Result<Option<u64>, StorageError> {
-        if self.strict_errors {
-            return self.hindsight_head(key).map(|v| v.map(|v| v.size));
-        }
-        if let Some(cache) = &self.cache {
-            let mut cache = cache.lock().unwrap_or_else(|p| p.into_inner());
-            if let Some(size) = cache.sizes.get(key.as_str()) {
-                return Ok(*size);
-            }
-        }
         let url = self.url(key)?;
         let size = retrying(|| {
             let _place = self.lane.permit();
@@ -519,7 +369,6 @@ impl ReadableStorageTraits for HttpStore {
                     .map(Some)
                     .ok_or_else(|| Retry::No(StorageError::Other("no content length".to_owned()))),
                 StatusCode::NOT_FOUND => Ok(None),
-                StatusCode::FORBIDDEN if !self.strict_errors => Ok(None),
                 status => {
                     let err = StorageError::Other(format!(
                         "the archive answered {status} for the size of {}",
@@ -533,13 +382,6 @@ impl ReadableStorageTraits for HttpStore {
                 }
             }
         })?;
-        if let Some(cache) = &self.cache {
-            let mut cache = cache.lock().unwrap_or_else(|p| p.into_inner());
-            if cache.sizes.len() >= 4096 {
-                cache.sizes.pop_lru();
-            }
-            cache.sizes.put(key.as_str().to_owned(), size);
-        }
         Ok(size)
     }
 
@@ -657,62 +499,5 @@ mod tests {
     #[test]
     fn a_base_that_is_not_a_url_is_refused() {
         assert!(HttpStore::new("not a url").is_err());
-    }
-}
-
-#[cfg(test)]
-#[allow(clippy::unwrap_used)]
-mod hindsight_transport_tests {
-    use super::*;
-    use std::io::{Read, Write};
-    use zarrs_storage::byte_range::ByteRange;
-
-    #[test]
-    fn hindsight_reuses_byte_ranges_and_surfaces_access_denied() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
-        let server = std::thread::spawn(move || {
-            // Three requests: one size, one range, one forbidden object.
-            // Re-reading the range must not need another connection.
-            for expected in ["HEAD /data", "GET /data", "GET /forbidden"] {
-                let (mut stream, _) = listener.accept().unwrap();
-                stream
-                    .set_read_timeout(Some(std::time::Duration::from_secs(5)))
-                    .unwrap();
-                let mut request = Vec::new();
-                let mut byte = [0];
-                while !request.ends_with(b"\r\n\r\n") {
-                    stream.read_exact(&mut byte).unwrap();
-                    request.push(byte[0]);
-                }
-                let request = String::from_utf8(request).unwrap();
-                assert!(request.starts_with(expected), "{request}");
-                let response = if expected.starts_with("HEAD") {
-                    "HTTP/1.1 200 OK\r\nContent-Length: 8\r\nConnection: close\r\n\r\n"
-                } else if expected.ends_with("/data") {
-                    assert!(request.to_ascii_lowercase().contains("range: bytes=2-4"));
-                    "HTTP/1.1 206 Partial Content\r\nContent-Length: 3\r\nContent-Range: bytes 2-4/8\r\nConnection: close\r\n\r\ncde"
-                } else {
-                    "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-                };
-                stream.write_all(response.as_bytes()).unwrap();
-            }
-        });
-        let store = HttpStore::s3(&format!("http://127.0.0.1:{port}"), None).unwrap();
-        let key = StoreKey::new("data").unwrap();
-        for _ in 0..2 {
-            let ranges = Box::new(std::iter::once(ByteRange::from(2..5)));
-            let bytes = store
-                .get_partial_many(&key, ranges)
-                .unwrap()
-                .unwrap()
-                .next()
-                .unwrap()
-                .unwrap();
-            assert_eq!(bytes.as_ref(), b"cde");
-        }
-        let err = store.get(&StoreKey::new("forbidden").unwrap()).unwrap_err();
-        assert!(err.to_string().contains("403"));
-        server.join().unwrap();
     }
 }
