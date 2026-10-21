@@ -13,6 +13,7 @@ use crate::error::AppError;
 use crate::projects::ProjectSummary;
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct KeyframeSetParams {
     pub object: u64,
     /// A property id (`object_get`'s `id`, e.g. `"Position"`, `"Speed"`).
@@ -24,12 +25,14 @@ pub struct KeyframeSetParams {
     pub value: Option<Value>,
 }
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct KeyframeParams {
     pub object: u64,
     pub property: String,
     pub step: u32,
 }
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct KeyframeMoveParams {
     pub object: u64,
     pub property: String,
@@ -37,6 +40,7 @@ pub struct KeyframeMoveParams {
     pub to: u32,
 }
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct InterpolationParams {
     pub object: u64,
     pub property: String,
@@ -48,6 +52,7 @@ pub struct InterpolationParams {
     pub interpolation: Value,
 }
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct MotionParams {
     pub object: u64,
     pub step: u32,
@@ -58,6 +63,7 @@ pub struct MotionParams {
     pub overwrite: bool,
 }
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct FollowParams {
     pub object: u64,
     pub property: String,
@@ -66,6 +72,7 @@ pub struct FollowParams {
     pub step: u32,
 }
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct TimelineParams {
     pub step_count: Option<u32>,
     /// Unix seconds for step 0. `null` clears the project's start time;

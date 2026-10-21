@@ -10,6 +10,7 @@ use super::{ToolError, VectorEffects};
 use crate::projects::ProjectSummary;
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct HistoryJumpParams {
     pub target: usize,
 }

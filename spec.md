@@ -4962,3 +4962,7 @@ their reasoning so they are not reopened by accident.
 - The MCP service (§8.8) is the second exception to invariant 5 and the first
   inbound one. It is switched, tokened and confined to one module; the
   WebDriver rule is unchanged.
+
+## Shared native MCP architecture
+
+The [versioned Whirlwind MCP contract](vendor/whirlwind-mcp/README.md) is the current authority for assistant transport, installation, permission policy and job lifecycle. It supersedes earlier direct-HTTP registration, shell launchers, token-copy reinstall steps, permission-by-annotation guidance and cancellation-on-disconnect behavior. Domain tool behavior and existing file formats remain governed by the sections above.

@@ -102,9 +102,9 @@ pub const GUIDE: &str = concat!(
    d. To animate any object: object_set with auto_key true at each step that matters, giving every property that changes there. On a gradient `circle`, SpeedMin is the wind at the CENTRE and SpeedMax the wind at the RIM, whatever the names suggest.
    e. Check with field_sample (numbers) or screenshot (picture), then export_grib or export_zarr if a file was asked for; a drawn project has no dates, so give it a reference time.
 
-A project about one place (the Bering Sea, the Arctic, a coast) takes a region on project_new: west, east (the arc east of west, so 160 to -160 crosses 180), south, north; a polar cap is full_circle true. Smaller grid, smaller files. The region cannot change later.\n\nA project that is already open may hold the user's unsaved work: project_status says, and project_new refuses to discard it unless told to. Ask, or project_save it first.
+A project about one place (the Bering Sea, the Arctic, a coast) takes a region on project_new: west, east (the arc east of west, so 160 to -160 crosses 180), south, north; a polar cap is full_circle true. Smaller grid, smaller files. The region cannot change later.\n\nA project that is already open may hold the user's unsaved work: project_status says, and project_new refuses to discard it unless told to. Use project_save first. Only project_discard may deliberately drop unsaved work, with authorization.
 
-Conventions: positions are [lon, lat] in degrees, longitude -180 to 180. Speeds are m/s (1 kt = 0.514 m/s). A direction is the azimuth the flow moves TOWARD, degrees clockwise from north — the opposite of a meteorological \"from\" bearing. Times are UTC. File paths must be absolute or begin with ~/. A choice option is {\"kind\":\"choice\",\"index\":i} indexing the option's variants. Every edit is undoable (undo; history_list is that undo list, not past weather) and shows on the map as it is made."
+Continue authorized reads, reversible edits, downloads and exports without asking again at each step. For a long export, export_start returns a durable job_id; poll assistant_jobs. Reuse request_id only for identical retries. Work continues after the assistant disconnects. Use app_read and app_edit for classified commands shown by assistant_capabilities; invoke remains a separately approved fallback. GRIB/Zarr outputs can feed Hindsight Router.\n\nConventions: positions are [lon, lat] in degrees, longitude -180 to 180. Speeds are m/s (1 kt = 0.514 m/s). A direction is the azimuth the flow moves TOWARD, degrees clockwise from north — the opposite of a meteorological \"from\" bearing. Times are UTC. File paths must be absolute or begin with ~/. A choice option is {\"kind\":\"choice\",\"index\":i} indexing the option's variants. Every edit is undoable (undo; history_list is that undo list, not past weather) and shows on the map as it is made."
 );
 
 /// What `vectoreffects_guide` returns.
@@ -117,6 +117,15 @@ pub struct Guide {
 
 #[tool_router(router = tool_router_guide, vis = "pub(crate)")]
 impl<R: tauri::Runtime> VectorEffects<R> {
+    #[tool(
+        description = "Read the shared MCP contract, tool effects, connection controls and workflow behavior."
+    )]
+    async fn assistant_capabilities(
+        &self,
+    ) -> std::result::Result<rmcp::model::CallToolResult, super::ToolError> {
+        let value = serde_json::json!({"contract_version":1,"app":"VectorEffects","tools":super::effects::TABLE,"commands":crate::mcp::invoke::COMMAND_EFFECTS,"connection_controls":"app_settings_only","policy":"routine edits, downloads and exports run automatically; project_discard and invoke require approval","jobs":"export_start returns a durable job_id; poll assistant_jobs; export_cancel explicitly stops work; disconnect does not cancel"});
+        Ok(rmcp::model::CallToolResult::structured(value))
+    }
     #[tool(
         description = "START HERE. How to use VectorEffects, the application open on this computer that makes global wind and ocean-current fields and exports them as GRIB2 or Zarr. Call this first whenever the user names VectorEffects, or wants a GRIB, a Zarr, or a wind, current, storm or weather field or file — real past weather (a named hurricane, a race, a date) or invented weather (a storm to draw) — and before writing any code to make one: these tools already do it. Returns today's date, which tools to call in which order for each kind of request, and the conventions for positions, speeds, directions and paths. Reads nothing and changes nothing."
     )]

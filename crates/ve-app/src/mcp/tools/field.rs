@@ -21,6 +21,7 @@ use crate::projects::ProjectSummary;
 const MAX_FIELD_SAMPLES: usize = 4096;
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct SampleParams {
     /// `[lon, lat]` pairs.
     pub points: Vec<[f64; 2]>,
@@ -44,6 +45,7 @@ pub struct Samples {
     pub samples: Vec<Sample>,
 }
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct CaptureParams {
     /// A region as the interface draws it: `{"kind":"rect","centre":[lon,lat],"half_width_deg":..,"half_height_deg":..}`,
     /// `{"kind":"disc","centre":[lon,lat],"radius_deg":..}`, or
@@ -56,6 +58,7 @@ pub struct CaptureParams {
     pub kind: Option<String>,
 }
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct PasteParams {
     pub lon: Option<f64>,
     pub lat: Option<f64>,
@@ -65,6 +68,7 @@ pub struct PasteParams {
     pub still: bool,
 }
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct MacroInsertParams {
     pub id: String,
     pub lon: f64,

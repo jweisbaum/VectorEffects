@@ -96,6 +96,8 @@ pub const EXCLUDED: &[&str] = &[
     "mcp_set_ask",
     "mcp_rotate_token",
     "mcp_register_client",
+    "mcp_connections",
+    "mcp_connection_action",
     "deliver_capture",
     "refuse_capture",
     // A handle or the cancel flag rather than the state alone. The curated
@@ -266,12 +268,173 @@ pub fn call<R: tauri::Runtime>(
         });
     }
     match TABLE.iter().find(|(n, _)| *n == name) {
-        Some((_, handler)) => handler(app.state::<AppState>(), args),
+        Some((_, handler)) => {
+            let mut value = handler(app.state::<AppState>(), args)?;
+            whirlwind_mcp::policy::redact(&mut value);
+            Ok(value)
+        }
         None => Err(AppError::BadOption {
             field: "command",
             value: format!("unknown command {name}"),
         }),
     }
+}
+
+/// Explicit command effects for the typed fallback tools; unknown commands never inherit permission.
+pub const COMMAND_EFFECTS: &[(&str, whirlwind_mcp::policy::Effect)] = &[
+    ("new_project", whirlwind_mcp::policy::Effect::Anything),
+    ("open_project", whirlwind_mcp::policy::Effect::Anything),
+    ("save_project", whirlwind_mcp::policy::Effect::Anything),
+    ("save_project_as", whirlwind_mcp::policy::Effect::Anything),
+    ("close_project", whirlwind_mcp::policy::Effect::Anything),
+    ("current_project", whirlwind_mcp::policy::Effect::Read),
+    ("recent_projects", whirlwind_mcp::policy::Effect::Read),
+    (
+        "clear_recent_projects",
+        whirlwind_mcp::policy::Effect::Anything,
+    ),
+    ("sample_field", whirlwind_mcp::policy::Effect::Read),
+    ("create_object", whirlwind_mcp::policy::Effect::Edit),
+    ("add_brush_stroke", whirlwind_mcp::policy::Effect::Edit),
+    ("undo", whirlwind_mcp::policy::Effect::Edit),
+    ("redo", whirlwind_mcp::policy::Effect::Edit),
+    ("export_estimate", whirlwind_mcp::policy::Effect::Read),
+    ("import_grib", whirlwind_mcp::policy::Effect::Edit),
+    (
+        "new_project_from_grib",
+        whirlwind_mcp::policy::Effect::Anything,
+    ),
+    ("import_zarr", whirlwind_mcp::policy::Effect::Edit),
+    (
+        "new_project_from_zarr",
+        whirlwind_mcp::policy::Effect::Anything,
+    ),
+    ("import_gis", whirlwind_mcp::policy::Effect::Edit),
+    ("set_gis_style", whirlwind_mcp::policy::Effect::Edit),
+    ("set_chart_directory", whirlwind_mcp::policy::Effect::Edit),
+    ("chart_status", whirlwind_mcp::policy::Effect::Read),
+    ("document_tree", whirlwind_mcp::policy::Effect::Read),
+    ("object_properties", whirlwind_mcp::policy::Effect::Read),
+    (
+        "set_liquify_destination",
+        whirlwind_mcp::policy::Effect::Edit,
+    ),
+    ("set_object_property", whirlwind_mcp::policy::Effect::Edit),
+    ("rename_project", whirlwind_mcp::policy::Effect::Edit),
+    ("add_layer", whirlwind_mcp::policy::Effect::Edit),
+    ("remove_layer", whirlwind_mcp::policy::Effect::Edit),
+    ("rename_layer", whirlwind_mcp::policy::Effect::Edit),
+    ("set_layer_visible", whirlwind_mcp::policy::Effect::Edit),
+    ("set_layer_parameter", whirlwind_mcp::policy::Effect::Edit),
+    ("set_layer_speed_range", whirlwind_mcp::policy::Effect::Edit),
+    ("align_layer", whirlwind_mcp::policy::Effect::Edit),
+    ("sample_temperature", whirlwind_mcp::policy::Effect::Read),
+    ("set_temperature_unit", whirlwind_mcp::policy::Effect::Edit),
+    ("earthdata_status", whirlwind_mcp::policy::Effect::Read),
+    ("set_layer_locked", whirlwind_mcp::policy::Effect::Edit),
+    ("move_layer", whirlwind_mcp::policy::Effect::Edit),
+    ("rename_object", whirlwind_mcp::policy::Effect::Edit),
+    ("remove_object", whirlwind_mcp::policy::Effect::Edit),
+    ("remove_objects", whirlwind_mcp::policy::Effect::Edit),
+    ("move_object", whirlwind_mcp::policy::Effect::Edit),
+    ("duplicate_object", whirlwind_mcp::policy::Effect::Edit),
+    ("set_active_range", whirlwind_mcp::policy::Effect::Edit),
+    ("object_at", whirlwind_mcp::policy::Effect::Read),
+    ("selection_transform", whirlwind_mcp::policy::Effect::Edit),
+    ("begin_transform", whirlwind_mcp::policy::Effect::Edit),
+    ("preview_transform", whirlwind_mcp::policy::Effect::Edit),
+    ("drag_transform", whirlwind_mcp::policy::Effect::Edit),
+    ("objects_in_region", whirlwind_mcp::policy::Effect::Read),
+    ("object_outlines", whirlwind_mcp::policy::Effect::Read),
+    ("end_gesture", whirlwind_mcp::policy::Effect::Edit),
+    ("copy_objects", whirlwind_mcp::policy::Effect::Edit),
+    ("cut_objects", whirlwind_mcp::policy::Effect::Edit),
+    ("paste_objects", whirlwind_mcp::policy::Effect::Edit),
+    ("erase_stroke", whirlwind_mcp::policy::Effect::Edit),
+    ("clipboard_state", whirlwind_mcp::policy::Effect::Read),
+    ("clipboard_kind", whirlwind_mcp::policy::Effect::Read),
+    ("history_view", whirlwind_mcp::policy::Effect::Read),
+    ("jump_to_history", whirlwind_mcp::policy::Effect::Edit),
+    ("app_settings", whirlwind_mcp::policy::Effect::Read),
+    ("set_theme", whirlwind_mcp::policy::Effect::Edit),
+    ("set_custom_theme", whirlwind_mcp::policy::Effect::Edit),
+    ("set_shortcut", whirlwind_mcp::policy::Effect::Edit),
+    ("reset_shortcuts", whirlwind_mcp::policy::Effect::Edit),
+    ("set_default_scales", whirlwind_mcp::policy::Effect::Edit),
+    (
+        "set_macro_directory",
+        whirlwind_mcp::policy::Effect::Anything,
+    ),
+    ("set_autosave_mode", whirlwind_mcp::policy::Effect::Edit),
+    ("set_projection", whirlwind_mcp::policy::Effect::Edit),
+    ("set_auto_scale", whirlwind_mcp::policy::Effect::Edit),
+    ("set_display_units", whirlwind_mcp::policy::Effect::Edit),
+    ("set_glyph_appearance", whirlwind_mcp::policy::Effect::Edit),
+    ("set_colour_scale", whirlwind_mcp::policy::Effect::Edit),
+    ("set_colour_gradient", whirlwind_mcp::policy::Effect::Edit),
+    ("autosaves", whirlwind_mcp::policy::Effect::Read),
+    ("recover_autosave", whirlwind_mcp::policy::Effect::Anything),
+    ("discard_autosave", whirlwind_mcp::policy::Effect::Anything),
+    ("import_image", whirlwind_mcp::policy::Effect::Edit),
+    ("resize_image", whirlwind_mcp::policy::Effect::Edit),
+    ("move_image", whirlwind_mcp::policy::Effect::Edit),
+    (
+        "set_image_control_points",
+        whirlwind_mcp::policy::Effect::Edit,
+    ),
+    ("set_image_opacity", whirlwind_mcp::policy::Effect::Edit),
+    ("reset_image_placement", whirlwind_mcp::policy::Effect::Edit),
+    ("measurements", whirlwind_mcp::policy::Effect::Read),
+    ("add_measurement", whirlwind_mcp::policy::Effect::Edit),
+    ("preview_measurement", whirlwind_mcp::policy::Effect::Edit),
+    (
+        "move_measurement_handle",
+        whirlwind_mcp::policy::Effect::Edit,
+    ),
+    ("extend_measurement", whirlwind_mcp::policy::Effect::Edit),
+    ("set_measurement_rings", whirlwind_mcp::policy::Effect::Edit),
+    ("remove_measurement", whirlwind_mcp::policy::Effect::Edit),
+    ("clear_measurements", whirlwind_mcp::policy::Effect::Edit),
+    ("macro_library", whirlwind_mcp::policy::Effect::Read),
+    ("delete_macros", whirlwind_mcp::policy::Effect::Anything),
+    ("start_capture", whirlwind_mcp::policy::Effect::Edit),
+    ("place_capture", whirlwind_mcp::policy::Effect::Edit),
+    ("visit_capture", whirlwind_mcp::policy::Effect::Edit),
+    ("unplace_capture", whirlwind_mcp::policy::Effect::Edit),
+    ("preview_capture", whirlwind_mcp::policy::Effect::Edit),
+    ("place_preview", whirlwind_mcp::policy::Effect::Edit),
+    ("edit_capture", whirlwind_mcp::policy::Effect::Edit),
+    ("cancel_capture", whirlwind_mcp::policy::Effect::Edit),
+    ("capture_mode", whirlwind_mcp::policy::Effect::Read),
+    ("finish_capture", whirlwind_mcp::policy::Effect::Anything),
+    ("insert_macro", whirlwind_mcp::policy::Effect::Edit),
+    ("capture_region", whirlwind_mcp::policy::Effect::Edit),
+    ("paste_capture", whirlwind_mcp::policy::Effect::Edit),
+    ("capture_state", whirlwind_mcp::policy::Effect::Read),
+    ("copy_grib_frames", whirlwind_mcp::policy::Effect::Edit),
+    ("paste_grib_frames", whirlwind_mcp::policy::Effect::Edit),
+    ("delete_grib_frames", whirlwind_mcp::policy::Effect::Edit),
+    ("frame_clipboard_state", whirlwind_mcp::policy::Effect::Read),
+    ("shape_controls", whirlwind_mcp::policy::Effect::Read),
+    ("move_shape_point", whirlwind_mcp::policy::Effect::Edit),
+    ("object_tracks", whirlwind_mcp::policy::Effect::Read),
+    ("track_samples", whirlwind_mcp::policy::Effect::Read),
+    ("set_keyframe", whirlwind_mcp::policy::Effect::Edit),
+    ("add_constant_motion", whirlwind_mcp::policy::Effect::Edit),
+    ("set_motion", whirlwind_mcp::policy::Effect::Edit),
+    ("set_follow", whirlwind_mcp::policy::Effect::Edit),
+    ("remove_keyframe", whirlwind_mcp::policy::Effect::Edit),
+    ("move_keyframe", whirlwind_mcp::policy::Effect::Edit),
+    ("set_interpolation", whirlwind_mcp::policy::Effect::Edit),
+    ("step_count_impact", whirlwind_mcp::policy::Effect::Read),
+    ("set_step_count", whirlwind_mcp::policy::Effect::Edit),
+    ("set_start_time", whirlwind_mcp::policy::Effect::Edit),
+];
+pub fn command_effect(name: &str) -> Option<whirlwind_mcp::policy::Effect> {
+    COMMAND_EFFECTS
+        .iter()
+        .find(|(n, _)| *n == name)
+        .map(|(_, effect)| *effect)
 }
 
 #[cfg(test)]
@@ -283,6 +446,14 @@ mod tests {
     /// it lands or someone has said why not.
     #[test]
     fn the_table_covers_every_registered_command() {
+        let names: std::collections::BTreeSet<_> = TABLE.iter().map(|(name, _)| *name).collect();
+        let classified: std::collections::BTreeSet<_> =
+            COMMAND_EFFECTS.iter().map(|(name, _)| *name).collect();
+        assert_eq!(
+            names, classified,
+            "Every callable fallback command has an explicit effect"
+        );
+
         let lib = include_str!("../lib.rs");
         let start = lib.find("generate_handler![").expect("handler list");
         let end = lib[start..].find("];").expect("end of list") + start;

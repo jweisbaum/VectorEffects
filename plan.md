@@ -6561,3 +6561,7 @@ the January 1, 2027 expiry gate, and bundled Help are part of this batch.
 The verification checklist is `docs/beta-improvements.md`; the four-platform
 publishing and signing plan is `docs/github-release-plan.md`. Publishing is
 separate from the local commit and requires working GitHub credentials.
+
+## Native MCP integration implementation
+
+The [versioned Whirlwind MCP contract](vendor/whirlwind-mcp/README.md) is the current authority for assistant transport, installation, permission policy and job lifecycle. It supersedes earlier direct-HTTP registration, shell launchers, token-copy reinstall steps, permission-by-annotation guidance and cancellation-on-disconnect behavior. Domain tool behavior and existing file formats remain governed by the sections above.

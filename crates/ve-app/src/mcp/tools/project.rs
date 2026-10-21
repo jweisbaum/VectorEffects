@@ -12,6 +12,7 @@ use super::{ToolError, VectorEffects};
 use crate::projects::ProjectSummary;
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ProjectNewParams {
     /// Project name.
     pub name: String,
@@ -40,6 +41,7 @@ pub struct ProjectNewParams {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ProjectOpenParams {
     /// Path to a .veproj file: absolute, or beginning with `~/`.
     pub path: String,
@@ -48,6 +50,7 @@ pub struct ProjectOpenParams {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ProjectSaveParams {
     /// Save here instead of the project's own path (a Save As). Absolute, or
     /// beginning with `~/`.
@@ -55,6 +58,7 @@ pub struct ProjectSaveParams {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct DiscardParams {
     #[serde(default)]
     pub discard_unsaved: bool,
@@ -92,6 +96,16 @@ pub struct Closed {
 #[tool_router(router = tool_router_project, vis = "pub(crate)")]
 impl<R: tauri::Runtime> VectorEffects<R> {
     #[tool(
+        description = "Discard unsaved work and close the open project. This is irreversible and requires approval."
+    )]
+    async fn project_discard(&self) -> std::result::Result<Json<Closed>, ToolError> {
+        self.write("project_discard", true, |app| {
+            crate::projects::close_project(app.state(), true)
+        })
+        .await?;
+        Ok(Json(Closed { closed: true }))
+    }
+    #[tool(
         description = "What VectorEffects — the wind and ocean-current field application open on this computer — has open: the project's summary (name, path, dirty, grid, steps, revision, undo state), or null when none is open. A good first call after vectoreffects_guide: an open project that is dirty holds the user's unsaved work."
     )]
     async fn project_status(&self) -> std::result::Result<Json<ProjectStatus>, ToolError> {
@@ -104,12 +118,15 @@ impl<R: tauri::Runtime> VectorEffects<R> {
     }
 
     #[tool(
-        description = "Starts a new VectorEffects project and opens it in the interface: the first step of making any wind or ocean-current field, GRIB2 or Zarr, whether the weather is then downloaded (import_history) or drawn (storm_create, object_create). Refused while the open project has unsaved changes unless discard_unsaved is true."
+        description = "Starts a new VectorEffects project and opens it in the interface: the first step of making any wind or ocean-current field, GRIB2 or Zarr, whether the weather is then downloaded (import_history) or drawn (storm_create, object_create). Refused while the open project has unsaved changes ; save first or use project_discard."
     )]
     async fn project_new(
         &self,
         Parameters(p): Parameters<ProjectNewParams>,
     ) -> std::result::Result<Json<ProjectSummary>, ToolError> {
+        if p.discard_unsaved {
+            return Err(ToolError::Refused("Use project_discard to approve discarding unsaved work, then retry this tool with discard_unsaved false.".into()));
+        }
         let region = match p.region {
             None | Some(Value::Null) => None,
             Some(raw) => super::typed("region", raw)?,
@@ -135,6 +152,9 @@ impl<R: tauri::Runtime> VectorEffects<R> {
         &self,
         Parameters(p): Parameters<ProjectOpenParams>,
     ) -> std::result::Result<Json<ProjectSummary>, ToolError> {
+        if p.discard_unsaved {
+            return Err(ToolError::Refused("Use project_discard to approve discarding unsaved work, then retry this tool with discard_unsaved false.".into()));
+        }
         let path = super::files::absolute(&p.path)?;
         self.write("project_open", true, move |app| {
             crate::projects::open_project(app.state(), path, p.discard_unsaved)
@@ -160,12 +180,15 @@ impl<R: tauri::Runtime> VectorEffects<R> {
     }
 
     #[tool(
-        description = "Closes the project and returns the interface to the start screen. Refused with unsaved changes unless discard_unsaved is true."
+        description = "Closes the project and returns the interface to the start screen. Refused with unsaved changes ; save first or use project_discard."
     )]
     async fn project_close(
         &self,
         Parameters(p): Parameters<DiscardParams>,
     ) -> std::result::Result<Json<Closed>, ToolError> {
+        if p.discard_unsaved {
+            return Err(ToolError::Refused("Use project_discard to approve discarding unsaved work, then retry this tool with discard_unsaved false.".into()));
+        }
         self.write("project_close", true, move |app| {
             crate::projects::close_project(app.state(), p.discard_unsaved)
         })

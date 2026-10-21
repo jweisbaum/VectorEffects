@@ -1,0 +1,25 @@
+[package]
+name = "whirlwind-mcp"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+license = "PolyForm-Noncommercial-1.0.0"
+description = "Shared local MCP transport, installation and workflow contracts for Whirlwind apps"
+
+[dependencies]
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rmcp = { version = "=3.4.0", default-features = false, features = ["server", "transport-io"] }
+tokio = { version = "1", features = ["rt", "net", "time", "sync", "io-std", "macros"] }
+fs2 = "0.4"
+uuid = { version = "1", features = ["v4"] }
+tempfile = "3"
+toml_edit = "0.25"
+zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
+
+process-wrap = { version = "=10.0.1", default-features = false, features = ["std", "process-group", "job-object", "creation-flags"] }
+bytes = "1"
+http-body-util = "0.1"
+hyper = { version = "1", features = ["client", "http1"] }
+hyper-util = { version = "0.1", features = ["client", "client-legacy", "http1", "tokio"] }

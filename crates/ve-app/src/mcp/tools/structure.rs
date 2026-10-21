@@ -14,27 +14,33 @@ use crate::error::AppError;
 use crate::projects::ProjectSummary;
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct NameParams {
     pub name: String,
 }
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct LayerParams {
     pub layer: u64,
 }
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ObjectParams {
     pub object: u64,
 }
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ObjectsParams {
     pub objects: Vec<u64>,
 }
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct MoveParams {
     pub from: usize,
     pub to: usize,
 }
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct LayerSetParams {
     pub layer: u64,
     pub name: Option<String>,
@@ -45,11 +51,13 @@ pub struct LayerSetParams {
     pub max_mps: Option<f32>,
 }
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ObjectsListParams {
     pub step: u32,
     pub layer: Option<u64>,
 }
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ObjectCreateParams {
     /// A tool name from `tool_catalogue`: "circle", "brush", "curve", …
     pub tool: String,
@@ -65,6 +73,7 @@ pub struct ObjectCreateParams {
     pub layer: Option<u64>,
 }
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ObjectSetParams {
     pub object: u64,
     /// The step the change is made at, from 0 to step_count - 1.
@@ -76,12 +85,14 @@ pub struct ObjectSetParams {
     pub auto_key: bool,
 }
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ObjectMoveParams {
     pub object: u64,
     pub layer: u64,
     pub index: usize,
 }
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct RegionParams {
     pub west: f64,
     pub south: f64,

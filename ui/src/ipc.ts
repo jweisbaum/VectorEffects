@@ -764,6 +764,8 @@ export const api = {
   setMacroDirectory: (directory: string) =>
     call<AppSettings>("set_macro_directory", { directory }),
   /** The MCP service's switch, port, token and live state (spec 8.8). */
+  mcpConnections: () => call<import("./generated/McpConnection").McpConnection[]>("mcp_connections"),
+  mcpConnectionAction: (client: import("./generated/McpClient").McpClient, action: string) => call<void>("mcp_connection_action", {client, action}),
   mcpStatus: () => call<McpStatus>("mcp_status", {}),
   /** Whether a NASA Earthdata token is set (M97). The token itself never comes back. */
   earthdataStatus: () => call<boolean>("earthdata_status", {}),
@@ -775,7 +777,7 @@ export const api = {
   /** A new token, and the listener restarted with it. */
   rotateMcpToken: () => call<McpStatus>("mcp_rotate_token", {}),
   /** Writes the service into a client's own configuration, and its skill (spec 8.8). */
-  registerMcpClient: (client: McpClient) => call<McpRegistered>("mcp_register_client", { client }),
+  registerMcpClient: (client: McpClient, policy?: string) => call<McpRegistered>("mcp_register_client", { client, policy }),
   /** The map's answer to a `view://capture` request. */
   deliverCapture: (id: number, pngBase64: string) =>
     call<void>("deliver_capture", { id, pngBase64 }),

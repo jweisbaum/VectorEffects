@@ -40,6 +40,7 @@ pub enum Rotation {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct StormParams {
     /// The storm centre's track as `[lon, lat]` waypoints, two or more: the
     /// first is where it is at `start_step` and the last where it is at

@@ -7,6 +7,7 @@ pub mod clients;
 pub mod desktop;
 pub mod events;
 pub mod invoke;
+pub mod native;
 pub mod server;
 pub mod skill;
 pub mod token;
@@ -20,10 +21,12 @@ use crate::settings::{McpSettings, McpStatus};
 #[derive(Debug, Default)]
 pub struct McpService {
     running: Mutex<Option<server::Running>>,
+    app_lock: Mutex<Option<std::fs::File>>,
     /// Why the last bind failed, shown in Settings.
     pub(crate) bind_error: Mutex<Option<String>>,
     /// Open client sessions and the last tool called (status bar, Settings).
     activity: Mutex<events::McpActivity>,
+    activity_generation: std::sync::atomic::AtomicU64,
     /// Screenshots asked of the frontend and not yet answered.
     pub captures: capture::Captures,
 }
@@ -36,6 +39,33 @@ impl McpService {
     /// the Tauri runtime so the mock application used by the integration
     /// tests can drive the same path as the shipped `tauri::Wry` build.
     pub fn apply<R: tauri::Runtime>(&self, app: &tauri::AppHandle<R>, mcp: &McpSettings) {
+        use tauri::Manager;
+        let dir = app
+            .state::<crate::commands::AppState>()
+            .paths
+            .config_dir
+            .join("mcp");
+        let ready = self
+            .app_lock
+            .lock()
+            .map(|mut lock| {
+                if lock.is_none() {
+                    *lock = whirlwind_mcp::endpoint::try_lock(&dir).ok().flatten();
+                }
+                lock.is_some()
+            })
+            .unwrap_or(false);
+        if !ready {
+            self.set_bind_error(Some("Another app instance owns AI assistant access".into()));
+            return;
+        }
+        whirlwind_mcp::endpoint::remove(&dir);
+        self.activity_generation
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if let Ok(mut activity) = self.activity.lock() {
+            *activity = events::McpActivity::default();
+        }
+
         // `take()` under the lock, then drop the guard before `stop()`:
         // `stop` can block briefly waiting for the accept loop, and nothing
         // else that touches `self.running` (`running_port`, `status`) must
@@ -50,6 +80,18 @@ impl McpService {
         }
         match server::start(app.clone(), mcp.port, mcp.token.clone()) {
             Ok(running) => {
+                let endpoint = whirlwind_mcp::endpoint::Endpoint {
+                    version: 1,
+                    port: running.port,
+                    token: mcp.token.clone(),
+                    pid: std::process::id(),
+                };
+                if let Err(error) = whirlwind_mcp::endpoint::write(&dir, &endpoint) {
+                    running.stop();
+                    self.set_bind_error(Some(error.to_string()));
+                    return;
+                }
+
                 self.set_bind_error(None);
                 self.adopt(running);
             }
@@ -89,25 +131,34 @@ impl McpService {
         }
     }
 
-    /// Records a tool call and tells the status bar.
+    /// Stateless HTTP has no persistent session. Show recent activity for one minute;
+    /// installed-host connection verification is tracked separately by the native bridge.
     pub fn note_tool<R: tauri::Runtime>(&self, app: &tauri::AppHandle<R>, name: &str) {
         use tauri::Emitter;
+        let generation = self
+            .activity_generation
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            + 1;
         if let Ok(mut activity) = self.activity.lock() {
+            activity.sessions = 1;
             activity.last_tool = Some(name.to_owned());
             let _ = app.emit(events::ACTIVITY, activity.clone());
         }
-    }
-
-    /// A client session opened (+1) or closed (-1).
-    pub fn session_delta<R: tauri::Runtime>(&self, app: &tauri::AppHandle<R>, delta: i32) {
-        use tauri::Emitter;
-        if let Ok(mut activity) = self.activity.lock() {
-            activity.sessions = activity.sessions.saturating_add_signed(delta);
-            if activity.sessions == 0 {
-                activity.last_tool = None;
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            use tauri::Manager;
+            let service = app.state::<McpService>();
+            if service
+                .activity_generation
+                .load(std::sync::atomic::Ordering::SeqCst)
+                == generation
+                && let Ok(mut activity) = service.activity.lock()
+            {
+                *activity = events::McpActivity::default();
+                let _ = app.emit(events::ACTIVITY, activity.clone());
             }
-            let _ = app.emit(events::ACTIVITY, activity.clone());
-        }
+        });
     }
 
     /// What Settings shows.

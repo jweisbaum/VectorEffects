@@ -14,6 +14,7 @@ use crate::commands::AppState;
 use crate::error::AppError;
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct FocusParams {
     pub lon: f64,
     pub lat: f64,
@@ -22,6 +23,7 @@ pub struct FocusParams {
     pub px_per_deg: Option<f64>,
 }
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct SelectionParams {
     pub objects: Vec<u64>,
 }

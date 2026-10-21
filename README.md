@@ -53,3 +53,6 @@ This means you may use the app except for commercial purposes. Commercial purpos
 - Professional or paid navigators, crew, or consultants, or as part of a paid contract.
 - Commercial forecast providers.
 - Licensed captains during a paid delivery or voyage.
+## Native AI assistant integrations
+
+Connect Codex, Claude Code or Claude Desktop from Settings → AI assistants. The native plugin opens this app when needed and follows the selected workflow permissions. Routine reads, edits, downloads and exports can run without repeated approval. See the [shared MCP architecture and maintenance contract](vendor/whirlwind-mcp/README.md) for installation, migration, permission boundaries, jobs and validation.

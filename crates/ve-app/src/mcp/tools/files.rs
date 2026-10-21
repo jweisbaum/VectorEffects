@@ -11,11 +11,13 @@ use super::{Done, ToolError, VectorEffects};
 use crate::projects::ProjectSummary;
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct PathParams {
     /// An absolute path, or one beginning with `~/`.
     pub path: String,
 }
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ImageParams {
     /// An absolute path, or one beginning with `~/`.
     pub path: String,
@@ -33,6 +35,7 @@ pub enum HistoryField {
     Current,
 }
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct HistoryParams {
     /// What to download: "wind", "current", or both. Each becomes a layer.
     pub fields: Vec<HistoryField>,
@@ -53,6 +56,7 @@ pub struct HistoryParams {
     pub set_start_time: Option<bool>,
 }
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct NrtParams {
     /// Product ids from nrt_products: "multiobs", "duacs", "wind-l4",
     /// "ascat", "ccmp", "seawinds", "oisst", "geopolar", "ostia", "cmc".
@@ -69,6 +73,7 @@ pub struct NrtParams {
     pub extend_timeline: Option<bool>,
 }
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ExportParams {
     /// Where to write: an absolute path, or one beginning with `~/`. A
     /// relative path is refused, since it would land in the application's
@@ -80,6 +85,21 @@ pub struct ExportParams {
     pub month: Option<u8>,
     pub day: Option<u8>,
     pub hour: Option<u8>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ExportStartParams {
+    /// grib or zarr.
+    pub format: String,
+    /// Absolute output path, or ~/.
+    pub path: String,
+    pub year: Option<u16>,
+    pub month: Option<u8>,
+    pub day: Option<u8>,
+    pub hour: Option<u8>,
+    /// Reuse only when retrying the identical export.
+    pub request_id: Option<String>,
 }
 
 /// A path a client named, made safe to hand to a command.
@@ -148,6 +168,115 @@ pub(crate) fn steps_covering(start_unix_s: i64, end_unix_s: i64, step_hours: u32
 
 #[tool_router(router = tool_router_files, vis = "pub(crate)")]
 impl<R: tauri::Runtime> VectorEffects<R> {
+    #[tool(
+        description = "Start a durable GRIB2 or Zarr export and return its job_id immediately. Poll assistant_jobs. Work continues after an assistant disconnect; export_cancel explicitly cancels it. Reuse request_id when retrying an identical request."
+    )]
+    async fn export_start(
+        &self,
+        Parameters(p): Parameters<ExportStartParams>,
+    ) -> std::result::Result<rmcp::model::CallToolResult, ToolError> {
+        if !["grib", "zarr"].contains(&p.format.as_str()) {
+            return Err(ToolError::Refused("format must be grib or zarr".into()));
+        }
+        let params = ExportParams {
+            path: p.path,
+            year: p.year,
+            month: p.month,
+            day: p.day,
+            hour: p.hour,
+        };
+        let state = self.app.state::<crate::commands::AppState>();
+        let journal = super::super::native::journal(&state.paths.config_dir.join("mcp"))
+            .map_err(ToolError::Refused)?;
+        let key = p.request_id.unwrap_or_else(super::super::token::fresh);
+        // Match the submitted request before resolving live project defaults or touching files.
+        // A retry still retrieves its result after the project closes or a Zarr directory exists.
+        let identity = serde_json::json!({"format":p.format,"path":absolute(&params.path)?,
+            "year":params.year,"month":params.month,"day":params.day,"hour":params.hour})
+        .to_string();
+        if let Some(record) = journal
+            .list()
+            .map_err(|e| ToolError::Refused(e.to_string()))?
+            .into_iter()
+            .find(|record| record.key == key)
+        {
+            if record.operation != "export" || record.target != identity {
+                return Err(ToolError::Refused(
+                    "Idempotency key belongs to another operation".into(),
+                ));
+            }
+            return Ok(rmcp::model::CallToolResult::structured(
+                serde_json::json!({"job_id":record.id,"job":record,"reused":true}),
+            ));
+        }
+        let (path, [year, month, day, hour]) = self.export_target(&params).await?;
+        let (record, new) = journal
+            .start(&key, "export", &identity)
+            .map_err(|e| ToolError::Refused(e.to_string()))?;
+        if !new {
+            return Ok(rmcp::model::CallToolResult::structured(
+                serde_json::json!({"job_id":record.id,"job":record,"reused":true}),
+            ));
+        }
+        let app = self.app.clone();
+        let id = record.id.clone();
+        tauri::async_runtime::spawn(async move {
+            let result = tauri::async_runtime::spawn_blocking(
+                move || -> crate::error::Result<serde_json::Value> {
+                    if p.format == "grib" {
+                        Ok(serde_json::to_value(crate::export::export_grib(
+                            app.clone(),
+                            app.state(),
+                            app.state(),
+                            crate::export::ExportRequest {
+                                path,
+                                year: year as u16,
+                                month: month as u8,
+                                day: day as u8,
+                                hour: hour as u8,
+                            },
+                        )?)?)
+                    } else {
+                        Ok(serde_json::to_value(crate::export::export_zarr(
+                            app.clone(),
+                            app.state(),
+                            app.state(),
+                            crate::export::ExportZarrRequest {
+                                path,
+                                year: year as u16,
+                                month: month as u8,
+                                day: day as u8,
+                                hour: hour as u8,
+                            },
+                        )?)?)
+                    }
+                },
+            )
+            .await;
+            use whirlwind_mcp::jobs::State;
+            let (status, value, error) = match result {
+                Ok(Ok(value)) => (State::Succeeded, Some(value), None),
+                Ok(Err(crate::error::AppError::ExportCancelled)) => (State::Cancelled, None, None),
+                Ok(Err(error)) => (State::Failed, None, Some(error.to_string())),
+                Err(error) => (State::Failed, None, Some(error.to_string())),
+            };
+            let _ = journal.finish(&id, status, value, error);
+        });
+        Ok(rmcp::model::CallToolResult::structured(
+            serde_json::json!({"job_id":record.id,"state":"running","poll":"assistant_jobs","cancel":"export_cancel"}),
+        ))
+    }
+    #[tool(
+        description = "List durable export job IDs, terminal results and interrupted jobs from earlier app runs."
+    )]
+    async fn assistant_jobs(&self) -> std::result::Result<rmcp::model::CallToolResult, ToolError> {
+        let state = self.app.state::<crate::commands::AppState>();
+        let journal = super::super::native::journal(&state.paths.config_dir.join("mcp"))
+            .map_err(ToolError::Refused)?;
+        Ok(rmcp::model::CallToolResult::structured(
+            serde_json::json!({"jobs":journal.list().map_err(|e|ToolError::Refused(e.to_string()))?}),
+        ))
+    }
     #[tool(
         description = "Imports a GRIB2 file as a new layer of the open project. Slow for large files; no progress is reported, and the call returns when the import finishes."
     )]
@@ -421,6 +550,8 @@ impl<R: tauri::Runtime> VectorEffects<R> {
     ) -> std::result::Result<(String, [u32; 4]), ToolError> {
         use chrono::{Datelike, Timelike};
         let path = absolute(&p.path)?;
+        whirlwind_mcp::files::preserve_before_replace(std::path::Path::new(&path))
+            .map_err(|e| ToolError::Refused(e.to_string()))?;
         if let (Some(year), Some(month), Some(day)) = (p.year, p.month, p.day) {
             let hour = p.hour.unwrap_or(0);
             return Ok((

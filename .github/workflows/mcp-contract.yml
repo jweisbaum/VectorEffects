@@ -1,0 +1,41 @@
+name: Native MCP contract
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  contract:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2022]
+    runs-on: ${{ matrix.os }}
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target/mcp-contract
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Preserve snapshot line endings
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.97"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify the shared source
+        run: python vendor/whirlwind-mcp/verify_snapshot.py
+      - name: Shared transport, policy, installer, job and grant tests
+        run: cargo test --locked -p whirlwind-mcp
+      - name: Build native plugin fixture
+        run: cargo build --locked -p whirlwind-mcp --example fixture
+      - name: Install pinned host CLIs
+        run: npm install --global @openai/codex@0.162.1 @anthropic-ai/claude-code@2.1.296
+      - name: Native packages and isolated host profiles
+        run: |
+          suffix=""; if [ "$RUNNER_OS" = Windows ]; then suffix=".exe"; fi
+          python vendor/whirlwind-mcp/native_contract.py "target/mcp-contract/debug/examples/fixture$suffix" --hosts

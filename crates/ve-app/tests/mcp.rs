@@ -320,8 +320,8 @@ async fn project_new_with_a_region() {
     assert_eq!(region["north"], 70.0);
     assert_eq!(region["full_circle"], false);
     // A global project reports none.
-    let mut global = new_project_args("Whole");
-    global["discard_unsaved"] = json!(true);
+    call(&client, "project_discard", json!({})).await;
+    let global = new_project_args("Whole");
     call(&client, "project_new", global).await;
     let status = call(&client, "project_status", json!({})).await;
     assert!(status["project"]["region"].is_null());
@@ -341,12 +341,12 @@ async fn a_malformed_region_is_a_readable_refusal() {
     assert_eq!(summary["grid_ni"], 41);
     // A malformed one reaches the model as a tool error naming the field.
     let mut args = new_project_args("Bad");
-    args["discard_unsaved"] = json!(true);
+
     args["region"] = json!({ "west": "left", "south": 1 });
     let message = call_err(&client, "project_new", args).await;
     assert!(message.contains("region"), "{message}");
     let mut args = new_project_args("Bad");
-    args["discard_unsaved"] = json!(true);
+
     args["region"] = json!("somewhere cold");
     let message = call_err(&client, "project_new", args).await;
     assert!(message.contains("region"), "{message}");
@@ -388,12 +388,10 @@ async fn unsaved_work_is_refused_without_discard() {
          selection and active layer: {changed}"
     );
 
-    let summary = call(
-        &client,
-        "project_new",
-        json!({ "name": "Two", "field_kind": "wind", "resolution": "1.0", "step_hours": 3, "step_count": 4, "discard_unsaved": true }),
-    )
-    .await;
+    let refused=call_err(&client,"project_new",json!({"name":"Two","field_kind":"wind","resolution":"1.0","step_hours":3,"step_count":4,"discard_unsaved":true})).await;
+    assert!(refused.contains("project_discard"));
+    call(&client, "project_discard", json!({})).await;
+    let summary = call(&client, "project_new", new_project_args("Two")).await;
     assert_eq!(summary["name"], "Two");
     client.cancel().await.expect("close");
 }
@@ -1042,9 +1040,7 @@ async fn every_tool_is_classified_and_nothing_else_is() {
     client.cancel().await.expect("close");
 }
 
-/// The hints that decide a prompt, checked against what the tools do —
-/// Codex's rule (`requires_mcp_tool_approval`): destructive asks; read-only
-/// runs; otherwise it runs only when neither destructive nor open-world.
+/// Explicit workflow policy permits routine effects without changing their annotations.
 #[tokio::test]
 async fn the_hints_say_what_the_tools_do() {
     let root = TempRoot::new("hints");
@@ -1052,23 +1048,13 @@ async fn the_hints_say_what_the_tools_do() {
     let (port, token) = serve(&app);
     let client = client(port, &token).await;
     let tools = client.list_all_tools().await.expect("tools");
-    let codex_asks = |name: &str| {
-        let a = tools
-            .iter()
-            .find(|t| t.name == name)
-            .unwrap_or_else(|| panic!("{name} is listed"))
-            .annotations
-            .clone()
-            .unwrap_or_else(|| panic!("{name} has annotations"));
-        if a.destructive_hint.unwrap_or(true) {
-            return true;
-        }
-        if a.read_only_hint.unwrap_or(false) {
-            return false;
-        }
-        a.open_world_hint.unwrap_or(true)
+    let automatic = |name: &str| {
+        let effect = ve_app::mcp::tools::effects::effect_of(name).unwrap();
+        let tool = tools.iter().find(|tool| tool.name == name).unwrap();
+        assert!(tool.annotations.is_some());
+        effect.automatic(whirlwind_mcp::policy::Policy::Workflow)
     };
-    for runs in [
+    for name in [
         "layers_list",
         "field_sample",
         "screenshot",
@@ -1077,21 +1063,22 @@ async fn the_hints_say_what_the_tools_do() {
         "undo",
         "view_focus",
         "import_grib",
-    ] {
-        assert!(!codex_asks(runs), "{runs} should run without asking");
-    }
-    for asks in [
         "project_save",
         "export_grib",
         "export_zarr",
+        "export_start",
         "import_nrt",
         "import_history",
         "project_open",
         "project_close",
         "project_new",
-        "invoke",
+        "app_read",
+        "app_edit",
     ] {
-        assert!(codex_asks(asks), "{asks} should ask");
+        assert!(automatic(name), "{name}");
+    }
+    for name in ["project_discard", "invoke"] {
+        assert!(!automatic(name), "{name}");
     }
     client.cancel().await.expect("close");
 }
@@ -1166,6 +1153,7 @@ async fn the_instructions_and_the_guide_name_only_what_exists() {
     }
     let tools = client.list_all_tools().await.expect("tools");
     let mut known: Vec<String> = tools.iter().map(|t| t.name.to_string()).collect();
+    known.push("job_id".into()); // Durable submissions return this output field.
     for tool in &tools {
         names_in(&Value::Object((*tool.input_schema).clone()), &mut known);
     }
@@ -1546,82 +1534,6 @@ async fn the_catalogue_gives_one_tool_when_asked_for_one() {
 
 /// The bridge from the bundle, running under Node, with its stdout read on a
 /// thread so that a message that never comes is a failed test and not a hang.
-struct Bridge {
-    child: std::process::Child,
-    lines: std::sync::mpsc::Receiver<Value>,
-    seen: Vec<Value>,
-}
-
-impl Bridge {
-    fn start(script: &std::path::Path, settings: &std::path::Path) -> Self {
-        use std::io::BufRead;
-        let mut child = std::process::Command::new("node")
-            .arg(script)
-            .env("VE_SETTINGS", settings)
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-            .expect("node");
-        let stdout = std::io::BufReader::new(child.stdout.take().expect("stdout"));
-        let (tx, lines) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
-            for line in stdout.lines().map_while(std::result::Result::ok) {
-                if let Ok(message) = serde_json::from_str(&line) {
-                    let _ = tx.send(message);
-                }
-            }
-        });
-        Self {
-            child,
-            lines,
-            seen: Vec::new(),
-        }
-    }
-
-    /// Sends a request and waits for the answer with its id; whatever else
-    /// arrives meanwhile — notifications — is kept in `seen`.
-    fn ask(&mut self, id: u64, method: &str, params: Value) -> Value {
-        use std::io::Write;
-        let request = json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params });
-        let stdin = self.child.stdin.as_mut().expect("stdin");
-        writeln!(stdin, "{request}").expect("write");
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
-        while std::time::Instant::now() < deadline {
-            match self
-                .lines
-                .recv_timeout(std::time::Duration::from_millis(200))
-            {
-                Ok(message) if message["id"] == id => return message,
-                Ok(message) => self.seen.push(message),
-                Err(_) => {}
-            }
-        }
-        panic!("no answer to {method} (id {id}); seen: {:?}", self.seen);
-    }
-
-    fn tool_names(&mut self, id: u64) -> Vec<String> {
-        let listed = self.ask(id, "tools/list", json!({}));
-        listed["result"]["tools"]
-            .as_array()
-            .unwrap_or_else(|| panic!("tools: {listed}"))
-            .iter()
-            .map(|tool| tool["name"].as_str().expect("name").to_owned())
-            .collect()
-    }
-}
-
-impl Drop for Bridge {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-    }
-}
-
-/// The bundle is what the manifest specification says a bundle is, and holds
-/// nothing secret. The required fields are MANIFEST.md's (manifest 0.3):
-/// `manifest_version`, `name`, `version`, `description`, `author.name` and
-/// `server`, whose `entry_point` has to be a file in the archive.
 #[test]
 fn the_desktop_bundle_is_a_valid_extension_with_no_secret_in_it() {
     use std::io::Read;
@@ -1695,27 +1607,25 @@ fn the_desktop_bundle_is_a_valid_extension_with_no_secret_in_it() {
 /// The bridge, as Claude Desktop runs it, against the service as the
 /// application runs it: through a restart of the application, the service
 /// switched off, and switched on again, all without being restarted itself.
-/// Skipped where there is no `node`.
-#[test]
-fn the_bridge_follows_the_application_through_a_restart_and_off_and_on() {
-    use std::io::Read;
-    if std::process::Command::new("node")
-        .arg("--version")
-        .output()
-        .is_err()
-    {
-        eprintln!("skipped: no node on PATH");
-        return;
+/// Uses the native Rust bridge over real local HTTP.
+#[tokio::test]
+async fn the_native_bridge_follows_restart_rotation_and_access_off() {
+    use std::sync::Arc;
+    use whirlwind_mcp::bridge::{Bridge, Launch, Timing};
+    struct NeverLaunch;
+    impl Launch for NeverLaunch {
+        fn launch(&self) -> Result<(), String> {
+            Err("The test never launches a GUI".into())
+        }
     }
-    let root = TempRoot::new("bridge");
+    let root = TempRoot::new("native-bridge");
     let app = mock_app(&root);
-    let port = {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind free port");
-        listener.local_addr().expect("addr").port()
-    };
-    // Through the command, so the settings file the bridge reads is the one
-    // the application writes and not this test's idea of it.
-    let set = |enabled: bool| {
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let set = |enabled| {
         ve_app::settings::mcp_set(
             app.handle().clone(),
             app.state(),
@@ -1723,107 +1633,51 @@ fn the_bridge_follows_the_application_through_a_restart_and_off_and_on() {
             enabled,
             port,
         )
-        .expect("mcp_set")
+        .unwrap()
     };
     let first = set(true);
-    let settings = app.state::<AppState>().paths.settings_file();
-
-    let bundle = root.0.join("VectorEffects.mcpb");
-    ve_app::mcp::desktop::write_bundle(&bundle, &settings).expect("bundle");
-    let script = root.0.join("index.js");
-    let mut source = String::new();
-    zip::ZipArchive::new(std::fs::File::open(&bundle).expect("open"))
-        .expect("zip")
-        .by_name("server/index.js")
-        .expect("bridge")
-        .read_to_string(&mut source)
-        .expect("read");
-    std::fs::write(&script, source).expect("write");
-
-    let mut bridge = Bridge::start(&script, &settings);
-    let hello = bridge.ask(
-        1,
-        "initialize",
-        json!({ "protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": { "name": "test", "version": "0" } }),
-    );
-    // The application's own answer, not the bridge's stand-in.
+    let dir = app.state::<AppState>().paths.config_dir.join("mcp");
+    let handler = ve_app::mcp::tools::VectorEffects::new(app.handle().clone());
+    let info = rmcp::ServerHandler::get_info(&handler);
+    drop(handler);
+    let bridge = Bridge::new(dir, Arc::new(NeverLaunch), Timing::DEFAULT)
+        .unwrap()
+        .with_catalog(
+            info,
+            ve_app::mcp::tools::VectorEffects::<MockRuntime>::catalogue(),
+        );
+    let (server_io, client_io) = tokio::io::duplex(65536);
+    let serving = tokio::spawn(async move {
+        let service = bridge.serve(server_io).await.unwrap();
+        let _ = service.waiting().await;
+    });
+    let client = ().serve(client_io).await.unwrap();
     assert_eq!(
-        hello["result"]["serverInfo"]["version"],
-        env!("CARGO_PKG_VERSION"),
-        "{hello}"
+        client
+            .peer_info()
+            .unwrap()
+            .server_info
+            .as_ref()
+            .unwrap()
+            .version,
+        env!("CARGO_PKG_VERSION")
     );
-    assert!(
-        bridge
-            .tool_names(2)
-            .iter()
-            .any(|name| name == "project_status")
-    );
-    let status = bridge.ask(
-        3,
-        "tools/call",
-        json!({ "name": "project_status", "arguments": {} }),
-    );
+    call(&client, "project_status", json!({})).await;
+    set(false);
+    let message = call_err(&client, "project_status", json!({})).await;
+    assert!(message.contains("off"), "{message}");
+    let next = set(true);
+    assert_ne!(first.token, next.token);
+    call(&client, "project_new", new_project_args("Reconnected")).await;
     assert_eq!(
-        status["result"]["structuredContent"]["project"],
-        Value::Null,
-        "{status}"
+        call(&client, "project_status", json!({})).await["project"]["name"],
+        "Reconnected"
     );
-
-    // The application restarts: a new token, and every session forgotten.
+    client.cancel().await.unwrap();
+    serving.await.unwrap();
     set(false);
-    let second = set(true);
-    assert_ne!(first.token, second.token);
-    assert!(
-        bridge
-            .tool_names(4)
-            .iter()
-            .any(|name| name == "project_status"),
-        "reconnected without the client doing anything"
-    );
-
-    // Off: the extension stays up and says what is wrong.
-    set(false);
-    assert_eq!(bridge.tool_names(5), ["vectoreffects_status"]);
-    let refused = bridge.ask(
-        6,
-        "tools/call",
-        json!({ "name": "project_status", "arguments": {} }),
-    );
-    assert_eq!(refused["result"]["isError"], true, "{refused}");
-    assert!(
-        refused["result"]["content"][0]["text"]
-            .as_str()
-            .expect("text")
-            .contains("MCP service")
-    );
-
-    // On again: the stand-in tool connects, and the client is told to look.
-    set(true);
-    let connected = bridge.ask(
-        7,
-        "tools/call",
-        json!({ "name": "vectoreffects_status", "arguments": {} }),
-    );
-    assert_ne!(connected["result"]["isError"], true, "{connected}");
-    assert!(
-        bridge
-            .seen
-            .iter()
-            .any(|m| m["method"] == "notifications/tools/list_changed"),
-        "{:?}",
-        bridge.seen
-    );
-    assert!(
-        bridge
-            .tool_names(8)
-            .iter()
-            .any(|name| name == "project_status")
-    );
 }
 
-/// The near-real-time products are listed without reaching the network,
-/// with what each holds; an import naming nothing, or something that is not
-/// a product, is refused before anything is fetched (spec.md 4.10, M94).
 #[tokio::test]
 async fn nrt_products_are_listed_and_a_bad_import_is_refused() {
     let root = TempRoot::new("nrt");
@@ -1873,4 +1727,51 @@ async fn nrt_products_are_listed_and_a_bad_import_is_refused() {
     .await;
     assert!(unknown.contains("\"gfs\""), "{unknown}");
     client.cancel().await.expect("close");
+}
+
+#[tokio::test]
+async fn a_durable_export_retry_survives_disconnect_and_a_closed_project() {
+    let root = TempRoot::new("export-retry");
+    let app = mock_app(&root);
+    let (port, token) = serve(&app);
+    let first = client(port, &token).await;
+    call(&first, "project_new", new_project_args("Durable export")).await;
+    let output = root.0.join("durable.grib2");
+    let args = json!({"format":"grib", "path":output, "year":2026,"month":9,"day":16,"request_id":"export-once"});
+    let started = call(&first, "export_start", args.clone()).await;
+    first.cancel().await.unwrap();
+    let next = client(port, &token).await;
+    let job = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        loop {
+            let jobs = call(&next, "assistant_jobs", json!({})).await;
+            let job = jobs["jobs"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|job| job["id"] == started["job_id"])
+                .unwrap()
+                .clone();
+            if job["state"] != "running" {
+                break job;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(job["state"], "succeeded", "{job}");
+    let original = std::fs::read(&output).unwrap();
+    call(&next, "project_discard", json!({})).await;
+    let retry = call(&next, "export_start", args.clone()).await;
+    assert_eq!(retry["job_id"], started["job_id"]);
+    assert_eq!(retry["reused"], true);
+    assert_eq!(std::fs::read(&output).unwrap(), original);
+    let mut different = args;
+    different["hour"] = json!(1);
+    assert!(
+        call_err(&next, "export_start", different)
+            .await
+            .contains("Idempotency")
+    );
+    next.cancel().await.unwrap();
 }

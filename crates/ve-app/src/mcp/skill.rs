@@ -57,7 +57,7 @@ fn description() -> String {
 }
 
 /// Where the tools are, and what it means when they are not there.
-const TOOLS: &str = "The tools belong to the MCP server named `vectoreffects` (in Claude Code their names begin `mcp__vectoreffects__`; where tools are loaded on demand, search for that name). `vectoreffects_guide` returns the text above with today's date.\n\nIf no such tool is listed, VectorEffects is not running or its MCP service is off. Say so and ask the user to open VectorEffects and turn on Settings > MCP service, then try again. Do not make the file some other way instead: what was asked for is the application's output, and a file written by hand is not it.";
+const TOOLS: &str = "The tools belong to the MCP server named `vectoreffects` (in Claude Code their names begin `mcp__plugin_vectoreffects_vectoreffects__`; where tools are loaded on demand, search for that name). `vectoreffects_guide` returns the text above with today's date.\n\nThe native bridge opens the app when a tool needs it. If no such tool is listed, the plugin may need connecting or repair. Say so and ask the user to open VectorEffects and turn on Settings > AI assistants, then try again. Do not make the file some other way instead: what was asked for is the application's output, and a file written by hand is not it.";
 
 /// Where Claude Code keeps its configuration: `$CLAUDE_CONFIG_DIR`, or
 /// `~/.claude`.
@@ -139,8 +139,8 @@ mod tests {
     fn the_body_is_the_guide_and_says_what_missing_tools_mean() {
         let text = skill_md();
         assert!(text.contains(guide::GUIDE));
-        assert!(text.contains("mcp__vectoreffects__"));
-        assert!(text.contains("Settings > MCP service"));
+        assert!(text.contains("mcp__plugin_vectoreffects_vectoreffects__"));
+        assert!(text.contains("Settings > AI assistants"));
     }
 
     #[test]

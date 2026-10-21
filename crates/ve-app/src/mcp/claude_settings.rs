@@ -195,7 +195,7 @@ mod tests {
         let allow = v["permissions"]["allow"].as_array().expect("allow");
         assert!(allow.iter().any(|r| r == "mcp__vectoreffects__layers_list"));
         assert!(!allow.iter().any(|r| r == "mcp__vectoreffects__invoke"));
-        assert!(!allow.iter().any(|r| r == "mcp__vectoreffects__export_grib"));
+        assert!(allow.iter().any(|r| r == "mcp__vectoreffects__export_grib"));
     }
 
     #[test]
@@ -279,7 +279,7 @@ mod tests {
                 .iter()
                 .any(|r| r == "mcp__vectoreffects__layers_list")
         );
-        assert_eq!(edit.written.len(), 44);
+        assert_eq!(edit.written.len(), rules_for(McpAsk::Outside).len() - 1);
         let again = with_rules(
             Some(&edit.text),
             &edit.written,
@@ -381,6 +381,9 @@ mod tests {
             }
         }
         assert!(rules_for(McpAsk::Everything).is_empty());
-        assert_eq!(rules_for(McpAsk::Outside).len(), 45);
+        assert_eq!(
+            rules_for(McpAsk::Outside).len(),
+            super::super::tools::effects::TABLE.len() - 2
+        );
     }
 }

@@ -1,47 +1,33 @@
 //! What each MCP tool does to the person's work, published as the MCP tool
 //! annotations (spec.md 8.8).
 //!
-//! One table, so the annotations, the Claude Code permission rules and the
-//! settings dialog cannot disagree. Annotations are hints a client may act
-//! on: Codex does (it runs a read-only tool, and one neither destructive nor
-//! open-world, without asking); Claude Code does not, which is why
-//! `claude_settings` writes rules from this same table.
+//! One table drives explicit effect hints and the shared installer's scoped
+//! permission rules. Host policy controls prompting; annotations describe effects.
 
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::model::ToolAnnotations;
 
 use crate::settings::McpAsk;
 
-/// What a tool does, coarsely enough to decide whether to ask first.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Effect {
-    /// Reads; changes nothing.
-    Read,
-    /// Changes the open document, undoably.
-    Edit,
-    /// Moves what the interface shows; not the document.
-    View,
-    /// Writes or replaces files on disk.
-    Files,
-    /// Downloads from the internet.
-    Network,
-    /// Can discard unsaved work when told to.
-    Discard,
-    /// `invoke`: any command at all.
-    Anything,
-}
+pub use whirlwind_mcp::policy::Effect;
 
 /// Every tool the service lists, by name, with its effect. The integration
 /// test holds this to the tool list both ways.
 pub const TABLE: &[(&str, Effect)] = &[
+    ("project_discard", Effect::Discard),
+    ("assistant_capabilities", Effect::Read),
+    ("app_read", Effect::Read),
+    ("app_edit", Effect::Edit),
+    ("assistant_jobs", Effect::Read),
+    ("export_start", Effect::Files),
     // guide
     ("vectoreffects_guide", Effect::Read),
     // project
     ("project_status", Effect::Read),
-    ("project_new", Effect::Discard),
-    ("project_open", Effect::Discard),
+    ("project_new", Effect::Edit),
+    ("project_open", Effect::Edit),
     ("project_save", Effect::Files),
-    ("project_close", Effect::Discard),
+    ("project_close", Effect::Edit),
     ("recent_projects", Effect::Read),
     ("tool_catalogue", Effect::Read),
     // structure
@@ -78,9 +64,9 @@ pub const TABLE: &[(&str, Effect)] = &[
     ("import_grib", Effect::Edit),
     ("import_zarr", Effect::Edit),
     ("import_image", Effect::Edit),
-    ("nrt_products", Effect::Read),
+    ("nrt_products", Effect::ReadNetwork),
     ("import_nrt", Effect::Network),
-    ("history_archives", Effect::Read),
+    ("history_archives", Effect::ReadNetwork),
     ("import_history", Effect::Network),
     ("export_grib", Effect::Files),
     ("export_zarr", Effect::Files),
@@ -106,24 +92,9 @@ pub fn effect_of(name: &str) -> Option<Effect> {
     TABLE.iter().find(|(n, _)| *n == name).map(|&(_, e)| e)
 }
 
-/// The annotations a tool of `effect` publishes. Every hint is stated: a
-/// missing one is read as `true` by Codex, which asks.
+/// The annotations a tool of `effect` publishes. Every hint is explicit.
 pub fn annotations(effect: Effect) -> ToolAnnotations {
-    let (read_only, destructive, idempotent, open_world) = match effect {
-        Effect::Read => (true, false, true, false),
-        Effect::Edit => (false, false, false, false),
-        Effect::View => (false, false, true, false),
-        Effect::Files | Effect::Discard => (false, true, false, false),
-        Effect::Network => (false, false, false, true),
-        Effect::Anything => (false, true, false, true),
-    };
-    ToolAnnotations::from_raw(
-        None,
-        Some(read_only),
-        Some(destructive),
-        Some(idempotent),
-        Some(open_world),
-    )
+    effect.annotations()
 }
 
 /// Whether a tool of `effect` may run without asking under the choice `ask`.
@@ -131,7 +102,7 @@ pub fn runs_without_asking(effect: Effect, ask: McpAsk) -> bool {
     match ask {
         McpAsk::Everything => false,
         McpAsk::Nothing => true,
-        McpAsk::Outside => matches!(effect, Effect::Read | Effect::Edit | Effect::View),
+        McpAsk::Outside => effect.automatic(whirlwind_mcp::policy::Policy::Workflow),
     }
 }
 
@@ -140,7 +111,7 @@ pub fn runs_without_asking(effect: Effect, ask: McpAsk) -> bool {
 pub fn apply<S>(router: &mut ToolRouter<S>) {
     for (name, route) in router.map.iter_mut() {
         if let Some(effect) = effect_of(name) {
-            route.attr.annotations = Some(annotations(effect));
+            whirlwind_mcp::policy::classify(&mut route.attr, effect);
         }
     }
 }
@@ -151,15 +122,16 @@ mod tests {
 
     #[test]
     fn what_runs_without_asking_under_each_choice() {
-        for e in [Effect::Read, Effect::Edit, Effect::View] {
-            assert!(runs_without_asking(e, McpAsk::Outside), "{e:?}");
-        }
         for e in [
+            Effect::Read,
+            Effect::Edit,
+            Effect::View,
             Effect::Files,
             Effect::Network,
-            Effect::Discard,
-            Effect::Anything,
         ] {
+            assert!(runs_without_asking(e, McpAsk::Outside), "{e:?}");
+        }
+        for e in [Effect::Discard, Effect::Anything] {
             assert!(!runs_without_asking(e, McpAsk::Outside), "{e:?}");
         }
         assert!(

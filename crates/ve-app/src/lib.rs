@@ -284,6 +284,8 @@ pub fn run() -> anyhow::Result<()> {
                 settings::mcp_set_ask,
                 settings::mcp_rotate_token,
                 mcp::clients::mcp_register_client,
+                mcp::native::mcp_connections,
+                mcp::native::mcp_connection_action,
                 history::history_archives,
                 settings::set_autosave_mode,
                 settings::set_projection,
