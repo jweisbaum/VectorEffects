@@ -2,7 +2,6 @@
 #![forbid(unsafe_code)]
 pub mod bridge;
 pub mod endpoint;
-pub mod grants;
 pub mod install;
 pub mod jobs;
 pub mod policy;

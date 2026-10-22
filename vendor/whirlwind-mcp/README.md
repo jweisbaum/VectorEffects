@@ -26,13 +26,17 @@ flowchart LR
 
 | Policy | Automatic work | Approval boundary |
 | --- | --- | --- |
-| Workflow, the default | Reads, reversible edits, views, configured-source downloads, saves and exports | Irreversible discard, new spending outside a grant, unrestricted compatibility dispatch |
+| Workflow, the default | Reads, reversible edits, views, configured-source downloads, saves and exports | Irreversible discard, new spending, unrestricted compatibility dispatch |
 | Always ask | None requested by this installer | Host policy applies to every tool |
 | Unrestricted | All tools supported by the host | Host-enforced approvals and app-side spending/quote rules still apply |
 
 A normal project switch cannot discard unsaved work. Save first, or use the explicit `project_discard` tool after authorization. Advanced commands are inventoried and divided into `app_read`, `app_edit` and the compatibility fallback. Host installation, permissions, credentials and access controls are UI-only, including through fallback dispatchers.
 
-Hindsight Sync adds UI-approved grants bound to one target, allowed operations, expiry and an estimated-cost budget. The server reserves the estimate before submission and charges a retry once. It retains reservations after ambiguous failure. Recurring spending, unknown estimates and deletion do not fit a grant. Estimates limit authorized work; they do not guarantee a cloud provider's final bill. Grants cannot be created or expanded through MCP.
+Hindsight Sync returns a quote for every paid action, including recurring spending,
+and for deletion. The assistant presents its scope and estimated costs in chat
+and obtains the user's approval before calling `confirm_paid_action`. Settings
+and host tool permissions never authorize spending. Estimates do not guarantee
+a cloud provider's final bill.
 
 ## Installation and lifecycle
 
@@ -44,7 +48,7 @@ Installers serialize their own writers, back up edited configuration, detect con
 
 ## App workflows
 
-- **Hindsight Sync:** inspect and populate weather archives, create local copies and export GRIB. Use an app-approved workflow budget for repeated bounded paid work.
+- **Hindsight Sync:** inspect and populate weather archives, create local copies and export GRIB. Approve quoted costs in chat before paid work starts.
 - **VectorEffects:** import historical or recent weather, construct and edit fields, inspect results and export GRIB2 or Zarr. `export_start` returns a durable job immediately.
 - **PolarExplorer:** import certificates, polars and tracks; fetch weather as a durable job; filter, edit and compare boats; export routing polars, including WhirlwindMatrixPolar.
 - **Hindsight Router:** import course and polar, save a configuration, preview departures, run a durable batch, inspect routes and statistics, and export results. Dedicated tools cover these operations.
@@ -53,6 +57,6 @@ Installers serialize their own writers, back up edited configuration, detect con
 
 The canonical source is `HistorySyncer/crates/whirlwind-mcp`. The other repositories vendor this exact crate, with version and SHA-256 in `vendor/whirlwind-mcp.json`. Change the canonical crate, run its tests, then run `node tools/sync-mcp.mjs <VectorEffects> <WhirlwindPolarSolver> <HindsightRouter>` from HistorySyncer. Do not patch a vendor copy independently. `verify_snapshot.py` checks provenance before CI builds.
 
-`cargo test -p whirlwind-mcp` covers transport rotation, private endpoints, configuration preservation, native packages, bounded processes, job replay/crash/cancellation and grant scope/budget/expiry. `native_contract.py <fixture> --hosts` exercises packages, stdio, installation, repair and removal using fresh temporary Codex and Claude profiles. `native_contract.py <app-binary> --app` checks a real app's native catalog without launching its GUI. No model call or cloud account is required.
+`cargo test -p whirlwind-mcp` covers transport rotation, private endpoints, configuration preservation, native packages, bounded processes, job replay/crash/cancellation. `native_contract.py <fixture> --hosts` exercises packages, stdio, installation, repair and removal using fresh temporary Codex and Claude profiles. `native_contract.py <app-binary> --app` checks a real app's native catalog without launching its GUI. No model call or cloud account is required.
 
 Each repository's MCP contract workflow runs on macOS, Windows and Linux with pinned Codex and Claude Code CLIs. App tests separately verify tool/command inventory, UI-only boundaries, live-state behavior and translated connection controls. Real Desktop extension dialogs and model-driven host approval UX require release testing in those hosts. Public marketplace submission is a separate distribution step; these local plugins do not depend on publication.

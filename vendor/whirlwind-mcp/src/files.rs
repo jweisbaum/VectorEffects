@@ -17,7 +17,11 @@ pub fn preserve_before_replace(path: &Path) -> Result<Option<PathBuf>> {
         .to_string_lossy();
     let backup = parent.join(format!(".{name}.whirlwind-backup-{}", uuid::Uuid::new_v4()));
     std::fs::copy(&path, &backup)?;
-    std::fs::File::open(&backup)?.sync_all()?;
+    // Windows requires write access to flush the copied file to disk.
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(&backup)?
+        .sync_all()?;
     Ok(Some(backup))
 }
 #[cfg(test)]
